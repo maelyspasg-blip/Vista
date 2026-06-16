@@ -1,33 +1,51 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
-
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Ionicons } from "@expo/vector-icons";
+import { Tabs } from "expo-router";
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
-        tabBarButton: HapticTab,
-      }}>
+        tabBarStyle: {
+          backgroundColor: "#FFFFFF",
+          borderTopColor: "#F0EEF8",
+          borderTopWidth: 1,
+          height: 60,
+          paddingBottom: 8,
+        },
+        tabBarActiveTintColor: "#8B6FE8",
+        tabBarInactiveTintColor: "#CCCCCC",
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: "500",
+        },
+      }}
+    >
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          title: "Home",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="home-outline" size={22} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="budget"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: "Budget",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="wallet-outline" size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="planning"
+        options={{
+          title: "Planning",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="calendar-outline" size={22} color={color} />
+          ),
         }}
       />
     </Tabs>
