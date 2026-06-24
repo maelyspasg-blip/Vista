@@ -28,12 +28,23 @@ export type DepensePrevue = {
   couleur: string;
 };
 
+export type Evenement = {
+  id: number;
+  nom: string;
+  jour: number;
+  heure: string;
+  duree: number;
+  couleur: string;
+  estFinancier: boolean;
+  montant?: number;
+  categorieLiee?: string;
+};
+
 export type Transaction = {
   id: number;
   nom: string;
   montant: number;
-  categorie: string;
-  couleur: string;
+  enveloppeId: number;
   date: string;
 };
 
@@ -41,7 +52,7 @@ const ENVELOPPES_INIT: Enveloppe[] = [
   {
     id: 1,
     nom: "Courses",
-    depense: 157,
+    depense: 0,
     budget: 250,
     couleur: "#5DC8A0",
     recurrente: true,
@@ -51,7 +62,7 @@ const ENVELOPPES_INIT: Enveloppe[] = [
   {
     id: 2,
     nom: "Restaurants",
-    depense: 66,
+    depense: 0,
     budget: 200,
     couleur: "#F4956A",
     recurrente: false,
@@ -60,7 +71,7 @@ const ENVELOPPES_INIT: Enveloppe[] = [
   {
     id: 3,
     nom: "Transport",
-    depense: 34,
+    depense: 0,
     budget: 80,
     couleur: "#4A90D9",
     recurrente: true,
@@ -70,7 +81,7 @@ const ENVELOPPES_INIT: Enveloppe[] = [
   {
     id: 4,
     nom: "Loisirs",
-    depense: 179,
+    depense: 0,
     budget: 200,
     couleur: "#D94A8C",
     recurrente: false,
@@ -133,48 +144,73 @@ const DEPENSES_PREVUES_INIT: DepensePrevue[] = [
   },
 ];
 
-const TRANSACTIONS_INIT: Transaction[] = [
+const EVENEMENTS_INIT: Evenement[] = [
   {
     id: 1,
-    nom: "Carrefour",
-    montant: 64,
-    categorie: "Courses",
-    couleur: "#5DC8A0",
-    date: "26 mai",
+    nom: "Standup équipe",
+    jour: 16,
+    heure: "9h00",
+    duree: 1,
+    couleur: "#8B6FE8",
+    estFinancier: false,
   },
   {
     id: 2,
-    nom: "Le Petit Bistrot",
-    montant: 38,
-    categorie: "Restaurants",
-    couleur: "#F4956A",
-    date: "25 mai",
+    nom: "Déjeuner Sophie",
+    jour: 16,
+    heure: "12h30",
+    duree: 1.5,
+    couleur: "#5DC8A0",
+    estFinancier: false,
   },
   {
     id: 3,
-    nom: "Métro 10x",
-    montant: 16,
-    categorie: "Transport",
-    couleur: "#4A90D9",
-    date: "22 mai",
+    nom: "Présentation Q2",
+    jour: 17,
+    heure: "14h00",
+    duree: 2,
+    couleur: "#F4956A",
+    estFinancier: false,
   },
   {
     id: 4,
-    nom: "Cinéma",
-    montant: 14,
-    categorie: "Loisirs",
-    couleur: "#D94A8C",
-    date: "24 mai",
+    nom: "Yoga",
+    jour: 18,
+    heure: "18h30",
+    duree: 1,
+    couleur: "#5DC8A0",
+    estFinancier: false,
   },
   {
     id: 5,
-    nom: "Picard",
-    montant: 42,
-    categorie: "Courses",
+    nom: "Réunion client",
+    jour: 19,
+    heure: "10h00",
+    duree: 1.5,
+    couleur: "#8B6FE8",
+    estFinancier: false,
+  },
+  {
+    id: 6,
+    nom: "Sport",
+    jour: 20,
+    heure: "8h00",
+    duree: 1,
+    couleur: "#F4956A",
+    estFinancier: false,
+  },
+  {
+    id: 7,
+    nom: "Dentiste",
+    jour: 20,
+    heure: "15h00",
+    duree: 1,
     couleur: "#5DC8A0",
-    date: "23 mai",
+    estFinancier: false,
   },
 ];
+
+const TRANSACTIONS_INIT: Transaction[] = [];
 
 type EtatStore = {
   objectifs: Objectif[];
@@ -183,6 +219,7 @@ type EtatStore = {
   argentDisponible: number;
   depensesPrevues: DepensePrevue[];
   transactions: Transaction[];
+  evenements: Evenement[];
 };
 
 let etat: EtatStore = {
@@ -192,6 +229,7 @@ let etat: EtatStore = {
   argentDisponible: 1800,
   depensesPrevues: DEPENSES_PREVUES_INIT,
   transactions: TRANSACTIONS_INIT,
+  evenements: EVENEMENTS_INIT,
 };
 
 type Ecouteur = (etat: EtatStore) => void;
@@ -217,6 +255,7 @@ export function useObjectifs() {
     argentDisponible: local.argentDisponible,
     depensesPrevues: local.depensesPrevues,
     transactions: local.transactions,
+    evenements: local.evenements,
 
     ajouterObjectif: (
       nom: string,
@@ -245,6 +284,93 @@ export function useObjectifs() {
     },
     modifierArgentDisponible: (montant: number) => {
       setEtat({ argentDisponible: montant });
+    },
+
+    ajouterEvenement: (
+      nom: string,
+      jour: number,
+      heure: string,
+      duree: number,
+      couleur: string,
+      estFinancier: boolean,
+      montant?: number,
+      categorieLiee?: string,
+    ) => {
+      const nouvelEvenement: Evenement = {
+        id: Date.now(),
+        nom,
+        jour,
+        heure,
+        duree,
+        couleur,
+        estFinancier,
+        montant,
+        categorieLiee,
+      };
+      setEtat({ evenements: [...etat.evenements, nouvelEvenement] });
+
+      if (estFinancier && montant) {
+        if (categorieLiee && categorieLiee !== "Aucune") {
+          const enveloppesMaj = etat.enveloppes.map((e) =>
+            e.nom === categorieLiee
+              ? { ...e, depense: e.depense + montant }
+              : e,
+          );
+          setEtat({ enveloppes: enveloppesMaj });
+        } else {
+          const nouvelleDepensePrevue: DepensePrevue = {
+            id: Date.now() + 1,
+            nom,
+            montant,
+            type: "Non courante",
+            statut: "Planifié",
+            couleur,
+          };
+          setEtat({
+            depensesPrevues: [...etat.depensesPrevues, nouvelleDepensePrevue],
+          });
+        }
+      }
+    },
+
+    supprimerEvenement: (id: number) => {
+      setEtat({ evenements: etat.evenements.filter((e) => e.id !== id) });
+    },
+
+    ajouterTransaction: (
+      nom: string,
+      montant: number,
+      enveloppeId: number,
+      date: string,
+    ) => {
+      const nouvelleTransaction: Transaction = {
+        id: Date.now(),
+        nom,
+        montant,
+        enveloppeId,
+        date,
+      };
+      const enveloppesMaj = etat.enveloppes.map((e) =>
+        e.id === enveloppeId ? { ...e, depense: e.depense + montant } : e,
+      );
+      setEtat({
+        transactions: [...etat.transactions, nouvelleTransaction],
+        enveloppes: enveloppesMaj,
+      });
+    },
+
+    supprimerTransaction: (id: number) => {
+      const tx = etat.transactions.find((t) => t.id === id);
+      if (!tx) return;
+      const enveloppesMaj = etat.enveloppes.map((e) =>
+        e.id === tx.enveloppeId
+          ? { ...e, depense: Math.max(0, e.depense - tx.montant) }
+          : e,
+      );
+      setEtat({
+        transactions: etat.transactions.filter((t) => t.id !== id),
+        enveloppes: enveloppesMaj,
+      });
     },
   };
 }

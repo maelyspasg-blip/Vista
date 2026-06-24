@@ -1,9 +1,13 @@
 import { useState } from "react";
 import {
+  InputAccessoryView,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -16,19 +20,26 @@ const MINT_LIGHT = "#E8F8F2";
 const PEACH = "#F4956A";
 const PEACH_LIGHT = "#FFF0EA";
 const ROUGE = "#E24B4A";
-const ROUGE_LIGHT = "#FCEBEB";
 const VERT = "#1D9E75";
-const VERT_LIGHT = "#E1F5EE";
+
+const ACCESSORY_ID = "numericDone";
+
+function bgClair(couleur: string) {
+  return couleur + "22";
+}
 
 export default function Budget() {
   const objStore = useObjectifs();
 
   const [onglet, setOnglet] = useState<"depenses" | "previsionnel">("depenses");
-  const [modalTxVisible, setModalTxVisible] = useState(false);
+  const [enveloppeOuverte, setEnveloppeOuverte] = useState<number | null>(null);
+
+  const [modalAjoutVisible, setModalAjoutVisible] = useState(false);
+  const [nomTx, setNomTx] = useState("");
+  const [montantTx, setMontantTx] = useState("");
+  const [enveloppeTx, setEnveloppeTx] = useState<number | null>(null);
+
   const [modalPrevuVisible, setModalPrevuVisible] = useState(false);
-  const [transactionDetail, setTransactionDetail] = useState<
-    (typeof objStore.transactions)[0] | null
-  >(null);
   const [prevuDetail, setPrevuDetail] = useState<
     (typeof objStore.depensesPrevues)[0] | null
   >(null);
@@ -39,7 +50,8 @@ export default function Budget() {
     0,
   );
   const budgetTotal = objStore.argentDisponible;
-  const resteEstime = budgetTotal - totalReel - totalPrevu;
+  const resteEstime =
+    budgetTotal - totalReel - totalPrevu - objStore.epargneMois;
   const estSousBudget = resteEstime >= 0;
 
   const pctReel =
@@ -48,8 +60,6 @@ export default function Budget() {
     budgetTotal > 0
       ? Math.min((totalPrevu / budgetTotal) * 100, 100 - pctReel)
       : 0;
-
-  // Projection fin de mois (estimation simple à partir du réel + 30 jours)
   const projectionFinMois = Math.round(totalReel * 1.6);
 
   const depenseDominante = [...objStore.enveloppes].sort(
@@ -65,14 +75,35 @@ export default function Budget() {
   };
   const lecture = lectureBudget();
 
-  const ouvrirTransaction = (tx: (typeof objStore.transactions)[0]) => {
-    setTransactionDetail(tx);
-    setModalTxVisible(true);
+  const ouvrirAjout = (enveloppeId?: number) => {
+    setNomTx("");
+    setMontantTx("");
+    setEnveloppeTx(enveloppeId ?? objStore.enveloppes[0]?.id ?? null);
+    setModalAjoutVisible(true);
+  };
+
+  const validerAjout = () => {
+    if (!nomTx || !montantTx || !enveloppeTx) return;
+    const dateStr = new Date().toLocaleDateString("fr-FR", {
+      day: "numeric",
+      month: "short",
+    });
+    objStore.ajouterTransaction(
+      nomTx,
+      parseFloat(montantTx),
+      enveloppeTx,
+      dateStr,
+    );
+    setModalAjoutVisible(false);
   };
 
   const ouvrirPrevu = (dep: (typeof objStore.depensesPrevues)[0]) => {
     setPrevuDetail(dep);
     setModalPrevuVisible(true);
+  };
+
+  const toggleEnveloppe = (id: number) => {
+    setEnveloppeOuverte(enveloppeOuverte === id ? null : id);
   };
 
   return (
@@ -134,28 +165,6 @@ export default function Budget() {
             </View>
           </View>
 
-          <View style={styles.statsRow}>
-            <TouchableOpacity
-              style={[styles.statCard, { backgroundColor: MINT_LIGHT }]}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.statLabel, { color: MINT }]}>DÉPENSÉ</Text>
-              <Text style={[styles.statValue, { color: "#0F6E56" }]}>
-                {totalReel} €
-              </Text>
-              <Text style={styles.statMicro}>vs budget {budgetTotal}€</Text>
-            </TouchableOpacity>
-            <View style={[styles.statCard, { backgroundColor: PURPLE_LIGHT }]}>
-              <Text style={[styles.statLabel, { color: PURPLE }]}>RESTANT</Text>
-              <Text style={[styles.statValue, { color: "#5A3DC4" }]}>
-                {budgetTotal - totalReel} €
-              </Text>
-              <Text style={styles.statMicro}>
-                {Math.round(pctReel)}% utilisé
-              </Text>
-            </View>
-          </View>
-
           {depenseDominante && depenseDominante.depense > 0 && (
             <View style={styles.insightBanner}>
               <Text style={styles.insightTexte}>
@@ -165,30 +174,101 @@ export default function Budget() {
             </View>
           )}
 
-          <Text style={styles.sectionTitle}>TRANSACTIONS DU MOIS</Text>
-          {objStore.transactions.map((t) => (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>ENVELOPPES</Text>
             <TouchableOpacity
-              key={t.id}
-              style={[styles.txCard, { backgroundColor: t.couleur + "22" }]}
+              style={styles.btnAjouter}
+              onPress={() => ouvrirAjout()}
               activeOpacity={0.7}
-              onPress={() => ouvrirTransaction(t)}
             >
-              <View style={[styles.txBarre, { backgroundColor: t.couleur }]} />
-              <View style={styles.txContent}>
-                <View style={styles.txRow}>
-                  <Text style={[styles.txNom, { color: t.couleur }]}>
-                    {t.nom}
-                  </Text>
-                  <Text style={[styles.txMontant, { color: t.couleur }]}>
-                    - {t.montant} €
-                  </Text>
-                </View>
-                <Text style={styles.txMeta}>
-                  {t.categorie} · {t.date}
-                </Text>
-              </View>
+              <Text style={styles.btnAjouterTexte}>+ Ajouter</Text>
             </TouchableOpacity>
-          ))}
+          </View>
+
+          {objStore.enveloppes.map((env) => {
+            const pct = Math.min((env.depense / env.budget) * 100, 100);
+            const estOuverte = enveloppeOuverte === env.id;
+            const txEnveloppe = objStore.transactions.filter(
+              (t) => t.enveloppeId === env.id,
+            );
+
+            return (
+              <View
+                key={env.id}
+                style={[
+                  styles.envCard,
+                  { backgroundColor: bgClair(env.couleur) },
+                ]}
+              >
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => toggleEnveloppe(env.id)}
+                >
+                  <View style={styles.envRow}>
+                    <Text style={styles.envNom}>{env.nom}</Text>
+                    <View style={styles.envRowRight}>
+                      <Text style={[styles.envMontant, { color: env.couleur }]}>
+                        {env.depense} € / {env.budget} €
+                      </Text>
+                      <Text style={[styles.chevron, { color: env.couleur }]}>
+                        {estOuverte ? "▾" : "▸"}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.envBarBg}>
+                    <View
+                      style={[
+                        styles.envBarFill,
+                        { width: `${pct}%`, backgroundColor: env.couleur },
+                      ]}
+                    />
+                  </View>
+                </TouchableOpacity>
+
+                {estOuverte && (
+                  <View style={styles.txListe}>
+                    {txEnveloppe.length === 0 ? (
+                      <Text style={styles.txVide}>
+                        Aucune dépense enregistrée
+                      </Text>
+                    ) : (
+                      txEnveloppe.map((tx) => (
+                        <View key={tx.id} style={styles.txLigne}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.txNom}>{tx.nom}</Text>
+                            <Text style={styles.txDate}>{tx.date}</Text>
+                          </View>
+                          <Text
+                            style={[styles.txMontant, { color: env.couleur }]}
+                          >
+                            - {tx.montant} €
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => objStore.supprimerTransaction(tx.id)}
+                            style={styles.txSupprimer}
+                          >
+                            <Text style={styles.txSupprimerTexte}>✕</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ))
+                    )}
+                    <TouchableOpacity
+                      style={[
+                        styles.btnAjouterIci,
+                        { backgroundColor: env.couleur },
+                      ]}
+                      onPress={() => ouvrirAjout(env.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.btnAjouterIciTexte}>
+                        + Ajouter une dépense ici
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            );
+          })}
           <View style={{ height: 30 }} />
         </ScrollView>
       ) : (
@@ -205,7 +285,7 @@ export default function Budget() {
             </Text>
             <Text style={styles.heroSub}>
               Budget {budgetTotal}€ · Dépensé {totalReel}€ · Prévisionnel{" "}
-              {totalPrevu}€
+              {totalPrevu}€ · Épargne {objStore.epargneMois}€
             </Text>
             <View style={styles.progressBg}>
               <View
@@ -280,7 +360,10 @@ export default function Budget() {
             return (
               <TouchableOpacity
                 key={dep.id}
-                style={[styles.txCard, { backgroundColor: dep.couleur + "22" }]}
+                style={[
+                  styles.txCard,
+                  { backgroundColor: bgClair(dep.couleur) },
+                ]}
                 activeOpacity={0.7}
                 onPress={() => ouvrirPrevu(dep)}
               >
@@ -289,10 +372,12 @@ export default function Budget() {
                 />
                 <View style={styles.txContent}>
                   <View style={styles.txRow}>
-                    <Text style={[styles.txNom, { color: dep.couleur }]}>
+                    <Text style={[styles.txCardNom, { color: dep.couleur }]}>
                       {dep.nom}
                     </Text>
-                    <Text style={[styles.txMontant, { color: dep.couleur }]}>
+                    <Text
+                      style={[styles.txCardMontant, { color: dep.couleur }]}
+                    >
                       {dep.montant} €
                     </Text>
                   </View>
@@ -341,61 +426,102 @@ export default function Budget() {
         </ScrollView>
       )}
 
-      {/* Modal détail transaction */}
+      {Platform.OS === "ios" && (
+        <InputAccessoryView nativeID={ACCESSORY_ID}>
+          <View style={styles.accessoryBar}>
+            <Text style={styles.accessoryTexte}>Terminé</Text>
+          </View>
+        </InputAccessoryView>
+      )}
+
+      {/* Modal ajout transaction */}
       <Modal
-        visible={modalTxVisible}
+        visible={modalAjoutVisible}
         animationType="slide"
         transparent
-        onRequestClose={() => setModalTxVisible(false)}
+        onRequestClose={() => setModalAjoutVisible(false)}
       >
-        <TouchableOpacity
+        <KeyboardAvoidingView
           style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setModalTxVisible(false)}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <View style={styles.modalCard}>
-            {transactionDetail && (
-              <>
-                <Text style={styles.modalTitre}>{transactionDetail.nom}</Text>
-                <View style={styles.modalStatsRow}>
-                  <View style={styles.modalStat}>
-                    <Text style={styles.modalStatLabel}>MONTANT</Text>
-                    <Text
-                      style={[
-                        styles.modalStatVal,
-                        { color: transactionDetail.couleur },
-                      ]}
-                    >
-                      {transactionDetail.montant} €
-                    </Text>
-                  </View>
-                  <View style={styles.modalStat}>
-                    <Text style={styles.modalStatLabel}>CATÉGORIE</Text>
-                    <Text style={styles.modalStatVal}>
-                      {transactionDetail.categorie}
-                    </Text>
-                  </View>
-                  <View style={styles.modalStat}>
-                    <Text style={styles.modalStatLabel}>DATE</Text>
-                    <Text style={styles.modalStatVal}>
-                      {transactionDetail.date}
-                    </Text>
-                  </View>
+          <View style={styles.modalOverlayTouch}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitre}>Nouvelle dépense</Text>
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                <Text style={styles.modalLabel}>Nom de la dépense</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Ex : Carrefour, Cinéma..."
+                  placeholderTextColor="#CCC"
+                  value={nomTx}
+                  onChangeText={setNomTx}
+                  returnKeyType="done"
+                />
+
+                <Text style={styles.modalLabel}>Montant</Text>
+                <View style={styles.modalInputRow}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }]}
+                    placeholder="0"
+                    placeholderTextColor="#CCC"
+                    keyboardType="numeric"
+                    value={montantTx}
+                    onChangeText={setMontantTx}
+                    returnKeyType="done"
+                    inputAccessoryViewID={ACCESSORY_ID}
+                  />
+                  <Text style={styles.modalEuro}>€</Text>
                 </View>
-                <Text style={styles.modalAide}>
-                  Pour modifier cette transaction, rends-toi sur l'accueil.
-                </Text>
-              </>
-            )}
-            <TouchableOpacity
-              style={styles.btnFermer}
-              onPress={() => setModalTxVisible(false)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.btnFermerTexte}>Fermer</Text>
-            </TouchableOpacity>
+
+                <Text style={styles.modalLabel}>Enveloppe</Text>
+                <View style={styles.envChoixGrid}>
+                  {objStore.enveloppes.map((env) => (
+                    <TouchableOpacity
+                      key={env.id}
+                      style={[
+                        styles.envChoixChip,
+                        enveloppeTx === env.id && {
+                          backgroundColor: env.couleur,
+                        },
+                      ]}
+                      onPress={() => setEnveloppeTx(env.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.envChoixTexte,
+                          enveloppeTx === env.id && { color: "#FFFFFF" },
+                        ]}
+                      >
+                        {env.nom}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TouchableOpacity
+                  style={styles.btnValider}
+                  onPress={validerAjout}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.btnValiderTexte}>Ajouter la dépense</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.btnAnnuler}
+                  onPress={() => setModalAjoutVisible(false)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.btnAnnulerTexte}>Annuler</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
           </View>
-        </TouchableOpacity>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Modal détail dépense prévue */}
@@ -437,14 +563,6 @@ export default function Budget() {
                     </Text>
                   </View>
                 </View>
-                <Text style={styles.modalAide}>
-                  Cette dépense représente{" "}
-                  {budgetTotal > 0
-                    ? Math.round((prevuDetail.montant / budgetTotal) * 100)
-                    : 0}
-                  % de ton budget total. Pour la modifier, rends-toi sur
-                  l'accueil.
-                </Text>
               </>
             )}
             <TouchableOpacity
@@ -466,7 +584,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     marginTop: 60,
     marginBottom: 16,
   },
@@ -477,6 +595,19 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   sousTitre: { fontSize: 14, color: "#999", marginTop: 2 },
+  btnAjouter: {
+    backgroundColor: PURPLE,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    maxWidth: 150,
+  },
+  btnAjouterTexte: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    textAlign: "center",
+  },
   onglets: {
     flexDirection: "row",
     backgroundColor: "#F7F7F7",
@@ -548,7 +679,6 @@ const styles = StyleSheet.create({
     marginBottom: 5,
   },
   statValue: { fontSize: 19, fontWeight: "700", marginBottom: 3 },
-  statMicro: { fontSize: 10, color: "#999" },
   insightBanner: {
     backgroundColor: "#FAFAFA",
     borderRadius: 13,
@@ -558,13 +688,66 @@ const styles = StyleSheet.create({
     borderColor: "#EEE",
   },
   insightTexte: { fontSize: 13, color: "#666", lineHeight: 19 },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
   sectionTitle: {
     fontSize: 12,
     fontWeight: "700",
     color: "#999",
     letterSpacing: 1,
-    marginBottom: 12,
   },
+  envCard: { borderRadius: 16, padding: 18, marginBottom: 10 },
+  envRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 11,
+  },
+  envNom: { fontSize: 16, fontWeight: "700", color: "#1A1A1A" },
+  envRowRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  envMontant: { fontSize: 14, fontWeight: "700" },
+  chevron: { fontSize: 14, fontWeight: "700" },
+  envBarBg: {
+    height: 6,
+    backgroundColor: "rgba(0,0,0,0.08)",
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  envBarFill: { height: "100%", borderRadius: 3 },
+  txListe: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 0.5,
+    borderTopColor: "rgba(0,0,0,0.08)",
+  },
+  txVide: {
+    fontSize: 13,
+    color: "#AAA",
+    textAlign: "center",
+    paddingVertical: 10,
+  },
+  txLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    gap: 8,
+  },
+  txNom: { fontSize: 13, fontWeight: "600", color: "#1A1A1A" },
+  txDate: { fontSize: 11, color: "#999" },
+  txMontant: { fontSize: 13, fontWeight: "700" },
+  txSupprimer: { padding: 4 },
+  txSupprimerTexte: { fontSize: 13, color: "#CCC" },
+  btnAjouterIci: {
+    borderRadius: 12,
+    padding: 11,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  btnAjouterIciTexte: { fontSize: 13, fontWeight: "700", color: "#FFFFFF" },
   txCard: {
     flexDirection: "row",
     borderRadius: 16,
@@ -585,13 +768,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 2,
   },
-  txNom: { fontSize: 15, fontWeight: "700" },
-  txMontant: { fontSize: 15, fontWeight: "700" },
+  txCardNom: { fontSize: 15, fontWeight: "700" },
+  txCardMontant: { fontSize: 15, fontWeight: "700" },
   txMeta: { fontSize: 12, color: "#999" },
   statutBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 20 },
   statutTexte: { fontSize: 11, fontWeight: "600" },
   alertePoids: { fontSize: 11, color: PEACH, marginTop: 6, fontWeight: "600" },
-  modalOverlay: {
+  modalOverlay: { flex: 1, justifyContent: "flex-end" },
+  modalOverlayTouch: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.3)",
     justifyContent: "flex-end",
@@ -602,6 +786,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 26,
     padding: 26,
     paddingBottom: 40,
+    maxHeight: "90%",
   },
   modalTitre: {
     fontSize: 21,
@@ -609,6 +794,52 @@ const styles = StyleSheet.create({
     color: "#1A1A1A",
     marginBottom: 20,
   },
+  modalLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#999",
+    letterSpacing: 0.5,
+    marginBottom: 9,
+    marginTop: 6,
+  },
+  modalInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  modalEuro: { fontSize: 17, color: "#999", marginBottom: 12 },
+  input: {
+    backgroundColor: "#F7F7F7",
+    borderRadius: 13,
+    padding: 16,
+    fontSize: 17,
+    color: "#1A1A1A",
+    marginBottom: 12,
+  },
+  envChoixGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 6,
+  },
+  envChoixChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: "#F7F7F7",
+  },
+  envChoixTexte: { fontSize: 13, color: "#999", fontWeight: "600" },
+  btnValider: {
+    backgroundColor: PURPLE,
+    borderRadius: 16,
+    padding: 17,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  btnValiderTexte: { fontSize: 17, color: "#FFFFFF", fontWeight: "700" },
+  btnAnnuler: {
+    padding: 15,
+    alignItems: "center",
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  btnAnnulerTexte: { fontSize: 15, color: "#999", fontWeight: "600" },
   modalStatsRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
   modalStat: {
     flex: 1,
@@ -629,7 +860,6 @@ const styles = StyleSheet.create({
     color: "#1A1A1A",
     textAlign: "center",
   },
-  modalAide: { fontSize: 12, color: "#AAA", lineHeight: 18, marginBottom: 10 },
   btnFermer: {
     backgroundColor: "#F7F7F7",
     borderRadius: 16,
