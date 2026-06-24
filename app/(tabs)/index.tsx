@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
+import { Enveloppe, useObjectifs } from "../store";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
@@ -21,16 +22,6 @@ const MINT_LIGHT = "#E8F8F2";
 const PEACH = "#F4956A";
 const PEACH_LIGHT = "#FFF0EA";
 const ROUGE_LIGHT = "#FCEBEB";
-
-type Enveloppe = {
-  id: number;
-  nom: string;
-  depense: number;
-  budget: number;
-  couleur: string;
-  recurrente: boolean;
-  frequenceJours?: number;
-};
 
 const PALETTE_COULEURS = [
   "#5DC8A0",
@@ -54,61 +45,6 @@ const PALETTE_COULEURS = [
 function bgClair(couleur: string) {
   return couleur + "22";
 }
-
-const ENVELOPPES_INIT: Enveloppe[] = [
-  {
-    id: 1,
-    nom: "Courses",
-    depense: 157,
-    budget: 250,
-    couleur: "#5DC8A0",
-    recurrente: true,
-    frequenceJours: 30,
-  },
-  {
-    id: 2,
-    nom: "Restaurants",
-    depense: 66,
-    budget: 200,
-    couleur: "#F4956A",
-    recurrente: false,
-  },
-  {
-    id: 3,
-    nom: "Transport",
-    depense: 34,
-    budget: 80,
-    couleur: "#4A90D9",
-    recurrente: true,
-    frequenceJours: 30,
-  },
-  {
-    id: 4,
-    nom: "Loisirs",
-    depense: 179,
-    budget: 200,
-    couleur: "#D94A8C",
-    recurrente: false,
-  },
-  {
-    id: 5,
-    nom: "Abonnements",
-    depense: 0,
-    budget: 50,
-    couleur: "#5BC0BE",
-    recurrente: true,
-    frequenceJours: 30,
-  },
-  {
-    id: 6,
-    nom: "Logement",
-    depense: 0,
-    budget: 850,
-    couleur: "#9B5DE5",
-    recurrente: true,
-    frequenceJours: 30,
-  },
-];
 
 function DonutChart({ data }: { data: { couleur: string; valeur: number }[] }) {
   const total = data.reduce((acc, d) => acc + d.valeur, 0);
@@ -138,7 +74,7 @@ function DonutChart({ data }: { data: { couleur: string; valeur: number }[] }) {
             fill="none"
           />
         </Svg>
-        <Text style={{ position: "absolute", fontSize: 12, color: "#BBB" }}>
+        <Text style={{ position: "absolute", fontSize: 13, color: "#BBB" }}>
           Aucune dépense
         </Text>
       </View>
@@ -183,10 +119,10 @@ function DonutChart({ data }: { data: { couleur: string; valeur: number }[] }) {
         ))}
       </Svg>
       <View style={{ position: "absolute", alignItems: "center" }}>
-        <Text style={{ fontSize: 18, fontWeight: "700", color: "#1A1A1A" }}>
+        <Text style={{ fontSize: 19, fontWeight: "700", color: "#1A1A1A" }}>
           {total} €
         </Text>
-        <Text style={{ fontSize: 10, color: "#999" }}>dépensé</Text>
+        <Text style={{ fontSize: 11, color: "#999" }}>dépensé</Text>
       </View>
     </View>
   );
@@ -195,9 +131,18 @@ function DonutChart({ data }: { data: { couleur: string; valeur: number }[] }) {
 const ACCESSORY_ID = "numericDone";
 
 export default function Dashboard() {
-  const [enveloppes, setEnveloppes] = useState<Enveloppe[]>(ENVELOPPES_INIT);
-  const [epargneVoulue, setEpargneVoulue] = useState("200");
-  const [argentDisponible, setArgentDisponible] = useState("1800");
+  const objStore = useObjectifs();
+
+  const enveloppes = objStore.enveloppes;
+  const setEnveloppes = (nouvellesEnveloppes: Enveloppe[]) =>
+    objStore.modifierEnveloppes(nouvellesEnveloppes);
+  const [argentDisponible, setArgentDisponibleLocal] = useState(
+    String(objStore.argentDisponible),
+  );
+  const setArgentDisponible = (val: string) => {
+    setArgentDisponibleLocal(val);
+    objStore.modifierArgentDisponible(parseFloat(val) || 0);
+  };
   const [editionDisponible, setEditionDisponible] = useState(false);
   const [disponibleTemp, setDisponibleTemp] = useState("1800");
 
@@ -218,12 +163,31 @@ export default function Dashboard() {
   const [estRecurrente, setEstRecurrente] = useState(false);
   const [nouvelleFrequence, setNouvelleFrequence] = useState("30");
 
-  const totalDepense = enveloppes.reduce((acc, e) => acc + e.depense, 0);
+  const [modalEpargneVisible, setModalEpargneVisible] = useState(false);
+  const [vueModal, setVueModal] = useState<"epargne" | "nouvelObjectif">(
+    "epargne",
+  );
+  const [epargneTemp, setEpargneTemp] = useState(String(objStore.epargneMois));
+  const [nomObjectif, setNomObjectif] = useState("");
+  const [cibleObjectif, setCibleObjectif] = useState("");
+  const [montantInitialObjectif, setMontantInitialObjectif] = useState("");
+  const [couleurObjectif, setCouleurObjectif] = useState(PALETTE_COULEURS[0]);
+
+  const totalDepenseEnveloppes = enveloppes.reduce(
+    (acc, e) => acc + e.depense,
+    0,
+  );
+  const totalDepense = totalDepenseEnveloppes + objStore.epargneMois;
   const disponibleNum = parseFloat(argentDisponible) || 0;
-  const epargneNum = parseFloat(epargneVoulue) || 0;
-  const resteAVivre = disponibleNum - totalDepense - epargneNum;
+  const resteAVivre = disponibleNum - totalDepense;
   const pctUtilise =
-    disponibleNum > 0 ? Math.min((totalDepense / disponibleNum) * 100, 100) : 0;
+    disponibleNum > 0
+      ? Math.min((totalDepenseEnveloppes / disponibleNum) * 100, 100)
+      : 0;
+  const pctEpargne =
+    disponibleNum > 0
+      ? Math.min((objStore.epargneMois / disponibleNum) * 100, 100)
+      : 0;
 
   const ouvrirEditionEnveloppe = (env: Enveloppe) => {
     setEnveloppeEnEdition(env);
@@ -291,6 +255,31 @@ export default function Dashboard() {
     setEditionDisponible(false);
   };
 
+  const ouvrirModalEpargne = () => {
+    setEpargneTemp(String(objStore.epargneMois));
+    setVueModal("epargne");
+    setModalEpargneVisible(true);
+  };
+
+  const sauvegarderEpargne = () => {
+    objStore.modifierEpargneMois(parseFloat(epargneTemp) || 0);
+  };
+
+  const creerObjectif = () => {
+    if (!nomObjectif || !cibleObjectif) return;
+    objStore.ajouterObjectif(
+      nomObjectif,
+      parseFloat(cibleObjectif) || 0,
+      parseFloat(montantInitialObjectif) || 0,
+      couleurObjectif,
+    );
+    setNomObjectif("");
+    setCibleObjectif("");
+    setMontantInitialObjectif("");
+    setCouleurObjectif(PALETTE_COULEURS[0]);
+    setVueModal("epargne");
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
       <ScrollView
@@ -313,10 +302,41 @@ export default function Dashboard() {
           <Text style={styles.heroAmount}>{totalDepense} €</Text>
           <View style={styles.barBg}>
             <View style={[styles.barFill, { width: `${pctUtilise}%` }]} />
+            {objStore.epargneMois > 0 && (
+              <View
+                style={[
+                  styles.barFillEpargne,
+                  { width: `${pctEpargne}%`, left: `${pctUtilise}%` },
+                ]}
+              />
+            )}
+          </View>
+          <View style={styles.heroLegende}>
+            <View style={styles.heroLegendeItem}>
+              <View
+                style={[styles.heroLegendeDot, { backgroundColor: "#FFFFFF" }]}
+              />
+              <Text style={styles.heroSub}>
+                Dépenses {totalDepenseEnveloppes} €
+              </Text>
+            </View>
+            {objStore.epargneMois > 0 && (
+              <View style={styles.heroLegendeItem}>
+                <View
+                  style={[
+                    styles.heroLegendeDot,
+                    { backgroundColor: "rgba(255,255,255,0.4)" },
+                  ]}
+                />
+                <Text style={styles.heroSub}>
+                  Épargne {objStore.epargneMois} €
+                </Text>
+              </View>
+            )}
           </View>
           <View style={styles.heroFooter}>
             <Text style={styles.heroSub}>
-              {Math.round(pctUtilise)}% du disponible
+              {Math.round(pctUtilise + pctEpargne)}% du disponible
             </Text>
             <Text style={styles.heroSub}>{resteAVivre} € libres</Text>
           </View>
@@ -370,26 +390,26 @@ export default function Dashboard() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.epargneCard}>
+        <TouchableOpacity
+          style={styles.epargneCard}
+          activeOpacity={0.7}
+          onPress={ouvrirModalEpargne}
+        >
           <View style={styles.epargneIconBox}>
-            <Text style={styles.epargneIcon}>💰</Text>
+            <Text style={styles.epargneIcon}>💵</Text>
           </View>
           <View style={styles.epargneTexte}>
             <Text style={styles.epargneLabel}>Mis de côté ce mois</Text>
-            <Text style={styles.epargneSub}>Objectif d'épargne mensuelle</Text>
+            <Text style={styles.epargneSub}>
+              {objStore.objectifs.length > 0
+                ? `${objStore.objectifs.length} objectif${objStore.objectifs.length > 1 ? "s" : ""} en cours`
+                : "Créer un objectif d'épargne"}
+            </Text>
           </View>
-          <View style={styles.epargneInputBox}>
-            <TextInput
-              style={styles.epargneInput}
-              keyboardType="numeric"
-              value={epargneVoulue}
-              onChangeText={setEpargneVoulue}
-              returnKeyType="done"
-              inputAccessoryViewID={ACCESSORY_ID}
-            />
-            <Text style={styles.epargneEuro}>€</Text>
-          </View>
-        </View>
+          <Text style={styles.epargneMontantAffiche}>
+            {objStore.epargneMois} €
+          </Text>
+        </TouchableOpacity>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>ENVELOPPES</Text>
@@ -441,6 +461,9 @@ export default function Dashboard() {
 
         <View style={styles.graphCard}>
           <Text style={styles.cardTitre}>Vue d'ensemble des dépenses</Text>
+          <Text style={styles.graphSousTitre}>
+            L'épargne n'est pas comptée ici, c'est de l'argent mis de côté
+          </Text>
           <View style={styles.graphContent}>
             <DonutChart
               data={enveloppes.map((e) => ({
@@ -463,8 +486,8 @@ export default function Dashboard() {
                       {e.nom}
                     </Text>
                     <Text style={styles.legendePct}>
-                      {totalDepense > 0
-                        ? Math.round((e.depense / totalDepense) * 100)
+                      {totalDepenseEnveloppes > 0
+                        ? Math.round((e.depense / totalDepenseEnveloppes) * 100)
                         : 0}
                       %
                     </Text>
@@ -485,7 +508,6 @@ export default function Dashboard() {
         </InputAccessoryView>
       )}
 
-      {/* Modal édition enveloppe */}
       <Modal
         visible={modalEnveloppeVisible}
         animationType="slide"
@@ -612,7 +634,6 @@ export default function Dashboard() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Modal ajout enveloppe */}
       <Modal
         visible={modalAjoutVisible}
         animationType="slide"
@@ -722,6 +743,219 @@ export default function Dashboard() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <Modal
+        visible={modalEpargneVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setModalEpargneVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.modalOverlayTouch}>
+            <View style={styles.modalCard}>
+              {vueModal === "epargne" ? (
+                <>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitre}>Épargne de ce mois</Text>
+                    <TouchableOpacity
+                      onPress={() => setModalEpargneVisible(false)}
+                      activeOpacity={0.6}
+                    >
+                      <Text style={styles.btnFermerCroix}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    <Text style={styles.modalLabel}>
+                      Montant à mettre de côté ce mois
+                    </Text>
+                    <View style={styles.modalInputRow}>
+                      <TextInput
+                        style={[styles.input, { flex: 1 }]}
+                        keyboardType="numeric"
+                        value={epargneTemp}
+                        onChangeText={setEpargneTemp}
+                        returnKeyType="done"
+                        inputAccessoryViewID={ACCESSORY_ID}
+                      />
+                      <Text style={styles.modalEuro}>€</Text>
+                    </View>
+                    <Text style={styles.modalAide}>
+                      Cet argent sera compté comme dépensé mais n'apparaîtra pas
+                      dans le graphique de tes dépenses courantes.
+                    </Text>
+
+                    <TouchableOpacity
+                      style={styles.btnAjouter}
+                      onPress={sauvegarderEpargne}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.btnAjouterTexte}>
+                        Enregistrer le montant
+                      </Text>
+                    </TouchableOpacity>
+
+                    <View style={styles.separateur} />
+
+                    <Text style={styles.modalLabel}>
+                      Tes objectifs d'épargne
+                    </Text>
+                    {objStore.objectifs.length === 0 && (
+                      <Text style={styles.modalVideTexte}>
+                        Aucun objectif pour le moment
+                      </Text>
+                    )}
+                    {objStore.objectifs.map((obj) => {
+                      const pct = Math.min((obj.actuel / obj.cible) * 100, 100);
+                      return (
+                        <View key={obj.id} style={styles.objectifModalItem}>
+                          <View style={styles.objectifModalHeader}>
+                            <Text style={styles.objectifModalNom}>
+                              {obj.nom}
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => objStore.supprimerObjectif(obj.id)}
+                            >
+                              <Text style={styles.objectifSupprimer}>✕</Text>
+                            </TouchableOpacity>
+                          </View>
+                          <Text
+                            style={[
+                              styles.objectifModalMontant,
+                              { color: obj.couleur },
+                            ]}
+                          >
+                            {obj.actuel} € / {obj.cible} €
+                          </Text>
+                          <View style={styles.catBarBg}>
+                            <View
+                              style={[
+                                styles.catBarFill,
+                                {
+                                  width: `${pct}%`,
+                                  backgroundColor: obj.couleur,
+                                },
+                              ]}
+                            />
+                          </View>
+                        </View>
+                      );
+                    })}
+
+                    <TouchableOpacity
+                      style={styles.btnNouvelObjectifBouton}
+                      onPress={() => setVueModal("nouvelObjectif")}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.btnNouvelObjectif}>
+                        + Créer un nouvel objectif
+                      </Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+                </>
+              ) : (
+                <>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitre}>Nouvel objectif</Text>
+                    <TouchableOpacity
+                      onPress={() => setVueModal("epargne")}
+                      activeOpacity={0.6}
+                    >
+                      <Text style={styles.btnFermerCroix}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    <Text style={styles.modalLabel}>Nom de l'objectif</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Ex : MacBook, Vacances..."
+                      placeholderTextColor="#CCC"
+                      value={nomObjectif}
+                      onChangeText={setNomObjectif}
+                      returnKeyType="done"
+                    />
+
+                    <Text style={styles.modalLabel}>Montant cible</Text>
+                    <View style={styles.modalInputRow}>
+                      <TextInput
+                        style={[styles.input, { flex: 1 }]}
+                        placeholder="Ex : 1500"
+                        placeholderTextColor="#CCC"
+                        keyboardType="numeric"
+                        value={cibleObjectif}
+                        onChangeText={setCibleObjectif}
+                        returnKeyType="done"
+                        inputAccessoryViewID={ACCESSORY_ID}
+                      />
+                      <Text style={styles.modalEuro}>€</Text>
+                    </View>
+
+                    <Text style={styles.modalLabel}>
+                      Déjà mis de côté (optionnel)
+                    </Text>
+                    <View style={styles.modalInputRow}>
+                      <TextInput
+                        style={[styles.input, { flex: 1 }]}
+                        placeholder="0"
+                        placeholderTextColor="#CCC"
+                        keyboardType="numeric"
+                        value={montantInitialObjectif}
+                        onChangeText={setMontantInitialObjectif}
+                        returnKeyType="done"
+                        inputAccessoryViewID={ACCESSORY_ID}
+                      />
+                      <Text style={styles.modalEuro}>€</Text>
+                    </View>
+
+                    <Text style={styles.modalLabel}>Couleur</Text>
+                    <View style={styles.paletteGrid}>
+                      {PALETTE_COULEURS.map((c) => (
+                        <TouchableOpacity
+                          key={c}
+                          style={[
+                            styles.swatch,
+                            { backgroundColor: c },
+                            couleurObjectif === c && styles.swatchSelectionne,
+                          ]}
+                          onPress={() => setCouleurObjectif(c)}
+                          activeOpacity={0.7}
+                        />
+                      ))}
+                    </View>
+
+                    <TouchableOpacity
+                      style={styles.btnAjouter}
+                      onPress={creerObjectif}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.btnAjouterTexte}>
+                        Créer l'objectif
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.btnAnnuler}
+                      onPress={() => setVueModal("epargne")}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.btnAnnulerTexte}>Retour</Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+                </>
+              )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -736,160 +970,160 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   appName: {
-    fontSize: 22,
+    fontSize: 23,
     fontWeight: "700",
     color: "#1A1A1A",
     letterSpacing: 2,
   },
-  subtitle: { fontSize: 13, color: "#999", marginTop: 2 },
+  subtitle: { fontSize: 14, color: "#999", marginTop: 2 },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: PURPLE,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
+  avatarText: { color: "#FFFFFF", fontWeight: "700", fontSize: 15 },
   hero: {
     backgroundColor: PURPLE,
-    borderRadius: 20,
-    padding: 24,
-    marginBottom: 16,
+    borderRadius: 22,
+    padding: 26,
+    marginBottom: 18,
   },
   heroLabel: {
-    fontSize: 10,
+    fontSize: 11,
     color: "rgba(255,255,255,0.6)",
     letterSpacing: 1,
     marginBottom: 8,
   },
   heroAmount: {
-    fontSize: 48,
+    fontSize: 50,
     fontWeight: "700",
     color: "#FFFFFF",
     marginBottom: 20,
   },
   barBg: {
-    height: 4,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    borderRadius: 2,
-    marginBottom: 10,
+    height: 6,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderRadius: 3,
+    marginBottom: 12,
+    flexDirection: "row",
+    position: "relative",
   },
-  barFill: { height: "100%", backgroundColor: "#FFFFFF", borderRadius: 2 },
+  barFill: {
+    height: "100%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 3,
+    position: "absolute",
+    left: 0,
+  },
+  barFillEpargne: {
+    height: "100%",
+    backgroundColor: "rgba(255,255,255,0.45)",
+    borderRadius: 3,
+    position: "absolute",
+  },
+  heroLegende: { flexDirection: "row", gap: 16, marginBottom: 10 },
+  heroLegendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
+  heroLegendeDot: { width: 7, height: 7, borderRadius: 4 },
   heroFooter: { flexDirection: "row", justifyContent: "space-between" },
-  heroSub: { fontSize: 12, color: "rgba(255,255,255,0.6)" },
+  heroSub: { fontSize: 13, color: "rgba(255,255,255,0.7)" },
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
   statCard: {
     flex: 1,
-    borderRadius: 14,
-    padding: 12,
+    borderRadius: 16,
+    padding: 14,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 64,
+    minHeight: 72,
   },
   statLabelRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    marginBottom: 4,
+    marginBottom: 5,
   },
-  statLabel: { fontSize: 9, fontWeight: "600", letterSpacing: 0.5 },
-  miniCrayon: { fontSize: 10, color: PEACH },
-  statValue: { fontSize: 16, fontWeight: "600" },
+  statLabel: { fontSize: 11, fontWeight: "600", letterSpacing: 0.5 },
+  miniCrayon: { fontSize: 11, color: PEACH },
+  statValue: { fontSize: 19, fontWeight: "700" },
   editDisponibleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   editDisponibleInput: {
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 18,
+    fontWeight: "700",
     color: "#993C1D",
     backgroundColor: "#FFFFFF",
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 2,
-    minWidth: 60,
+    minWidth: 64,
     textAlign: "center",
   },
-  validerTexte: { fontSize: 13, fontWeight: "700", color: PEACH },
+  validerTexte: { fontSize: 14, fontWeight: "700", color: PEACH },
   epargneCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#FAFAFA",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 24,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 26,
     borderWidth: 0.5,
     borderColor: "#F0EEF8",
-    gap: 12,
+    gap: 14,
   },
   epargneIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: MINT_LIGHT,
     alignItems: "center",
     justifyContent: "center",
   },
-  epargneIcon: { fontSize: 18 },
+  epargneIcon: { fontSize: 22 },
   epargneTexte: { flex: 1 },
-  epargneLabel: { fontSize: 13, fontWeight: "600", color: "#1A1A1A" },
-  epargneSub: { fontSize: 11, color: "#999", marginTop: 1 },
-  epargneInputBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    borderWidth: 0.5,
-    borderColor: "#E0DDD6",
-  },
-  epargneInput: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: MINT,
-    minWidth: 44,
-    textAlign: "right",
-    paddingVertical: 8,
-  },
-  epargneEuro: { fontSize: 15, fontWeight: "600", color: MINT, marginLeft: 2 },
+  epargneLabel: { fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
+  epargneSub: { fontSize: 12, color: "#999", marginTop: 2 },
+  epargneMontantAffiche: { fontSize: 18, fontWeight: "700", color: MINT },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 14,
   },
   sectionTitle: {
-    fontSize: 11,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "700",
     color: "#999",
     letterSpacing: 1,
   },
   btnAjoutEnveloppe: {
     backgroundColor: PURPLE_LIGHT,
     borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
   },
-  btnAjoutTexte: { fontSize: 12, fontWeight: "600", color: PURPLE },
-  envCard: { borderRadius: 14, padding: 16, marginBottom: 8 },
+  btnAjoutTexte: { fontSize: 13, fontWeight: "700", color: PURPLE },
+  envCard: { borderRadius: 16, padding: 18, marginBottom: 10 },
   envRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 11,
   },
-  envNomRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  envNom: { fontSize: 15, fontWeight: "600", color: "#1A1A1A" },
+  envNomRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  envNom: { fontSize: 16, fontWeight: "700", color: "#1A1A1A" },
   recurrenceBadge: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 19,
+    height: 19,
+    borderRadius: 10,
     backgroundColor: "rgba(0,0,0,0.06)",
     alignItems: "center",
     justifyContent: "center",
   },
-  recurrenceTexte: { fontSize: 10, color: "#888" },
-  envMontant: { fontSize: 13, fontWeight: "600" },
+  recurrenceTexte: { fontSize: 11, color: "#888" },
+  envMontant: { fontSize: 14, fontWeight: "700" },
   envBarBg: {
-    height: 5,
+    height: 6,
     backgroundColor: "rgba(0,0,0,0.08)",
     borderRadius: 3,
     overflow: "hidden",
@@ -897,24 +1131,25 @@ const styles = StyleSheet.create({
   envBarFill: { height: "100%", borderRadius: 3 },
   graphCard: {
     backgroundColor: "#FAFAFA",
-    borderRadius: 20,
-    padding: 18,
-    marginTop: 16,
+    borderRadius: 22,
+    padding: 20,
+    marginTop: 18,
     borderWidth: 0.5,
     borderColor: "#F0EEF8",
   },
   cardTitre: {
-    fontSize: 15,
-    fontWeight: "600",
+    fontSize: 16,
+    fontWeight: "700",
     color: "#1A1A1A",
-    marginBottom: 16,
+    marginBottom: 4,
   },
+  graphSousTitre: { fontSize: 12, color: "#999", marginBottom: 18 },
   graphContent: { flexDirection: "row", alignItems: "center" },
-  graphLegende: { flex: 1, paddingLeft: 16, gap: 10 },
-  legendeItem: { flexDirection: "row", alignItems: "center", gap: 6 },
-  legendeDot: { width: 9, height: 9, borderRadius: 5 },
-  legendeNom: { flex: 1, fontSize: 13, color: "#1A1A1A" },
-  legendePct: { fontSize: 13, color: "#999", fontWeight: "500" },
+  graphLegende: { flex: 1, paddingLeft: 16, gap: 11 },
+  legendeItem: { flexDirection: "row", alignItems: "center", gap: 7 },
+  legendeDot: { width: 10, height: 10, borderRadius: 5 },
+  legendeNom: { flex: 1, fontSize: 14, color: "#1A1A1A" },
+  legendePct: { fontSize: 14, color: "#999", fontWeight: "600" },
   modalOverlay: { flex: 1, justifyContent: "flex-end" },
   modalOverlayTouch: {
     flex: 1,
@@ -923,11 +1158,11 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    padding: 26,
     paddingBottom: 30,
-    maxHeight: "88%",
+    maxHeight: "90%",
   },
   modalHeader: {
     flexDirection: "row",
@@ -935,66 +1170,104 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  modalTitre: { fontSize: 19, fontWeight: "700", color: "#1A1A1A" },
+  modalTitre: { fontSize: 21, fontWeight: "700", color: "#1A1A1A" },
   btnCorbeille: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: ROUGE_LIGHT,
     alignItems: "center",
     justifyContent: "center",
   },
-  corbeilleIcon: { fontSize: 14 },
+  corbeilleIcon: { fontSize: 15 },
+  btnFermerCroix: { fontSize: 18, color: "#BBB", padding: 4 },
   modalLabel: {
-    fontSize: 12,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "700",
     color: "#999",
     letterSpacing: 0.5,
-    marginBottom: 8,
-    marginTop: 4,
+    marginBottom: 9,
+    marginTop: 6,
   },
   modalInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  modalEuro: { fontSize: 16, color: "#999", marginBottom: 12 },
+  modalEuro: { fontSize: 17, color: "#999", marginBottom: 12 },
+  modalAide: { fontSize: 12, color: "#AAA", lineHeight: 18, marginBottom: 14 },
   input: {
     backgroundColor: "#F7F7F7",
-    borderRadius: 12,
-    padding: 15,
-    fontSize: 16,
+    borderRadius: 13,
+    padding: 16,
+    fontSize: 17,
     color: "#1A1A1A",
     marginBottom: 12,
   },
   paletteGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 16,
+    gap: 11,
+    marginBottom: 18,
   },
-  swatch: { width: 34, height: 34, borderRadius: 17 },
+  swatch: { width: 36, height: 36, borderRadius: 18 },
   swatchSelectionne: { borderWidth: 3, borderColor: "#1A1A1A" },
   switchRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 18,
     marginTop: 8,
   },
-  switchLabel: { fontSize: 15, fontWeight: "500", color: "#1A1A1A" },
-  switchSub: { fontSize: 12, color: "#999", marginTop: 2 },
+  switchLabel: { fontSize: 16, fontWeight: "600", color: "#1A1A1A" },
+  switchSub: { fontSize: 13, color: "#999", marginTop: 2 },
   btnAjouter: {
     backgroundColor: PURPLE,
-    borderRadius: 14,
-    padding: 16,
+    borderRadius: 16,
+    padding: 17,
     alignItems: "center",
-    marginTop: 8,
+    marginTop: 10,
   },
-  btnAjouterTexte: { fontSize: 16, color: "#FFFFFF", fontWeight: "600" },
+  btnAjouterTexte: { fontSize: 17, color: "#FFFFFF", fontWeight: "700" },
   btnAnnuler: {
-    padding: 14,
+    padding: 15,
     alignItems: "center",
     marginTop: 4,
     marginBottom: 6,
   },
-  btnAnnulerTexte: { fontSize: 14, color: "#999", fontWeight: "500" },
+  btnAnnulerTexte: { fontSize: 15, color: "#999", fontWeight: "600" },
+  separateur: { height: 1, backgroundColor: "#EEE", marginVertical: 20 },
+  modalVideTexte: {
+    fontSize: 14,
+    color: "#BBB",
+    textAlign: "center",
+    paddingVertical: 14,
+  },
+  objectifModalItem: {
+    backgroundColor: "#FAFAFA",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+  },
+  objectifModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  objectifModalNom: { fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
+  objectifSupprimer: { fontSize: 15, color: "#CCC", padding: 4 },
+  objectifModalMontant: { fontSize: 14, fontWeight: "700", marginBottom: 8 },
+  catBarBg: {
+    height: 6,
+    backgroundColor: "#EEEEEE",
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  catBarFill: { height: "100%", borderRadius: 3 },
+  btnNouvelObjectifBouton: {
+    padding: 14,
+    alignItems: "center",
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  btnNouvelObjectif: { fontSize: 15, fontWeight: "700", color: PURPLE },
   accessoryBar: {
     backgroundColor: "#F7F7F7",
     padding: 10,
@@ -1002,10 +1275,5 @@ const styles = StyleSheet.create({
     borderTopWidth: 0.5,
     borderTopColor: "#DDD",
   },
-  accessoryTexte: {
-    color: PURPLE,
-    fontSize: 16,
-    fontWeight: "600",
-    paddingHorizontal: 10,
-  },
+  accessoryTexte: { color: PURPLE, fontSize: 17, fontWeight: "700" },
 });

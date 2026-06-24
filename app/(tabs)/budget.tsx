@@ -4,10 +4,10 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useObjectifs } from "../store";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
@@ -15,144 +15,64 @@ const MINT = "#5DC8A0";
 const MINT_LIGHT = "#E8F8F2";
 const PEACH = "#F4956A";
 const PEACH_LIGHT = "#FFF0EA";
-
-const CATEGORIES = [
-  { nom: "Courses", couleur: MINT, bg: MINT_LIGHT },
-  { nom: "Restaurants", couleur: PEACH, bg: PEACH_LIGHT },
-  { nom: "Transport", couleur: PURPLE, bg: PURPLE_LIGHT },
-  { nom: "Loisirs", couleur: PEACH, bg: PEACH_LIGHT },
-  { nom: "Abonnements", couleur: MINT, bg: MINT_LIGHT },
-  { nom: "Logement", couleur: PURPLE, bg: PURPLE_LIGHT },
-  { nom: "Autre", couleur: "#999", bg: "#F5F5F5" },
-];
-
-const TYPES = ["Courante", "Fixe", "Non courante"];
-
-const DEPENSES_PREVUES = [
-  {
-    nom: "Loyer",
-    montant: 850,
-    type: "Fixe",
-    statut: "Prévu",
-    couleur: PURPLE,
-    bg: PURPLE_LIGHT,
-  },
-  {
-    nom: "Salle de sport",
-    montant: 30,
-    type: "Fixe",
-    statut: "Payé",
-    couleur: MINT,
-    bg: MINT_LIGHT,
-  },
-  {
-    nom: "Spotify",
-    montant: 10,
-    type: "Fixe",
-    statut: "À venir",
-    couleur: PEACH,
-    bg: PEACH_LIGHT,
-  },
-  {
-    nom: "Vacances Italie",
-    montant: 600,
-    type: "Non courante",
-    statut: "Planifié",
-    couleur: PEACH,
-    bg: PEACH_LIGHT,
-  },
-];
-
-type Transaction = {
-  id: number;
-  nom: string;
-  montant: number;
-  categorie: string;
-  type: string;
-  couleur: string;
-  bg: string;
-};
-
-const TRANSACTIONS_INIT: Transaction[] = [
-  {
-    id: 1,
-    nom: "Carrefour",
-    montant: 64,
-    categorie: "Courses",
-    type: "Courante",
-    couleur: MINT,
-    bg: MINT_LIGHT,
-  },
-  {
-    id: 2,
-    nom: "Le Petit Bistrot",
-    montant: 38,
-    categorie: "Restaurants",
-    type: "Courante",
-    couleur: PEACH,
-    bg: PEACH_LIGHT,
-  },
-  {
-    id: 3,
-    nom: "Métro 10x",
-    montant: 16,
-    categorie: "Transport",
-    type: "Courante",
-    couleur: PURPLE,
-    bg: PURPLE_LIGHT,
-  },
-  {
-    id: 4,
-    nom: "Cinéma",
-    montant: 14,
-    categorie: "Loisirs",
-    type: "Courante",
-    couleur: PEACH,
-    bg: PEACH_LIGHT,
-  },
-  {
-    id: 5,
-    nom: "Picard",
-    montant: 42,
-    categorie: "Courses",
-    type: "Courante",
-    couleur: MINT,
-    bg: MINT_LIGHT,
-  },
-];
+const ROUGE = "#E24B4A";
+const ROUGE_LIGHT = "#FCEBEB";
+const VERT = "#1D9E75";
+const VERT_LIGHT = "#E1F5EE";
 
 export default function Budget() {
+  const objStore = useObjectifs();
+
   const [onglet, setOnglet] = useState<"depenses" | "previsionnel">("depenses");
-  const [transactions, setTransactions] =
-    useState<Transaction[]>(TRANSACTIONS_INIT);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [nomDepense, setNomDepense] = useState("");
-  const [montant, setMontant] = useState("");
-  const [categorieSelectionnee, setCategorieSelectionnee] = useState(
-    CATEGORIES[0],
+  const [modalTxVisible, setModalTxVisible] = useState(false);
+  const [modalPrevuVisible, setModalPrevuVisible] = useState(false);
+  const [transactionDetail, setTransactionDetail] = useState<
+    (typeof objStore.transactions)[0] | null
+  >(null);
+  const [prevuDetail, setPrevuDetail] = useState<
+    (typeof objStore.depensesPrevues)[0] | null
+  >(null);
+
+  const totalReel = objStore.enveloppes.reduce((acc, e) => acc + e.depense, 0);
+  const totalPrevu = objStore.depensesPrevues.reduce(
+    (acc, d) => acc + d.montant,
+    0,
   );
-  const [typeSelectionne, setTypeSelectionne] = useState(TYPES[0]);
-
-  const budgetTotal = 1800;
-  const totalReel = transactions.reduce((acc, t) => acc + t.montant, 0);
-  const totalPrevu = DEPENSES_PREVUES.reduce((acc, d) => acc + d.montant, 0);
+  const budgetTotal = objStore.argentDisponible;
   const resteEstime = budgetTotal - totalReel - totalPrevu;
+  const estSousBudget = resteEstime >= 0;
 
-  const ajouterDepense = () => {
-    if (!nomDepense || !montant) return;
-    const nouvelle: Transaction = {
-      id: Date.now(),
-      nom: nomDepense,
-      montant: parseFloat(montant),
-      categorie: categorieSelectionnee.nom,
-      type: typeSelectionne,
-      couleur: categorieSelectionnee.couleur,
-      bg: categorieSelectionnee.bg,
-    };
-    setTransactions([nouvelle, ...transactions]);
-    setNomDepense("");
-    setMontant("");
-    setModalVisible(false);
+  const pctReel =
+    budgetTotal > 0 ? Math.min((totalReel / budgetTotal) * 100, 100) : 0;
+  const pctPrevu =
+    budgetTotal > 0
+      ? Math.min((totalPrevu / budgetTotal) * 100, 100 - pctReel)
+      : 0;
+
+  // Projection fin de mois (estimation simple à partir du réel + 30 jours)
+  const projectionFinMois = Math.round(totalReel * 1.6);
+
+  const depenseDominante = [...objStore.enveloppes].sort(
+    (a, b) => b.depense - a.depense,
+  )[0];
+
+  const lectureBudget = () => {
+    if (resteEstime < 0)
+      return { texte: "Risque de dépassement", couleur: ROUGE };
+    if (resteEstime < budgetTotal * 0.15)
+      return { texte: "Tu es proche de la limite", couleur: PEACH };
+    return { texte: "Tu devrais rester dans ton budget", couleur: VERT };
+  };
+  const lecture = lectureBudget();
+
+  const ouvrirTransaction = (tx: (typeof objStore.transactions)[0]) => {
+    setTransactionDetail(tx);
+    setModalTxVisible(true);
+  };
+
+  const ouvrirPrevu = (dep: (typeof objStore.depensesPrevues)[0]) => {
+    setPrevuDetail(dep);
+    setModalPrevuVisible(true);
   };
 
   return (
@@ -162,15 +82,6 @@ export default function Budget() {
           <Text style={styles.titre}>Budget</Text>
           <Text style={styles.sousTitre}>Juin 2026</Text>
         </View>
-        {onglet === "depenses" && (
-          <TouchableOpacity
-            style={styles.btnPlus}
-            onPress={() => setModalVisible(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.btnPlusTexte}>+</Text>
-          </TouchableOpacity>
-        )}
       </View>
 
       <View style={styles.onglets}>
@@ -206,6 +117,11 @@ export default function Budget() {
           </Text>
         </TouchableOpacity>
       </View>
+      <Text style={styles.microCopy}>
+        {onglet === "depenses"
+          ? "Ce que tu as déjà dépensé"
+          : "Ce que tu prévois de dépenser"}
+      </Text>
 
       {onglet === "depenses" ? (
         <ScrollView showsVerticalScrollIndicator={false}>
@@ -214,35 +130,49 @@ export default function Budget() {
             <Text style={styles.heroAmount}>{totalReel} €</Text>
             <Text style={styles.heroSub}>/ {budgetTotal} € budget mensuel</Text>
             <View style={styles.progressBg}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    width: `${Math.min((totalReel / budgetTotal) * 100, 100)}%`,
-                  },
-                ]}
-              />
+              <View style={[styles.progressFill, { width: `${pctReel}%` }]} />
             </View>
           </View>
 
           <View style={styles.statsRow}>
-            <View style={[styles.statCard, { backgroundColor: MINT_LIGHT }]}>
+            <TouchableOpacity
+              style={[styles.statCard, { backgroundColor: MINT_LIGHT }]}
+              activeOpacity={0.7}
+            >
               <Text style={[styles.statLabel, { color: MINT }]}>DÉPENSÉ</Text>
               <Text style={[styles.statValue, { color: "#0F6E56" }]}>
                 {totalReel} €
               </Text>
-            </View>
+              <Text style={styles.statMicro}>vs budget {budgetTotal}€</Text>
+            </TouchableOpacity>
             <View style={[styles.statCard, { backgroundColor: PURPLE_LIGHT }]}>
               <Text style={[styles.statLabel, { color: PURPLE }]}>RESTANT</Text>
               <Text style={[styles.statValue, { color: "#5A3DC4" }]}>
                 {budgetTotal - totalReel} €
               </Text>
+              <Text style={styles.statMicro}>
+                {Math.round(pctReel)}% utilisé
+              </Text>
             </View>
           </View>
 
+          {depenseDominante && depenseDominante.depense > 0 && (
+            <View style={styles.insightBanner}>
+              <Text style={styles.insightTexte}>
+                💡 {depenseDominante.nom} représente ta plus grosse dépense ce
+                mois-ci
+              </Text>
+            </View>
+          )}
+
           <Text style={styles.sectionTitle}>TRANSACTIONS DU MOIS</Text>
-          {transactions.map((t) => (
-            <View key={t.id} style={[styles.txCard, { backgroundColor: t.bg }]}>
+          {objStore.transactions.map((t) => (
+            <TouchableOpacity
+              key={t.id}
+              style={[styles.txCard, { backgroundColor: t.couleur + "22" }]}
+              activeOpacity={0.7}
+              onPress={() => ouvrirTransaction(t)}
+            >
               <View style={[styles.txBarre, { backgroundColor: t.couleur }]} />
               <View style={styles.txContent}>
                 <View style={styles.txRow}>
@@ -254,10 +184,10 @@ export default function Budget() {
                   </Text>
                 </View>
                 <Text style={styles.txMeta}>
-                  {t.categorie} · {t.type}
+                  {t.categorie} · {t.date}
                 </Text>
               </View>
-            </View>
+            </TouchableOpacity>
           ))}
           <View style={{ height: 30 }} />
         </ScrollView>
@@ -268,30 +198,30 @@ export default function Budget() {
             <Text
               style={[
                 styles.heroAmount,
-                { color: resteEstime < 0 ? PEACH : "#5A3DC4" },
+                { color: estSousBudget ? "#5A3DC4" : ROUGE },
               ]}
             >
               {resteEstime} €
             </Text>
             <Text style={styles.heroSub}>
-              Budget {budgetTotal}€ · Réel {totalReel}€ · Prévu {totalPrevu}€
+              Budget {budgetTotal}€ · Dépensé {totalReel}€ · Prévisionnel{" "}
+              {totalPrevu}€
             </Text>
             <View style={styles.progressBg}>
               <View
                 style={[
                   styles.progressFill,
-                  {
-                    width: `${Math.min((totalReel / budgetTotal) * 100, 100)}%`,
-                    backgroundColor: MINT,
-                  },
+                  { width: `${pctReel}%`, backgroundColor: MINT },
                 ]}
               />
               <View
                 style={[
                   styles.progressFill,
                   {
-                    width: `${Math.min((totalPrevu / budgetTotal) * 100, 100)}%`,
+                    width: `${pctPrevu}%`,
                     backgroundColor: PEACH,
+                    position: "absolute",
+                    left: `${pctReel}%`,
                   },
                 ]}
               />
@@ -299,24 +229,41 @@ export default function Budget() {
             <View style={styles.legendeRow}>
               <View style={styles.legendeItem}>
                 <View style={[styles.legendeDot, { backgroundColor: MINT }]} />
-                <Text style={styles.legendeTexte}>Réel {totalReel}€</Text>
+                <Text style={styles.legendeTexte}>Dépensé {totalReel}€</Text>
               </View>
               <View style={styles.legendeItem}>
                 <View style={[styles.legendeDot, { backgroundColor: PEACH }]} />
-                <Text style={styles.legendeTexte}>Prévu {totalPrevu}€</Text>
+                <Text style={styles.legendeTexte}>
+                  Prévisionnel {totalPrevu}€
+                </Text>
               </View>
             </View>
+            <View
+              style={[
+                styles.lectureBanner,
+                { backgroundColor: lecture.couleur + "22" },
+              ]}
+            >
+              <Text style={[styles.lectureTexte, { color: lecture.couleur }]}>
+                {lecture.texte}
+              </Text>
+            </View>
+            <Text style={styles.projectionTexte}>
+              À ce rythme, tu dépenseras environ {projectionFinMois} € ce mois
+            </Text>
           </View>
 
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { backgroundColor: MINT_LIGHT }]}>
-              <Text style={[styles.statLabel, { color: MINT }]}>RÉEL</Text>
+              <Text style={[styles.statLabel, { color: MINT }]}>DÉPENSÉ</Text>
               <Text style={[styles.statValue, { color: "#0F6E56" }]}>
                 {totalReel} €
               </Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: PEACH_LIGHT }]}>
-              <Text style={[styles.statLabel, { color: PEACH }]}>PRÉVU</Text>
+              <Text style={[styles.statLabel, { color: PEACH }]}>
+                PRÉVISIONNEL
+              </Text>
               <Text style={[styles.statValue, { color: "#993C1D" }]}>
                 {totalPrevu} €
               </Text>
@@ -324,155 +271,190 @@ export default function Budget() {
           </View>
 
           <Text style={styles.sectionTitle}>DÉPENSES PRÉVUES</Text>
-          {DEPENSES_PREVUES.map((dep, i) => (
-            <View key={i} style={[styles.txCard, { backgroundColor: dep.bg }]}>
-              <View
-                style={[styles.txBarre, { backgroundColor: dep.couleur }]}
-              />
-              <View style={styles.txContent}>
-                <View style={styles.txRow}>
-                  <Text style={[styles.txNom, { color: dep.couleur }]}>
-                    {dep.nom}
-                  </Text>
-                  <Text style={[styles.txMontant, { color: dep.couleur }]}>
-                    {dep.montant} €
-                  </Text>
-                </View>
-                <View style={styles.txRowBottom}>
-                  <Text style={styles.txMeta}>{dep.type}</Text>
-                  <View
-                    style={[
-                      styles.statutBadge,
-                      {
-                        backgroundColor:
-                          dep.statut === "Payé"
-                            ? MINT_LIGHT
-                            : dep.statut === "Prévu"
-                              ? PURPLE_LIGHT
-                              : PEACH_LIGHT,
-                      },
-                    ]}
-                  >
-                    <Text
+          {objStore.depensesPrevues.map((dep) => {
+            const pctBudget =
+              budgetTotal > 0
+                ? Math.round((dep.montant / budgetTotal) * 100)
+                : 0;
+            const estLourd = pctBudget >= 30;
+            return (
+              <TouchableOpacity
+                key={dep.id}
+                style={[styles.txCard, { backgroundColor: dep.couleur + "22" }]}
+                activeOpacity={0.7}
+                onPress={() => ouvrirPrevu(dep)}
+              >
+                <View
+                  style={[styles.txBarre, { backgroundColor: dep.couleur }]}
+                />
+                <View style={styles.txContent}>
+                  <View style={styles.txRow}>
+                    <Text style={[styles.txNom, { color: dep.couleur }]}>
+                      {dep.nom}
+                    </Text>
+                    <Text style={[styles.txMontant, { color: dep.couleur }]}>
+                      {dep.montant} €
+                    </Text>
+                  </View>
+                  <View style={styles.txRowBottom}>
+                    <Text style={styles.txMeta}>{dep.type}</Text>
+                    <View
                       style={[
-                        styles.statutTexte,
+                        styles.statutBadge,
                         {
-                          color:
+                          backgroundColor:
                             dep.statut === "Payé"
-                              ? MINT
-                              : dep.statut === "Prévu"
-                                ? PURPLE
-                                : PEACH,
+                              ? MINT_LIGHT
+                              : dep.statut === "À venir"
+                                ? PEACH_LIGHT
+                                : PURPLE_LIGHT,
                         },
                       ]}
                     >
-                      {dep.statut}
-                    </Text>
+                      <Text
+                        style={[
+                          styles.statutTexte,
+                          {
+                            color:
+                              dep.statut === "Payé"
+                                ? MINT
+                                : dep.statut === "À venir"
+                                  ? PEACH
+                                  : PURPLE,
+                          },
+                        ]}
+                      >
+                        {dep.statut}
+                      </Text>
+                    </View>
                   </View>
+                  {estLourd && (
+                    <Text style={styles.alertePoids}>
+                      ⚠️ {pctBudget}% du budget total
+                    </Text>
+                  )}
                 </View>
-              </View>
-            </View>
-          ))}
+              </TouchableOpacity>
+            );
+          })}
           <View style={{ height: 30 }} />
         </ScrollView>
       )}
 
+      {/* Modal détail transaction */}
       <Modal
-        visible={modalVisible}
+        visible={modalTxVisible}
         animationType="slide"
         transparent
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={() => setModalTxVisible(false)}
       >
         <TouchableOpacity
           style={styles.modalOverlay}
           activeOpacity={1}
-          onPress={() => setModalVisible(false)}
+          onPress={() => setModalTxVisible(false)}
         >
-          <TouchableOpacity style={styles.modalCard} activeOpacity={1}>
-            <Text style={styles.modalTitre}>Nouvelle dépense</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Nom de la dépense"
-              placeholderTextColor="#CCC"
-              value={nomDepense}
-              onChangeText={setNomDepense}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Montant (€)"
-              placeholderTextColor="#CCC"
-              keyboardType="numeric"
-              value={montant}
-              onChangeText={setMontant}
-            />
-            <Text style={styles.modalLabel}>Catégorie</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.chipsScroll}
-            >
-              {CATEGORIES.map((cat) => (
-                <TouchableOpacity
-                  key={cat.nom}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor:
-                        categorieSelectionnee.nom === cat.nom
-                          ? cat.couleur
-                          : cat.bg,
-                    },
-                  ]}
-                  onPress={() => setCategorieSelectionnee(cat)}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.chipTexte,
-                      {
-                        color:
-                          categorieSelectionnee.nom === cat.nom
-                            ? "#FFFFFF"
-                            : cat.couleur,
-                      },
-                    ]}
-                  >
-                    {cat.nom}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <Text style={styles.modalLabel}>Type</Text>
-            <View style={styles.typesRow}>
-              {TYPES.map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={[
-                    styles.typeBtn,
-                    typeSelectionne === type && styles.typeBtnActif,
-                  ]}
-                  onPress={() => setTypeSelectionne(type)}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.typeTexte,
-                      typeSelectionne === type && styles.typeTexteActif,
-                    ]}
-                  >
-                    {type}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+          <View style={styles.modalCard}>
+            {transactionDetail && (
+              <>
+                <Text style={styles.modalTitre}>{transactionDetail.nom}</Text>
+                <View style={styles.modalStatsRow}>
+                  <View style={styles.modalStat}>
+                    <Text style={styles.modalStatLabel}>MONTANT</Text>
+                    <Text
+                      style={[
+                        styles.modalStatVal,
+                        { color: transactionDetail.couleur },
+                      ]}
+                    >
+                      {transactionDetail.montant} €
+                    </Text>
+                  </View>
+                  <View style={styles.modalStat}>
+                    <Text style={styles.modalStatLabel}>CATÉGORIE</Text>
+                    <Text style={styles.modalStatVal}>
+                      {transactionDetail.categorie}
+                    </Text>
+                  </View>
+                  <View style={styles.modalStat}>
+                    <Text style={styles.modalStatLabel}>DATE</Text>
+                    <Text style={styles.modalStatVal}>
+                      {transactionDetail.date}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.modalAide}>
+                  Pour modifier cette transaction, rends-toi sur l'accueil.
+                </Text>
+              </>
+            )}
             <TouchableOpacity
-              style={styles.btnAjouter}
-              onPress={ajouterDepense}
+              style={styles.btnFermer}
+              onPress={() => setModalTxVisible(false)}
               activeOpacity={0.7}
             >
-              <Text style={styles.btnAjouterTexte}>Ajouter la dépense</Text>
+              <Text style={styles.btnFermerTexte}>Fermer</Text>
             </TouchableOpacity>
-          </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Modal détail dépense prévue */}
+      <Modal
+        visible={modalPrevuVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setModalPrevuVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setModalPrevuVisible(false)}
+        >
+          <View style={styles.modalCard}>
+            {prevuDetail && (
+              <>
+                <Text style={styles.modalTitre}>{prevuDetail.nom}</Text>
+                <View style={styles.modalStatsRow}>
+                  <View style={styles.modalStat}>
+                    <Text style={styles.modalStatLabel}>MONTANT</Text>
+                    <Text
+                      style={[
+                        styles.modalStatVal,
+                        { color: prevuDetail.couleur },
+                      ]}
+                    >
+                      {prevuDetail.montant} €
+                    </Text>
+                  </View>
+                  <View style={styles.modalStat}>
+                    <Text style={styles.modalStatLabel}>TYPE</Text>
+                    <Text style={styles.modalStatVal}>{prevuDetail.type}</Text>
+                  </View>
+                  <View style={styles.modalStat}>
+                    <Text style={styles.modalStatLabel}>STATUT</Text>
+                    <Text style={styles.modalStatVal}>
+                      {prevuDetail.statut}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.modalAide}>
+                  Cette dépense représente{" "}
+                  {budgetTotal > 0
+                    ? Math.round((prevuDetail.montant / budgetTotal) * 100)
+                    : 0}
+                  % de ton budget total. Pour la modifier, rends-toi sur
+                  l'accueil.
+                </Text>
+              </>
+            )}
+            <TouchableOpacity
+              style={styles.btnFermer}
+              onPress={() => setModalPrevuVisible(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.btnFermerTexte}>Fermer</Text>
+            </TouchableOpacity>
+          </View>
         </TouchableOpacity>
       </Modal>
     </View>
@@ -489,49 +471,47 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   titre: {
-    fontSize: 22,
+    fontSize: 23,
     fontWeight: "700",
     color: "#1A1A1A",
     letterSpacing: 1,
   },
-  sousTitre: { fontSize: 13, color: "#999", marginTop: 2 },
-  btnPlus: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: PURPLE,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  btnPlusTexte: {
-    fontSize: 24,
-    color: "#FFFFFF",
-    fontWeight: "300",
-    lineHeight: 28,
-  },
+  sousTitre: { fontSize: 14, color: "#999", marginTop: 2 },
   onglets: {
     flexDirection: "row",
     backgroundColor: "#F7F7F7",
     borderRadius: 14,
     padding: 4,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   onglet: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 11,
     alignItems: "center",
     borderRadius: 10,
   },
   ongletActif: { backgroundColor: "#FFFFFF" },
-  ongletTexte: { fontSize: 13, color: "#999", fontWeight: "500" },
-  ongletTexteActif: { color: PURPLE, fontWeight: "600" },
+  ongletTexte: { fontSize: 14, color: "#999", fontWeight: "600" },
+  ongletTexteActif: { color: PURPLE, fontWeight: "700" },
+  microCopy: {
+    fontSize: 12,
+    color: "#BBB",
+    marginBottom: 16,
+    textAlign: "center",
+  },
   heroCard: {
     backgroundColor: PURPLE_LIGHT,
-    borderRadius: 20,
+    borderRadius: 22,
     padding: 24,
     marginBottom: 16,
   },
-  heroLabel: { fontSize: 10, color: PURPLE, letterSpacing: 1, marginBottom: 8 },
+  heroLabel: {
+    fontSize: 11,
+    color: PURPLE,
+    letterSpacing: 1,
+    marginBottom: 8,
+    fontWeight: "700",
+  },
   heroAmount: {
     fontSize: 42,
     fontWeight: "700",
@@ -540,57 +520,77 @@ const styles = StyleSheet.create({
   },
   heroSub: { fontSize: 13, color: "#999", marginBottom: 16 },
   progressBg: {
-    height: 4,
+    height: 6,
     backgroundColor: "rgba(139,111,232,0.2)",
-    borderRadius: 2,
-    flexDirection: "row",
+    borderRadius: 3,
+    position: "relative",
     overflow: "hidden",
   },
-  progressFill: { height: "100%", backgroundColor: PURPLE, borderRadius: 2 },
-  legendeRow: { flexDirection: "row", gap: 16, marginTop: 8 },
+  progressFill: { height: "100%", backgroundColor: PURPLE, borderRadius: 3 },
+  legendeRow: { flexDirection: "row", gap: 16, marginTop: 10 },
   legendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   legendeDot: { width: 8, height: 8, borderRadius: 4 },
-  legendeTexte: { fontSize: 11, color: "#999" },
-  statsRow: { flexDirection: "row", gap: 10, marginBottom: 24 },
-  statCard: { flex: 1, borderRadius: 14, padding: 14, alignItems: "center" },
-  statLabel: {
-    fontSize: 9,
-    fontWeight: "600",
-    letterSpacing: 0.5,
-    marginBottom: 4,
+  legendeTexte: { fontSize: 12, color: "#999" },
+  lectureBanner: { borderRadius: 12, padding: 12, marginTop: 16 },
+  lectureTexte: { fontSize: 14, fontWeight: "700", textAlign: "center" },
+  projectionTexte: {
+    fontSize: 12,
+    color: "#999",
+    textAlign: "center",
+    marginTop: 10,
   },
-  statValue: { fontSize: 18, fontWeight: "600" },
+  statsRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
+  statCard: { flex: 1, borderRadius: 16, padding: 14, alignItems: "center" },
+  statLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    marginBottom: 5,
+  },
+  statValue: { fontSize: 19, fontWeight: "700", marginBottom: 3 },
+  statMicro: { fontSize: 10, color: "#999" },
+  insightBanner: {
+    backgroundColor: "#FAFAFA",
+    borderRadius: 13,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 0.5,
+    borderColor: "#EEE",
+  },
+  insightTexte: { fontSize: 13, color: "#666", lineHeight: 19 },
   sectionTitle: {
-    fontSize: 10,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "700",
     color: "#999",
     letterSpacing: 1,
     marginBottom: 12,
   },
   txCard: {
     flexDirection: "row",
-    borderRadius: 14,
-    marginBottom: 8,
+    borderRadius: 16,
+    marginBottom: 10,
     overflow: "hidden",
   },
   txBarre: { width: 4 },
-  txContent: { flex: 1, padding: 14 },
+  txContent: { flex: 1, padding: 16 },
   txRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 4,
+    marginBottom: 5,
   },
   txRowBottom: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginTop: 2,
   },
-  txNom: { fontSize: 14, fontWeight: "500" },
-  txMontant: { fontSize: 14, fontWeight: "600" },
-  txMeta: { fontSize: 11, color: "#999" },
-  statutBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
-  statutTexte: { fontSize: 10, fontWeight: "500" },
+  txNom: { fontSize: 15, fontWeight: "700" },
+  txMontant: { fontSize: 15, fontWeight: "700" },
+  txMeta: { fontSize: 12, color: "#999" },
+  statutBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 20 },
+  statutTexte: { fontSize: 11, fontWeight: "600" },
+  alertePoids: { fontSize: 11, color: PEACH, marginTop: 6, fontWeight: "600" },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.3)",
@@ -598,57 +598,44 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    padding: 26,
     paddingBottom: 40,
   },
   modalTitre: {
-    fontSize: 18,
+    fontSize: 21,
     fontWeight: "700",
     color: "#1A1A1A",
     marginBottom: 20,
   },
-  input: {
-    backgroundColor: "#F7F7F7",
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 15,
-    color: "#1A1A1A",
-    marginBottom: 12,
-  },
-  modalLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#999",
-    letterSpacing: 0.5,
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  chipsScroll: { marginBottom: 16 },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
-  },
-  chipTexte: { fontSize: 13, fontWeight: "500" },
-  typesRow: { flexDirection: "row", gap: 8, marginBottom: 20 },
-  typeBtn: {
+  modalStatsRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
+  modalStat: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 12,
     backgroundColor: "#F7F7F7",
+    borderRadius: 13,
+    padding: 13,
     alignItems: "center",
   },
-  typeBtnActif: { backgroundColor: PURPLE },
-  typeTexte: { fontSize: 12, color: "#999", fontWeight: "500" },
-  typeTexteActif: { color: "#FFFFFF" },
-  btnAjouter: {
-    backgroundColor: PURPLE,
-    borderRadius: 14,
+  modalStatLabel: {
+    fontSize: 10,
+    color: "#999",
+    fontWeight: "700",
+    marginBottom: 5,
+  },
+  modalStatVal: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#1A1A1A",
+    textAlign: "center",
+  },
+  modalAide: { fontSize: 12, color: "#AAA", lineHeight: 18, marginBottom: 10 },
+  btnFermer: {
+    backgroundColor: "#F7F7F7",
+    borderRadius: 16,
     padding: 16,
     alignItems: "center",
+    marginTop: 12,
   },
-  btnAjouterTexte: { fontSize: 15, color: "#FFFFFF", fontWeight: "600" },
+  btnFermerTexte: { fontSize: 15, color: "#666", fontWeight: "700" },
 });
