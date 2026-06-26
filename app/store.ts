@@ -17,6 +17,9 @@ export type Enveloppe = {
   recurrente: boolean;
   frequenceJours?: number;
   type: "Fixe" | "Variable";
+  dateFixe?: string;
+  payee?: boolean;
+  repeteChaqueMois?: boolean;
 };
 
 export type DepensePrevue = {
@@ -284,6 +287,41 @@ export function useObjectifs() {
     },
     modifierArgentDisponible: (montant: number) => {
       setEtat({ argentDisponible: montant });
+    },
+    verifierEcheancesFixes: () => {
+      const aujourdhui = new Date();
+      aujourdhui.setHours(0, 0, 0, 0);
+
+      const enveloppesMaj = etat.enveloppes.map((env) => {
+        if (env.type === "Fixe" && env.dateFixe && !env.payee) {
+          const dateEcheance = new Date(env.dateFixe);
+          dateEcheance.setHours(0, 0, 0, 0);
+          if (dateEcheance <= aujourdhui) {
+            if (env.repeteChaqueMois) {
+              const prochaine = new Date(dateEcheance);
+              prochaine.setMonth(prochaine.getMonth() + 1);
+              const prochaineStr = `${prochaine.getFullYear()}-${String(prochaine.getMonth() + 1).padStart(2, "0")}-${String(prochaine.getDate()).padStart(2, "0")}`;
+              return {
+                ...env,
+                depense: env.depense + env.budget,
+                payee: false,
+                dateFixe: prochaineStr,
+              };
+            }
+            return { ...env, depense: env.budget, payee: true };
+          }
+        }
+        return env;
+      });
+
+      const aChange = enveloppesMaj.some(
+        (env, i) =>
+          env.payee !== etat.enveloppes[i].payee ||
+          env.dateFixe !== etat.enveloppes[i].dateFixe,
+      );
+      if (aChange) {
+        setEtat({ enveloppes: enveloppesMaj });
+      }
     },
 
     ajouterEvenement: (
