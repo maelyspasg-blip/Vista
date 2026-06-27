@@ -24,18 +24,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
+          title: "Aperçu",
           tabBarIcon: ({ color }) => (
-            <Ionicons name="home-outline" size={22} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="budget"
-        options={{
-          title: "Budget",
-          tabBarIcon: ({ color }) => (
-            <Ionicons name="wallet-outline" size={22} color={color} />
+            <Ionicons name="sparkles-outline" size={22} color={color} />
           ),
         }}
       />
@@ -45,6 +36,15 @@ export default function TabLayout() {
           title: "Planning",
           tabBarIcon: ({ color }) => (
             <Ionicons name="calendar-outline" size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="budget"
+        options={{
+          title: "Budget",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="wallet-outline" size={22} color={color} />
           ),
         }}
       />

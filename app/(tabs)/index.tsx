@@ -728,7 +728,7 @@ export default function Dashboard() {
                 <View style={styles.modalInputRow}>
                   <TextInput
                     style={[styles.input, { flex: 1 }]}
-                    keyboardType="numeric"
+                    keyboardType="number-pad"
                     value={budgetTemp}
                     onChangeText={setBudgetTemp}
                     returnKeyType="done"
