@@ -38,12 +38,23 @@ export default function Budget() {
   const [montantTx, setMontantTx] = useState("");
   const [enveloppeTx, setEnveloppeTx] = useState<number | null>(null);
 
+  const MOIS_ACTUEL = 5;
+  const ANNEE_ACTUELLE = 2026;
+
+  const paiementsDuMois = objStore.historiquePaiements.filter((p) => {
+    const d = new Date(p.date);
+    return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
+  });
+
   const enveloppesCourantes = objStore.enveloppes.filter(
     (e) => e.type === "Variable",
   );
-  const enveloppesAVenir = objStore.enveloppes.filter(
-    (e) => e.type === "Fixe" && !e.payee,
-  );
+
+  const enveloppesAVenir = objStore.enveloppes.filter((e) => {
+    if (e.type !== "Fixe" || e.payee || !e.dateFixe) return false;
+    const d = new Date(e.dateFixe);
+    return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
+  });
 
   const totalReel = objStore.enveloppes.reduce((acc, e) => acc + e.depense, 0);
   const budgetTotal = objStore.argentDisponible;
@@ -123,6 +134,28 @@ export default function Budget() {
             <Text style={styles.btnAjouterTexte}>+ Ajouter</Text>
           </TouchableOpacity>
         </View>
+
+        {paiementsDuMois.map((p) => (
+          <View
+            key={`paye-${p.id}`}
+            style={[styles.envCard, { backgroundColor: bgClair(p.couleur) }]}
+          >
+            <View style={styles.envRow}>
+              <Text style={styles.envNom}>{p.nom}</Text>
+              <Text style={[styles.envMontant, { color: p.couleur }]}>
+                {p.montant} € / {p.montant} €
+              </Text>
+            </View>
+            <View style={styles.envBarBg}>
+              <View
+                style={[
+                  styles.envBarFill,
+                  { width: "100%", backgroundColor: p.couleur },
+                ]}
+              />
+            </View>
+          </View>
+        ))}
 
         {enveloppesCourantes.map((env) => {
           const pct = Math.min((env.depense / env.budget) * 100, 100);

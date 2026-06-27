@@ -20,6 +20,7 @@ export type Enveloppe = {
   dateFixe?: string;
   payee?: boolean;
   repeteChaqueMois?: boolean;
+  afficherDansPlanning?: boolean;
 };
 
 export type DepensePrevue = {
@@ -28,6 +29,15 @@ export type DepensePrevue = {
   montant: number;
   type: "Fixe" | "Non courante";
   statut: "Payé" | "À venir" | "Planifié";
+  couleur: string;
+};
+
+export type PaiementHistorique = {
+  id: number;
+  enveloppeId: number;
+  nom: string;
+  montant: number;
+  date: string;
   couleur: string;
 };
 
@@ -223,6 +233,7 @@ type EtatStore = {
   depensesPrevues: DepensePrevue[];
   transactions: Transaction[];
   evenements: Evenement[];
+  historiquePaiements: PaiementHistorique[];
 };
 
 let etat: EtatStore = {
@@ -233,6 +244,7 @@ let etat: EtatStore = {
   depensesPrevues: DEPENSES_PREVUES_INIT,
   transactions: TRANSACTIONS_INIT,
   evenements: EVENEMENTS_INIT,
+  historiquePaiements: [],
 };
 
 type Ecouteur = (etat: EtatStore) => void;
@@ -259,6 +271,7 @@ export function useObjectifs() {
     depensesPrevues: local.depensesPrevues,
     transactions: local.transactions,
     evenements: local.evenements,
+    historiquePaiements: local.historiquePaiements,
 
     ajouterObjectif: (
       nom: string,
@@ -288,15 +301,27 @@ export function useObjectifs() {
     modifierArgentDisponible: (montant: number) => {
       setEtat({ argentDisponible: montant });
     },
+
     verifierEcheancesFixes: () => {
       const aujourdhui = new Date();
       aujourdhui.setHours(0, 0, 0, 0);
+
+      const nouveauxPaiements: PaiementHistorique[] = [];
 
       const enveloppesMaj = etat.enveloppes.map((env) => {
         if (env.type === "Fixe" && env.dateFixe && !env.payee) {
           const dateEcheance = new Date(env.dateFixe);
           dateEcheance.setHours(0, 0, 0, 0);
           if (dateEcheance <= aujourdhui) {
+            nouveauxPaiements.push({
+              id: Date.now() + Math.random(),
+              enveloppeId: env.id,
+              nom: env.nom,
+              montant: env.budget,
+              date: env.dateFixe,
+              couleur: env.couleur,
+            });
+
             if (env.repeteChaqueMois) {
               const prochaine = new Date(dateEcheance);
               prochaine.setMonth(prochaine.getMonth() + 1);
@@ -320,7 +345,13 @@ export function useObjectifs() {
           env.dateFixe !== etat.enveloppes[i].dateFixe,
       );
       if (aChange) {
-        setEtat({ enveloppes: enveloppesMaj });
+        setEtat({
+          enveloppes: enveloppesMaj,
+          historiquePaiements: [
+            ...etat.historiquePaiements,
+            ...nouveauxPaiements,
+          ],
+        });
       }
     },
 

@@ -166,6 +166,7 @@ export default function Dashboard() {
   const [frequenceTemp, setFrequenceTemp] = useState("30");
   const [dateTemp, setDateTemp] = useState("2026-06-16");
   const [repeteChaqueMoisTemp, setRepeteChaqueMoisTemp] = useState(false);
+  const [afficherPlanningTemp, setAfficherPlanningTemp] = useState(false);
 
   const [modalAjoutVisible, setModalAjoutVisible] = useState(false);
   const [nouveauNom, setNouveauNom] = useState("");
@@ -179,6 +180,7 @@ export default function Dashboard() {
   const [nouvelleFrequence, setNouvelleFrequence] = useState("30");
   const [nouvelleDate, setNouvelleDate] = useState("2026-06-16");
   const [nouveauRepeteChaqueMois, setNouveauRepeteChaqueMois] = useState(false);
+  const [nouveauAfficherPlanning, setNouveauAfficherPlanning] = useState(false);
 
   const [modalEpargneVisible, setModalEpargneVisible] = useState(false);
   const [vueModal, setVueModal] = useState<"epargne" | "nouvelObjectif">(
@@ -242,6 +244,7 @@ export default function Dashboard() {
     setFrequenceTemp(String(env.frequenceJours || 30));
     setDateTemp(env.dateFixe || "2026-06-16");
     setRepeteChaqueMoisTemp(env.repeteChaqueMois || false);
+    setAfficherPlanningTemp(env.afficherDansPlanning || false);
     setModalEnveloppeVisible(true);
   };
 
@@ -265,6 +268,8 @@ export default function Dashboard() {
               payee: typeTemp === "Fixe" ? (e.payee ?? false) : undefined,
               repeteChaqueMois:
                 typeTemp === "Fixe" ? repeteChaqueMoisTemp : undefined,
+              afficherDansPlanning:
+                typeTemp === "Fixe" ? afficherPlanningTemp : undefined,
             }
           : e,
       ),
@@ -296,6 +301,8 @@ export default function Dashboard() {
       payee: nouveauType === "Fixe" ? false : undefined,
       repeteChaqueMois:
         nouveauType === "Fixe" ? nouveauRepeteChaqueMois : undefined,
+      afficherDansPlanning:
+        nouveauType === "Fixe" ? nouveauAfficherPlanning : undefined,
     };
     setEnveloppes([...enveloppes, nouvelle]);
     setNouveauNom("");
@@ -307,6 +314,7 @@ export default function Dashboard() {
     setNouvelleFrequence("30");
     setNouvelleDate("2026-06-16");
     setNouveauRepeteChaqueMois(false);
+    setNouveauAfficherPlanning(false);
     setModalAjoutVisible(false);
   };
 
@@ -817,6 +825,23 @@ export default function Dashboard() {
                         thumbColor={repeteChaqueMoisTemp ? PURPLE : "#FFF"}
                       />
                     </View>
+
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={styles.switchLabel}>
+                          Afficher dans Planning
+                        </Text>
+                        <Text style={styles.switchSub}>
+                          Visible aussi dans ton agenda
+                        </Text>
+                      </View>
+                      <Switch
+                        value={afficherPlanningTemp}
+                        onValueChange={setAfficherPlanningTemp}
+                        trackColor={{ false: "#EEE", true: PURPLE_LIGHT }}
+                        thumbColor={afficherPlanningTemp ? PURPLE : "#FFF"}
+                      />
+                    </View>
                   </>
                 )}
 
@@ -1031,6 +1056,23 @@ export default function Dashboard() {
                         onValueChange={setNouveauRepeteChaqueMois}
                         trackColor={{ false: "#EEE", true: PURPLE_LIGHT }}
                         thumbColor={nouveauRepeteChaqueMois ? PURPLE : "#FFF"}
+                      />
+                    </View>
+
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={styles.switchLabel}>
+                          Afficher dans Planning
+                        </Text>
+                        <Text style={styles.switchSub}>
+                          Visible aussi dans ton agenda
+                        </Text>
+                      </View>
+                      <Switch
+                        value={nouveauAfficherPlanning}
+                        onValueChange={setNouveauAfficherPlanning}
+                        trackColor={{ false: "#EEE", true: PURPLE_LIGHT }}
+                        thumbColor={nouveauAfficherPlanning ? PURPLE : "#FFF"}
                       />
                     </View>
                   </>
