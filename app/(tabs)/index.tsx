@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
@@ -163,7 +164,6 @@ export default function Dashboard() {
   const [paletteOuverteTemp, setPaletteOuverteTemp] = useState(false);
   const [typeTemp, setTypeTemp] = useState<"Variable" | "Fixe">("Variable");
   const [recurrenteTemp, setRecurrenteTemp] = useState(false);
-  const [frequenceTemp, setFrequenceTemp] = useState("30");
   const [dateTemp, setDateTemp] = useState("2026-06-16");
   const [repeteChaqueMoisTemp, setRepeteChaqueMoisTemp] = useState(false);
   const [afficherPlanningTemp, setAfficherPlanningTemp] = useState(false);
@@ -177,7 +177,6 @@ export default function Dashboard() {
     "Variable",
   );
   const [estRecurrente, setEstRecurrente] = useState(false);
-  const [nouvelleFrequence, setNouvelleFrequence] = useState("30");
   const [nouvelleDate, setNouvelleDate] = useState("2026-06-16");
   const [nouveauRepeteChaqueMois, setNouveauRepeteChaqueMois] = useState(false);
   const [nouveauAfficherPlanning, setNouveauAfficherPlanning] = useState(false);
@@ -241,7 +240,6 @@ export default function Dashboard() {
     setPaletteOuverteTemp(false);
     setTypeTemp(env.type);
     setRecurrenteTemp(env.recurrente);
-    setFrequenceTemp(String(env.frequenceJours || 30));
     setDateTemp(env.dateFixe || "2026-06-16");
     setRepeteChaqueMoisTemp(env.repeteChaqueMois || false);
     setAfficherPlanningTemp(env.afficherDansPlanning || false);
@@ -261,9 +259,7 @@ export default function Dashboard() {
               type: typeTemp,
               recurrente: typeTemp === "Variable" ? recurrenteTemp : false,
               frequenceJours:
-                typeTemp === "Variable" && recurrenteTemp
-                  ? parseFloat(frequenceTemp) || 30
-                  : undefined,
+                typeTemp === "Variable" && recurrenteTemp ? 30 : undefined,
               dateFixe: typeTemp === "Fixe" ? dateTemp : undefined,
               payee: typeTemp === "Fixe" ? (e.payee ?? false) : undefined,
               repeteChaqueMois:
@@ -294,9 +290,7 @@ export default function Dashboard() {
       type: nouveauType,
       recurrente: nouveauType === "Variable" ? estRecurrente : false,
       frequenceJours:
-        nouveauType === "Variable" && estRecurrente
-          ? parseFloat(nouvelleFrequence) || 30
-          : undefined,
+        nouveauType === "Variable" && estRecurrente ? 30 : undefined,
       dateFixe: nouveauType === "Fixe" ? nouvelleDate : undefined,
       payee: nouveauType === "Fixe" ? false : undefined,
       repeteChaqueMois:
@@ -311,7 +305,6 @@ export default function Dashboard() {
     setPaletteOuverteNouvelle(false);
     setNouveauType("Variable");
     setEstRecurrente(false);
-    setNouvelleFrequence("30");
     setNouvelleDate("2026-06-16");
     setNouveauRepeteChaqueMois(false);
     setNouveauAfficherPlanning(false);
@@ -494,7 +487,7 @@ export default function Dashboard() {
               <Text style={[styles.statLabel, { color: PEACH }]}>
                 DISPONIBLE
               </Text>
-              <Text style={styles.miniCrayon}>✎</Text>
+              <Ionicons name="pencil-outline" size={12} color={PEACH} />
             </View>
             {editionDisponible ? (
               <View style={styles.editDisponibleRow}>
@@ -526,7 +519,7 @@ export default function Dashboard() {
           onPress={ouvrirModalEpargne}
         >
           <View style={styles.epargneIconBox}>
-            <Text style={styles.epargneIcon}>💵</Text>
+            <Ionicons name="wallet-outline" size={22} color="#1A1A1A" />
           </View>
           <View style={styles.epargneTexte}>
             <Text style={styles.epargneLabel}>Mis de côté ce mois</Text>
@@ -568,20 +561,36 @@ export default function Dashboard() {
                 <View style={styles.envNomRow}>
                   <Text style={styles.envNom}>{env.nom}</Text>
                   {env.type === "Fixe" ? (
-                    <View
-                      style={[
-                        styles.recurrenceBadge,
-                        env.payee && styles.payeeBadge,
-                      ]}
-                    >
-                      <Text style={styles.recurrenceTexte}>
-                        {env.repeteChaqueMois ? "↻" : env.payee ? "✓" : "📅"}
-                      </Text>
+                    <View style={styles.badgesRow}>
+                      {env.payee ? (
+                        <View
+                          style={[styles.recurrenceBadge, styles.payeeBadge]}
+                        >
+                          <Ionicons
+                            name="checkmark"
+                            size={12}
+                            color="#1A1A1A"
+                          />
+                        </View>
+                      ) : (
+                        <View style={styles.recurrenceBadge}>
+                          <Ionicons
+                            name="calendar-outline"
+                            size={12}
+                            color="#1A1A1A"
+                          />
+                        </View>
+                      )}
+                      {env.repeteChaqueMois && (
+                        <View style={styles.recurrenceBadge}>
+                          <Ionicons name="repeat" size={12} color="#1A1A1A" />
+                        </View>
+                      )}
                     </View>
                   ) : (
                     env.recurrente && (
                       <View style={styles.recurrenceBadge}>
-                        <Text style={styles.recurrenceTexte}>↻</Text>
+                        <Ionicons name="repeat" size={12} color="#1A1A1A" />
                       </View>
                     )
                   )}
@@ -665,15 +674,7 @@ export default function Dashboard() {
             <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitre}>Modifier l'enveloppe</Text>
-                <TouchableOpacity
-                  onPress={supprimerEnveloppe}
-                  activeOpacity={0.6}
-                  style={styles.btnCorbeille}
-                >
-                  <Text style={styles.corbeilleIcon}>🗑</Text>
-                </TouchableOpacity>
               </View>
-
               <ScrollView
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
@@ -781,7 +782,7 @@ export default function Dashboard() {
                     <View>
                       <Text style={styles.switchLabel}>Récurrente</Text>
                       <Text style={styles.switchSub}>
-                        Se répète automatiquement
+                        Se répète chaque mois
                       </Text>
                     </View>
                     <Switch
@@ -845,26 +846,21 @@ export default function Dashboard() {
                   </>
                 )}
 
-                {typeTemp === "Variable" && recurrenteTemp && (
-                  <>
-                    <Text style={styles.modalLabel}>Fréquence (en jours)</Text>
-                    <TextInput
-                      style={styles.input}
-                      keyboardType="numeric"
-                      value={frequenceTemp}
-                      onChangeText={setFrequenceTemp}
-                      returnKeyType="done"
-                      inputAccessoryViewID={ACCESSORY_ID}
-                    />
-                  </>
-                )}
-
                 <TouchableOpacity
                   style={styles.btnAjouter}
                   onPress={sauvegarderEnveloppe}
                   activeOpacity={0.7}
                 >
                   <Text style={styles.btnAjouterTexte}>Enregistrer</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.btnSupprimerTexte}
+                  onPress={supprimerEnveloppe}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.btnSupprimerTexteLabel}>
+                    Supprimer l'enveloppe
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.btnAnnuler}
@@ -956,7 +952,7 @@ export default function Dashboard() {
                     style={[styles.input, { flex: 1 }]}
                     placeholder="0"
                     placeholderTextColor="#CCC"
-                    keyboardType="numeric"
+                    keyboardType="number-pad"
                     value={nouveauBudget}
                     onChangeText={setNouveauBudget}
                     returnKeyType="done"
@@ -1011,7 +1007,7 @@ export default function Dashboard() {
                     <View>
                       <Text style={styles.switchLabel}>Récurrente</Text>
                       <Text style={styles.switchSub}>
-                        Se répète automatiquement
+                        Se répète chaque mois
                       </Text>
                     </View>
                     <Switch
@@ -1075,22 +1071,6 @@ export default function Dashboard() {
                         thumbColor={nouveauAfficherPlanning ? PURPLE : "#FFF"}
                       />
                     </View>
-                  </>
-                )}
-
-                {nouveauType === "Variable" && estRecurrente && (
-                  <>
-                    <Text style={styles.modalLabel}>Fréquence (en jours)</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Ex : 30 pour mensuel, 7 pour hebdo"
-                      placeholderTextColor="#CCC"
-                      keyboardType="numeric"
-                      value={nouvelleFrequence}
-                      onChangeText={setNouvelleFrequence}
-                      returnKeyType="done"
-                      inputAccessoryViewID={ACCESSORY_ID}
-                    />
                   </>
                 )}
 
@@ -1436,7 +1416,6 @@ const styles = StyleSheet.create({
     marginBottom: 5,
   },
   statLabel: { fontSize: 11, fontWeight: "600", letterSpacing: 0.5 },
-  miniCrayon: { fontSize: 11, color: PEACH },
   statValue: { fontSize: 19, fontWeight: "700" },
   editDisponibleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   editDisponibleInput: {
@@ -1470,7 +1449,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  epargneIcon: { fontSize: 22 },
   epargneTexte: { flex: 1 },
   epargneLabel: { fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
   epargneSub: { fontSize: 12, color: "#999", marginTop: 2 },
@@ -1502,6 +1480,7 @@ const styles = StyleSheet.create({
     marginBottom: 11,
   },
   envNomRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  badgesRow: { flexDirection: "row", gap: 4 },
   envNom: { fontSize: 16, fontWeight: "700", color: "#1A1A1A" },
   recurrenceBadge: {
     width: 19,
@@ -1512,7 +1491,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   payeeBadge: { backgroundColor: MINT_LIGHT },
-  recurrenceTexte: { fontSize: 11, color: "#888" },
   envMontant: { fontSize: 14, fontWeight: "700" },
   envBarBg: {
     height: 6,
@@ -1563,15 +1541,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitre: { fontSize: 21, fontWeight: "700", color: "#1A1A1A" },
-  btnCorbeille: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: ROUGE_LIGHT,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  corbeilleIcon: { fontSize: 15 },
   btnFermerCroix: { fontSize: 18, color: "#BBB", padding: 4 },
   modalLabel: {
     fontSize: 13,
@@ -1652,6 +1621,16 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   btnAjouterTexte: { fontSize: 17, color: "#FFFFFF", fontWeight: "700" },
+  btnSupprimerTexte: {
+    padding: 14,
+    alignItems: "center",
+    marginTop: 6,
+  },
+  btnSupprimerTexteLabel: {
+    fontSize: 15,
+    color: "#E24B4A",
+    fontWeight: "600",
+  },
   btnAnnuler: {
     padding: 15,
     alignItems: "center",
