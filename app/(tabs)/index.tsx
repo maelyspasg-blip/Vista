@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
 import {
   InputAccessoryView,
   KeyboardAvoidingView,
@@ -134,9 +135,11 @@ const ACCESSORY_ID = "numericDone";
 export default function Dashboard() {
   const objStore = useObjectifs();
 
-  useEffect(() => {
-    objStore.verifierEcheancesFixes();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      objStore.verifierEcheancesFixes();
+    }, []),
+  );
 
   const enveloppes = objStore.enveloppes;
   const setEnveloppes = (nouvellesEnveloppes: Enveloppe[]) =>
@@ -155,9 +158,9 @@ export default function Dashboard() {
   const [enveloppeEnEdition, setEnveloppeEnEdition] =
     useState<Enveloppe | null>(null);
   const [nomTemp, setNomTemp] = useState("");
-  const [montantTemp, setMontantTemp] = useState("");
   const [budgetTemp, setBudgetTemp] = useState("");
   const [couleurTemp, setCouleurTemp] = useState(PALETTE_COULEURS[0]);
+  const [paletteOuverteTemp, setPaletteOuverteTemp] = useState(false);
   const [typeTemp, setTypeTemp] = useState<"Variable" | "Fixe">("Variable");
   const [recurrenteTemp, setRecurrenteTemp] = useState(false);
   const [frequenceTemp, setFrequenceTemp] = useState("30");
@@ -168,6 +171,7 @@ export default function Dashboard() {
   const [nouveauNom, setNouveauNom] = useState("");
   const [nouveauBudget, setNouveauBudget] = useState("");
   const [nouvelleCouleur, setNouvelleCouleur] = useState(PALETTE_COULEURS[0]);
+  const [paletteOuverteNouvelle, setPaletteOuverteNouvelle] = useState(false);
   const [nouveauType, setNouveauType] = useState<"Variable" | "Fixe">(
     "Variable",
   );
@@ -230,9 +234,9 @@ export default function Dashboard() {
   const ouvrirEditionEnveloppe = (env: Enveloppe) => {
     setEnveloppeEnEdition(env);
     setNomTemp(env.nom);
-    setMontantTemp(String(env.depense));
     setBudgetTemp(String(env.budget));
     setCouleurTemp(env.couleur);
+    setPaletteOuverteTemp(false);
     setTypeTemp(env.type);
     setRecurrenteTemp(env.recurrente);
     setFrequenceTemp(String(env.frequenceJours || 30));
@@ -249,7 +253,6 @@ export default function Dashboard() {
           ? {
               ...e,
               nom: nomTemp || e.nom,
-              depense: parseFloat(montantTemp) || 0,
               budget: parseFloat(budgetTemp) || 0,
               couleur: couleurTemp,
               type: typeTemp,
@@ -298,6 +301,7 @@ export default function Dashboard() {
     setNouveauNom("");
     setNouveauBudget("");
     setNouvelleCouleur(PALETTE_COULEURS[0]);
+    setPaletteOuverteNouvelle(false);
     setNouveauType("Variable");
     setEstRecurrente(false);
     setNouvelleFrequence("30");
@@ -712,19 +716,6 @@ export default function Dashboard() {
                   </TouchableOpacity>
                 </View>
 
-                <Text style={styles.modalLabel}>Montant dépensé</Text>
-                <View style={styles.modalInputRow}>
-                  <TextInput
-                    style={[styles.input, { flex: 1 }]}
-                    keyboardType="numeric"
-                    value={montantTemp}
-                    onChangeText={setMontantTemp}
-                    returnKeyType="done"
-                    inputAccessoryViewID={ACCESSORY_ID}
-                  />
-                  <Text style={styles.modalEuro}>€</Text>
-                </View>
-
                 <Text style={styles.modalLabel}>Budget de l'enveloppe</Text>
                 <View style={styles.modalInputRow}>
                   <TextInput
@@ -739,20 +730,43 @@ export default function Dashboard() {
                 </View>
 
                 <Text style={styles.modalLabel}>Couleur</Text>
-                <View style={styles.paletteGrid}>
-                  {PALETTE_COULEURS.map((c) => (
-                    <TouchableOpacity
-                      key={c}
-                      style={[
-                        styles.swatch,
-                        { backgroundColor: c },
-                        couleurTemp === c && styles.swatchSelectionne,
-                      ]}
-                      onPress={() => setCouleurTemp(c)}
-                      activeOpacity={0.7}
-                    />
-                  ))}
-                </View>
+                <TouchableOpacity
+                  style={styles.couleurTiroirBouton}
+                  onPress={() => setPaletteOuverteTemp(!paletteOuverteTemp)}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.couleurRond,
+                      { backgroundColor: couleurTemp },
+                    ]}
+                  />
+                  <Text style={styles.couleurTiroirTexte}>
+                    Choisir une couleur
+                  </Text>
+                  <Text style={styles.couleurChevron}>
+                    {paletteOuverteTemp ? "▾" : "▸"}
+                  </Text>
+                </TouchableOpacity>
+                {paletteOuverteTemp && (
+                  <View style={styles.paletteGrid}>
+                    {PALETTE_COULEURS.map((c) => (
+                      <TouchableOpacity
+                        key={c}
+                        style={[
+                          styles.swatch,
+                          { backgroundColor: c },
+                          couleurTemp === c && styles.swatchSelectionne,
+                        ]}
+                        onPress={() => {
+                          setCouleurTemp(c);
+                          setPaletteOuverteTemp(false);
+                        }}
+                        activeOpacity={0.7}
+                      />
+                    ))}
+                  </View>
+                )}
 
                 {typeTemp === "Variable" ? (
                   <View style={styles.switchRow}>
@@ -927,20 +941,45 @@ export default function Dashboard() {
                 </View>
 
                 <Text style={styles.modalLabel}>Couleur</Text>
-                <View style={styles.paletteGrid}>
-                  {PALETTE_COULEURS.map((c) => (
-                    <TouchableOpacity
-                      key={c}
-                      style={[
-                        styles.swatch,
-                        { backgroundColor: c },
-                        nouvelleCouleur === c && styles.swatchSelectionne,
-                      ]}
-                      onPress={() => setNouvelleCouleur(c)}
-                      activeOpacity={0.7}
-                    />
-                  ))}
-                </View>
+                <TouchableOpacity
+                  style={styles.couleurTiroirBouton}
+                  onPress={() =>
+                    setPaletteOuverteNouvelle(!paletteOuverteNouvelle)
+                  }
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.couleurRond,
+                      { backgroundColor: nouvelleCouleur },
+                    ]}
+                  />
+                  <Text style={styles.couleurTiroirTexte}>
+                    Choisir une couleur
+                  </Text>
+                  <Text style={styles.couleurChevron}>
+                    {paletteOuverteNouvelle ? "▾" : "▸"}
+                  </Text>
+                </TouchableOpacity>
+                {paletteOuverteNouvelle && (
+                  <View style={styles.paletteGrid}>
+                    {PALETTE_COULEURS.map((c) => (
+                      <TouchableOpacity
+                        key={c}
+                        style={[
+                          styles.swatch,
+                          { backgroundColor: c },
+                          nouvelleCouleur === c && styles.swatchSelectionne,
+                        ]}
+                        onPress={() => {
+                          setNouvelleCouleur(c);
+                          setPaletteOuverteNouvelle(false);
+                        }}
+                        activeOpacity={0.7}
+                      />
+                    ))}
+                  </View>
+                )}
 
                 {nouveauType === "Variable" ? (
                   <View style={styles.switchRow}>
@@ -1511,6 +1550,23 @@ const styles = StyleSheet.create({
     color: "#1A1A1A",
     marginBottom: 12,
   },
+  couleurTiroirBouton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F7F7F7",
+    borderRadius: 13,
+    padding: 14,
+    marginBottom: 10,
+    gap: 10,
+  },
+  couleurRond: { width: 24, height: 24, borderRadius: 12 },
+  couleurTiroirTexte: {
+    flex: 1,
+    fontSize: 15,
+    color: "#1A1A1A",
+    fontWeight: "500",
+  },
+  couleurChevron: { fontSize: 14, color: "#999" },
   paletteGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
