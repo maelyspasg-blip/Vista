@@ -25,6 +25,7 @@ const MINT_LIGHT = "#E8F8F2";
 const PEACH = "#F4956A";
 const PEACH_LIGHT = "#FFF0EA";
 const ROUGE_LIGHT = "#FCEBEB";
+const BLEU = "#4A90D9";
 
 const PALETTE_COULEURS = [
   "#5DC8A0",
@@ -139,6 +140,26 @@ export default function Dashboard() {
   useFocusEffect(
     useCallback(() => {
       objStore.verifierEcheancesFixes();
+
+      const maintenant = new Date();
+      const moisActuel = maintenant.getMonth();
+      const anneeActuelle = maintenant.getFullYear();
+      const dernier = objStore.dernierMoisArchive;
+
+      if (dernier !== null) {
+        if (
+          dernier.annee < anneeActuelle ||
+          (dernier.annee === anneeActuelle && dernier.mois < moisActuel)
+        ) {
+          objStore.archiverMoisActuel(dernier.mois, dernier.annee);
+        }
+      } else {
+        const moisCourant = 5;
+        const anneeCourante = 2026;
+        if (moisActuel > moisCourant || anneeActuelle > anneeCourante) {
+          objStore.archiverMoisActuel(moisCourant, anneeCourante);
+        }
+      }
     }, []),
   );
 
@@ -207,10 +228,10 @@ export default function Dashboard() {
       ? Math.min((objStore.epargneMois / disponibleNum) * 100, 100)
       : 0;
 
-  const enveloppesAVenir = enveloppes.filter(
-    (e) => e.type === "Fixe" && !e.payee,
+  const totalPrevu = enveloppes.reduce(
+    (acc, e) => acc + Math.max(0, e.budget - e.depense),
+    0,
   );
-  const totalPrevu = enveloppesAVenir.reduce((acc, e) => acc + e.budget, 0);
   const resteEstime =
     disponibleNum - totalDepenseEnveloppes - totalPrevu - objStore.epargneMois;
   const pctDepenseEstime =
@@ -221,7 +242,13 @@ export default function Dashboard() {
     disponibleNum > 0
       ? Math.min((totalPrevu / disponibleNum) * 100, 100 - pctDepenseEstime)
       : 0;
-  const projectionFinMois = Math.round(totalDepenseEnveloppes * 1.6);
+  const pctEpargneEstime =
+    disponibleNum > 0
+      ? Math.min(
+          (objStore.epargneMois / disponibleNum) * 100,
+          100 - pctDepenseEstime - pctPrevuEstime,
+        )
+      : 0;
   const lecture =
     resteEstime < 0
       ? { texte: "Risque de dépassement", couleurTexte: "#FFD2D2" }
@@ -362,12 +389,21 @@ export default function Dashboard() {
           <Text style={styles.heroLabel}>DÉPENSÉ CE MOIS</Text>
           <Text style={styles.heroAmount}>{totalDepense} €</Text>
           <View style={styles.barBg}>
-            <View style={[styles.barFill, { width: `${pctUtilise}%` }]} />
+            <View
+              style={[
+                styles.barFill,
+                { width: `${pctUtilise}%`, backgroundColor: MINT },
+              ]}
+            />
             {objStore.epargneMois > 0 && (
               <View
                 style={[
                   styles.barFillEpargne,
-                  { width: `${pctEpargne}%`, left: `${pctUtilise}%` },
+                  {
+                    width: `${pctEpargne}%`,
+                    left: `${pctUtilise}%`,
+                    backgroundColor: BLEU,
+                  },
                 ]}
               />
             )}
@@ -375,7 +411,7 @@ export default function Dashboard() {
           <View style={styles.heroLegende}>
             <View style={styles.heroLegendeItem}>
               <View
-                style={[styles.heroLegendeDot, { backgroundColor: "#FFFFFF" }]}
+                style={[styles.heroLegendeDot, { backgroundColor: MINT }]}
               />
               <Text style={styles.heroSub}>
                 Dépenses {totalDepenseEnveloppes} €
@@ -384,10 +420,7 @@ export default function Dashboard() {
             {objStore.epargneMois > 0 && (
               <View style={styles.heroLegendeItem}>
                 <View
-                  style={[
-                    styles.heroLegendeDot,
-                    { backgroundColor: "rgba(255,255,255,0.4)" },
-                  ]}
+                  style={[styles.heroLegendeDot, { backgroundColor: BLEU }]}
                 />
                 <Text style={styles.heroSub}>
                   Épargne {objStore.epargneMois} €
@@ -415,7 +448,10 @@ export default function Dashboard() {
           </Text>
           <Text style={styles.heroSubDetail}>
             Budget {disponibleNum}€ · Dépensé {totalDepenseEnveloppes}€ ·
-            Prévisionnel {totalPrevu}€ · Épargne {objStore.epargneMois}€
+            Dépenses prévues {totalPrevu}€ · Épargne {objStore.epargneMois}€
+          </Text>
+          <Text style={styles.heroPhraseClaire}>
+            Il te restera environ {resteEstime} € à la fin du mois
           </Text>
           <View style={styles.barBg}>
             <View
@@ -430,6 +466,14 @@ export default function Dashboard() {
                 { width: `${pctPrevuEstime}%`, backgroundColor: PEACH },
               ]}
             />
+            {objStore.epargneMois > 0 && (
+              <View
+                style={[
+                  styles.barSegment,
+                  { width: `${pctEpargneEstime}%`, backgroundColor: BLEU },
+                ]}
+              />
+            )}
           </View>
           <View style={styles.heroLegende}>
             <View style={styles.heroLegendeItem}>
@@ -444,8 +488,18 @@ export default function Dashboard() {
               <View
                 style={[styles.heroLegendeDot, { backgroundColor: PEACH }]}
               />
-              <Text style={styles.heroSub}>Prévisionnel {totalPrevu}€</Text>
+              <Text style={styles.heroSub}>Dépenses prévues {totalPrevu}€</Text>
             </View>
+            {objStore.epargneMois > 0 && (
+              <View style={styles.heroLegendeItem}>
+                <View
+                  style={[styles.heroLegendeDot, { backgroundColor: BLEU }]}
+                />
+                <Text style={styles.heroSub}>
+                  Épargne {objStore.epargneMois}€
+                </Text>
+              </View>
+            )}
           </View>
 
           <View
@@ -460,18 +514,15 @@ export default function Dashboard() {
               {lecture.texte}
             </Text>
           </View>
-          <Text style={styles.projectionTexte}>
-            À ce rythme, tu dépenseras environ {projectionFinMois} € ce mois
-          </Text>
         </View>
 
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: PURPLE_LIGHT }]}>
             <Text style={[styles.statLabel, { color: PURPLE }]}>
-              RESTE À VIVRE
+              PROJECTION FIN DE MOIS
             </Text>
             <Text style={[styles.statValue, { color: "#5A3DC4" }]}>
-              {resteAVivre} €
+              {resteEstime} €
             </Text>
           </View>
 
@@ -1363,18 +1414,21 @@ const styles = StyleSheet.create({
   },
   barFill: {
     height: "100%",
-    backgroundColor: "#FFFFFF",
     borderRadius: 3,
     position: "absolute",
     left: 0,
   },
   barFillEpargne: {
     height: "100%",
-    backgroundColor: "rgba(255,255,255,0.45)",
     borderRadius: 3,
     position: "absolute",
   },
-  heroLegende: { flexDirection: "row", gap: 16, marginBottom: 10 },
+  heroLegende: {
+    flexDirection: "row",
+    gap: 16,
+    marginBottom: 10,
+    flexWrap: "wrap",
+  },
   heroLegendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   heroLegendeDot: { width: 7, height: 7, borderRadius: 4 },
   heroFooter: { flexDirection: "row", justifyContent: "space-between" },
@@ -1388,18 +1442,18 @@ const styles = StyleSheet.create({
   heroSubDetail: {
     fontSize: 12,
     color: "rgba(255,255,255,0.6)",
-    marginBottom: 14,
+    marginBottom: 4,
     lineHeight: 17,
+  },
+  heroPhraseClaire: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.85)",
+    fontWeight: "600",
+    marginBottom: 14,
   },
   barSegment: { height: "100%" },
   lectureBanner: { borderRadius: 12, padding: 11, marginTop: 14 },
   lectureTexte: { fontSize: 13, fontWeight: "700", textAlign: "center" },
-  projectionTexte: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.55)",
-    textAlign: "center",
-    marginTop: 8,
-  },
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
   statCard: {
     flex: 1,
@@ -1415,7 +1469,12 @@ const styles = StyleSheet.create({
     gap: 4,
     marginBottom: 5,
   },
-  statLabel: { fontSize: 11, fontWeight: "600", letterSpacing: 0.5 },
+  statLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.5,
+    textAlign: "center",
+  },
   statValue: { fontSize: 19, fontWeight: "700" },
   editDisponibleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   editDisponibleInput: {

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
 import {
   InputAccessoryView,
   KeyboardAvoidingView,
@@ -30,6 +31,12 @@ function bgClair(couleur: string) {
 
 export default function Budget() {
   const objStore = useObjectifs();
+
+  useFocusEffect(
+    useCallback(() => {
+      objStore.verifierEcheancesFixes();
+    }, []),
+  );
 
   const [enveloppeOuverte, setEnveloppeOuverte] = useState<number | null>(null);
 

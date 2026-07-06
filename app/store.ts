@@ -61,12 +61,30 @@ export type Transaction = {
   date: string;
 };
 
+export type SnapshotEnveloppe = {
+  id: number;
+  nom: string;
+  depense: number;
+  budget: number;
+  couleur: string;
+  type: "Fixe" | "Variable";
+};
+
+export type SnapshotMois = {
+  mois: number;
+  annee: number;
+  enveloppes: SnapshotEnveloppe[];
+  epargne: number;
+  disponible: number;
+  totalDepense: number;
+};
+
 const ENVELOPPES_INIT: Enveloppe[] = [
   {
     id: 1,
     nom: "Courses",
     depense: 0,
-    budget: 250,
+    budget: 0,
     couleur: "#5DC8A0",
     recurrente: true,
     frequenceJours: 30,
@@ -74,155 +92,19 @@ const ENVELOPPES_INIT: Enveloppe[] = [
   },
   {
     id: 2,
-    nom: "Restaurants",
-    depense: 0,
-    budget: 200,
-    couleur: "#F4956A",
-    recurrente: false,
-    type: "Variable",
-  },
-  {
-    id: 3,
-    nom: "Transport",
-    depense: 0,
-    budget: 80,
-    couleur: "#4A90D9",
-    recurrente: true,
-    frequenceJours: 30,
-    type: "Variable",
-  },
-  {
-    id: 4,
-    nom: "Loisirs",
-    depense: 0,
-    budget: 200,
-    couleur: "#D94A8C",
-    recurrente: false,
-    type: "Variable",
-  },
-  {
-    id: 5,
-    nom: "Abonnements",
-    depense: 0,
-    budget: 50,
-    couleur: "#5BC0BE",
-    recurrente: true,
-    frequenceJours: 30,
-    type: "Fixe",
-  },
-  {
-    id: 6,
     nom: "Logement",
     depense: 0,
-    budget: 850,
+    budget: 0,
     couleur: "#9B5DE5",
-    recurrente: true,
-    frequenceJours: 30,
+    recurrente: false,
     type: "Fixe",
+    repeteChaqueMois: true,
+    afficherDansPlanning: true,
   },
 ];
 
-const DEPENSES_PREVUES_INIT: DepensePrevue[] = [
-  {
-    id: 1,
-    nom: "Loyer",
-    montant: 850,
-    type: "Fixe",
-    statut: "Planifié",
-    couleur: "#9B5DE5",
-  },
-  {
-    id: 2,
-    nom: "Salle de sport",
-    montant: 30,
-    type: "Fixe",
-    statut: "Payé",
-    couleur: "#5DC8A0",
-  },
-  {
-    id: 3,
-    nom: "Spotify",
-    montant: 10,
-    type: "Fixe",
-    statut: "À venir",
-    couleur: "#F4956A",
-  },
-  {
-    id: 4,
-    nom: "Vacances Italie",
-    montant: 600,
-    type: "Non courante",
-    statut: "Planifié",
-    couleur: "#F4956A",
-  },
-];
-
-const EVENEMENTS_INIT: Evenement[] = [
-  {
-    id: 1,
-    nom: "Standup équipe",
-    jour: 16,
-    heure: "9h00",
-    duree: 1,
-    couleur: "#8B6FE8",
-    estFinancier: false,
-  },
-  {
-    id: 2,
-    nom: "Déjeuner Sophie",
-    jour: 16,
-    heure: "12h30",
-    duree: 1.5,
-    couleur: "#5DC8A0",
-    estFinancier: false,
-  },
-  {
-    id: 3,
-    nom: "Présentation Q2",
-    jour: 17,
-    heure: "14h00",
-    duree: 2,
-    couleur: "#F4956A",
-    estFinancier: false,
-  },
-  {
-    id: 4,
-    nom: "Yoga",
-    jour: 18,
-    heure: "18h30",
-    duree: 1,
-    couleur: "#5DC8A0",
-    estFinancier: false,
-  },
-  {
-    id: 5,
-    nom: "Réunion client",
-    jour: 19,
-    heure: "10h00",
-    duree: 1.5,
-    couleur: "#8B6FE8",
-    estFinancier: false,
-  },
-  {
-    id: 6,
-    nom: "Sport",
-    jour: 20,
-    heure: "8h00",
-    duree: 1,
-    couleur: "#F4956A",
-    estFinancier: false,
-  },
-  {
-    id: 7,
-    nom: "Dentiste",
-    jour: 20,
-    heure: "15h00",
-    duree: 1,
-    couleur: "#5DC8A0",
-    estFinancier: false,
-  },
-];
-
+const DEPENSES_PREVUES_INIT: DepensePrevue[] = [];
+const EVENEMENTS_INIT: Evenement[] = [];
 const TRANSACTIONS_INIT: Transaction[] = [];
 
 type EtatStore = {
@@ -234,17 +116,21 @@ type EtatStore = {
   transactions: Transaction[];
   evenements: Evenement[];
   historiquePaiements: PaiementHistorique[];
+  historiquesMois: SnapshotMois[];
+  dernierMoisArchive: { mois: number; annee: number } | null;
 };
 
 let etat: EtatStore = {
   objectifs: [],
   epargneMois: 0,
   enveloppes: ENVELOPPES_INIT,
-  argentDisponible: 1800,
+  argentDisponible: 0,
   depensesPrevues: DEPENSES_PREVUES_INIT,
   transactions: TRANSACTIONS_INIT,
   evenements: EVENEMENTS_INIT,
   historiquePaiements: [],
+  historiquesMois: [],
+  dernierMoisArchive: null,
 };
 
 type Ecouteur = (etat: EtatStore) => void;
@@ -272,6 +158,8 @@ export function useObjectifs() {
     transactions: local.transactions,
     evenements: local.evenements,
     historiquePaiements: local.historiquePaiements,
+    historiquesMois: local.historiquesMois,
+    dernierMoisArchive: local.dernierMoisArchive,
 
     ajouterObjectif: (
       nom: string,
@@ -288,9 +176,11 @@ export function useObjectifs() {
       };
       setEtat({ objectifs: [...etat.objectifs, nouvel] });
     },
+
     modifierEpargneMois: (montant: number) => {
       setEtat({ epargneMois: montant });
     },
+
     supprimerObjectif: (id: number) => {
       setEtat({ objectifs: etat.objectifs.filter((o) => o.id !== id) });
     },
@@ -298,8 +188,48 @@ export function useObjectifs() {
     modifierEnveloppes: (enveloppes: Enveloppe[]) => {
       setEtat({ enveloppes });
     },
+
     modifierArgentDisponible: (montant: number) => {
       setEtat({ argentDisponible: montant });
+    },
+
+    archiverMoisActuel: (mois: number, annee: number) => {
+      const dejaArchive = etat.historiquesMois.some(
+        (s) => s.mois === mois && s.annee === annee,
+      );
+      if (dejaArchive) return;
+
+      const snapshot: SnapshotMois = {
+        mois,
+        annee,
+        enveloppes: etat.enveloppes.map((e) => ({
+          id: e.id,
+          nom: e.nom,
+          depense: e.depense,
+          budget: e.budget,
+          couleur: e.couleur,
+          type: e.type,
+        })),
+        epargne: etat.epargneMois,
+        disponible: etat.argentDisponible,
+        totalDepense:
+          etat.enveloppes.reduce((acc, e) => acc + e.depense, 0) +
+          etat.epargneMois,
+      };
+
+      const enveloppesMaj = etat.enveloppes.map((e) => ({
+        ...e,
+        depense: 0,
+        payee: e.type === "Fixe" ? false : e.payee,
+      }));
+
+      setEtat({
+        historiquesMois: [...etat.historiquesMois, snapshot],
+        dernierMoisArchive: { mois, annee },
+        enveloppes: enveloppesMaj,
+        epargneMois: 0,
+        transactions: [],
+      });
     },
 
     verifierEcheancesFixes: () => {
@@ -321,7 +251,6 @@ export function useObjectifs() {
               date: env.dateFixe,
               couleur: env.couleur,
             });
-
             if (env.repeteChaqueMois) {
               const prochaine = new Date(dateEcheance);
               prochaine.setMonth(prochaine.getMonth() + 1);
@@ -377,7 +306,6 @@ export function useObjectifs() {
         categorieLiee,
       };
       setEtat({ evenements: [...etat.evenements, nouvelEvenement] });
-
       if (estFinancier && montant) {
         if (categorieLiee && categorieLiee !== "Aucune") {
           const enveloppesMaj = etat.enveloppes.map((e) =>

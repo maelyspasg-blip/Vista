@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useObjectifs } from "../store";
 
@@ -470,7 +471,7 @@ export default function Planning() {
                         { backgroundColor: ev.couleur + "22" },
                       ]}
                     >
-                      <Text style={styles.alldayPin}>📌</Text>
+                      <Ionicons name="pin-outline" size={12} color="#1A1A1A" style={styles.alldayPin} />
                       <Text style={[styles.alldayNom, { color: ev.couleur }]}>
                         {ev.nom} — toute la journée
                       </Text>
@@ -861,7 +862,7 @@ export default function Planning() {
                     onPress={choisirNonFinancier}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.choixEmoji}>📅</Text>
+                    <Ionicons name="calendar-outline" size={24} color="#1A1A1A" style={styles.choixEmoji} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.choixTitre}>
                         Non, c'est juste un rappel
@@ -877,7 +878,7 @@ export default function Planning() {
                     onPress={choisirFinancier}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.choixEmoji}>💶</Text>
+                    <Ionicons name="cash-outline" size={24} color="#1A1A1A" style={styles.choixEmoji} />
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.choixTitre, { color: "#993C1D" }]}>
                         Oui, ça va me coûter de l'argent
