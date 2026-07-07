@@ -45,8 +45,8 @@ export default function Budget() {
   const [montantTx, setMontantTx] = useState("");
   const [enveloppeTx, setEnveloppeTx] = useState<number | null>(null);
 
-  const MOIS_ACTUEL = 5;
-  const ANNEE_ACTUELLE = 2026;
+  const MOIS_ACTUEL = new Date().getMonth();
+  const ANNEE_ACTUELLE = new Date().getFullYear();
 
   const paiementsDuMois = objStore.historiquePaiements.filter((p) => {
     const d = new Date(p.date);
@@ -101,7 +101,12 @@ export default function Budget() {
       <View style={styles.header}>
         <View>
           <Text style={styles.titre}>Budget</Text>
-          <Text style={styles.sousTitre}>Juin 2026</Text>
+          <Text style={styles.sousTitre}>
+            {new Date().toLocaleDateString("fr-FR", {
+              month: "long",
+              year: "numeric",
+            })}
+          </Text>
         </View>
       </View>
 

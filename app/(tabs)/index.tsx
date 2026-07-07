@@ -174,6 +174,11 @@ export default function Dashboard() {
     objStore.modifierArgentDisponible(parseFloat(val) || 0);
   };
   const [editionDisponible, setEditionDisponible] = useState(false);
+  const maintenant = new Date();
+  const moisActuelLabel = maintenant.toLocaleDateString("fr-FR", {
+    month: "long",
+    year: "numeric",
+  });
   const [disponibleTemp, setDisponibleTemp] = useState("1800");
 
   const [modalEnveloppeVisible, setModalEnveloppeVisible] = useState(false);
@@ -378,7 +383,12 @@ export default function Dashboard() {
         <View style={styles.header}>
           <View>
             <Text style={styles.appName}>VISTA</Text>
-            <Text style={styles.subtitle}>Juin 2026</Text>
+            <Text style={styles.subtitle}>
+              {new Date().toLocaleDateString("fr-FR", {
+                month: "long",
+                year: "numeric",
+              })}
+            </Text>
           </View>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>M</Text>

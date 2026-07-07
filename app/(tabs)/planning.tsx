@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import {
   InputAccessoryView,
@@ -11,7 +12,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useObjectifs } from "../store";
 
@@ -52,7 +52,7 @@ const PALETTE_COULEURS = [
 ];
 
 const ACCESSORY_ID = "numericDone";
-const AUJOURDHUI = new Date(2026, 5, 27);
+const AUJOURDHUI = new Date();
 
 function heureEnMinutes(heure: string): number {
   const [h, m] = heure.replace("h", ":").split(":");
@@ -148,7 +148,7 @@ export default function Planning() {
   const objStore = useObjectifs();
 
   const [vue, setVue] = useState<"jour" | "semaine" | "mois">("jour");
-  const [dateActuelle, setDateActuelle] = useState(new Date(2026, 5, 27));
+  const [dateActuelle, setDateActuelle] = useState(new Date());
 
   const [modalCreationVisible, setModalCreationVisible] = useState(false);
   const [etapeCreation, setEtapeCreation] = useState<
@@ -471,7 +471,12 @@ export default function Planning() {
                         { backgroundColor: ev.couleur + "22" },
                       ]}
                     >
-                      <Ionicons name="pin-outline" size={12} color="#1A1A1A" style={styles.alldayPin} />
+                      <Ionicons
+                        name="pin-outline"
+                        size={12}
+                        color="#1A1A1A"
+                        style={styles.alldayPin}
+                      />
                       <Text style={[styles.alldayNom, { color: ev.couleur }]}>
                         {ev.nom} — toute la journée
                       </Text>
@@ -862,7 +867,12 @@ export default function Planning() {
                     onPress={choisirNonFinancier}
                     activeOpacity={0.7}
                   >
-                    <Ionicons name="calendar-outline" size={24} color="#1A1A1A" style={styles.choixEmoji} />
+                    <Ionicons
+                      name="calendar-outline"
+                      size={24}
+                      color="#1A1A1A"
+                      style={styles.choixEmoji}
+                    />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.choixTitre}>
                         Non, c'est juste un rappel
@@ -878,7 +888,12 @@ export default function Planning() {
                     onPress={choisirFinancier}
                     activeOpacity={0.7}
                   >
-                    <Ionicons name="cash-outline" size={24} color="#1A1A1A" style={styles.choixEmoji} />
+                    <Ionicons
+                      name="cash-outline"
+                      size={24}
+                      color="#1A1A1A"
+                      style={styles.choixEmoji}
+                    />
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.choixTitre, { color: "#993C1D" }]}>
                         Oui, ça va me coûter de l'argent
