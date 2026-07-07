@@ -14,10 +14,7 @@ import {
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useObjectifs } from "../store";
-
-const PURPLE = "#8B6FE8";
-const PURPLE_LIGHT = "#F0EEFF";
-const PEACH_LIGHT = "#FFF0EA";
+import { useTheme } from "../ThemeContext";
 
 const JOURS_SEMAINE = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const HEURES = [
@@ -146,6 +143,7 @@ type EvenementUnifie = {
 
 export default function Planning() {
   const objStore = useObjectifs();
+  const { couleurs: C } = useTheme();
 
   const [vue, setVue] = useState<"jour" | "semaine" | "mois">("jour");
   const [dateActuelle, setDateActuelle] = useState(new Date());
@@ -403,11 +401,11 @@ export default function Planning() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: C.fondPage }]}>
       <View style={styles.header}>
-        <Text style={styles.titre}>Planning</Text>
+        <Text style={[styles.titre, { color: C.texte }]}>Planning</Text>
         <TouchableOpacity
-          style={styles.btnPlus}
+          style={[styles.btnPlus, { backgroundColor: C.purple }]}
           activeOpacity={0.7}
           onPress={ouvrirCreationComplete}
         >
@@ -415,15 +413,24 @@ export default function Planning() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.tabsRow}>
+      <View style={[styles.tabsRow, { backgroundColor: C.fondSecondaire }]}>
         {(["jour", "semaine", "mois"] as const).map((v) => (
           <TouchableOpacity
             key={v}
-            style={[styles.tabBtn, vue === v && styles.tabBtnActif]}
+            style={[
+              styles.tabBtn,
+              vue === v && [styles.tabBtnActif, { backgroundColor: C.carte }],
+            ]}
             onPress={() => setVue(v)}
             activeOpacity={0.7}
           >
-            <Text style={[styles.tabTexte, vue === v && styles.tabTexteActif]}>
+            <Text
+              style={[
+                styles.tabTexte,
+                { color: C.texteMuted },
+                vue === v && { color: C.purple },
+              ]}
+            >
               {v.charAt(0).toUpperCase() + v.slice(1)}
             </Text>
           </TouchableOpacity>
@@ -434,6 +441,7 @@ export default function Planning() {
         <Text
           style={[
             styles.dayTitle,
+            { color: C.texte },
             vue === "mois" && { textTransform: "capitalize" },
           ]}
         >
@@ -441,18 +449,18 @@ export default function Planning() {
         </Text>
         <View style={styles.dayNav}>
           <TouchableOpacity
-            style={styles.navArrow}
+            style={[styles.navArrow, { backgroundColor: C.fondSecondaire }]}
             onPress={allerPrecedent}
             activeOpacity={0.7}
           >
-            <Text style={styles.navArrowTexte}>‹</Text>
+            <Text style={[styles.navArrowTexte, { color: C.purple }]}>‹</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.navArrow}
+            style={[styles.navArrow, { backgroundColor: C.fondSecondaire }]}
             onPress={allerSuivant}
             activeOpacity={0.7}
           >
-            <Text style={styles.navArrowTexte}>›</Text>
+            <Text style={[styles.navArrowTexte, { color: C.purple }]}>›</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -462,7 +470,9 @@ export default function Planning() {
           {vue === "jour" && (
             <View style={{ flex: 1 }}>
               {evsToutLaJourneeJour(dateActuelle).length > 0 && (
-                <View style={styles.alldayZone}>
+                <View
+                  style={[styles.alldayZone, { borderColor: C.separateur }]}
+                >
                   {evsToutLaJourneeJour(dateActuelle).map((ev) => (
                     <View
                       key={ev.id}
@@ -474,7 +484,7 @@ export default function Planning() {
                       <Ionicons
                         name="pin-outline"
                         size={12}
-                        color="#1A1A1A"
+                        color={C.texte}
                         style={styles.alldayPin}
                       />
                       <Text style={[styles.alldayNom, { color: ev.couleur }]}>
@@ -500,7 +510,9 @@ export default function Planning() {
                   <View style={styles.heuresCol}>
                     {HEURES.map((h) => (
                       <View key={h} style={styles.heureRow}>
-                        <Text style={styles.heureTexte}>{h}</Text>
+                        <Text style={[styles.heureTexte, { color: C.texteMuted }]}>
+                          {h}
+                        </Text>
                       </View>
                     ))}
                   </View>
@@ -508,7 +520,7 @@ export default function Planning() {
                     {HEURES.map((h, i) => (
                       <TouchableOpacity
                         key={h}
-                        style={styles.ligneFond}
+                        style={[styles.ligneFond, { borderTopColor: C.separateur }]}
                         activeOpacity={0.5}
                         onPress={() =>
                           ouvrirCreationRapide(`${HEURE_DEBUT + i}h00`)
@@ -552,7 +564,9 @@ export default function Planning() {
                               </View>
                             )}
                           </View>
-                          <Text style={styles.eventHeure}>{ev.heure}</Text>
+                          <Text style={[styles.eventHeure, { color: C.texteMuted }]}>
+                            {ev.heure}
+                          </Text>
                         </TouchableOpacity>
                       ),
                     )}
@@ -582,11 +596,14 @@ export default function Planning() {
                       activeOpacity={0.7}
                       onPress={() => ouvrirJour(jourDate)}
                     >
-                      <Text style={styles.weekHeadNom}>{JOURS_SEMAINE[i]}</Text>
+                      <Text style={[styles.weekHeadNom, { color: C.texteMuted }]}>
+                        {JOURS_SEMAINE[i]}
+                      </Text>
                       <Text
                         style={[
                           styles.weekHeadNum,
-                          estAujourdhui && styles.weekHeadNumToday,
+                          { color: C.texte },
+                          estAujourdhui && { color: C.purple },
                         ]}
                       >
                         {jourDate.getDate()}
@@ -600,7 +617,9 @@ export default function Planning() {
                 <View style={styles.heuresCol}>
                   {HEURES.map((h) => (
                     <View key={h} style={styles.heureRow}>
-                      <Text style={styles.heureTexte}>{h}</Text>
+                      <Text style={[styles.heureTexte, { color: C.texteMuted }]}>
+                        {h}
+                      </Text>
                     </View>
                   ))}
                 </View>
@@ -614,7 +633,13 @@ export default function Planning() {
                   const positions = calculerPositions(evsJourCol);
 
                   return (
-                    <View key={i} style={styles.weekDayTimelineCol}>
+                    <View
+                      key={i}
+                      style={[
+                        styles.weekDayTimelineCol,
+                        { borderLeftColor: C.separateur },
+                      ]}
+                    >
                       {evsToutLaJourneeCol.length > 0 && (
                         <View style={styles.weekAlldayZone}>
                           {evsToutLaJourneeCol.map((ev) => (
@@ -641,7 +666,10 @@ export default function Planning() {
                       {HEURES.map((h, hi) => (
                         <TouchableOpacity
                           key={h}
-                          style={styles.ligneFondSemaine}
+                          style={[
+                            styles.ligneFondSemaine,
+                            { borderTopColor: C.separateur },
+                          ]}
                           activeOpacity={0.5}
                           onPress={() => {
                             setDateActuelle(jourDate);
@@ -687,12 +715,15 @@ export default function Planning() {
             <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.monthDayHeadRow}>
                 {JOURS_SEMAINE.map((j) => (
-                  <Text key={j} style={styles.monthDayHead}>
+                  <Text
+                    key={j}
+                    style={[styles.monthDayHead, { color: C.texteMuted }]}
+                  >
                     {j.charAt(0)}
                   </Text>
                 ))}
               </View>
-              <View style={styles.monthGrid}>
+              <View style={[styles.monthGrid, { borderColor: C.separateur }]}>
                 {obtenirGrilleMoisComplete(dateActuelle).map((jourDate, i) => {
                   const estAujourdhui = memeJour(jourDate, AUJOURDHUI);
                   const estMoisActuel =
@@ -704,14 +735,15 @@ export default function Planning() {
                   return (
                     <TouchableOpacity
                       key={i}
-                      style={styles.monthCell}
+                      style={[styles.monthCell, { borderColor: C.separateur }]}
                       activeOpacity={0.7}
                       onPress={() => ouvrirJour(jourDate)}
                     >
                       <Text
                         style={[
                           styles.monthNum,
-                          estAujourdhui && styles.monthNumToday,
+                          { color: C.texteMuted },
+                          estAujourdhui && { color: C.purple, fontWeight: "700" },
                           !estMoisActuel && styles.monthNumHorsMois,
                         ]}
                       >
@@ -748,8 +780,15 @@ export default function Planning() {
 
       {Platform.OS === "ios" && (
         <InputAccessoryView nativeID={ACCESSORY_ID}>
-          <View style={styles.accessoryBar}>
-            <Text style={styles.accessoryTexte}>Terminé</Text>
+          <View
+            style={[
+              styles.accessoryBar,
+              { backgroundColor: C.fondSecondaire, borderTopColor: C.separateur },
+            ]}
+          >
+            <Text style={[styles.accessoryTexte, { color: C.purple }]}>
+              Terminé
+            </Text>
           </View>
         </InputAccessoryView>
       )}
@@ -765,16 +804,20 @@ export default function Planning() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={styles.modalOverlayTouch}>
-            <View style={styles.modalCard}>
+            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
               {etapeCreation === "infos" && (
                 <>
                   <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitre}>Nouvel événement</Text>
+                    <Text style={[styles.modalTitre, { color: C.texte }]}>
+                      Nouvel événement
+                    </Text>
                     <TouchableOpacity
                       onPress={() => setModalCreationVisible(false)}
                       activeOpacity={0.6}
                     >
-                      <Text style={styles.btnFermerCroix}>✕</Text>
+                      <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>
+                        ✕
+                      </Text>
                     </TouchableOpacity>
                   </View>
 
@@ -782,30 +825,45 @@ export default function Planning() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                   >
-                    <Text style={styles.modalLabel}>Nom de l'événement</Text>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Nom de l'événement
+                    </Text>
                     <TextInput
-                      style={styles.input}
+                      style={[
+                        styles.input,
+                        { backgroundColor: C.fondSecondaire, color: C.texte },
+                      ]}
                       placeholder="Ex : Anniversaire de Camille"
-                      placeholderTextColor="#CCC"
+                      placeholderTextColor={C.texteMuted}
                       value={nomEvent}
                       onChangeText={setNomEvent}
                       returnKeyType="done"
                       autoFocus
                     />
 
-                    <Text style={styles.modalLabel}>Heure</Text>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Heure
+                    </Text>
                     <TextInput
-                      style={styles.input}
+                      style={[
+                        styles.input,
+                        { backgroundColor: C.fondSecondaire, color: C.texte },
+                      ]}
                       placeholder="Ex : 14h30"
-                      placeholderTextColor="#CCC"
+                      placeholderTextColor={C.texteMuted}
                       value={heureEvent}
                       onChangeText={setHeureEvent}
                       returnKeyType="done"
                     />
 
-                    <Text style={styles.modalLabel}>Durée (en heures)</Text>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Durée (en heures)
+                    </Text>
                     <TextInput
-                      style={styles.input}
+                      style={[
+                        styles.input,
+                        { backgroundColor: C.fondSecondaire, color: C.texte },
+                      ]}
                       keyboardType="numeric"
                       value={dureeEvent}
                       onChangeText={setDureeEvent}
@@ -815,7 +873,9 @@ export default function Planning() {
 
                     {!creationRapide && (
                       <>
-                        <Text style={styles.modalLabel}>Couleur</Text>
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Couleur
+                        </Text>
                         <View style={styles.paletteGrid}>
                           {PALETTE_COULEURS.map((c) => (
                             <TouchableOpacity
@@ -823,7 +883,10 @@ export default function Planning() {
                               style={[
                                 styles.swatch,
                                 { backgroundColor: c },
-                                couleurEvent === c && styles.swatchSelectionne,
+                                couleurEvent === c && {
+                                  borderWidth: 3,
+                                  borderColor: C.texte,
+                                },
                               ]}
                               onPress={() => setCouleurEvent(c)}
                               activeOpacity={0.7}
@@ -834,7 +897,7 @@ export default function Planning() {
                     )}
 
                     <TouchableOpacity
-                      style={styles.btnSuivant}
+                      style={[styles.btnSuivant, { backgroundColor: C.purple }]}
                       onPress={validerInfos}
                       activeOpacity={0.7}
                     >
@@ -849,56 +912,60 @@ export default function Planning() {
               {etapeCreation === "financier" && (
                 <>
                   <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitre}>{nomEvent}</Text>
+                    <Text style={[styles.modalTitre, { color: C.texte }]}>
+                      {nomEvent}
+                    </Text>
                     <TouchableOpacity
                       onPress={() => setModalCreationVisible(false)}
                       activeOpacity={0.6}
                     >
-                      <Text style={styles.btnFermerCroix}>✕</Text>
+                      <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>
+                        ✕
+                      </Text>
                     </TouchableOpacity>
                   </View>
 
-                  <Text style={styles.questionFinanciere}>
+                  <Text style={[styles.questionFinanciere, { color: C.texte }]}>
                     Ça va coûter de l'argent ?
                   </Text>
 
                   <TouchableOpacity
-                    style={styles.choixCard}
+                    style={[styles.choixCard, { backgroundColor: C.fondSecondaire }]}
                     onPress={choisirNonFinancier}
                     activeOpacity={0.7}
                   >
                     <Ionicons
                       name="calendar-outline"
                       size={24}
-                      color="#1A1A1A"
+                      color={C.texte}
                       style={styles.choixEmoji}
                     />
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.choixTitre}>
+                      <Text style={[styles.choixTitre, { color: C.texte }]}>
                         Non, c'est juste un rappel
                       </Text>
-                      <Text style={styles.choixSousTitre}>
+                      <Text style={[styles.choixSousTitre, { color: C.texteMuted }]}>
                         Aucun impact sur le budget
                       </Text>
                     </View>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.choixCard, { backgroundColor: PEACH_LIGHT }]}
+                    style={[styles.choixCard, { backgroundColor: C.peachLight }]}
                     onPress={choisirFinancier}
                     activeOpacity={0.7}
                   >
                     <Ionicons
                       name="cash-outline"
                       size={24}
-                      color="#1A1A1A"
+                      color={C.texte}
                       style={styles.choixEmoji}
                     />
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.choixTitre, { color: "#993C1D" }]}>
+                      <Text style={[styles.choixTitre, { color: C.peachText }]}>
                         Oui, ça va me coûter de l'argent
                       </Text>
-                      <Text style={styles.choixSousTitre}>
+                      <Text style={[styles.choixSousTitre, { color: C.texteMuted }]}>
                         Sera ajouté à ton budget
                       </Text>
                     </View>
@@ -909,7 +976,9 @@ export default function Planning() {
                     onPress={() => setEtapeCreation("infos")}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.btnAnnulerTexte}>Retour</Text>
+                    <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                      Retour
+                    </Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -917,12 +986,16 @@ export default function Planning() {
               {etapeCreation === "categorie" && (
                 <>
                   <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitre}>Combien ça coûte ?</Text>
+                    <Text style={[styles.modalTitre, { color: C.texte }]}>
+                      Combien ça coûte ?
+                    </Text>
                     <TouchableOpacity
                       onPress={() => setModalCreationVisible(false)}
                       activeOpacity={0.6}
                     >
-                      <Text style={styles.btnFermerCroix}>✕</Text>
+                      <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>
+                        ✕
+                      </Text>
                     </TouchableOpacity>
                   </View>
 
@@ -930,12 +1003,21 @@ export default function Planning() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                   >
-                    <Text style={styles.modalLabel}>Montant</Text>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Montant
+                    </Text>
                     <View style={styles.modalInputRow}>
                       <TextInput
-                        style={[styles.input, { flex: 1 }]}
+                        style={[
+                          styles.input,
+                          {
+                            flex: 1,
+                            backgroundColor: C.fondSecondaire,
+                            color: C.texte,
+                          },
+                        ]}
                         placeholder="Ex : 30"
-                        placeholderTextColor="#CCC"
+                        placeholderTextColor={C.texteMuted}
                         keyboardType="numeric"
                         value={montantEvent}
                         onChangeText={setMontantEvent}
@@ -943,18 +1025,22 @@ export default function Planning() {
                         autoFocus
                         inputAccessoryViewID={ACCESSORY_ID}
                       />
-                      <Text style={styles.modalEuro}>€</Text>
+                      <Text style={[styles.modalEuro, { color: C.texteMuted }]}>
+                        €
+                      </Text>
                     </View>
 
-                    <Text style={styles.modalLabel}>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
                       Lier à une catégorie (optionnel)
                     </Text>
                     <View style={styles.categorieGrid}>
                       <TouchableOpacity
                         style={[
                           styles.categorieChip,
-                          categorieEvent === "Aucune" &&
-                            styles.categorieChipActif,
+                          { backgroundColor: C.fondSecondaire },
+                          categorieEvent === "Aucune" && {
+                            backgroundColor: C.purple,
+                          },
                         ]}
                         onPress={() => setCategorieEvent("Aucune")}
                         activeOpacity={0.7}
@@ -962,6 +1048,7 @@ export default function Planning() {
                         <Text
                           style={[
                             styles.categorieChipTexte,
+                            { color: C.texteMuted },
                             categorieEvent === "Aucune" &&
                               styles.categorieChipTexteActif,
                           ]}
@@ -976,6 +1063,7 @@ export default function Planning() {
                             key={env.id}
                             style={[
                               styles.categorieChip,
+                              { backgroundColor: C.fondSecondaire },
                               categorieEvent === env.nom && {
                                 backgroundColor: env.couleur,
                               },
@@ -986,6 +1074,7 @@ export default function Planning() {
                             <Text
                               style={[
                                 styles.categorieChipTexte,
+                                { color: C.texteMuted },
                                 categorieEvent === env.nom && {
                                   color: "#FFFFFF",
                                 },
@@ -997,14 +1086,14 @@ export default function Planning() {
                         ))}
                     </View>
 
-                    <Text style={styles.modalAide}>
+                    <Text style={[styles.modalAide, { color: C.texteMuted }]}>
                       {categorieEvent === "Aucune"
                         ? `Une nouvelle ligne "${nomEvent}" apparaîtra dans tes dépenses prévues.`
                         : `Le montant sera ajouté à ta dépense "${categorieEvent}".`}
                     </Text>
 
                     <TouchableOpacity
-                      style={styles.btnSuivant}
+                      style={[styles.btnSuivant, { backgroundColor: C.purple }]}
                       onPress={validerCreationFinanciere}
                       activeOpacity={0.7}
                     >
@@ -1017,7 +1106,9 @@ export default function Planning() {
                       onPress={() => setEtapeCreation("financier")}
                       activeOpacity={0.7}
                     >
-                      <Text style={styles.btnAnnulerTexte}>Retour</Text>
+                      <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                        Retour
+                      </Text>
                     </TouchableOpacity>
                   </ScrollView>
                 </>
@@ -1031,7 +1122,7 @@ export default function Planning() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 16 },
+  container: { flex: 1, paddingHorizontal: 16 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1042,14 +1133,12 @@ const styles = StyleSheet.create({
   titre: {
     fontSize: 22,
     fontWeight: "700",
-    color: "#1A1A1A",
     letterSpacing: 1,
   },
   btnPlus: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: PURPLE,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1061,7 +1150,6 @@ const styles = StyleSheet.create({
   },
   tabsRow: {
     flexDirection: "row",
-    backgroundColor: "#F7F7F7",
     borderRadius: 14,
     padding: 4,
     marginBottom: 14,
@@ -1073,29 +1161,26 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
   },
-  tabBtnActif: { backgroundColor: "#FFFFFF" },
-  tabTexte: { fontSize: 13, color: "#999", fontWeight: "600" },
-  tabTexteActif: { color: PURPLE },
+  tabBtnActif: {},
+  tabTexte: { fontSize: 13, fontWeight: "600" },
   dayHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 10,
   },
-  dayTitle: { fontSize: 16, fontWeight: "600", color: "#1A1A1A" },
+  dayTitle: { fontSize: 16, fontWeight: "600" },
   dayNav: { flexDirection: "row", gap: 8 },
   navArrow: {
     width: 30,
     height: 30,
     borderRadius: 10,
-    backgroundColor: "#F7F7F7",
     alignItems: "center",
     justifyContent: "center",
   },
-  navArrowTexte: { fontSize: 18, color: PURPLE, fontWeight: "700" },
+  navArrowTexte: { fontSize: 18, fontWeight: "700" },
   alldayZone: {
     borderWidth: 0.5,
-    borderColor: "#F0EEF8",
     borderBottomWidth: 0,
     borderRadius: 14,
     padding: 8,
@@ -1122,7 +1207,6 @@ const styles = StyleSheet.create({
   },
   heureTexte: {
     fontSize: 10,
-    color: "#BBBBBB",
     textAlign: "right",
     paddingRight: 4,
   },
@@ -1130,7 +1214,6 @@ const styles = StyleSheet.create({
   ligneFond: {
     height: HAUTEUR_HEURE,
     borderTopWidth: 0.5,
-    borderTopColor: "#F0EEF8",
   },
   eventCard: {
     position: "absolute",
@@ -1143,22 +1226,19 @@ const styles = StyleSheet.create({
   eventTitre: { fontSize: 11, fontWeight: "600", flex: 1 },
   badgeFinancier: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 6 },
   badgeFinancierTexte: { fontSize: 9, fontWeight: "700", color: "#FFFFFF" },
-  eventHeure: { fontSize: 9, color: "#999" },
+  eventHeure: { fontSize: 9 },
   weekHeadRow: { flexDirection: "row", marginBottom: 4 },
   weekHeadCol: { flex: 1, alignItems: "center", paddingVertical: 6 },
-  weekHeadNom: { fontSize: 9, color: "#999" },
+  weekHeadNom: { fontSize: 9 },
   weekHeadNum: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#1A1A1A",
     marginTop: 2,
   },
-  weekHeadNumToday: { color: PURPLE },
   weekDayTimelineCol: {
     flex: 1,
     position: "relative",
     borderLeftWidth: 0.5,
-    borderLeftColor: "#F5F5F5",
   },
   weekAlldayZone: { paddingVertical: 2, paddingHorizontal: 2 },
   weekAlldayPill: {
@@ -1171,7 +1251,6 @@ const styles = StyleSheet.create({
   ligneFondSemaine: {
     height: HAUTEUR_HEURE,
     borderTopWidth: 0.5,
-    borderTopColor: "#F0EEF8",
   },
   weekEventBlock: {
     position: "absolute",
@@ -1182,12 +1261,11 @@ const styles = StyleSheet.create({
   },
   weekEventBlockTexte: { fontSize: 9, fontWeight: "600" },
   monthDayHeadRow: { flexDirection: "row", marginBottom: 4 },
-  monthDayHead: { flex: 1, textAlign: "center", fontSize: 10, color: "#999" },
+  monthDayHead: { flex: 1, textAlign: "center", fontSize: 10 },
   monthGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     borderWidth: 0.5,
-    borderColor: "#F0EEF8",
     borderRadius: 14,
     overflow: "hidden",
   },
@@ -1195,22 +1273,18 @@ const styles = StyleSheet.create({
     width: "14.28%",
     minHeight: 62,
     borderWidth: 0.25,
-    borderColor: "#F0EEF8",
     padding: 3,
   },
-  monthNum: { fontSize: 10, color: "#999" },
-  monthNumToday: { color: PURPLE, fontWeight: "700" },
-  monthNumHorsMois: { color: "#DDD" },
+  monthNum: { fontSize: 10 },
+  monthNumHorsMois: { opacity: 0.5 },
   monthEventLine: { borderRadius: 3, paddingHorizontal: 2, marginTop: 2 },
   monthEventTexte: { fontSize: 7, fontWeight: "600" },
   accessoryBar: {
-    backgroundColor: "#F7F7F7",
     padding: 10,
     alignItems: "flex-end",
     borderTopWidth: 0.5,
-    borderTopColor: "#DDD",
   },
-  accessoryTexte: { color: PURPLE, fontSize: 17, fontWeight: "700" },
+  accessoryTexte: { fontSize: 17, fontWeight: "700" },
   modalOverlay: { flex: 1, justifyContent: "flex-end" },
   modalOverlayTouch: {
     flex: 1,
@@ -1218,7 +1292,6 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   modalCard: {
-    backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     padding: 26,
@@ -1231,25 +1304,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  modalTitre: { fontSize: 21, fontWeight: "700", color: "#1A1A1A", flex: 1 },
-  btnFermerCroix: { fontSize: 18, color: "#BBB", padding: 4 },
+  modalTitre: { fontSize: 21, fontWeight: "700", flex: 1 },
+  btnFermerCroix: { fontSize: 18, padding: 4 },
   modalLabel: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#999",
     letterSpacing: 0.5,
     marginBottom: 9,
     marginTop: 6,
   },
   modalInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  modalEuro: { fontSize: 17, color: "#999", marginBottom: 12 },
-  modalAide: { fontSize: 12, color: "#AAA", lineHeight: 18, marginBottom: 14 },
+  modalEuro: { fontSize: 17, marginBottom: 12 },
+  modalAide: { fontSize: 12, lineHeight: 18, marginBottom: 14 },
   input: {
-    backgroundColor: "#F7F7F7",
     borderRadius: 13,
     padding: 16,
     fontSize: 17,
-    color: "#1A1A1A",
     marginBottom: 12,
   },
   paletteGrid: {
@@ -1259,9 +1329,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   swatch: { width: 36, height: 36, borderRadius: 18 },
-  swatchSelectionne: { borderWidth: 3, borderColor: "#1A1A1A" },
   btnSuivant: {
-    backgroundColor: PURPLE,
     borderRadius: 16,
     padding: 17,
     alignItems: "center",
@@ -1274,11 +1342,10 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 6,
   },
-  btnAnnulerTexte: { fontSize: 15, color: "#999", fontWeight: "600" },
+  btnAnnulerTexte: { fontSize: 15, fontWeight: "600" },
   questionFinanciere: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#1A1A1A",
     marginBottom: 16,
     textAlign: "center",
   },
@@ -1286,7 +1353,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
-    backgroundColor: "#F7F7F7",
     borderRadius: 16,
     padding: 16,
     marginBottom: 10,
@@ -1295,10 +1361,9 @@ const styles = StyleSheet.create({
   choixTitre: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#1A1A1A",
     marginBottom: 2,
   },
-  choixSousTitre: { fontSize: 12, color: "#999" },
+  choixSousTitre: { fontSize: 12 },
   categorieGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1309,9 +1374,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 20,
-    backgroundColor: "#F7F7F7",
   },
-  categorieChipActif: { backgroundColor: PURPLE },
-  categorieChipTexte: { fontSize: 13, color: "#999", fontWeight: "600" },
+  categorieChipTexte: { fontSize: 13, fontWeight: "600" },
   categorieChipTexteActif: { color: "#FFFFFF" },
 });

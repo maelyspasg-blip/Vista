@@ -10,12 +10,7 @@ import {
 } from "react-native";
 import Svg, { Circle, Line, Path, Text as SvgText } from "react-native-svg";
 import { useObjectifs } from "../store";
-
-const PURPLE = "#8B6FE8";
-const PURPLE_LIGHT = "#F0EEFF";
-const MINT = "#5DC8A0";
-const PEACH = "#F4956A";
-const BLEU = "#4A90D9";
+import { COULEURS, useTheme } from "../ThemeContext";
 
 const MOIS_LABELS = [
   "Jan",
@@ -46,10 +41,12 @@ function GraphiqueLignes({
   donneesReelles,
   donneesPrevisionnelles,
   labels,
+  couleurs: C,
 }: {
   donneesReelles: number[];
   donneesPrevisionnelles: number[];
   labels: string[];
+  couleurs: typeof COULEURS.clair;
 }) {
   const toutes = [...donneesReelles, ...donneesPrevisionnelles];
   const max = Math.max(...toutes, 1);
@@ -82,30 +79,30 @@ function GraphiqueLignes({
           y1={CHART_H - f * (CHART_H - 10) + 5}
           x2={CHART_W - PADDING_X}
           y2={CHART_H - f * (CHART_H - 10) + 5}
-          stroke="#F0EEF8"
+          stroke={C.separateur}
           strokeWidth={1}
         />
       ))}
       <Path
         d={pathReels}
-        stroke={MINT}
+        stroke={C.accent}
         strokeWidth={2.5}
         fill="none"
         strokeLinejoin="round"
       />
       {pointsReels.map((p, i) => (
-        <Circle key={`r${i}`} cx={p.x} cy={p.y} r={4} fill={MINT} />
+        <Circle key={`r${i}`} cx={p.x} cy={p.y} r={4} fill={C.accent} />
       ))}
       <Path
         d={pathPrevus}
-        stroke={PEACH}
+        stroke={C.peach}
         strokeWidth={2}
         fill="none"
         strokeDasharray="6,4"
         strokeLinejoin="round"
       />
       {pointsPrevus.map((p, i) => (
-        <Circle key={`p${i}`} cx={p.x} cy={p.y} r={3} fill={PEACH} />
+        <Circle key={`p${i}`} cx={p.x} cy={p.y} r={3} fill={C.peach} />
       ))}
       {labels.map((lbl, i) => (
         <SvgText
@@ -113,7 +110,7 @@ function GraphiqueLignes({
           x={PADDING_X + i * espacement}
           y={CHART_H + 18}
           fontSize={10}
-          fill="#999"
+          fill={C.texteMuted}
           textAnchor="middle"
         >
           {lbl}
@@ -125,6 +122,7 @@ function GraphiqueLignes({
 
 export default function Analytics() {
   const objStore = useObjectifs();
+  const { theme, couleurs: C } = useTheme();
   const [periode, setPeriode] = useState<Periode>("3mois");
   const [vue, setVue] = useState<Vue>("global");
   const [titoirOuvert, setTiroirOuvert] = useState(false);
@@ -312,11 +310,11 @@ export default function Analytics() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: C.fondPage }]}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.titre}>Stats</Text>
-          <Text style={styles.sousTitre}>
+          <Text style={[styles.titre, { color: C.texte }]}>Stats</Text>
+          <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
             {MOIS_LABELS[MOIS_ACTUEL]} {ANNEE_ACTUELLE}
           </Text>
         </View>
@@ -325,7 +323,11 @@ export default function Analytics() {
           {(["global", "categorie"] as Vue[]).map((v) => (
             <TouchableOpacity
               key={v}
-              style={[styles.chip, vue === v && styles.chipActif]}
+              style={[
+                styles.chip,
+                { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                vue === v && { backgroundColor: C.purple, borderColor: C.purple },
+              ]}
               onPress={() => {
                 setVue(v);
                 if (v === "categorie") setTiroirOuvert(true);
@@ -337,7 +339,11 @@ export default function Analytics() {
               activeOpacity={0.7}
             >
               <Text
-                style={[styles.chipTexte, vue === v && styles.chipTexteActif]}
+                style={[
+                  styles.chipTexte,
+                  { color: C.texteMuted },
+                  vue === v && styles.chipTexteActif,
+                ]}
               >
                 {v === "global"
                   ? "Global"
@@ -349,21 +355,34 @@ export default function Analytics() {
 
         {vue === "categorie" && (
           <TouchableOpacity
-            style={styles.tiroirBouton}
+            style={[
+              styles.tiroirBouton,
+              { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+            ]}
             onPress={() => setTiroirOuvert(!titoirOuvert)}
             activeOpacity={0.7}
           >
-            <Text style={styles.tiroirBoutonTexte}>
+            <Text style={[styles.tiroirBoutonTexte, { color: C.texte }]}>
               {categoriesSelectionnees.length === 0
                 ? "Sélectionner des catégories"
                 : `${categoriesSelectionnees.length} catégorie${categoriesSelectionnees.length > 1 ? "s" : ""} sélectionnée${categoriesSelectionnees.length > 1 ? "s" : ""}`}
             </Text>
-            <Text style={styles.tiroirChevron}>{titoirOuvert ? "▾" : "▸"}</Text>
+            <Text style={[styles.tiroirChevron, { color: C.texteMuted }]}>
+              {titoirOuvert ? "▾" : "▸"}
+            </Text>
           </TouchableOpacity>
         )}
 
         {vue === "categorie" && titoirOuvert && (
-          <View style={styles.tiroirContenu}>
+          <View
+            style={[
+              styles.tiroirContenu,
+              {
+                backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                borderColor: C.carteBorder,
+              },
+            ]}
+          >
             {objStore.enveloppes.map((env) => {
               const sel = categoriesSelectionnees.includes(env.id);
               return (
@@ -371,6 +390,7 @@ export default function Analytics() {
                   key={env.id}
                   style={[
                     styles.tiroirItem,
+                    { borderBottomColor: C.separateur },
                     sel && { backgroundColor: env.couleur + "22" },
                   ]}
                   onPress={() => toggleCategorie(env.id)}
@@ -382,7 +402,9 @@ export default function Analytics() {
                       { backgroundColor: env.couleur },
                     ]}
                   />
-                  <Text style={styles.tiroirNom}>{env.nom}</Text>
+                  <Text style={[styles.tiroirNom, { color: C.texte }]}>
+                    {env.nom}
+                  </Text>
                   {sel && (
                     <Text style={[styles.tiroirCoche, { color: env.couleur }]}>
                       ✓
@@ -397,7 +419,9 @@ export default function Analytics() {
                 onPress={() => setCategoriesSelectionnees([])}
                 activeOpacity={0.7}
               >
-                <Text style={styles.tiroirResetTexte}>Tout déselectionner</Text>
+                <Text style={[styles.tiroirResetTexte, { color: C.texteMuted }]}>
+                  Tout déselectionner
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -407,13 +431,21 @@ export default function Analytics() {
           {(["3mois", "6mois", "12mois"] as Periode[]).map((p) => (
             <TouchableOpacity
               key={p}
-              style={[styles.chip, periode === p && styles.chipActif]}
+              style={[
+                styles.chip,
+                { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                periode === p && {
+                  backgroundColor: C.purple,
+                  borderColor: C.purple,
+                },
+              ]}
               onPress={() => setPeriode(p)}
               activeOpacity={0.7}
             >
               <Text
                 style={[
                   styles.chipTexte,
+                  { color: C.texteMuted },
                   periode === p && styles.chipTexteActif,
                 ]}
               >
@@ -428,8 +460,17 @@ export default function Analytics() {
         </View>
 
         {pasSuffisammentDonnees && (
-          <View style={styles.banniereInfo}>
-            <Text style={styles.banniereInfoTexte}>
+          <View
+            style={[
+              styles.banniereInfo,
+              {
+                backgroundColor: theme === "sombre" ? C.carte : C.purpleLight,
+                borderWidth: theme === "sombre" ? 0.5 : 0,
+                borderColor: C.carteBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.banniereInfoTexte, { color: C.purpleText }]}>
               {nbMoisAvecDonnees === 1
                 ? `Données disponibles pour 1 mois seulement. Reviens dans ${nbMois - nbMoisAvecDonnees} mois pour une vue complète sur ${nbMois} mois.`
                 : `Données disponibles pour ${nbMoisAvecDonnees} mois sur ${nbMois}. La vue sera complète dans ${nbMois - nbMoisAvecDonnees} mois.`}
@@ -437,67 +478,114 @@ export default function Analytics() {
           </View>
         )}
 
-        <Text style={styles.sectionLabel}>Vue d'ensemble</Text>
+        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+          Vue d'ensemble
+        </Text>
         <View style={styles.kpiGrid}>
-          <View style={[styles.kpiCard, { backgroundColor: "#E8F8F2" }]}>
-            <Text style={[styles.kpiLabel, { color: MINT }]}>
+          <View
+            style={[
+              styles.kpiCard,
+              {
+                backgroundColor: theme === "sombre" ? C.carte : C.accentLight,
+                borderWidth: theme === "sombre" ? 0.5 : 0,
+                borderColor: C.carteBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.kpiLabel, { color: C.accent }]}>
               DÉPENSE MOY. / JOUR
             </Text>
-            <Text style={[styles.kpiVal, { color: "#0F6E56" }]}>
+            <Text style={[styles.kpiVal, { color: C.accentText }]}>
               {depenseMoyJour} €
             </Text>
             <Text
               style={[
                 styles.kpiDelta,
-                { color: deltaDepMoy <= 0 ? "#0F6E56" : "#993C1D" },
+                { color: deltaDepMoy <= 0 ? C.accentText : C.peachText },
               ]}
             >
               {deltaDepMoy > 0 ? "↑" : "↓"} {Math.abs(deltaDepMoy)}% vs mois
               dernier
             </Text>
           </View>
-          <View style={[styles.kpiCard, { backgroundColor: "#FFF0EA" }]}>
-            <Text style={[styles.kpiLabel, { color: PEACH }]}>
+          <View
+            style={[
+              styles.kpiCard,
+              {
+                backgroundColor: theme === "sombre" ? C.carte : C.peachLight,
+                borderWidth: theme === "sombre" ? 0.5 : 0,
+                borderColor: C.carteBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.kpiLabel, { color: C.peach }]}>
               TAUX D'ÉPARGNE
             </Text>
-            <Text style={[styles.kpiVal, { color: "#993C1D" }]}>
+            <Text style={[styles.kpiVal, { color: C.peachText }]}>
               {tauxEpargne}%
             </Text>
-            <Text style={[styles.kpiDelta, { color: "#993C1D" }]}>
+            <Text style={[styles.kpiDelta, { color: C.peachText }]}>
               Ce mois-ci
             </Text>
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>Dépensé vs dépenses prévues</Text>
-        <View style={styles.chartCard}>
+        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+          Dépensé vs dépenses prévues
+        </Text>
+        <View
+          style={[
+            styles.chartCard,
+            {
+              backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+              borderColor: C.carteBorder,
+            },
+          ]}
+        >
           <GraphiqueLignes
             donneesReelles={donneesReelles}
             donneesPrevisionnelles={donneesPrevisionnelles}
             labels={labels}
+            couleurs={C}
           />
           <View style={styles.legendeRow}>
             <View style={styles.legendeItem}>
-              <View style={[styles.legendeDot, { backgroundColor: MINT }]} />
-              <Text style={styles.legendeTexte}>Dépensé</Text>
+              <View
+                style={[styles.legendeDot, { backgroundColor: C.accent }]}
+              />
+              <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
+                Dépensé
+              </Text>
             </View>
             <View style={styles.legendeItem}>
-              <View style={[styles.legendeDot, { backgroundColor: PEACH }]} />
-              <Text style={styles.legendeTexte}>Dépenses prévues</Text>
+              <View
+                style={[styles.legendeDot, { backgroundColor: C.peach }]}
+              />
+              <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
+                Dépenses prévues
+              </Text>
             </View>
           </View>
         </View>
 
-        <View style={styles.compareCard}>
+        <View
+          style={[
+            styles.compareCard,
+            {
+              backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+              borderColor: C.carteBorder,
+            },
+          ]}
+        >
           <View style={styles.compareHead}>
-            <Text style={styles.compareTitle}>
+            <Text style={[styles.compareTitle, { color: C.texte }]}>
               {MOIS_LABELS[MOIS_ACTUEL]} vs{" "}
               {MOIS_LABELS[moisPrecedent.getMonth()]}
             </Text>
             <Text
               style={[
                 styles.compareDelta,
-                { color: deltaTotal <= 0 ? "#0F6E56" : "#993C1D" },
+                { color: deltaTotal <= 0 ? C.accentText : C.peachText },
               ]}
             >
               {deltaTotal > 0 ? "+" : ""}
@@ -509,10 +597,15 @@ export default function Analytics() {
               env.budget > 0 ? Math.round((env.depense / env.budget) * 100) : 0;
             return (
               <View key={env.id} style={styles.cbarRow}>
-                <Text style={styles.cbarLabel} numberOfLines={1}>
+                <Text
+                  style={[styles.cbarLabel, { color: C.texte }]}
+                  numberOfLines={1}
+                >
                   {env.nom}
                 </Text>
-                <View style={styles.cbarTrack}>
+                <View
+                  style={[styles.cbarTrack, { backgroundColor: C.separateur }]}
+                >
                   <View
                     style={[
                       styles.cbarFill,
@@ -523,72 +616,123 @@ export default function Analytics() {
                     ]}
                   />
                 </View>
-                <Text style={styles.cbarVal}>{env.depense} €</Text>
+                <Text style={[styles.cbarVal, { color: C.texte }]}>
+                  {env.depense} €
+                </Text>
               </View>
             );
           })}
           {depenseMoisPrec > 0 && (
-            <Text style={styles.compareFooter}>
+            <Text style={[styles.compareFooter, { color: C.texteMuted }]}>
               Total ce mois : {depenseMoisActuel} € vs {depenseMoisPrec} € le
               mois dernier
             </Text>
           )}
         </View>
 
-        <Text style={styles.sectionLabel}>Épargne dans le temps</Text>
-        <View style={styles.chartCard}>
+        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+          Épargne dans le temps
+        </Text>
+        <View
+          style={[
+            styles.chartCard,
+            {
+              backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+              borderColor: C.carteBorder,
+            },
+          ]}
+        >
           <View style={styles.barresEpargne}>
             {donneesEpargne.map((val, i) => {
               const maxE = Math.max(...donneesEpargne, 1);
               const h = Math.round((val / maxE) * 90);
               return (
                 <View key={i} style={styles.barreEpargneCol}>
-                  <Text style={[styles.barreEpargneVal, { color: BLEU }]}>
+                  <Text
+                    style={[styles.barreEpargneVal, { color: C.bleuGris }]}
+                  >
                     {val > 0 ? `${val}€` : ""}
                   </Text>
-                  <View style={styles.barreEpargneTrack}>
+                  <View
+                    style={[
+                      styles.barreEpargneTrack,
+                      { backgroundColor: C.separateur },
+                    ]}
+                  >
                     <View
                       style={[
                         styles.barreEpargneRemplissage,
-                        { height: h, backgroundColor: BLEU },
+                        { height: h, backgroundColor: C.bleuGris },
                       ]}
                     />
                   </View>
-                  <Text style={styles.barreEpargneLabel}>{labels[i]}</Text>
+                  <Text
+                    style={[styles.barreEpargneLabel, { color: C.texteMuted }]}
+                  >
+                    {labels[i]}
+                  </Text>
                 </View>
               );
             })}
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>Ce qu'il faut retenir</Text>
-        <View style={styles.insightCard}>
+        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+          Ce qu'il faut retenir
+        </Text>
+        <View
+          style={[
+            styles.insightCard,
+            {
+              backgroundColor: theme === "sombre" ? C.carte : C.purpleLight,
+              borderWidth: theme === "sombre" ? 0.5 : 0,
+              borderColor: C.carteBorder,
+            },
+          ]}
+        >
           {insights.map((txt, i) => (
             <View
               key={i}
-              style={[styles.insightItem, i > 0 && styles.insightItemBorder]}
+              style={[
+                styles.insightItem,
+                i > 0 && [
+                  styles.insightItemBorder,
+                  { borderTopColor: C.separateur },
+                ],
+              ]}
             >
-              <View style={styles.insightDot} />
-              <Text style={styles.insightTexte}>{txt}</Text>
+              <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
+              <Text style={[styles.insightTexte, { color: C.purpleText }]}>
+                {txt}
+              </Text>
             </View>
           ))}
         </View>
 
         {topDepensesTri.length > 0 && (
           <>
-            <Text style={styles.sectionLabel}>
+            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
               Top dépenses — {nbMois} derniers mois
             </Text>
             {topDepensesTri.map((dep, i) => (
-              <View key={i} style={styles.topItem}>
+              <View
+                key={i}
+                style={[styles.topItem, { borderBottomColor: C.separateur }]}
+              >
                 <View
                   style={[styles.topRank, { backgroundColor: dep.couleur }]}
                 >
                   <Text style={styles.topRankTexte}>{i + 1}</Text>
                 </View>
-                <Text style={styles.topNom}>{dep.nom}</Text>
-                <Text style={styles.topMois}>{dep.mois}</Text>
-                <Text style={styles.topMontant}>{dep.montant} €</Text>
+                <Text style={[styles.topNom, { color: C.texte }]}>
+                  {dep.nom}
+                </Text>
+                <Text style={[styles.topMois, { color: C.texteMuted }]}>
+                  {dep.mois}
+                </Text>
+                <Text style={[styles.topMontant, { color: C.texte }]}>
+                  {dep.montant} €
+                </Text>
               </View>
             ))}
           </>
@@ -619,7 +763,7 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: "#EEE",
   },
-  chipActif: { backgroundColor: PURPLE, borderColor: PURPLE },
+  chipActif: { backgroundColor: "#8B6FE8", borderColor: "#8B6FE8" },
   chipTexte: { fontSize: 12, fontWeight: "600", color: "#999" },
   chipTexteActif: { color: "#FFFFFF" },
   tiroirBouton: {
@@ -657,7 +801,7 @@ const styles = StyleSheet.create({
   tiroirReset: { padding: 14, alignItems: "center" },
   tiroirResetTexte: { fontSize: 13, color: "#999", fontWeight: "600" },
   banniereInfo: {
-    backgroundColor: PURPLE_LIGHT,
+    backgroundColor: "#F0EEFF",
     borderRadius: 13,
     padding: 14,
     marginBottom: 10,
@@ -760,7 +904,7 @@ const styles = StyleSheet.create({
   },
   barreEpargneRemplissage: { width: "100%", borderRadius: 6 },
   barreEpargneLabel: { fontSize: 10, color: "#999", marginTop: 5 },
-  insightCard: { backgroundColor: PURPLE_LIGHT, borderRadius: 16, padding: 18 },
+  insightCard: { backgroundColor: "#F0EEFF", borderRadius: 16, padding: 18 },
   insightItem: { flexDirection: "row", gap: 10, paddingVertical: 10 },
   insightItemBorder: {
     borderTopWidth: 0.5,
@@ -770,7 +914,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: PURPLE,
+    backgroundColor: "#8B6FE8",
     marginTop: 6,
     flexShrink: 0,
   },

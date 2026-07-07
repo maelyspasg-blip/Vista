@@ -12,25 +12,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useTheme } from "../ThemeContext";
 import { useObjectifs } from "../store";
-
-const PURPLE = "#8B6FE8";
-const PURPLE_LIGHT = "#F0EEFF";
-const MINT = "#5DC8A0";
-const MINT_LIGHT = "#E8F8F2";
-const PEACH = "#F4956A";
-const PEACH_LIGHT = "#FFF0EA";
-const ROUGE = "#E24B4A";
-const VERT = "#1D9E75";
 
 const ACCESSORY_ID = "numericDone";
 
-function bgClair(couleur: string) {
-  return couleur + "22";
-}
-
 export default function Budget() {
   const objStore = useObjectifs();
+  const { couleurs: C } = useTheme();
 
   useFocusEffect(
     useCallback(() => {
@@ -39,7 +28,6 @@ export default function Budget() {
   );
 
   const [enveloppeOuverte, setEnveloppeOuverte] = useState<number | null>(null);
-
   const [modalAjoutVisible, setModalAjoutVisible] = useState(false);
   const [nomTx, setNomTx] = useState("");
   const [montantTx, setMontantTx] = useState("");
@@ -97,11 +85,11 @@ export default function Budget() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View style={[styles.container, { backgroundColor: C.fondPage }]}>
+      <View style={[styles.header, { backgroundColor: C.fondPage }]}>
         <View>
-          <Text style={styles.titre}>Budget</Text>
-          <Text style={styles.sousTitre}>
+          <Text style={[styles.titre, { color: C.texte }]}>Budget</Text>
+          <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
             {new Date().toLocaleDateString("fr-FR", {
               month: "long",
               year: "numeric",
@@ -111,16 +99,23 @@ export default function Budget() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        <View style={styles.heroCard}>
-          <Text style={styles.heroLabel}>TOTAL DÉPENSÉ</Text>
-          <Text style={styles.heroAmount}>{totalReel} €</Text>
-          <Text style={styles.heroSub}>/ {budgetTotal} € budget mensuel</Text>
-          <View style={styles.progressBg}>
+        <View style={[styles.heroCard, { backgroundColor: C.bleuGrisLight }]}>
+          <Text style={[styles.heroLabel, { color: C.bleuGris }]}>
+            TOTAL DÉPENSÉ
+          </Text>
+          <Text style={[styles.heroAmount, { color: C.texte }]}>
+            {totalReel} €
+          </Text>
+          <Text style={[styles.heroSub, { color: C.texteMuted }]}>
+            / {budgetTotal} € budget mensuel
+          </Text>
+          <View style={[styles.progressBg, { backgroundColor: C.separateur }]}>
             <View
               style={[
                 styles.progressFill,
                 {
                   width: `${budgetTotal > 0 ? Math.min((totalReel / budgetTotal) * 100, 100) : 0}%`,
+                  backgroundColor: C.bleuGris,
                 },
               ]}
             />
@@ -128,8 +123,13 @@ export default function Budget() {
         </View>
 
         {depenseDominante && depenseDominante.depense > 0 && (
-          <View style={styles.insightBanner}>
-            <Text style={styles.insightTexte}>
+          <View
+            style={[
+              styles.insightBanner,
+              { backgroundColor: C.carte, borderColor: C.carteBorder },
+            ]}
+          >
+            <Text style={[styles.insightTexte, { color: C.texte }]}>
               💡 {depenseDominante.nom} représente ta plus grosse dépense ce
               mois-ci
             </Text>
@@ -137,28 +137,32 @@ export default function Budget() {
         )}
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>TES CATÉGORIES</Text>
+          <Text style={[styles.sectionTitle, { color: C.texteMuted }]}>
+            TES CATÉGORIES
+          </Text>
           <TouchableOpacity
-            style={styles.btnAjouter}
+            style={[styles.btnAjouter, { backgroundColor: C.accentLight }]}
             onPress={() => ouvrirAjout()}
             activeOpacity={0.7}
           >
-            <Text style={styles.btnAjouterTexte}>+ Ajouter</Text>
+            <Text style={[styles.btnAjouterTexte, { color: C.accentText }]}>
+              + Ajouter
+            </Text>
           </TouchableOpacity>
         </View>
 
         {paiementsDuMois.map((p) => (
           <View
             key={`paye-${p.id}`}
-            style={[styles.envCard, { backgroundColor: bgClair(p.couleur) }]}
+            style={[styles.envCard, { backgroundColor: p.couleur + "22" }]}
           >
             <View style={styles.envRow}>
-              <Text style={styles.envNom}>{p.nom}</Text>
+              <Text style={[styles.envNom, { color: C.texte }]}>{p.nom}</Text>
               <Text style={[styles.envMontant, { color: p.couleur }]}>
                 {p.montant} € / {p.montant} €
               </Text>
             </View>
-            <View style={styles.envBarBg}>
+            <View style={[styles.envBarBg, { backgroundColor: C.separateur }]}>
               <View
                 style={[
                   styles.envBarFill,
@@ -179,17 +183,16 @@ export default function Budget() {
           return (
             <View
               key={env.id}
-              style={[
-                styles.envCard,
-                { backgroundColor: bgClair(env.couleur) },
-              ]}
+              style={[styles.envCard, { backgroundColor: env.couleur + "22" }]}
             >
               <TouchableOpacity
                 activeOpacity={0.7}
                 onPress={() => toggleEnveloppe(env.id)}
               >
                 <View style={styles.envRow}>
-                  <Text style={styles.envNom}>{env.nom}</Text>
+                  <Text style={[styles.envNom, { color: C.texte }]}>
+                    {env.nom}
+                  </Text>
                   <View style={styles.envRowRight}>
                     <Text style={[styles.envMontant, { color: env.couleur }]}>
                       {env.depense} € / {env.budget} €
@@ -199,7 +202,9 @@ export default function Budget() {
                     </Text>
                   </View>
                 </View>
-                <View style={styles.envBarBg}>
+                <View
+                  style={[styles.envBarBg, { backgroundColor: C.separateur }]}
+                >
                   <View
                     style={[
                       styles.envBarFill,
@@ -210,17 +215,25 @@ export default function Budget() {
               </TouchableOpacity>
 
               {estOuverte && (
-                <View style={styles.txListe}>
+                <View
+                  style={[styles.txListe, { borderTopColor: C.separateur }]}
+                >
                   {txEnveloppe.length === 0 ? (
-                    <Text style={styles.txVide}>
+                    <Text style={[styles.txVide, { color: C.texteMuted }]}>
                       Aucune dépense enregistrée
                     </Text>
                   ) : (
                     txEnveloppe.map((tx) => (
                       <View key={tx.id} style={styles.txLigne}>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.txNom}>{tx.nom}</Text>
-                          <Text style={styles.txDate}>{tx.date}</Text>
+                          <Text style={[styles.txNom, { color: C.texte }]}>
+                            {tx.nom}
+                          </Text>
+                          <Text
+                            style={[styles.txDate, { color: C.texteMuted }]}
+                          >
+                            {tx.date}
+                          </Text>
                         </View>
                         <Text
                           style={[styles.txMontant, { color: env.couleur }]}
@@ -231,7 +244,14 @@ export default function Budget() {
                           onPress={() => objStore.supprimerTransaction(tx.id)}
                           style={styles.txSupprimer}
                         >
-                          <Text style={styles.txSupprimerTexte}>✕</Text>
+                          <Text
+                            style={[
+                              styles.txSupprimerTexte,
+                              { color: C.texteMuted },
+                            ]}
+                          >
+                            ✕
+                          </Text>
                         </TouchableOpacity>
                       </View>
                     ))
@@ -254,11 +274,22 @@ export default function Budget() {
           );
         })}
 
-        <Text style={styles.sectionTitle}>À VENIR CE MOIS-CI</Text>
+        <Text
+          style={[styles.sectionTitle, { color: C.texteMuted, marginTop: 8 }]}
+        >
+          À VENIR CE MOIS-CI
+        </Text>
 
         {enveloppesAVenir.length === 0 ? (
-          <View style={styles.videContainer}>
-            <Text style={styles.videTexte}>Rien à venir pour le moment</Text>
+          <View
+            style={[
+              styles.videContainer,
+              { backgroundColor: C.carte, borderColor: C.carteBorder },
+            ]}
+          >
+            <Text style={[styles.videTexte, { color: C.texteMuted }]}>
+              Rien à venir pour le moment
+            </Text>
           </View>
         ) : (
           enveloppesAVenir.map((env) => {
@@ -278,7 +309,7 @@ export default function Budget() {
                 key={env.id}
                 style={[
                   styles.fixeCard,
-                  { backgroundColor: bgClair(env.couleur) },
+                  { backgroundColor: env.couleur + "22" },
                 ]}
               >
                 <View
@@ -294,23 +325,23 @@ export default function Budget() {
                     </Text>
                   </View>
                   <View style={styles.fixeRowBottom}>
-                    <Text style={styles.fixeMeta}>
+                    <Text style={[styles.fixeMeta, { color: C.texteMuted }]}>
                       {dateAffichee}
                       {env.repeteChaqueMois ? " · tous les mois" : ""}
                     </Text>
                     <View
                       style={[
                         styles.statutBadge,
-                        { backgroundColor: PURPLE_LIGHT },
+                        { backgroundColor: C.bleuGrisLight },
                       ]}
                     >
-                      <Text style={[styles.statutTexte, { color: PURPLE }]}>
+                      <Text style={[styles.statutTexte, { color: C.bleuGris }]}>
                         À venir
                       </Text>
                     </View>
                   </View>
                   {estLourd && (
-                    <Text style={styles.alertePoids}>
+                    <Text style={[styles.alertePoids, { color: C.peach }]}>
                       ⚠️ {pctBudget}% du budget total
                     </Text>
                   )}
@@ -325,8 +356,12 @@ export default function Budget() {
 
       {Platform.OS === "ios" && (
         <InputAccessoryView nativeID={ACCESSORY_ID}>
-          <View style={styles.accessoryBar}>
-            <Text style={styles.accessoryTexte}>Terminé</Text>
+          <View
+            style={[styles.accessoryBar, { backgroundColor: C.fondSecondaire }]}
+          >
+            <Text style={[styles.accessoryTexte, { color: C.accent }]}>
+              Terminé
+            </Text>
           </View>
         </InputAccessoryView>
       )}
@@ -342,45 +377,66 @@ export default function Budget() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={styles.modalOverlayTouch}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitre}>Nouvelle dépense</Text>
+            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+              <Text style={[styles.modalTitre, { color: C.texte }]}>
+                Nouvelle dépense
+              </Text>
 
               <ScrollView
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
-                <Text style={styles.modalLabel}>Nom de la dépense</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                  Nom de la dépense
+                </Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    { backgroundColor: C.fondSecondaire, color: C.texte },
+                  ]}
                   placeholder="Ex : Carrefour, Cinéma..."
-                  placeholderTextColor="#CCC"
+                  placeholderTextColor={C.texteMuted}
                   value={nomTx}
                   onChangeText={setNomTx}
                   returnKeyType="done"
                 />
 
-                <Text style={styles.modalLabel}>Montant</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                  Montant
+                </Text>
                 <View style={styles.modalInputRow}>
                   <TextInput
-                    style={[styles.input, { flex: 1 }]}
+                    style={[
+                      styles.input,
+                      {
+                        flex: 1,
+                        backgroundColor: C.fondSecondaire,
+                        color: C.texte,
+                      },
+                    ]}
                     placeholder="0"
-                    placeholderTextColor="#CCC"
+                    placeholderTextColor={C.texteMuted}
                     keyboardType="numeric"
                     value={montantTx}
                     onChangeText={setMontantTx}
                     returnKeyType="done"
                     inputAccessoryViewID={ACCESSORY_ID}
                   />
-                  <Text style={styles.modalEuro}>€</Text>
+                  <Text style={[styles.modalEuro, { color: C.texteMuted }]}>
+                    €
+                  </Text>
                 </View>
 
-                <Text style={styles.modalLabel}>Catégorie</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                  Catégorie
+                </Text>
                 <View style={styles.envChoixGrid}>
                   {enveloppesCourantes.map((env) => (
                     <TouchableOpacity
                       key={env.id}
                       style={[
                         styles.envChoixChip,
+                        { backgroundColor: C.fondSecondaire },
                         enveloppeTx === env.id && {
                           backgroundColor: env.couleur,
                         },
@@ -391,6 +447,7 @@ export default function Budget() {
                       <Text
                         style={[
                           styles.envChoixTexte,
+                          { color: C.texteMuted },
                           enveloppeTx === env.id && { color: "#FFFFFF" },
                         ]}
                       >
@@ -401,7 +458,7 @@ export default function Budget() {
                 </View>
 
                 <TouchableOpacity
-                  style={styles.btnValider}
+                  style={[styles.btnValider, { backgroundColor: C.hero }]}
                   onPress={validerAjout}
                   activeOpacity={0.7}
                 >
@@ -412,7 +469,11 @@ export default function Budget() {
                   onPress={() => setModalAjoutVisible(false)}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.btnAnnulerTexte}>Annuler</Text>
+                  <Text
+                    style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}
+                  >
+                    Annuler
+                  </Text>
                 </TouchableOpacity>
               </ScrollView>
             </View>
@@ -424,7 +485,7 @@ export default function Budget() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 20 },
+  container: { flex: 1, paddingHorizontal: 20 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -432,50 +493,26 @@ const styles = StyleSheet.create({
     marginTop: 60,
     marginBottom: 16,
   },
-  titre: {
-    fontSize: 23,
-    fontWeight: "700",
-    color: "#1A1A1A",
-    letterSpacing: 1,
-  },
-  sousTitre: { fontSize: 14, color: "#999", marginTop: 2 },
-  heroCard: {
-    backgroundColor: PURPLE_LIGHT,
-    borderRadius: 22,
-    padding: 24,
-    marginBottom: 16,
-  },
+  titre: { fontSize: 23, fontWeight: "700", letterSpacing: 1 },
+  sousTitre: { fontSize: 14, marginTop: 2 },
+  heroCard: { borderRadius: 22, padding: 24, marginBottom: 16 },
   heroLabel: {
     fontSize: 11,
-    color: PURPLE,
     letterSpacing: 1,
     marginBottom: 8,
     fontWeight: "700",
   },
-  heroAmount: {
-    fontSize: 42,
-    fontWeight: "700",
-    color: "#5A3DC4",
-    marginBottom: 4,
-  },
-  heroSub: { fontSize: 13, color: "#999", marginBottom: 16 },
-  progressBg: {
-    height: 6,
-    backgroundColor: "rgba(139,111,232,0.2)",
-    borderRadius: 3,
-    position: "relative",
-    overflow: "hidden",
-  },
-  progressFill: { height: "100%", backgroundColor: PURPLE, borderRadius: 3 },
+  heroAmount: { fontSize: 42, fontWeight: "700", marginBottom: 4 },
+  heroSub: { fontSize: 13, marginBottom: 16 },
+  progressBg: { height: 6, borderRadius: 3, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 3 },
   insightBanner: {
-    backgroundColor: "#FAFAFA",
     borderRadius: 13,
     padding: 14,
     marginBottom: 16,
     borderWidth: 0.5,
-    borderColor: "#EEE",
   },
-  insightTexte: { fontSize: 13, color: "#666", lineHeight: 19 },
+  insightTexte: { fontSize: 13, lineHeight: 19 },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -485,18 +522,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#999",
     letterSpacing: 1,
     marginBottom: 12,
     marginTop: 4,
   },
-  btnAjouter: {
-    backgroundColor: PURPLE_LIGHT,
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  btnAjouterTexte: { fontSize: 12, fontWeight: "700", color: PURPLE },
+  btnAjouter: { borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },
+  btnAjouterTexte: { fontSize: 12, fontWeight: "700" },
   envCard: { borderRadius: 16, padding: 18, marginBottom: 10 },
   envRow: {
     flexDirection: "row",
@@ -504,40 +535,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 11,
   },
-  envNom: { fontSize: 16, fontWeight: "700", color: "#1A1A1A" },
+  envNom: { fontSize: 16, fontWeight: "700" },
   envRowRight: { flexDirection: "row", alignItems: "center", gap: 8 },
   envMontant: { fontSize: 14, fontWeight: "700" },
   chevron: { fontSize: 14, fontWeight: "700" },
-  envBarBg: {
-    height: 6,
-    backgroundColor: "rgba(0,0,0,0.08)",
-    borderRadius: 3,
-    overflow: "hidden",
-  },
+  envBarBg: { height: 6, borderRadius: 3, overflow: "hidden" },
   envBarFill: { height: "100%", borderRadius: 3 },
-  txListe: {
-    marginTop: 14,
-    paddingTop: 14,
-    borderTopWidth: 0.5,
-    borderTopColor: "rgba(0,0,0,0.08)",
-  },
-  txVide: {
-    fontSize: 13,
-    color: "#AAA",
-    textAlign: "center",
-    paddingVertical: 10,
-  },
+  txListe: { marginTop: 14, paddingTop: 14, borderTopWidth: 0.5 },
+  txVide: { fontSize: 13, textAlign: "center", paddingVertical: 10 },
   txLigne: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 8,
     gap: 8,
   },
-  txNom: { fontSize: 13, fontWeight: "600", color: "#1A1A1A" },
-  txDate: { fontSize: 11, color: "#999" },
+  txNom: { fontSize: 13, fontWeight: "600" },
+  txDate: { fontSize: 11 },
   txMontant: { fontSize: 13, fontWeight: "700" },
   txSupprimer: { padding: 4 },
-  txSupprimerTexte: { fontSize: 13, color: "#CCC" },
+  txSupprimerTexte: { fontSize: 13 },
   btnAjouterIci: {
     borderRadius: 12,
     padding: 11,
@@ -546,13 +562,13 @@ const styles = StyleSheet.create({
   },
   btnAjouterIciTexte: { fontSize: 13, fontWeight: "700", color: "#FFFFFF" },
   videContainer: {
-    backgroundColor: "#FAFAFA",
     borderRadius: 16,
     padding: 20,
     alignItems: "center",
     marginBottom: 10,
+    borderWidth: 0.5,
   },
-  videTexte: { fontSize: 13, color: "#BBB" },
+  videTexte: { fontSize: 13 },
   fixeCard: {
     flexDirection: "row",
     borderRadius: 16,
@@ -575,10 +591,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 2,
   },
-  fixeMeta: { fontSize: 12, color: "#999" },
+  fixeMeta: { fontSize: 12 },
   statutBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 20 },
   statutTexte: { fontSize: 11, fontWeight: "600" },
-  alertePoids: { fontSize: 11, color: PEACH, marginTop: 6, fontWeight: "600" },
+  alertePoids: { fontSize: 11, marginTop: 6, fontWeight: "600" },
   modalOverlay: { flex: 1, justifyContent: "flex-end" },
   modalOverlayTouch: {
     flex: 1,
@@ -586,52 +602,32 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   modalCard: {
-    backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     padding: 26,
     paddingBottom: 40,
     maxHeight: "90%",
   },
-  modalTitre: {
-    fontSize: 21,
-    fontWeight: "700",
-    color: "#1A1A1A",
-    marginBottom: 20,
-  },
+  modalTitre: { fontSize: 21, fontWeight: "700", marginBottom: 20 },
   modalLabel: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#999",
     letterSpacing: 0.5,
     marginBottom: 9,
     marginTop: 6,
   },
   modalInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  modalEuro: { fontSize: 17, color: "#999", marginBottom: 12 },
-  input: {
-    backgroundColor: "#F7F7F7",
-    borderRadius: 13,
-    padding: 16,
-    fontSize: 17,
-    color: "#1A1A1A",
-    marginBottom: 12,
-  },
+  modalEuro: { fontSize: 17, marginBottom: 12 },
+  input: { borderRadius: 13, padding: 16, fontSize: 17, marginBottom: 12 },
   envChoixGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
     marginBottom: 6,
   },
-  envChoixChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 20,
-    backgroundColor: "#F7F7F7",
-  },
-  envChoixTexte: { fontSize: 13, color: "#999", fontWeight: "600" },
+  envChoixChip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20 },
+  envChoixTexte: { fontSize: 13, fontWeight: "600" },
   btnValider: {
-    backgroundColor: PURPLE,
     borderRadius: 16,
     padding: 17,
     alignItems: "center",
@@ -644,13 +640,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 6,
   },
-  btnAnnulerTexte: { fontSize: 15, color: "#999", fontWeight: "600" },
+  btnAnnulerTexte: { fontSize: 15, fontWeight: "600" },
   accessoryBar: {
-    backgroundColor: "#F7F7F7",
     padding: 10,
     alignItems: "flex-end",
     borderTopWidth: 0.5,
     borderTopColor: "#DDD",
   },
-  accessoryTexte: { color: PURPLE, fontSize: 17, fontWeight: "700" },
+  accessoryTexte: { fontSize: 17, fontWeight: "700" },
 });

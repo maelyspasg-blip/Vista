@@ -17,15 +17,7 @@ import {
 import { Calendar } from "react-native-calendars";
 import Svg, { Circle } from "react-native-svg";
 import { Enveloppe, useObjectifs } from "../store";
-
-const PURPLE = "#8B6FE8";
-const PURPLE_LIGHT = "#F0EEFF";
-const MINT = "#5DC8A0";
-const MINT_LIGHT = "#E8F8F2";
-const PEACH = "#F4956A";
-const PEACH_LIGHT = "#FFF0EA";
-const ROUGE_LIGHT = "#FCEBEB";
-const BLEU = "#4A90D9";
+import { COULEURS, useTheme } from "../ThemeContext";
 
 const PALETTE_COULEURS = [
   "#5DC8A0",
@@ -50,7 +42,13 @@ function bgClair(couleur: string) {
   return couleur + "22";
 }
 
-function DonutChart({ data }: { data: { couleur: string; valeur: number }[] }) {
+function DonutChart({
+  data,
+  couleurs: C,
+}: {
+  data: { couleur: string; valeur: number }[];
+  couleurs: typeof COULEURS.clair;
+}) {
   const total = data.reduce((acc, d) => acc + d.valeur, 0);
   const taille = 140;
   const rayon = 55;
@@ -73,12 +71,14 @@ function DonutChart({ data }: { data: { couleur: string; valeur: number }[] }) {
             cx={centre}
             cy={centre}
             r={rayon}
-            stroke="#EEEEEE"
+            stroke={C.separateur}
             strokeWidth={epaisseur}
             fill="none"
           />
         </Svg>
-        <Text style={{ position: "absolute", fontSize: 13, color: "#BBB" }}>
+        <Text
+          style={{ position: "absolute", fontSize: 13, color: C.texteMuted }}
+        >
           Aucune dépense
         </Text>
       </View>
@@ -123,10 +123,10 @@ function DonutChart({ data }: { data: { couleur: string; valeur: number }[] }) {
         ))}
       </Svg>
       <View style={{ position: "absolute", alignItems: "center" }}>
-        <Text style={{ fontSize: 19, fontWeight: "700", color: "#1A1A1A" }}>
+        <Text style={{ fontSize: 19, fontWeight: "700", color: C.texte }}>
           {total} €
         </Text>
-        <Text style={{ fontSize: 11, color: "#999" }}>dépensé</Text>
+        <Text style={{ fontSize: 11, color: C.texteMuted }}>dépensé</Text>
       </View>
     </View>
   );
@@ -136,6 +136,8 @@ const ACCESSORY_ID = "numericDone";
 
 export default function Dashboard() {
   const objStore = useObjectifs();
+  const { theme, couleurs, toggleTheme } = useTheme();
+  const C = couleurs;
 
   useFocusEffect(
     useCallback(() => {
@@ -374,35 +376,60 @@ export default function Dashboard() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
+    <View style={{ flex: 1, backgroundColor: C.fondPage }}>
       <ScrollView
-        style={styles.container}
+        style={[styles.container, { backgroundColor: C.fondPage }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: C.fondPage }]}>
           <View>
-            <Text style={styles.appName}>VISTA</Text>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.appName, { color: C.texte }]}>VISTA</Text>
+            <Text style={[styles.subtitle, { color: C.texteMuted }]}>
               {new Date().toLocaleDateString("fr-FR", {
                 month: "long",
                 year: "numeric",
               })}
             </Text>
           </View>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>M</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <TouchableOpacity
+              style={[
+                styles.themeBouton,
+                { backgroundColor: C.iconeBoutonFond },
+              ]}
+              onPress={toggleTheme}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={theme === "clair" ? "moon-outline" : "sunny-outline"}
+                size={18}
+                color={C.iconeBouton}
+              />
+            </TouchableOpacity>
+            <View style={[styles.avatar, { backgroundColor: C.hero }]}>
+              <Text style={styles.avatarText}>M</Text>
+            </View>
           </View>
         </View>
 
-        <View style={styles.hero}>
+        <View
+          style={[
+            styles.hero,
+            {
+              backgroundColor: theme === "sombre" ? C.carte : C.purple,
+              borderWidth: theme === "sombre" ? 0.5 : 0,
+              borderColor: C.carteBorder,
+            },
+          ]}
+        >
           <Text style={styles.heroLabel}>DÉPENSÉ CE MOIS</Text>
           <Text style={styles.heroAmount}>{totalDepense} €</Text>
           <View style={styles.barBg}>
             <View
               style={[
                 styles.barFill,
-                { width: `${pctUtilise}%`, backgroundColor: MINT },
+                { width: `${pctUtilise}%`, backgroundColor: C.accent },
               ]}
             />
             {objStore.epargneMois > 0 && (
@@ -412,7 +439,7 @@ export default function Dashboard() {
                   {
                     width: `${pctEpargne}%`,
                     left: `${pctUtilise}%`,
-                    backgroundColor: BLEU,
+                    backgroundColor: C.bleuGris,
                   },
                 ]}
               />
@@ -421,7 +448,7 @@ export default function Dashboard() {
           <View style={styles.heroLegende}>
             <View style={styles.heroLegendeItem}>
               <View
-                style={[styles.heroLegendeDot, { backgroundColor: MINT }]}
+                style={[styles.heroLegendeDot, { backgroundColor: C.accent }]}
               />
               <Text style={styles.heroSub}>
                 Dépenses {totalDepenseEnveloppes} €
@@ -430,7 +457,10 @@ export default function Dashboard() {
             {objStore.epargneMois > 0 && (
               <View style={styles.heroLegendeItem}>
                 <View
-                  style={[styles.heroLegendeDot, { backgroundColor: BLEU }]}
+                  style={[
+                    styles.heroLegendeDot,
+                    { backgroundColor: C.bleuGris },
+                  ]}
                 />
                 <Text style={styles.heroSub}>
                   Épargne {objStore.epargneMois} €
@@ -467,20 +497,23 @@ export default function Dashboard() {
             <View
               style={[
                 styles.barSegment,
-                { width: `${pctDepenseEstime}%`, backgroundColor: MINT },
+                { width: `${pctDepenseEstime}%`, backgroundColor: C.accent },
               ]}
             />
             <View
               style={[
                 styles.barSegment,
-                { width: `${pctPrevuEstime}%`, backgroundColor: PEACH },
+                { width: `${pctPrevuEstime}%`, backgroundColor: C.peach },
               ]}
             />
             {objStore.epargneMois > 0 && (
               <View
                 style={[
                   styles.barSegment,
-                  { width: `${pctEpargneEstime}%`, backgroundColor: BLEU },
+                  {
+                    width: `${pctEpargneEstime}%`,
+                    backgroundColor: C.bleuGris,
+                  },
                 ]}
               />
             )}
@@ -488,7 +521,7 @@ export default function Dashboard() {
           <View style={styles.heroLegende}>
             <View style={styles.heroLegendeItem}>
               <View
-                style={[styles.heroLegendeDot, { backgroundColor: MINT }]}
+                style={[styles.heroLegendeDot, { backgroundColor: C.accent }]}
               />
               <Text style={styles.heroSub}>
                 Dépensé {totalDepenseEnveloppes}€
@@ -496,14 +529,17 @@ export default function Dashboard() {
             </View>
             <View style={styles.heroLegendeItem}>
               <View
-                style={[styles.heroLegendeDot, { backgroundColor: PEACH }]}
+                style={[styles.heroLegendeDot, { backgroundColor: C.peach }]}
               />
               <Text style={styles.heroSub}>Dépenses prévues {totalPrevu}€</Text>
             </View>
             {objStore.epargneMois > 0 && (
               <View style={styles.heroLegendeItem}>
                 <View
-                  style={[styles.heroLegendeDot, { backgroundColor: BLEU }]}
+                  style={[
+                    styles.heroLegendeDot,
+                    { backgroundColor: C.bleuGris },
+                  ]}
                 />
                 <Text style={styles.heroSub}>
                   Épargne {objStore.epargneMois}€
@@ -527,17 +563,33 @@ export default function Dashboard() {
         </View>
 
         <View style={styles.statsRow}>
-          <View style={[styles.statCard, { backgroundColor: PURPLE_LIGHT }]}>
-            <Text style={[styles.statLabel, { color: PURPLE }]}>
+          <View
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: theme === "sombre" ? C.carte : C.purpleLight,
+                borderWidth: theme === "sombre" ? 0.5 : 0,
+                borderColor: C.carteBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.statLabel, { color: C.purple }]}>
               PROJECTION FIN DE MOIS
             </Text>
-            <Text style={[styles.statValue, { color: "#5A3DC4" }]}>
+            <Text style={[styles.statValue, { color: C.purpleText }]}>
               {resteEstime} €
             </Text>
           </View>
 
           <TouchableOpacity
-            style={[styles.statCard, { backgroundColor: PEACH_LIGHT }]}
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: theme === "sombre" ? C.carte : C.peachLight,
+                borderWidth: theme === "sombre" ? 0.5 : 0,
+                borderColor: C.carteBorder,
+              },
+            ]}
             activeOpacity={0.7}
             onPress={() => {
               setDisponibleTemp(argentDisponible);
@@ -545,15 +597,18 @@ export default function Dashboard() {
             }}
           >
             <View style={styles.statLabelRow}>
-              <Text style={[styles.statLabel, { color: PEACH }]}>
+              <Text style={[styles.statLabel, { color: C.peach }]}>
                 DISPONIBLE
               </Text>
-              <Ionicons name="pencil-outline" size={12} color={PEACH} />
+              <Ionicons name="pencil-outline" size={12} color={C.peach} />
             </View>
             {editionDisponible ? (
               <View style={styles.editDisponibleRow}>
                 <TextInput
-                  style={styles.editDisponibleInput}
+                  style={[
+                    styles.editDisponibleInput,
+                    { backgroundColor: C.fondPage, color: C.peachText },
+                  ]}
                   keyboardType="numeric"
                   value={disponibleTemp}
                   onChangeText={setDisponibleTemp}
@@ -563,11 +618,13 @@ export default function Dashboard() {
                   inputAccessoryViewID={ACCESSORY_ID}
                 />
                 <TouchableOpacity onPress={sauvegarderDisponible}>
-                  <Text style={styles.validerTexte}>OK</Text>
+                  <Text style={[styles.validerTexte, { color: C.peach }]}>
+                    OK
+                  </Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              <Text style={[styles.statValue, { color: "#993C1D" }]}>
+              <Text style={[styles.statValue, { color: C.peachText }]}>
                 {disponibleNum} €
               </Text>
             )}
@@ -575,34 +632,48 @@ export default function Dashboard() {
         </View>
 
         <TouchableOpacity
-          style={styles.epargneCard}
+          style={[
+            styles.epargneCard,
+            { backgroundColor: C.carte, borderColor: C.carteBorder },
+          ]}
           activeOpacity={0.7}
           onPress={ouvrirModalEpargne}
         >
-          <View style={styles.epargneIconBox}>
-            <Ionicons name="wallet-outline" size={22} color="#1A1A1A" />
+          <View
+            style={[styles.epargneIconBox, { backgroundColor: C.accentLight }]}
+          >
+            <Ionicons name="wallet-outline" size={22} color={C.accentText} />
           </View>
           <View style={styles.epargneTexte}>
-            <Text style={styles.epargneLabel}>Mis de côté ce mois</Text>
-            <Text style={styles.epargneSub}>
+            <Text style={[styles.epargneLabel, { color: C.texte }]}>
+              Mis de côté ce mois
+            </Text>
+            <Text style={[styles.epargneSub, { color: C.texteMuted }]}>
               {objStore.objectifs.length > 0
                 ? `${objStore.objectifs.length} objectif${objStore.objectifs.length > 1 ? "s" : ""} en cours`
                 : "Créer un objectif d'épargne"}
             </Text>
           </View>
-          <Text style={styles.epargneMontantAffiche}>
+          <Text style={[styles.epargneMontantAffiche, { color: C.accent }]}>
             {objStore.epargneMois} €
           </Text>
         </TouchableOpacity>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>ENVELOPPES</Text>
+          <Text style={[styles.sectionTitle, { color: C.texteMuted }]}>
+            ENVELOPPES
+          </Text>
           <TouchableOpacity
-            style={styles.btnAjoutEnveloppe}
+            style={[
+              styles.btnAjoutEnveloppe,
+              { backgroundColor: C.purpleLight },
+            ]}
             onPress={() => setModalAjoutVisible(true)}
             activeOpacity={0.7}
           >
-            <Text style={styles.btnAjoutTexte}>+ Ajouter</Text>
+            <Text style={[styles.btnAjoutTexte, { color: C.purple }]}>
+              + Ajouter
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -620,38 +691,58 @@ export default function Dashboard() {
             >
               <View style={styles.envRow}>
                 <View style={styles.envNomRow}>
-                  <Text style={styles.envNom}>{env.nom}</Text>
+                  <Text style={[styles.envNom, { color: C.texte }]}>
+                    {env.nom}
+                  </Text>
                   {env.type === "Fixe" ? (
                     <View style={styles.badgesRow}>
                       {env.payee ? (
                         <View
-                          style={[styles.recurrenceBadge, styles.payeeBadge]}
+                          style={[
+                            styles.recurrenceBadge,
+                            { backgroundColor: C.accentLight },
+                          ]}
                         >
                           <Ionicons
                             name="checkmark"
                             size={12}
-                            color="#1A1A1A"
+                            color={C.texte}
                           />
                         </View>
                       ) : (
-                        <View style={styles.recurrenceBadge}>
+                        <View
+                          style={[
+                            styles.recurrenceBadge,
+                            { backgroundColor: C.iconeBoutonFond },
+                          ]}
+                        >
                           <Ionicons
                             name="calendar-outline"
                             size={12}
-                            color="#1A1A1A"
+                            color={C.texte}
                           />
                         </View>
                       )}
                       {env.repeteChaqueMois && (
-                        <View style={styles.recurrenceBadge}>
-                          <Ionicons name="repeat" size={12} color="#1A1A1A" />
+                        <View
+                          style={[
+                            styles.recurrenceBadge,
+                            { backgroundColor: C.iconeBoutonFond },
+                          ]}
+                        >
+                          <Ionicons name="repeat" size={12} color={C.texte} />
                         </View>
                       )}
                     </View>
                   ) : (
                     env.recurrente && (
-                      <View style={styles.recurrenceBadge}>
-                        <Ionicons name="repeat" size={12} color="#1A1A1A" />
+                      <View
+                        style={[
+                          styles.recurrenceBadge,
+                          { backgroundColor: C.iconeBoutonFond },
+                        ]}
+                      >
+                        <Ionicons name="repeat" size={12} color={C.texte} />
                       </View>
                     )
                   )}
@@ -660,7 +751,9 @@ export default function Dashboard() {
                   {env.depense} € / {env.budget} €
                 </Text>
               </View>
-              <View style={styles.envBarBg}>
+              <View
+                style={[styles.envBarBg, { backgroundColor: C.separateur }]}
+              >
                 <View
                   style={[
                     styles.envBarFill,
@@ -672,13 +765,21 @@ export default function Dashboard() {
           );
         })}
 
-        <View style={styles.graphCard}>
-          <Text style={styles.cardTitre}>Vue d'ensemble des dépenses</Text>
-          <Text style={styles.graphSousTitre}>
+        <View
+          style={[
+            styles.graphCard,
+            { backgroundColor: C.carte, borderColor: C.carteBorder },
+          ]}
+        >
+          <Text style={[styles.cardTitre, { color: C.texte }]}>
+            Vue d'ensemble des dépenses
+          </Text>
+          <Text style={[styles.graphSousTitre, { color: C.texteMuted }]}>
             L'épargne n'est pas comptée ici, c'est de l'argent mis de côté
           </Text>
           <View style={styles.graphContent}>
             <DonutChart
+              couleurs={C}
               data={enveloppes.map((e) => ({
                 couleur: e.couleur,
                 valeur: e.depense,
@@ -695,10 +796,13 @@ export default function Dashboard() {
                         { backgroundColor: e.couleur },
                       ]}
                     />
-                    <Text style={styles.legendeNom} numberOfLines={1}>
+                    <Text
+                      style={[styles.legendeNom, { color: C.texte }]}
+                      numberOfLines={1}
+                    >
                       {e.nom}
                     </Text>
-                    <Text style={styles.legendePct}>
+                    <Text style={[styles.legendePct, { color: C.texteMuted }]}>
                       {totalDepenseEnveloppes > 0
                         ? Math.round((e.depense / totalDepenseEnveloppes) * 100)
                         : 0}
@@ -715,8 +819,15 @@ export default function Dashboard() {
 
       {Platform.OS === "ios" && (
         <InputAccessoryView nativeID={ACCESSORY_ID}>
-          <View style={styles.accessoryBar}>
-            <Text style={styles.accessoryTexte}>Terminé</Text>
+          <View
+            style={[
+              styles.accessoryBar,
+              { backgroundColor: C.fondSecondaire, borderTopColor: C.separateur },
+            ]}
+          >
+            <Text style={[styles.accessoryTexte, { color: C.purple }]}>
+              Terminé
+            </Text>
           </View>
         </InputAccessoryView>
       )}
@@ -732,28 +843,32 @@ export default function Dashboard() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={styles.modalOverlayTouch}>
-            <View style={styles.modalCard}>
+            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitre}>Modifier l'enveloppe</Text>
+                <Text style={[styles.modalTitre, { color: C.texte }]}>Modifier l'enveloppe</Text>
               </View>
               <ScrollView
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
-                <Text style={styles.modalLabel}>Nom</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Nom</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    { backgroundColor: C.fondSecondaire, color: C.texte },
+                  ]}
                   value={nomTemp}
                   onChangeText={setNomTemp}
                   returnKeyType="done"
                 />
 
-                <Text style={styles.modalLabel}>Type</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Type</Text>
                 <View style={styles.typeRow}>
                   <TouchableOpacity
                     style={[
                       styles.typeChip,
-                      typeTemp === "Variable" && styles.typeChipActif,
+                      { backgroundColor: C.fondSecondaire },
+                      typeTemp === "Variable" && { backgroundColor: C.purple },
                     ]}
                     onPress={() => setTypeTemp("Variable")}
                     activeOpacity={0.7}
@@ -761,6 +876,7 @@ export default function Dashboard() {
                     <Text
                       style={[
                         styles.typeChipTexte,
+                        { color: C.texteMuted },
                         typeTemp === "Variable" && styles.typeChipTexteActif,
                       ]}
                     >
@@ -770,7 +886,8 @@ export default function Dashboard() {
                   <TouchableOpacity
                     style={[
                       styles.typeChip,
-                      typeTemp === "Fixe" && styles.typeChipActif,
+                      { backgroundColor: C.fondSecondaire },
+                      typeTemp === "Fixe" && { backgroundColor: C.purple },
                     ]}
                     onPress={() => setTypeTemp("Fixe")}
                     activeOpacity={0.7}
@@ -778,6 +895,7 @@ export default function Dashboard() {
                     <Text
                       style={[
                         styles.typeChipTexte,
+                        { color: C.texteMuted },
                         typeTemp === "Fixe" && styles.typeChipTexteActif,
                       ]}
                     >
@@ -786,22 +904,29 @@ export default function Dashboard() {
                   </TouchableOpacity>
                 </View>
 
-                <Text style={styles.modalLabel}>Budget de l'enveloppe</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Budget de l'enveloppe</Text>
                 <View style={styles.modalInputRow}>
                   <TextInput
-                    style={[styles.input, { flex: 1 }]}
+                    style={[
+                      styles.input,
+                      {
+                        flex: 1,
+                        backgroundColor: C.fondSecondaire,
+                        color: C.texte,
+                      },
+                    ]}
                     keyboardType="number-pad"
                     value={budgetTemp}
                     onChangeText={setBudgetTemp}
                     returnKeyType="done"
                     inputAccessoryViewID={ACCESSORY_ID}
                   />
-                  <Text style={styles.modalEuro}>€</Text>
+                  <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
                 </View>
 
-                <Text style={styles.modalLabel}>Couleur</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Couleur</Text>
                 <TouchableOpacity
-                  style={styles.couleurTiroirBouton}
+                  style={[styles.couleurTiroirBouton, { backgroundColor: C.fondSecondaire }]}
                   onPress={() => setPaletteOuverteTemp(!paletteOuverteTemp)}
                   activeOpacity={0.7}
                 >
@@ -811,10 +936,10 @@ export default function Dashboard() {
                       { backgroundColor: couleurTemp },
                     ]}
                   />
-                  <Text style={styles.couleurTiroirTexte}>
+                  <Text style={[styles.couleurTiroirTexte, { color: C.texte }]}>
                     Choisir une couleur
                   </Text>
-                  <Text style={styles.couleurChevron}>
+                  <Text style={[styles.couleurChevron, { color: C.texteMuted }]}>
                     {paletteOuverteTemp ? "▾" : "▸"}
                   </Text>
                 </TouchableOpacity>
@@ -826,7 +951,10 @@ export default function Dashboard() {
                         style={[
                           styles.swatch,
                           { backgroundColor: c },
-                          couleurTemp === c && styles.swatchSelectionne,
+                          couleurTemp === c && {
+                            borderWidth: 3,
+                            borderColor: C.texte,
+                          },
                         ]}
                         onPress={() => {
                           setCouleurTemp(c);
@@ -841,74 +969,80 @@ export default function Dashboard() {
                 {typeTemp === "Variable" ? (
                   <View style={styles.switchRow}>
                     <View>
-                      <Text style={styles.switchLabel}>Récurrente</Text>
-                      <Text style={styles.switchSub}>
+                      <Text style={[styles.switchLabel, { color: C.texte }]}>Récurrente</Text>
+                      <Text style={[styles.switchSub, { color: C.texteMuted }]}>
                         Se répète chaque mois
                       </Text>
                     </View>
                     <Switch
                       value={recurrenteTemp}
                       onValueChange={setRecurrenteTemp}
-                      trackColor={{ false: "#EEE", true: PURPLE_LIGHT }}
-                      thumbColor={recurrenteTemp ? PURPLE : "#FFF"}
+                      trackColor={{ false: C.separateur, true: C.purpleLight }}
+                      thumbColor={recurrenteTemp ? C.purple : "#FFF"}
                     />
                   </View>
                 ) : (
                   <>
-                    <Text style={styles.modalLabel}>Date de paiement</Text>
-                    <View style={styles.calendarWrap}>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Date de paiement</Text>
+                    <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
                       <Calendar
                         current={dateTemp}
                         onDayPress={(day) => setDateTemp(day.dateString)}
                         markedDates={{
-                          [dateTemp]: { selected: true, selectedColor: PURPLE },
+                          [dateTemp]: { selected: true, selectedColor: C.purple },
                         }}
                         theme={{
-                          selectedDayBackgroundColor: PURPLE,
-                          todayTextColor: PURPLE,
-                          arrowColor: PURPLE,
+                          calendarBackground: C.carte,
+                          dayTextColor: C.texte,
+                          monthTextColor: C.texte,
+                          textDisabledColor: C.texteMuted,
+                          textSectionTitleColor: C.texteMuted,
+                          selectedDayTextColor: "#FFFFFF",
+                          selectedDayBackgroundColor: C.purple,
+                          todayTextColor: C.purple,
+                          arrowColor: C.purple,
                         }}
                       />
                     </View>
 
                     <View style={styles.switchRow}>
                       <View>
-                        <Text style={styles.switchLabel}>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
                           Se répète tous les mois
                         </Text>
-                        <Text style={styles.switchSub}>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
                           Comme un loyer ou un abonnement
                         </Text>
                       </View>
                       <Switch
                         value={repeteChaqueMoisTemp}
                         onValueChange={setRepeteChaqueMoisTemp}
-                        trackColor={{ false: "#EEE", true: PURPLE_LIGHT }}
-                        thumbColor={repeteChaqueMoisTemp ? PURPLE : "#FFF"}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={repeteChaqueMoisTemp ? C.purple : "#FFF"}
                       />
                     </View>
 
                     <View style={styles.switchRow}>
                       <View>
-                        <Text style={styles.switchLabel}>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
                           Afficher dans Planning
                         </Text>
-                        <Text style={styles.switchSub}>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
                           Visible aussi dans ton agenda
                         </Text>
                       </View>
                       <Switch
                         value={afficherPlanningTemp}
                         onValueChange={setAfficherPlanningTemp}
-                        trackColor={{ false: "#EEE", true: PURPLE_LIGHT }}
-                        thumbColor={afficherPlanningTemp ? PURPLE : "#FFF"}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={afficherPlanningTemp ? C.purple : "#FFF"}
                       />
                     </View>
                   </>
                 )}
 
                 <TouchableOpacity
-                  style={styles.btnAjouter}
+                  style={[styles.btnAjouter, { backgroundColor: C.purple }]}
                   onPress={sauvegarderEnveloppe}
                   activeOpacity={0.7}
                 >
@@ -928,7 +1062,7 @@ export default function Dashboard() {
                   onPress={() => setModalEnveloppeVisible(false)}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.btnAnnulerTexte}>Annuler</Text>
+                  <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>Annuler</Text>
                 </TouchableOpacity>
               </ScrollView>
             </View>
@@ -947,29 +1081,35 @@ export default function Dashboard() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={styles.modalOverlayTouch}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitre}>Nouvelle enveloppe</Text>
+            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+              <Text style={[styles.modalTitre, { color: C.texte }]}>Nouvelle enveloppe</Text>
 
               <ScrollView
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
-                <Text style={styles.modalLabel}>Nom</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Nom</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    { backgroundColor: C.fondSecondaire, color: C.texte },
+                  ]}
                   placeholder="Ex : Vacances, Sport..."
-                  placeholderTextColor="#CCC"
+                  placeholderTextColor={C.texteMuted}
                   value={nouveauNom}
                   onChangeText={setNouveauNom}
                   returnKeyType="done"
                 />
 
-                <Text style={styles.modalLabel}>Type</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Type</Text>
                 <View style={styles.typeRow}>
                   <TouchableOpacity
                     style={[
                       styles.typeChip,
-                      nouveauType === "Variable" && styles.typeChipActif,
+                      { backgroundColor: C.fondSecondaire },
+                      nouveauType === "Variable" && {
+                        backgroundColor: C.purple,
+                      },
                     ]}
                     onPress={() => setNouveauType("Variable")}
                     activeOpacity={0.7}
@@ -977,6 +1117,7 @@ export default function Dashboard() {
                     <Text
                       style={[
                         styles.typeChipTexte,
+                        { color: C.texteMuted },
                         nouveauType === "Variable" && styles.typeChipTexteActif,
                       ]}
                     >
@@ -986,7 +1127,8 @@ export default function Dashboard() {
                   <TouchableOpacity
                     style={[
                       styles.typeChip,
-                      nouveauType === "Fixe" && styles.typeChipActif,
+                      { backgroundColor: C.fondSecondaire },
+                      nouveauType === "Fixe" && { backgroundColor: C.purple },
                     ]}
                     onPress={() => setNouveauType("Fixe")}
                     activeOpacity={0.7}
@@ -994,6 +1136,7 @@ export default function Dashboard() {
                     <Text
                       style={[
                         styles.typeChipTexte,
+                        { color: C.texteMuted },
                         nouveauType === "Fixe" && styles.typeChipTexteActif,
                       ]}
                     >
@@ -1001,30 +1144,37 @@ export default function Dashboard() {
                     </Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={styles.modalAide}>
+                <Text style={[styles.modalAide, { color: C.texteMuted }]}>
                   {nouveauType === "Variable"
                     ? "Une dépense courante comme Courses ou Loisirs"
                     : "Une dépense payée à une date précise, ponctuelle ou chaque mois"}
                 </Text>
 
-                <Text style={styles.modalLabel}>Budget mensuel</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Budget mensuel</Text>
                 <View style={styles.modalInputRow}>
                   <TextInput
-                    style={[styles.input, { flex: 1 }]}
+                    style={[
+                      styles.input,
+                      {
+                        flex: 1,
+                        backgroundColor: C.fondSecondaire,
+                        color: C.texte,
+                      },
+                    ]}
                     placeholder="0"
-                    placeholderTextColor="#CCC"
+                    placeholderTextColor={C.texteMuted}
                     keyboardType="number-pad"
                     value={nouveauBudget}
                     onChangeText={setNouveauBudget}
                     returnKeyType="done"
                     inputAccessoryViewID={ACCESSORY_ID}
                   />
-                  <Text style={styles.modalEuro}>€</Text>
+                  <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
                 </View>
 
-                <Text style={styles.modalLabel}>Couleur</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Couleur</Text>
                 <TouchableOpacity
-                  style={styles.couleurTiroirBouton}
+                  style={[styles.couleurTiroirBouton, { backgroundColor: C.fondSecondaire }]}
                   onPress={() =>
                     setPaletteOuverteNouvelle(!paletteOuverteNouvelle)
                   }
@@ -1036,10 +1186,10 @@ export default function Dashboard() {
                       { backgroundColor: nouvelleCouleur },
                     ]}
                   />
-                  <Text style={styles.couleurTiroirTexte}>
+                  <Text style={[styles.couleurTiroirTexte, { color: C.texte }]}>
                     Choisir une couleur
                   </Text>
-                  <Text style={styles.couleurChevron}>
+                  <Text style={[styles.couleurChevron, { color: C.texteMuted }]}>
                     {paletteOuverteNouvelle ? "▾" : "▸"}
                   </Text>
                 </TouchableOpacity>
@@ -1051,7 +1201,10 @@ export default function Dashboard() {
                         style={[
                           styles.swatch,
                           { backgroundColor: c },
-                          nouvelleCouleur === c && styles.swatchSelectionne,
+                          nouvelleCouleur === c && {
+                            borderWidth: 3,
+                            borderColor: C.texte,
+                          },
                         ]}
                         onPress={() => {
                           setNouvelleCouleur(c);
@@ -1066,77 +1219,83 @@ export default function Dashboard() {
                 {nouveauType === "Variable" ? (
                   <View style={styles.switchRow}>
                     <View>
-                      <Text style={styles.switchLabel}>Récurrente</Text>
-                      <Text style={styles.switchSub}>
+                      <Text style={[styles.switchLabel, { color: C.texte }]}>Récurrente</Text>
+                      <Text style={[styles.switchSub, { color: C.texteMuted }]}>
                         Se répète chaque mois
                       </Text>
                     </View>
                     <Switch
                       value={estRecurrente}
                       onValueChange={setEstRecurrente}
-                      trackColor={{ false: "#EEE", true: PURPLE_LIGHT }}
-                      thumbColor={estRecurrente ? PURPLE : "#FFF"}
+                      trackColor={{ false: C.separateur, true: C.purpleLight }}
+                      thumbColor={estRecurrente ? C.purple : "#FFF"}
                     />
                   </View>
                 ) : (
                   <>
-                    <Text style={styles.modalLabel}>Date de paiement</Text>
-                    <View style={styles.calendarWrap}>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Date de paiement</Text>
+                    <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
                       <Calendar
                         current={nouvelleDate}
                         onDayPress={(day) => setNouvelleDate(day.dateString)}
                         markedDates={{
                           [nouvelleDate]: {
                             selected: true,
-                            selectedColor: PURPLE,
+                            selectedColor: C.purple,
                           },
                         }}
                         theme={{
-                          selectedDayBackgroundColor: PURPLE,
-                          todayTextColor: PURPLE,
-                          arrowColor: PURPLE,
+                          calendarBackground: C.carte,
+                          dayTextColor: C.texte,
+                          monthTextColor: C.texte,
+                          textDisabledColor: C.texteMuted,
+                          textSectionTitleColor: C.texteMuted,
+                          selectedDayTextColor: "#FFFFFF",
+                          selectedDayBackgroundColor: C.purple,
+                          todayTextColor: C.purple,
+                          arrowColor: C.purple,
                         }}
                       />
                     </View>
 
                     <View style={styles.switchRow}>
                       <View>
-                        <Text style={styles.switchLabel}>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
                           Se répète tous les mois
                         </Text>
-                        <Text style={styles.switchSub}>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
                           Comme un loyer ou un abonnement
                         </Text>
                       </View>
                       <Switch
                         value={nouveauRepeteChaqueMois}
                         onValueChange={setNouveauRepeteChaqueMois}
-                        trackColor={{ false: "#EEE", true: PURPLE_LIGHT }}
-                        thumbColor={nouveauRepeteChaqueMois ? PURPLE : "#FFF"}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={nouveauRepeteChaqueMois ? C.purple : "#FFF"}
                       />
                     </View>
 
                     <View style={styles.switchRow}>
                       <View>
-                        <Text style={styles.switchLabel}>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
                           Afficher dans Planning
                         </Text>
-                        <Text style={styles.switchSub}>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
                           Visible aussi dans ton agenda
                         </Text>
                       </View>
                       <Switch
                         value={nouveauAfficherPlanning}
                         onValueChange={setNouveauAfficherPlanning}
-                        trackColor={{ false: "#EEE", true: PURPLE_LIGHT }}
-                        thumbColor={nouveauAfficherPlanning ? PURPLE : "#FFF"}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={nouveauAfficherPlanning ? C.purple : "#FFF"}
                       />
                     </View>
                   </>
                 )}
 
                 <TouchableOpacity
-                  style={styles.btnAjouter}
+                  style={[styles.btnAjouter, { backgroundColor: C.purple }]}
                   onPress={ajouterEnveloppe}
                   activeOpacity={0.7}
                 >
@@ -1147,7 +1306,7 @@ export default function Dashboard() {
                   onPress={() => setModalAjoutVisible(false)}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.btnAnnulerTexte}>Annuler</Text>
+                  <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>Annuler</Text>
                 </TouchableOpacity>
               </ScrollView>
             </View>
@@ -1166,16 +1325,16 @@ export default function Dashboard() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={styles.modalOverlayTouch}>
-            <View style={styles.modalCard}>
+            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
               {vueModal === "epargne" ? (
                 <>
                   <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitre}>Épargne de ce mois</Text>
+                    <Text style={[styles.modalTitre, { color: C.texte }]}>Épargne de ce mois</Text>
                     <TouchableOpacity
                       onPress={() => setModalEpargneVisible(false)}
                       activeOpacity={0.6}
                     >
-                      <Text style={styles.btnFermerCroix}>✕</Text>
+                      <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>✕</Text>
                     </TouchableOpacity>
                   </View>
 
@@ -1183,27 +1342,34 @@ export default function Dashboard() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                   >
-                    <Text style={styles.modalLabel}>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
                       Montant à mettre de côté ce mois
                     </Text>
                     <View style={styles.modalInputRow}>
                       <TextInput
-                        style={[styles.input, { flex: 1 }]}
+                        style={[
+                      styles.input,
+                      {
+                        flex: 1,
+                        backgroundColor: C.fondSecondaire,
+                        color: C.texte,
+                      },
+                    ]}
                         keyboardType="numeric"
                         value={epargneTemp}
                         onChangeText={setEpargneTemp}
                         returnKeyType="done"
                         inputAccessoryViewID={ACCESSORY_ID}
                       />
-                      <Text style={styles.modalEuro}>€</Text>
+                      <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
                     </View>
-                    <Text style={styles.modalAide}>
+                    <Text style={[styles.modalAide, { color: C.texteMuted }]}>
                       Cet argent sera compté comme dépensé mais n'apparaîtra pas
                       dans le graphique de tes dépenses courantes.
                     </Text>
 
                     <TouchableOpacity
-                      style={styles.btnAjouter}
+                      style={[styles.btnAjouter, { backgroundColor: C.purple }]}
                       onPress={sauvegarderEpargne}
                       activeOpacity={0.7}
                     >
@@ -1212,28 +1378,28 @@ export default function Dashboard() {
                       </Text>
                     </TouchableOpacity>
 
-                    <View style={styles.separateur} />
+                    <View style={[styles.separateur, { backgroundColor: C.separateur }]} />
 
-                    <Text style={styles.modalLabel}>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
                       Tes objectifs d'épargne
                     </Text>
                     {objStore.objectifs.length === 0 && (
-                      <Text style={styles.modalVideTexte}>
+                      <Text style={[styles.modalVideTexte, { color: C.texteMuted }]}>
                         Aucun objectif pour le moment
                       </Text>
                     )}
                     {objStore.objectifs.map((obj) => {
                       const pct = Math.min((obj.actuel / obj.cible) * 100, 100);
                       return (
-                        <View key={obj.id} style={styles.objectifModalItem}>
+                        <View key={obj.id} style={[styles.objectifModalItem, { backgroundColor: C.fondSecondaire }]}>
                           <View style={styles.objectifModalHeader}>
-                            <Text style={styles.objectifModalNom}>
+                            <Text style={[styles.objectifModalNom, { color: C.texte }]}>
                               {obj.nom}
                             </Text>
                             <TouchableOpacity
                               onPress={() => objStore.supprimerObjectif(obj.id)}
                             >
-                              <Text style={styles.objectifSupprimer}>✕</Text>
+                              <Text style={[styles.objectifSupprimer, { color: C.texteMuted }]}>✕</Text>
                             </TouchableOpacity>
                           </View>
                           <Text
@@ -1244,7 +1410,7 @@ export default function Dashboard() {
                           >
                             {obj.actuel} € / {obj.cible} €
                           </Text>
-                          <View style={styles.catBarBg}>
+                          <View style={[styles.catBarBg, { backgroundColor: C.separateur }]}>
                             <View
                               style={[
                                 styles.catBarFill,
@@ -1264,7 +1430,7 @@ export default function Dashboard() {
                       onPress={() => setVueModal("nouvelObjectif")}
                       activeOpacity={0.7}
                     >
-                      <Text style={styles.btnNouvelObjectif}>
+                      <Text style={[styles.btnNouvelObjectif, { color: C.purple }]}>
                         + Créer un nouvel objectif
                       </Text>
                     </TouchableOpacity>
@@ -1273,12 +1439,12 @@ export default function Dashboard() {
               ) : (
                 <>
                   <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitre}>Nouvel objectif</Text>
+                    <Text style={[styles.modalTitre, { color: C.texte }]}>Nouvel objectif</Text>
                     <TouchableOpacity
                       onPress={() => setVueModal("epargne")}
                       activeOpacity={0.6}
                     >
-                      <Text style={styles.btnFermerCroix}>✕</Text>
+                      <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>✕</Text>
                     </TouchableOpacity>
                   </View>
 
@@ -1286,49 +1452,66 @@ export default function Dashboard() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                   >
-                    <Text style={styles.modalLabel}>Nom de l'objectif</Text>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Nom de l'objectif</Text>
                     <TextInput
-                      style={styles.input}
+                      style={[
+                    styles.input,
+                    { backgroundColor: C.fondSecondaire, color: C.texte },
+                  ]}
                       placeholder="Ex : MacBook, Vacances..."
-                      placeholderTextColor="#CCC"
+                      placeholderTextColor={C.texteMuted}
                       value={nomObjectif}
                       onChangeText={setNomObjectif}
                       returnKeyType="done"
                     />
 
-                    <Text style={styles.modalLabel}>Montant cible</Text>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Montant cible</Text>
                     <View style={styles.modalInputRow}>
                       <TextInput
-                        style={[styles.input, { flex: 1 }]}
+                        style={[
+                      styles.input,
+                      {
+                        flex: 1,
+                        backgroundColor: C.fondSecondaire,
+                        color: C.texte,
+                      },
+                    ]}
                         placeholder="Ex : 1500"
-                        placeholderTextColor="#CCC"
+                        placeholderTextColor={C.texteMuted}
                         keyboardType="numeric"
                         value={cibleObjectif}
                         onChangeText={setCibleObjectif}
                         returnKeyType="done"
                         inputAccessoryViewID={ACCESSORY_ID}
                       />
-                      <Text style={styles.modalEuro}>€</Text>
+                      <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
                     </View>
 
-                    <Text style={styles.modalLabel}>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
                       Déjà mis de côté (optionnel)
                     </Text>
                     <View style={styles.modalInputRow}>
                       <TextInput
-                        style={[styles.input, { flex: 1 }]}
+                        style={[
+                      styles.input,
+                      {
+                        flex: 1,
+                        backgroundColor: C.fondSecondaire,
+                        color: C.texte,
+                      },
+                    ]}
                         placeholder="0"
-                        placeholderTextColor="#CCC"
+                        placeholderTextColor={C.texteMuted}
                         keyboardType="numeric"
                         value={montantInitialObjectif}
                         onChangeText={setMontantInitialObjectif}
                         returnKeyType="done"
                         inputAccessoryViewID={ACCESSORY_ID}
                       />
-                      <Text style={styles.modalEuro}>€</Text>
+                      <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
                     </View>
 
-                    <Text style={styles.modalLabel}>Couleur</Text>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Couleur</Text>
                     <View style={styles.paletteGrid}>
                       {PALETTE_COULEURS.map((c) => (
                         <TouchableOpacity
@@ -1336,7 +1519,10 @@ export default function Dashboard() {
                           style={[
                             styles.swatch,
                             { backgroundColor: c },
-                            couleurObjectif === c && styles.swatchSelectionne,
+                            couleurObjectif === c && {
+                              borderWidth: 3,
+                              borderColor: C.texte,
+                            },
                           ]}
                           onPress={() => setCouleurObjectif(c)}
                           activeOpacity={0.7}
@@ -1345,7 +1531,7 @@ export default function Dashboard() {
                     </View>
 
                     <TouchableOpacity
-                      style={styles.btnAjouter}
+                      style={[styles.btnAjouter, { backgroundColor: C.purple }]}
                       onPress={creerObjectif}
                       activeOpacity={0.7}
                     >
@@ -1358,7 +1544,7 @@ export default function Dashboard() {
                       onPress={() => setVueModal("epargne")}
                       activeOpacity={0.7}
                     >
-                      <Text style={styles.btnAnnulerTexte}>Retour</Text>
+                      <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>Retour</Text>
                     </TouchableOpacity>
                   </ScrollView>
                 </>
@@ -1372,7 +1558,7 @@ export default function Dashboard() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 20 },
+  container: { flex: 1, paddingHorizontal: 20 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1391,13 +1577,11 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: PURPLE,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarText: { color: "#FFFFFF", fontWeight: "700", fontSize: 15 },
   hero: {
-    backgroundColor: PURPLE,
     borderRadius: 22,
     padding: 26,
     marginBottom: 18,
@@ -1407,6 +1591,13 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.6)",
     letterSpacing: 1,
     marginBottom: 8,
+  },
+  themeBouton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
   },
   heroAmount: {
     fontSize: 50,
@@ -1490,38 +1681,33 @@ const styles = StyleSheet.create({
   editDisponibleInput: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#993C1D",
-    backgroundColor: "#FFFFFF",
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 2,
     minWidth: 64,
     textAlign: "center",
   },
-  validerTexte: { fontSize: 14, fontWeight: "700", color: PEACH },
+  validerTexte: { fontSize: 14, fontWeight: "700" },
   epargneCard: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FAFAFA",
     borderRadius: 18,
     padding: 16,
     marginBottom: 26,
     borderWidth: 0.5,
-    borderColor: "#F0EEF8",
     gap: 14,
   },
   epargneIconBox: {
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: MINT_LIGHT,
     alignItems: "center",
     justifyContent: "center",
   },
   epargneTexte: { flex: 1 },
-  epargneLabel: { fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
-  epargneSub: { fontSize: 12, color: "#999", marginTop: 2 },
-  epargneMontantAffiche: { fontSize: 18, fontWeight: "700", color: MINT },
+  epargneLabel: { fontSize: 15, fontWeight: "700" },
+  epargneSub: { fontSize: 12, marginTop: 2 },
+  epargneMontantAffiche: { fontSize: 18, fontWeight: "700" },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1531,16 +1717,14 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#999",
     letterSpacing: 1,
   },
   btnAjoutEnveloppe: {
-    backgroundColor: PURPLE_LIGHT,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  btnAjoutTexte: { fontSize: 13, fontWeight: "700", color: PURPLE },
+  btnAjoutTexte: { fontSize: 13, fontWeight: "700" },
   envCard: { borderRadius: 16, padding: 18, marginBottom: 10 },
   envRow: {
     flexDirection: "row",
@@ -1550,45 +1734,39 @@ const styles = StyleSheet.create({
   },
   envNomRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   badgesRow: { flexDirection: "row", gap: 4 },
-  envNom: { fontSize: 16, fontWeight: "700", color: "#1A1A1A" },
+  envNom: { fontSize: 16, fontWeight: "700" },
   recurrenceBadge: {
     width: 19,
     height: 19,
     borderRadius: 10,
-    backgroundColor: "rgba(0,0,0,0.06)",
     alignItems: "center",
     justifyContent: "center",
   },
-  payeeBadge: { backgroundColor: MINT_LIGHT },
   envMontant: { fontSize: 14, fontWeight: "700" },
   envBarBg: {
     height: 6,
-    backgroundColor: "rgba(0,0,0,0.08)",
     borderRadius: 3,
     overflow: "hidden",
   },
   envBarFill: { height: "100%", borderRadius: 3 },
   graphCard: {
-    backgroundColor: "#FAFAFA",
     borderRadius: 22,
     padding: 20,
     marginTop: 18,
     borderWidth: 0.5,
-    borderColor: "#F0EEF8",
   },
   cardTitre: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#1A1A1A",
     marginBottom: 4,
   },
-  graphSousTitre: { fontSize: 12, color: "#999", marginBottom: 18 },
+  graphSousTitre: { fontSize: 12, marginBottom: 18 },
   graphContent: { flexDirection: "row", alignItems: "center" },
   graphLegende: { flex: 1, paddingLeft: 16, gap: 11 },
   legendeItem: { flexDirection: "row", alignItems: "center", gap: 7 },
   legendeDot: { width: 10, height: 10, borderRadius: 5 },
-  legendeNom: { flex: 1, fontSize: 14, color: "#1A1A1A" },
-  legendePct: { fontSize: 14, color: "#999", fontWeight: "600" },
+  legendeNom: { flex: 1, fontSize: 14 },
+  legendePct: { fontSize: 14, fontWeight: "600" },
   modalOverlay: { flex: 1, justifyContent: "flex-end" },
   modalOverlayTouch: {
     flex: 1,
@@ -1596,7 +1774,6 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   modalCard: {
-    backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     padding: 26,
@@ -1609,31 +1786,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  modalTitre: { fontSize: 21, fontWeight: "700", color: "#1A1A1A" },
-  btnFermerCroix: { fontSize: 18, color: "#BBB", padding: 4 },
+  modalTitre: { fontSize: 21, fontWeight: "700" },
+  btnFermerCroix: { fontSize: 18, padding: 4 },
   modalLabel: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#999",
     letterSpacing: 0.5,
     marginBottom: 9,
     marginTop: 6,
   },
   modalInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  modalEuro: { fontSize: 17, color: "#999", marginBottom: 12 },
-  modalAide: { fontSize: 12, color: "#AAA", lineHeight: 18, marginBottom: 14 },
+  modalEuro: { fontSize: 17, marginBottom: 12 },
+  modalAide: { fontSize: 12, lineHeight: 18, marginBottom: 14 },
   input: {
-    backgroundColor: "#F7F7F7",
     borderRadius: 13,
     padding: 16,
     fontSize: 17,
-    color: "#1A1A1A",
     marginBottom: 12,
   },
   couleurTiroirBouton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F7F7F7",
     borderRadius: 13,
     padding: 14,
     marginBottom: 10,
@@ -1643,10 +1816,9 @@ const styles = StyleSheet.create({
   couleurTiroirTexte: {
     flex: 1,
     fontSize: 15,
-    color: "#1A1A1A",
     fontWeight: "500",
   },
-  couleurChevron: { fontSize: 14, color: "#999" },
+  couleurChevron: { fontSize: 14 },
   paletteGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1654,24 +1826,20 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   swatch: { width: 36, height: 36, borderRadius: 18 },
-  swatchSelectionne: { borderWidth: 3, borderColor: "#1A1A1A" },
   typeRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
   typeChip: {
     flex: 1,
     paddingVertical: 11,
     borderRadius: 12,
-    backgroundColor: "#F7F7F7",
     alignItems: "center",
   },
-  typeChipActif: { backgroundColor: PURPLE },
-  typeChipTexte: { fontSize: 14, fontWeight: "600", color: "#999" },
+  typeChipTexte: { fontSize: 14, fontWeight: "600" },
   typeChipTexteActif: { color: "#FFFFFF" },
   calendarWrap: {
     borderRadius: 14,
     overflow: "hidden",
     marginBottom: 12,
     borderWidth: 0.5,
-    borderColor: "#EEE",
   },
   switchRow: {
     flexDirection: "row",
@@ -1680,10 +1848,9 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     marginTop: 8,
   },
-  switchLabel: { fontSize: 16, fontWeight: "600", color: "#1A1A1A" },
-  switchSub: { fontSize: 13, color: "#999", marginTop: 2 },
+  switchLabel: { fontSize: 16, fontWeight: "600" },
+  switchSub: { fontSize: 13, marginTop: 2 },
   btnAjouter: {
-    backgroundColor: PURPLE,
     borderRadius: 16,
     padding: 17,
     alignItems: "center",
@@ -1706,16 +1873,14 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 6,
   },
-  btnAnnulerTexte: { fontSize: 15, color: "#999", fontWeight: "600" },
-  separateur: { height: 1, backgroundColor: "#EEE", marginVertical: 20 },
+  btnAnnulerTexte: { fontSize: 15, fontWeight: "600" },
+  separateur: { height: 1, marginVertical: 20 },
   modalVideTexte: {
     fontSize: 14,
-    color: "#BBB",
     textAlign: "center",
     paddingVertical: 14,
   },
   objectifModalItem: {
-    backgroundColor: "#FAFAFA",
     borderRadius: 14,
     padding: 14,
     marginBottom: 10,
@@ -1726,12 +1891,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 4,
   },
-  objectifModalNom: { fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
-  objectifSupprimer: { fontSize: 15, color: "#CCC", padding: 4 },
+  objectifModalNom: { fontSize: 15, fontWeight: "700" },
+  objectifSupprimer: { fontSize: 15, padding: 4 },
   objectifModalMontant: { fontSize: 14, fontWeight: "700", marginBottom: 8 },
   catBarBg: {
     height: 6,
-    backgroundColor: "#EEEEEE",
     borderRadius: 3,
     overflow: "hidden",
   },
@@ -1742,13 +1906,11 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 10,
   },
-  btnNouvelObjectif: { fontSize: 15, fontWeight: "700", color: PURPLE },
+  btnNouvelObjectif: { fontSize: 15, fontWeight: "700" },
   accessoryBar: {
-    backgroundColor: "#F7F7F7",
     padding: 10,
     alignItems: "flex-end",
     borderTopWidth: 0.5,
-    borderTopColor: "#DDD",
   },
-  accessoryTexte: { color: PURPLE, fontSize: 17, fontWeight: "700" },
+  accessoryTexte: { fontSize: 17, fontWeight: "700" },
 });
