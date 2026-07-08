@@ -127,7 +127,7 @@ export default function Analytics() {
   const [vue, setVue] = useState<Vue>("global");
   const [titoirOuvert, setTiroirOuvert] = useState(false);
   const [categoriesSelectionnees, setCategoriesSelectionnees] = useState<
-    number[]
+    string[]
   >([]);
 
   useFocusEffect(
@@ -147,7 +147,7 @@ export default function Analytics() {
   const getDepenseMois = (
     mois: number,
     annee: number,
-    enveloppeIds?: number[],
+    enveloppeIds?: string[],
   ) => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
       const envsFiltrees = enveloppeIds
@@ -168,7 +168,7 @@ export default function Analytics() {
   const getBudgetMois = (
     mois: number,
     annee: number,
-    enveloppeIds?: number[],
+    enveloppeIds?: string[],
   ) => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
       const envsFiltrees = enveloppeIds
@@ -318,7 +318,7 @@ export default function Analytics() {
     return { ...obj, pct, delta };
   });
 
-  const toggleCategorie = (id: number) => {
+  const toggleCategorie = (id: string) => {
     setCategoriesSelectionnees((prev) =>
       prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id],
     );

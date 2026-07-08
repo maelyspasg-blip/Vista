@@ -29,11 +29,11 @@ export default function Budget() {
     }, []),
   );
 
-  const [enveloppeOuverte, setEnveloppeOuverte] = useState<number | null>(null);
+  const [enveloppeOuverte, setEnveloppeOuverte] = useState<string | null>(null);
   const [modalAjoutVisible, setModalAjoutVisible] = useState(false);
   const [nomTx, setNomTx] = useState("");
   const [montantTx, setMontantTx] = useState("");
-  const [enveloppeTx, setEnveloppeTx] = useState<number | null>(null);
+  const [enveloppeTx, setEnveloppeTx] = useState<string | null>(null);
 
   const MOIS_ACTUEL = new Date().getMonth();
   const ANNEE_ACTUELLE = new Date().getFullYear();
@@ -71,7 +71,7 @@ export default function Budget() {
     (a, b) => b.depense - a.depense,
   )[0];
 
-  const ouvrirAjout = (enveloppeId?: number) => {
+  const ouvrirAjout = (enveloppeId?: string) => {
     setNomTx("");
     setMontantTx("");
     setEnveloppeTx(enveloppeId ?? enveloppesCourantes[0]?.id ?? null);
@@ -93,7 +93,7 @@ export default function Budget() {
     setModalAjoutVisible(false);
   };
 
-  const toggleEnveloppe = (id: number) => {
+  const toggleEnveloppe = (id: string) => {
     setEnveloppeOuverte(enveloppeOuverte === id ? null : id);
   };
 

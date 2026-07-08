@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -192,6 +193,8 @@ export default function Dashboard() {
   const [nouvelleDate, setNouvelleDate] = useState("2026-06-16");
   const [nouveauRepeteChaqueMois, setNouveauRepeteChaqueMois] = useState(false);
   const [nouveauAfficherPlanning, setNouveauAfficherPlanning] = useState(false);
+  const [creationEnveloppeEnCours, setCreationEnveloppeEnCours] =
+    useState(false);
 
   const [modalEpargneVisible, setModalEpargneVisible] = useState(false);
   const [vueModal, setVueModal] = useState<"liste" | "form">("liste");
@@ -301,10 +304,10 @@ export default function Dashboard() {
     setModalEnveloppeVisible(false);
   };
 
-  const ajouterEnveloppe = () => {
-    if (!nouveauNom || !nouveauBudget) return;
-    const nouvelle: Enveloppe = {
-      id: Date.now(),
+  const ajouterEnveloppe = async () => {
+    if (!nouveauNom || !nouveauBudget || creationEnveloppeEnCours) return;
+    setCreationEnveloppeEnCours(true);
+    const nouvelle = await objStore.ajouterEnveloppe({
       nom: nouveauNom,
       depense: 0,
       budget: parseFloat(nouveauBudget),
@@ -319,8 +322,9 @@ export default function Dashboard() {
         nouveauType === "Fixe" ? nouveauRepeteChaqueMois : undefined,
       afficherDansPlanning:
         nouveauType === "Fixe" ? nouveauAfficherPlanning : undefined,
-    };
-    setEnveloppes([...enveloppes, nouvelle]);
+    });
+    setCreationEnveloppeEnCours(false);
+    if (!nouvelle) return;
     setNouveauNom("");
     setNouveauBudget("");
     setNouvelleCouleur(PALETTE_COULEURS[0]);
@@ -1336,11 +1340,24 @@ export default function Dashboard() {
                 )}
 
                 <TouchableOpacity
-                  style={[styles.btnAjouter, { backgroundColor: C.purple }]}
+                  style={[
+                    styles.btnAjouter,
+                    {
+                      backgroundColor: C.purple,
+                      opacity: creationEnveloppeEnCours ? 0.6 : 1,
+                    },
+                  ]}
                   onPress={ajouterEnveloppe}
                   activeOpacity={0.7}
+                  disabled={creationEnveloppeEnCours}
                 >
-                  <Text style={styles.btnAjouterTexte}>Créer l'enveloppe</Text>
+                  {creationEnveloppeEnCours ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.btnAjouterTexte}>
+                      Créer l'enveloppe
+                    </Text>
+                  )}
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.btnAnnuler}

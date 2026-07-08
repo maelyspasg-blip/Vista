@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
+    ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
@@ -9,14 +10,49 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { messageErreurAuth } from "../authErrors";
+import { supabase } from "../../supabaseClient";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function Inscription() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
+  const [chargement, setChargement] = useState(false);
+  const [erreur, setErreur] = useState("");
+  const [confirmationRequise, setConfirmationRequise] = useState(false);
+
+  const emailValide = EMAIL_REGEX.test(email.trim());
+  const formulaireValide = emailValide && motDePasse.length >= 8;
+
+  const creerCompte = async () => {
+    if (!formulaireValide || chargement) return;
+    setErreur("");
+    setChargement(true);
+
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password: motDePasse,
+    });
+
+    setChargement(false);
+
+    if (error) {
+      setErreur(messageErreurAuth(error.message));
+      return;
+    }
+
+    if (data.session) {
+      router.push("/onboarding/preferences");
+      return;
+    }
+
+    setConfirmationRequise(true);
+  };
 
   return (
     <KeyboardAvoidingView
@@ -31,51 +67,87 @@ export default function Inscription() {
       </View>
 
       <View style={styles.form}>
-        <Text style={styles.label}>Email</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="ton@email.com"
-          placeholderTextColor="#CCC"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          value={email}
-          onChangeText={setEmail}
-        />
+        {confirmationRequise ? (
+          <View style={styles.confirmationBox}>
+            <Text style={styles.confirmationTitre}>Compte créé !</Text>
+            <Text style={styles.confirmationTexte}>
+              Vérifie ta boîte mail ({email.trim()}) et confirme ton adresse
+              avant de te connecter.
+            </Text>
+            <TouchableOpacity
+              style={styles.btnPrincipal}
+              onPress={() => router.push("/onboarding/connexion")}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.btnTexte}>Aller à la connexion</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="ton@email.com"
+              placeholderTextColor="#CCC"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={email}
+              onChangeText={(v) => {
+                setEmail(v);
+                setErreur("");
+              }}
+              editable={!chargement}
+            />
 
-        <Text style={styles.label}>Mot de passe</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Au moins 8 caractères"
-          placeholderTextColor="#CCC"
-          secureTextEntry
-          value={motDePasse}
-          onChangeText={setMotDePasse}
-        />
+            <Text style={styles.label}>Mot de passe</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Au moins 8 caractères"
+              placeholderTextColor="#CCC"
+              secureTextEntry
+              value={motDePasse}
+              onChangeText={(v) => {
+                setMotDePasse(v);
+                setErreur("");
+              }}
+              editable={!chargement}
+            />
 
-        <TouchableOpacity
-          style={[
-            styles.btnPrincipal,
-            { opacity: email && motDePasse.length >= 8 ? 1 : 0.5 },
-          ]}
-          onPress={() => router.push("/onboarding/preferences")}
-          activeOpacity={0.8}
-          disabled={!email || motDePasse.length < 8}
-        >
-          <Text style={styles.btnTexte}>Continuer</Text>
-        </TouchableOpacity>
+            {!!erreur && <Text style={styles.erreurTexte}>{erreur}</Text>}
+
+            <TouchableOpacity
+              style={[
+                styles.btnPrincipal,
+                { opacity: formulaireValide && !chargement ? 1 : 0.5 },
+              ]}
+              onPress={creerCompte}
+              activeOpacity={0.8}
+              disabled={!formulaireValide || chargement}
+            >
+              {chargement ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.btnTexte}>Continuer</Text>
+              )}
+            </TouchableOpacity>
+          </>
+        )}
       </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerTexte}>Déjà un compte ? </Text>
-        <TouchableOpacity
-          onPress={() => router.push("/(tabs)")}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.footerLien, { color: PURPLE }]}>
-            Se connecter
-          </Text>
-        </TouchableOpacity>
-      </View>
+      {!confirmationRequise && (
+        <View style={styles.footer}>
+          <Text style={styles.footerTexte}>Déjà un compte ? </Text>
+          <TouchableOpacity
+            onPress={() => router.push("/onboarding/connexion")}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.footerLien, { color: PURPLE }]}>
+              Se connecter
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -120,6 +192,12 @@ const styles = StyleSheet.create({
     color: "#1A1A1A",
     marginBottom: 20,
   },
+  erreurTexte: {
+    fontSize: 13,
+    color: "#E24B4A",
+    marginTop: -10,
+    marginBottom: 16,
+  },
   btnPrincipal: {
     backgroundColor: PURPLE,
     borderRadius: 16,
@@ -144,5 +222,22 @@ const styles = StyleSheet.create({
   footerLien: {
     fontSize: 14,
     fontWeight: "600",
+  },
+  confirmationBox: {
+    backgroundColor: PURPLE_LIGHT,
+    borderRadius: 16,
+    padding: 20,
+  },
+  confirmationTitre: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1A1A1A",
+    marginBottom: 8,
+  },
+  confirmationTexte: {
+    fontSize: 14,
+    color: "#4A4A4A",
+    lineHeight: 20,
+    marginBottom: 20,
   },
 });

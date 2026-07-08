@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { supabase } from "../supabaseClient";
 
 export type Objectif = {
   id: number;
@@ -13,7 +14,7 @@ export type Objectif = {
 };
 
 export type Enveloppe = {
-  id: number;
+  id: string;
   nom: string;
   depense: number;
   budget: number;
@@ -38,7 +39,7 @@ export type DepensePrevue = {
 
 export type PaiementHistorique = {
   id: number;
-  enveloppeId: number;
+  enveloppeId: string;
   nom: string;
   montant: number;
   date: string;
@@ -65,12 +66,12 @@ export type Transaction = {
   id: number;
   nom: string;
   montant: number;
-  enveloppeId: number;
+  enveloppeId: string;
   date: string;
 };
 
 export type SnapshotEnveloppe = {
-  id: number;
+  id: string;
   nom: string;
   depense: number;
   budget: number;
@@ -95,30 +96,6 @@ export type SnapshotMois = {
   totalDepense: number;
 };
 
-const ENVELOPPES_INIT: Enveloppe[] = [
-  {
-    id: 1,
-    nom: "Courses",
-    depense: 0,
-    budget: 0,
-    couleur: "#5DC8A0",
-    recurrente: true,
-    frequenceJours: 30,
-    type: "Variable",
-  },
-  {
-    id: 2,
-    nom: "Logement",
-    depense: 0,
-    budget: 0,
-    couleur: "#9B5DE5",
-    recurrente: false,
-    type: "Fixe",
-    repeteChaqueMois: true,
-    afficherDansPlanning: true,
-  },
-];
-
 const DEPENSES_PREVUES_INIT: DepensePrevue[] = [];
 const EVENEMENTS_INIT: Evenement[] = [];
 const TRANSACTIONS_INIT: Transaction[] = [];
@@ -134,12 +111,13 @@ type EtatStore = {
   historiquePaiements: PaiementHistorique[];
   historiquesMois: SnapshotMois[];
   dernierMoisArchive: { mois: number; annee: number } | null;
+  erreurSync: string | null;
 };
 
 let etat: EtatStore = {
   objectifs: [],
   epargneMois: 0,
-  enveloppes: ENVELOPPES_INIT,
+  enveloppes: [],
   argentDisponible: 0,
   depensesPrevues: DEPENSES_PREVUES_INIT,
   transactions: TRANSACTIONS_INIT,
@@ -147,6 +125,7 @@ let etat: EtatStore = {
   historiquePaiements: [],
   historiquesMois: [],
   dernierMoisArchive: null,
+  erreurSync: null,
 };
 
 type Ecouteur = (etat: EtatStore) => void;
@@ -155,6 +134,121 @@ let ecouteurs: Ecouteur[] = [];
 function setEtat(nouvelEtat: Partial<EtatStore>) {
   etat = { ...etat, ...nouvelEtat };
   ecouteurs.forEach((fn) => fn(etat));
+}
+
+let minuteurErreurSync: ReturnType<typeof setTimeout> | null = null;
+
+function signalerErreurSync(message: string) {
+  setEtat({ erreurSync: message });
+  if (minuteurErreurSync) clearTimeout(minuteurErreurSync);
+  minuteurErreurSync = setTimeout(() => {
+    setEtat({ erreurSync: null });
+  }, 5000);
+}
+
+type EnveloppeRow = {
+  id: string;
+  user_id: string;
+  nom: string;
+  depense: number;
+  budget: number;
+  couleur: string;
+  recurrente: boolean;
+  frequence_jours: number | null;
+  type: "Fixe" | "Variable";
+  date_fixe: string | null;
+  payee: boolean | null;
+  repete_chaque_mois: boolean | null;
+  afficher_dans_planning: boolean | null;
+};
+
+function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
+  return {
+    id: l.id,
+    nom: l.nom,
+    depense: l.depense,
+    budget: l.budget,
+    couleur: l.couleur,
+    recurrente: l.recurrente,
+    frequenceJours: l.frequence_jours ?? undefined,
+    type: l.type,
+    dateFixe: l.date_fixe ?? undefined,
+    payee: l.payee ?? undefined,
+    repeteChaqueMois: l.repete_chaque_mois ?? undefined,
+    afficherDansPlanning: l.afficher_dans_planning ?? undefined,
+  };
+}
+
+function enveloppeVersColonnes(e: Omit<Enveloppe, "id">) {
+  return {
+    nom: e.nom,
+    depense: e.depense,
+    budget: e.budget,
+    couleur: e.couleur,
+    recurrente: e.recurrente,
+    frequence_jours: e.frequenceJours ?? null,
+    type: e.type,
+    date_fixe: e.dateFixe ?? null,
+    payee: e.payee ?? null,
+    repete_chaque_mois: e.repeteChaqueMois ?? null,
+    afficher_dans_planning: e.afficherDansPlanning ?? null,
+  };
+}
+
+function enveloppesEgales(a: Enveloppe, b: Enveloppe): boolean {
+  return (
+    a.nom === b.nom &&
+    a.depense === b.depense &&
+    a.budget === b.budget &&
+    a.couleur === b.couleur &&
+    a.recurrente === b.recurrente &&
+    a.frequenceJours === b.frequenceJours &&
+    a.type === b.type &&
+    a.dateFixe === b.dateFixe &&
+    a.payee === b.payee &&
+    a.repeteChaqueMois === b.repeteChaqueMois &&
+    a.afficherDansPlanning === b.afficherDansPlanning
+  );
+}
+
+function appliquerEnveloppes(nouvellesEnveloppes: Enveloppe[]) {
+  const anciennes = etat.enveloppes;
+  setEtat({ enveloppes: nouvellesEnveloppes });
+
+  const idsNouvelles = new Set(nouvellesEnveloppes.map((e) => e.id));
+  anciennes
+    .filter((e) => !idsNouvelles.has(e.id))
+    .forEach((e) => {
+      supabase
+        .from("enveloppes")
+        .delete()
+        .eq("id", e.id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Supabase delete enveloppe a échoué :", error);
+            signalerErreurSync(
+              `Impossible de supprimer l'enveloppe : ${error.message}`,
+            );
+          }
+        });
+    });
+
+  nouvellesEnveloppes.forEach((e) => {
+    const ancienne = anciennes.find((a) => a.id === e.id);
+    if (!ancienne || enveloppesEgales(ancienne, e)) return;
+    supabase
+      .from("enveloppes")
+      .update(enveloppeVersColonnes(e))
+      .eq("id", e.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error("Supabase update enveloppe a échoué :", error);
+          signalerErreurSync(
+            `Impossible de sauvegarder l'enveloppe : ${error.message}`,
+          );
+        }
+      });
+  });
 }
 
 export function useObjectifs() {
@@ -176,6 +270,69 @@ export function useObjectifs() {
     historiquePaiements: local.historiquePaiements,
     historiquesMois: local.historiquesMois,
     dernierMoisArchive: local.dernierMoisArchive,
+    erreurSync: local.erreurSync,
+
+    effacerErreurSync: () => {
+      if (minuteurErreurSync) clearTimeout(minuteurErreurSync);
+      setEtat({ erreurSync: null });
+    },
+
+    chargerEnveloppes: async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from("enveloppes")
+        .select("*")
+        .eq("user_id", user.id);
+
+      if (error) {
+        console.error("Supabase select enveloppes a échoué :", error);
+        signalerErreurSync(
+          `Impossible de charger tes enveloppes : ${error.message}`,
+        );
+        return;
+      }
+
+      setEtat({ enveloppes: (data ?? []).map(enveloppeDepuisLigne) });
+    },
+
+    ajouterEnveloppe: async (
+      champs: Omit<Enveloppe, "id">,
+    ): Promise<Enveloppe | null> => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        console.error(
+          "Création d'enveloppe refusée : aucun utilisateur connecté (supabase.auth.getUser() a renvoyé null).",
+        );
+        signalerErreurSync("Tu dois être connecté pour créer une enveloppe.");
+        return null;
+      }
+
+      const { data, error } = await supabase
+        .from("enveloppes")
+        .insert({ ...enveloppeVersColonnes(champs), user_id: user.id })
+        .select()
+        .single();
+
+      if (error || !data) {
+        console.error("Supabase insert enveloppe a échoué :", error);
+        signalerErreurSync(
+          error
+            ? `Impossible de créer l'enveloppe : ${error.message}`
+            : "Impossible de créer l'enveloppe : réponse vide de Supabase.",
+        );
+        return null;
+      }
+
+      const nouvelle = enveloppeDepuisLigne(data);
+      setEtat({ enveloppes: [...etat.enveloppes, nouvelle] });
+      return nouvelle;
+    },
 
     ajouterObjectif: (
       nom: string,
@@ -273,7 +430,7 @@ export function useObjectifs() {
     },
 
     modifierEnveloppes: (enveloppes: Enveloppe[]) => {
-      setEtat({ enveloppes });
+      appliquerEnveloppes(enveloppes);
     },
 
     modifierArgentDisponible: (montant: number) => {
@@ -319,17 +476,17 @@ export function useObjectifs() {
       setEtat({
         historiquesMois: [...etat.historiquesMois, snapshot],
         dernierMoisArchive: { mois, annee },
-        enveloppes: enveloppesMaj,
         epargneMois: 0,
         transactions: [],
       });
+      appliquerEnveloppes(enveloppesMaj);
     },
 
     verifierEcheancesFixes: () => {
       const aujourdhui = new Date();
       aujourdhui.setHours(0, 0, 0, 0);
 
-      const dejaPayeeCeMois = (enveloppeId: number, dateEcheance: Date) =>
+      const dejaPayeeCeMois = (enveloppeId: string, dateEcheance: Date) =>
         etat.historiquePaiements.some((p) => {
           if (p.enveloppeId !== enveloppeId) return false;
           const d = new Date(p.date);
@@ -385,12 +542,12 @@ export function useObjectifs() {
       );
       if (aChange) {
         setEtat({
-          enveloppes: enveloppesMaj,
           historiquePaiements: [
             ...etat.historiquePaiements,
             ...nouveauxPaiements,
           ],
         });
+        appliquerEnveloppes(enveloppesMaj);
       }
     },
 
@@ -432,7 +589,7 @@ export function useObjectifs() {
               ? { ...e, depense: e.depense + montant }
               : e,
           );
-          setEtat({ enveloppes: enveloppesMaj });
+          appliquerEnveloppes(enveloppesMaj);
         } else {
           const nouvelleDepensePrevue: DepensePrevue = {
             id: Date.now() + 1,
@@ -464,7 +621,7 @@ export function useObjectifs() {
     ajouterTransaction: (
       nom: string,
       montant: number,
-      enveloppeId: number,
+      enveloppeId: string,
       date: string,
     ) => {
       const nouvelleTransaction: Transaction = {
@@ -479,8 +636,8 @@ export function useObjectifs() {
       );
       setEtat({
         transactions: [...etat.transactions, nouvelleTransaction],
-        enveloppes: enveloppesMaj,
       });
+      appliquerEnveloppes(enveloppesMaj);
     },
 
     supprimerTransaction: (id: number) => {
@@ -493,8 +650,8 @@ export function useObjectifs() {
       );
       setEtat({
         transactions: etat.transactions.filter((t) => t.id !== id),
-        enveloppes: enveloppesMaj,
       });
+      appliquerEnveloppes(enveloppesMaj);
     },
   };
 }

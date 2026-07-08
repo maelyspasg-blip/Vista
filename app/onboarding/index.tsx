@@ -7,6 +7,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { marquerOnboardingVu } from "../onboardingStorage";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
@@ -52,8 +53,14 @@ export default function Onboarding() {
     if (slideActuel < SLIDES.length - 1) {
       setSlideActuel(slideActuel + 1);
     } else {
+      marquerOnboardingVu();
       router.push("/onboarding/inscription");
     }
+  };
+
+  const passer = () => {
+    marquerOnboardingVu();
+    router.push("/onboarding/inscription");
   };
 
   const slide = SLIDES[slideActuel];
@@ -62,7 +69,7 @@ export default function Onboarding() {
     <View style={styles.container}>
       <TouchableOpacity
         style={styles.skip}
-        onPress={() => router.push("/onboarding/inscription")}
+        onPress={passer}
         activeOpacity={0.7}
       >
         <Text style={styles.skipTexte}>Passer</Text>

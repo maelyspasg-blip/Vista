@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
+    ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -10,6 +11,8 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { supabase } from "../../supabaseClient";
+import { messageErreurAuth } from "../authErrors";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
@@ -47,6 +50,42 @@ export default function Preferences() {
   const [interetsSelectionnes, setInteretsSelectionnes] = useState<string[]>(
     [],
   );
+  const [chargement, setChargement] = useState(false);
+  const [erreur, setErreur] = useState("");
+
+  const enregistrerPreferences = async () => {
+    if (!prenom || !budget || chargement) return;
+    setErreur("");
+    setChargement(true);
+
+    const {
+      data: { user },
+      error: erreurUtilisateur,
+    } = await supabase.auth.getUser();
+
+    if (erreurUtilisateur || !user) {
+      setChargement(false);
+      setErreur("Session expirée. Reconnecte-toi.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("profils")
+      .update({
+        prenom: prenom.trim(),
+        argent_disponible: parseFloat(budget) || 0,
+      })
+      .eq("user_id", user.id);
+
+    setChargement(false);
+
+    if (error) {
+      setErreur(messageErreurAuth(error.message));
+      return;
+    }
+
+    router.replace("/(tabs)");
+  };
 
   const toggleInteret = (nom: string) => {
     if (interetsSelectionnes.includes(nom)) {
@@ -123,13 +162,22 @@ export default function Preferences() {
           })}
         </View>
 
+        {!!erreur && <Text style={styles.erreurTexte}>{erreur}</Text>}
+
         <TouchableOpacity
-          style={[styles.btnPrincipal, { opacity: prenom && budget ? 1 : 0.5 }]}
-          onPress={() => router.push("/(tabs)")}
+          style={[
+            styles.btnPrincipal,
+            { opacity: prenom && budget && !chargement ? 1 : 0.5 },
+          ]}
+          onPress={enregistrerPreferences}
           activeOpacity={0.8}
-          disabled={!prenom || !budget}
+          disabled={!prenom || !budget || chargement}
         >
-          <Text style={styles.btnTexte}>Lancer Vista 🚀</Text>
+          {chargement ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.btnTexte}>Lancer Vista 🚀</Text>
+          )}
         </TouchableOpacity>
 
         <View style={{ height: 40 }} />
@@ -214,6 +262,11 @@ const styles = StyleSheet.create({
   interetNom: {
     fontSize: 13,
     fontWeight: "500",
+  },
+  erreurTexte: {
+    fontSize: 13,
+    color: "#E24B4A",
+    marginBottom: 12,
   },
   btnPrincipal: {
     backgroundColor: PURPLE,
