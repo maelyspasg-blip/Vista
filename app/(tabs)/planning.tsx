@@ -1,20 +1,30 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
   InputAccessoryView,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { useObjectifs } from "../store";
+import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
+import {
+  demanderPermissionNotifications,
+  programmerNotificationsEvenement,
+} from "../notifications";
+import { Evenement, useObjectifs } from "../store";
 import { useTheme } from "../ThemeContext";
+
+type FrequenceEvenement = "jour" | "semaine" | "mois" | "an";
 
 const JOURS_SEMAINE = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const HEURES = [
@@ -35,19 +45,6 @@ const HEURES = [
 const HEURE_DEBUT = 8;
 const HAUTEUR_HEURE = 56;
 
-const PALETTE_COULEURS = [
-  "#5DC8A0",
-  "#F4956A",
-  "#8B6FE8",
-  "#4A90D9",
-  "#D9A04A",
-  "#D94A8C",
-  "#5BC0BE",
-  "#9B5DE5",
-  "#E84C1E",
-  "#2EC4B6",
-];
-
 const ACCESSORY_ID = "numericDone";
 const AUJOURDHUI = new Date();
 
@@ -56,8 +53,39 @@ function heureEnMinutes(heure: string): number {
   return parseInt(h) * 60 + (parseInt(m) || 0);
 }
 
-function dateVersJourMois(date: Date) {
-  return { jour: date.getDate() };
+function dateVersISO(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function genererOccurrencesEvenement(
+  dateDebut: Date,
+  frequence: FrequenceEvenement,
+  debutFenetre: Date,
+  finFenetre: Date,
+): Date[] {
+  const occurrences: Date[] = [];
+  const debut = new Date(dateDebut);
+  debut.setHours(0, 0, 0, 0);
+
+  if (frequence === "jour") {
+    const cursor = new Date(Math.max(debut.getTime(), debutFenetre.getTime()));
+    while (cursor <= finFenetre) {
+      occurrences.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return occurrences;
+  }
+
+  const cursor = new Date(debut);
+  let iterations = 0;
+  while (cursor <= finFenetre && iterations < 1000) {
+    if (cursor >= debutFenetre) occurrences.push(new Date(cursor));
+    if (frequence === "semaine") cursor.setDate(cursor.getDate() + 7);
+    else if (frequence === "mois") cursor.setMonth(cursor.getMonth() + 1);
+    else cursor.setFullYear(cursor.getFullYear() + 1);
+    iterations++;
+  }
+  return occurrences;
 }
 
 function formaterDateAffichage(date: Date) {
@@ -139,11 +167,14 @@ type EvenementUnifie = {
   montant?: number;
   touteLaJournee: boolean;
   date: Date;
+  modifiable: boolean;
+  evenementId?: number;
 };
 
 export default function Planning() {
   const objStore = useObjectifs();
   const { couleurs: C } = useTheme();
+  const router = useRouter();
 
   const [vue, setVue] = useState<"jour" | "semaine" | "mois">("jour");
   const [dateActuelle, setDateActuelle] = useState(new Date());
@@ -160,39 +191,126 @@ export default function Planning() {
   const [montantEvent, setMontantEvent] = useState("");
   const [categorieEvent, setCategorieEvent] = useState("Aucune");
   const [creationRapide, setCreationRapide] = useState(false);
+  const [recurrentEvent, setRecurrentEvent] = useState(false);
+  const [frequenceEvent, setFrequenceEvent] =
+    useState<FrequenceEvenement>("semaine");
+  const [journeeEntiereEvent, setJourneeEntiereEvent] = useState(false);
+  const [notifierEvent, setNotifierEvent] = useState(false);
+  const [evenementEnEditionId, setEvenementEnEditionId] = useState<
+    number | null
+  >(null);
 
   const tousLesEvenements: EvenementUnifie[] = [];
 
+  const anneeVue = dateActuelle.getFullYear();
+  const moisVue = dateActuelle.getMonth();
+  const debutFenetreRecurrence = new Date(anneeVue, moisVue - 2, 1);
+  const finFenetreRecurrence = new Date(anneeVue, moisVue + 3, 0);
+  finFenetreRecurrence.setHours(23, 59, 59, 999);
+
   objStore.evenements.forEach((e) => {
-    const d = new Date(2026, 5, e.jour);
-    tousLesEvenements.push({
-      id: `manuel-${e.id}`,
-      nom: e.nom,
-      heure: e.heure,
-      duree: e.duree,
-      couleur: e.couleur,
-      estFinancier: e.estFinancier,
-      montant: e.montant,
-      touteLaJournee: false,
-      date: d,
-    });
+    const dateDebut = new Date(e.date);
+    if (e.recurrent && e.frequence) {
+      const occurrences = genererOccurrencesEvenement(
+        dateDebut,
+        e.frequence,
+        debutFenetreRecurrence,
+        finFenetreRecurrence,
+      );
+      occurrences.forEach((d) => {
+        tousLesEvenements.push({
+          id: `manuel-${e.id}-${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`,
+          nom: e.nom,
+          heure: e.heure,
+          duree: e.duree,
+          couleur: e.couleur,
+          estFinancier: e.estFinancier,
+          montant: e.montant,
+          touteLaJournee: e.touteLaJournee ?? false,
+          date: d,
+          modifiable: !e.estFinancier,
+          evenementId: e.id,
+        });
+      });
+    } else {
+      tousLesEvenements.push({
+        id: `manuel-${e.id}`,
+        nom: e.nom,
+        heure: e.heure,
+        duree: e.duree,
+        couleur: e.couleur,
+        estFinancier: e.estFinancier,
+        montant: e.montant,
+        touteLaJournee: e.touteLaJournee ?? false,
+        date: dateDebut,
+        modifiable: !e.estFinancier,
+        evenementId: e.id,
+      });
+    }
   });
 
   objStore.enveloppes
     .filter((e) => e.type === "Fixe" && e.afficherDansPlanning && e.dateFixe)
     .forEach((e) => {
-      const d = new Date(e.dateFixe!);
-      tousLesEvenements.push({
-        id: `env-${e.id}`,
-        nom: e.nom,
-        heure: "",
-        duree: 0,
-        couleur: e.couleur,
-        estFinancier: true,
-        montant: e.budget,
-        touteLaJournee: true,
-        date: d,
-      });
+      const dateOrigine = new Date(e.dateFixe!);
+      if (e.repeteChaqueMois) {
+        const jour = dateOrigine.getDate();
+        for (let offset = -2; offset <= 2; offset++) {
+          const d = new Date(anneeVue, moisVue + offset, jour);
+          const dejaPayeeCeMois = objStore.historiquePaiements.some(
+            (p) =>
+              p.enveloppeId === e.id &&
+              new Date(p.date).getMonth() === d.getMonth() &&
+              new Date(p.date).getFullYear() === d.getFullYear(),
+          );
+          if (dejaPayeeCeMois) continue;
+          tousLesEvenements.push({
+            id: `env-${e.id}-${d.getFullYear()}-${d.getMonth()}`,
+            nom: e.nom,
+            heure: "",
+            duree: 0,
+            couleur: e.couleur,
+            estFinancier: true,
+            montant: e.budget,
+            touteLaJournee: true,
+            date: d,
+            modifiable: false,
+          });
+        }
+      } else {
+        tousLesEvenements.push({
+          id: `env-${e.id}`,
+          nom: e.nom,
+          heure: "",
+          duree: 0,
+          couleur: e.couleur,
+          estFinancier: true,
+          montant: e.budget,
+          touteLaJournee: true,
+          date: dateOrigine,
+          modifiable: false,
+        });
+      }
+    });
+
+  objStore.objectifs
+    .filter((o) => o.recurrent && o.montantMensuel && o.jourDuMois)
+    .forEach((o) => {
+      for (let offset = -2; offset <= 2; offset++) {
+        const d = new Date(anneeVue, moisVue + offset, o.jourDuMois!);
+        tousLesEvenements.push({
+          id: `objectif-${o.id}-${d.getFullYear()}-${d.getMonth()}`,
+          nom: `Épargne : ${o.nom}`,
+          heure: "",
+          duree: 0,
+          couleur: o.couleur,
+          estFinancier: true,
+          montant: o.montantMensuel,
+          touteLaJournee: true,
+          date: d,
+          modifiable: false,
+        });
+      }
     });
 
   objStore.historiquePaiements.forEach((p) => {
@@ -207,6 +325,7 @@ export default function Planning() {
       montant: p.montant,
       touteLaJournee: true,
       date: d,
+      modifiable: false,
     });
   });
 
@@ -256,6 +375,11 @@ export default function Planning() {
     setMontantEvent("");
     setCategorieEvent("Aucune");
     setCreationRapide(false);
+    setRecurrentEvent(false);
+    setFrequenceEvent("semaine");
+    setJourneeEntiereEvent(false);
+    setNotifierEvent(false);
+    setEvenementEnEditionId(null);
     setEtapeCreation("infos");
     setModalCreationVisible(true);
   };
@@ -267,57 +391,115 @@ export default function Planning() {
     setDateEvent(dateActuelle);
     setCouleurEvent(PALETTE_COULEURS[0]);
     setCreationRapide(true);
+    setRecurrentEvent(false);
+    setFrequenceEvent("semaine");
+    setJourneeEntiereEvent(false);
+    setNotifierEvent(false);
+    setEvenementEnEditionId(null);
     setEtapeCreation("infos");
     setModalCreationVisible(true);
   };
 
+  const ouvrirEditionEvenement = (ev: Evenement) => {
+    setEvenementEnEditionId(ev.id);
+    setNomEvent(ev.nom);
+    setDateEvent(new Date(ev.date));
+    setHeureEvent(ev.heure || "9h00");
+    setDureeEvent(String(ev.duree || 1));
+    setCouleurEvent(ev.couleur);
+    setJourneeEntiereEvent(ev.touteLaJournee ?? false);
+    setRecurrentEvent(ev.recurrent ?? false);
+    setFrequenceEvent(ev.frequence ?? "semaine");
+    setNotifierEvent(ev.notifierActif ?? false);
+    setCreationRapide(false);
+    setEtapeCreation("infos");
+    setModalCreationVisible(true);
+  };
+
+  const sauvegarderModificationEvenement = () => {
+    if (!nomEvent || evenementEnEditionId === null) return;
+    objStore.modifierEvenement(evenementEnEditionId, {
+      nom: nomEvent,
+      date: dateVersISO(dateEvent),
+      heure: heureEvent,
+      duree: parseFloat(dureeEvent) || 1,
+      couleur: couleurEvent,
+      touteLaJournee: journeeEntiereEvent,
+      recurrent: recurrentEvent,
+      frequence: recurrentEvent ? frequenceEvent : undefined,
+      notifierActif: notifierEvent,
+    });
+    setModalCreationVisible(false);
+  };
+
+  const supprimerEvenementEnEdition = () => {
+    if (evenementEnEditionId === null) return;
+    objStore.supprimerEvenement(evenementEnEditionId);
+    setModalCreationVisible(false);
+  };
+
+  const gererClicEvenement = (ev: EvenementUnifie) => {
+    if (!ev.modifiable) {
+      router.push("/");
+      return;
+    }
+    const source = objStore.evenements.find((e) => e.id === ev.evenementId);
+    if (!source) return;
+    ouvrirEditionEvenement(source);
+  };
+
+  const finaliserCreationEvenement = async (
+    estFinancier: boolean,
+    montant?: number,
+    categorieLiee?: string,
+  ) => {
+    const id = Date.now();
+    objStore.ajouterEvenement(
+      id,
+      nomEvent,
+      dateVersISO(dateEvent),
+      heureEvent,
+      parseFloat(dureeEvent) || 1,
+      couleurEvent,
+      estFinancier,
+      montant,
+      categorieLiee,
+      recurrentEvent,
+      frequenceEvent,
+      journeeEntiereEvent,
+      notifierEvent,
+    );
+    if (notifierEvent && !recurrentEvent) {
+      const autorise = await demanderPermissionNotifications();
+      if (autorise) {
+        await programmerNotificationsEvenement(id, nomEvent, dateEvent);
+      }
+    }
+    setModalCreationVisible(false);
+  };
+
   const validerInfos = () => {
     if (!nomEvent) return;
+    if (evenementEnEditionId !== null) {
+      sauvegarderModificationEvenement();
+      return;
+    }
     if (creationRapide) {
-      const { jour } = dateVersJourMois(dateEvent);
-      objStore.ajouterEvenement(
-        nomEvent,
-        jour,
-        heureEvent,
-        parseFloat(dureeEvent) || 1,
-        couleurEvent,
-        false,
-      );
-      setModalCreationVisible(false);
+      finaliserCreationEvenement(false);
       return;
     }
     setEtapeCreation("financier");
   };
 
   const choisirNonFinancier = () => {
-    const { jour } = dateVersJourMois(dateEvent);
-    objStore.ajouterEvenement(
-      nomEvent,
-      jour,
-      heureEvent,
-      parseFloat(dureeEvent) || 1,
-      couleurEvent,
-      false,
-    );
-    setModalCreationVisible(false);
+    finaliserCreationEvenement(false);
   };
 
   const choisirFinancier = () => setEtapeCreation("categorie");
 
   const validerCreationFinanciere = () => {
     if (!montantEvent) return;
-    const { jour } = dateVersJourMois(dateEvent);
-    objStore.ajouterEvenement(
-      nomEvent,
-      jour,
-      heureEvent,
-      parseFloat(dureeEvent) || 1,
-      couleurEvent,
-      true,
-      parseFloat(montantEvent),
-      categorieEvent,
-    );
-    setModalCreationVisible(false);
+    finaliserCreationEvenement(true, parseFloat(montantEvent), categorieEvent);
   };
 
   function calculerPositions(evs: EvenementUnifie[]) {
@@ -474,12 +656,14 @@ export default function Planning() {
                   style={[styles.alldayZone, { borderColor: C.separateur }]}
                 >
                   {evsToutLaJourneeJour(dateActuelle).map((ev) => (
-                    <View
+                    <TouchableOpacity
                       key={ev.id}
                       style={[
                         styles.alldayPill,
                         { backgroundColor: ev.couleur + "22" },
                       ]}
+                      onPress={() => gererClicEvenement(ev)}
+                      activeOpacity={0.7}
                     >
                       <Ionicons
                         name="pin-outline"
@@ -497,7 +681,7 @@ export default function Planning() {
                           {ev.montant}€
                         </Text>
                       )}
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </View>
               )}
@@ -543,6 +727,7 @@ export default function Planning() {
                             },
                           ]}
                           activeOpacity={0.7}
+                          onPress={() => gererClicEvenement(ev)}
                         >
                           <View style={styles.eventTopRow}>
                             <Text
@@ -786,9 +971,11 @@ export default function Planning() {
               { backgroundColor: C.fondSecondaire, borderTopColor: C.separateur },
             ]}
           >
-            <Text style={[styles.accessoryTexte, { color: C.purple }]}>
-              Terminé
-            </Text>
+            <TouchableOpacity onPress={() => Keyboard.dismiss()}>
+              <Text style={[styles.accessoryTexte, { color: C.purple }]}>
+                Terminé
+              </Text>
+            </TouchableOpacity>
           </View>
         </InputAccessoryView>
       )}
@@ -809,7 +996,9 @@ export default function Planning() {
                 <>
                   <View style={styles.modalHeader}>
                     <Text style={[styles.modalTitre, { color: C.texte }]}>
-                      Nouvel événement
+                      {evenementEnEditionId !== null
+                        ? "Modifier l'événement"
+                        : "Nouvel événement"}
                     </Text>
                     <TouchableOpacity
                       onPress={() => setModalCreationVisible(false)}
@@ -841,60 +1030,138 @@ export default function Planning() {
                       autoFocus
                     />
 
-                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                      Heure
-                    </Text>
-                    <TextInput
-                      style={[
-                        styles.input,
-                        { backgroundColor: C.fondSecondaire, color: C.texte },
-                      ]}
-                      placeholder="Ex : 14h30"
-                      placeholderTextColor={C.texteMuted}
-                      value={heureEvent}
-                      onChangeText={setHeureEvent}
-                      returnKeyType="done"
-                    />
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
+                          Toute la journée
+                        </Text>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                          Sans horaire précis
+                        </Text>
+                      </View>
+                      <Switch
+                        value={journeeEntiereEvent}
+                        onValueChange={setJourneeEntiereEvent}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={journeeEntiereEvent ? C.purple : "#FFF"}
+                      />
+                    </View>
 
-                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                      Durée (en heures)
-                    </Text>
-                    <TextInput
-                      style={[
-                        styles.input,
-                        { backgroundColor: C.fondSecondaire, color: C.texte },
-                      ]}
-                      keyboardType="numeric"
-                      value={dureeEvent}
-                      onChangeText={setDureeEvent}
-                      returnKeyType="done"
-                      inputAccessoryViewID={ACCESSORY_ID}
-                    />
-
-                    {!creationRapide && (
+                    {!journeeEntiereEvent && (
                       <>
                         <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                          Couleur
+                          Heure
                         </Text>
-                        <View style={styles.paletteGrid}>
-                          {PALETTE_COULEURS.map((c) => (
-                            <TouchableOpacity
-                              key={c}
-                              style={[
-                                styles.swatch,
-                                { backgroundColor: c },
-                                couleurEvent === c && {
-                                  borderWidth: 3,
-                                  borderColor: C.texte,
-                                },
-                              ]}
-                              onPress={() => setCouleurEvent(c)}
-                              activeOpacity={0.7}
-                            />
-                          ))}
-                        </View>
+                        <TextInput
+                          style={[
+                            styles.input,
+                            { backgroundColor: C.fondSecondaire, color: C.texte },
+                          ]}
+                          placeholder="Ex : 14h30"
+                          placeholderTextColor={C.texteMuted}
+                          value={heureEvent}
+                          onChangeText={setHeureEvent}
+                          returnKeyType="done"
+                        />
+
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Durée (en heures)
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.input,
+                            { backgroundColor: C.fondSecondaire, color: C.texte },
+                          ]}
+                          keyboardType="numeric"
+                          value={dureeEvent}
+                          onChangeText={setDureeEvent}
+                          returnKeyType="done"
+                          inputAccessoryViewID={ACCESSORY_ID}
+                        />
                       </>
                     )}
+
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
+                          Répéter cet événement
+                        </Text>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                          Se reproduit automatiquement
+                        </Text>
+                      </View>
+                      <Switch
+                        value={recurrentEvent}
+                        onValueChange={setRecurrentEvent}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={recurrentEvent ? C.purple : "#FFF"}
+                      />
+                    </View>
+
+                    {recurrentEvent && (
+                      <View style={styles.categorieGrid}>
+                        {(
+                          [
+                            { valeur: "jour", label: "Tous les jours" },
+                            { valeur: "semaine", label: "Toutes les semaines" },
+                            { valeur: "mois", label: "Tous les mois" },
+                            { valeur: "an", label: "Tous les ans" },
+                          ] as { valeur: FrequenceEvenement; label: string }[]
+                        ).map((f) => (
+                          <TouchableOpacity
+                            key={f.valeur}
+                            style={[
+                              styles.categorieChip,
+                              { backgroundColor: C.fondSecondaire },
+                              frequenceEvent === f.valeur && {
+                                backgroundColor: C.purple,
+                              },
+                            ]}
+                            onPress={() => setFrequenceEvent(f.valeur)}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.categorieChipTexte,
+                                { color: C.texteMuted },
+                                frequenceEvent === f.valeur &&
+                                  styles.categorieChipTexteActif,
+                              ]}
+                            >
+                              {f.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+
+                    {!recurrentEvent && (
+                      <View style={styles.switchRow}>
+                        <View>
+                          <Text style={[styles.switchLabel, { color: C.texte }]}>
+                            Me le rappeler
+                          </Text>
+                          <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                            Notification la veille et le jour même à 9h
+                          </Text>
+                        </View>
+                        <Switch
+                          value={notifierEvent}
+                          onValueChange={setNotifierEvent}
+                          trackColor={{ false: C.separateur, true: C.purpleLight }}
+                          thumbColor={notifierEvent ? C.purple : "#FFF"}
+                        />
+                      </View>
+                    )}
+
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Couleur
+                    </Text>
+                    <ColorPicker
+                      value={couleurEvent}
+                      onChange={setCouleurEvent}
+                      borderColor={C.texte}
+                    />
 
                     <TouchableOpacity
                       style={[styles.btnSuivant, { backgroundColor: C.purple }]}
@@ -902,9 +1169,24 @@ export default function Planning() {
                       activeOpacity={0.7}
                     >
                       <Text style={styles.btnSuivantTexte}>
-                        {creationRapide ? "Créer l'événement" : "Continuer"}
+                        {evenementEnEditionId !== null
+                          ? "Enregistrer les modifications"
+                          : creationRapide
+                            ? "Créer l'événement"
+                            : "Continuer"}
                       </Text>
                     </TouchableOpacity>
+                    {evenementEnEditionId !== null && (
+                      <TouchableOpacity
+                        style={styles.btnSupprimerTexte}
+                        onPress={supprimerEvenementEnEdition}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.btnSupprimerTexteLabel}>
+                          Supprimer l'événement
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </ScrollView>
                 </>
               )}
@@ -1322,13 +1604,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     marginBottom: 12,
   },
-  paletteGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 11,
-    marginBottom: 6,
-  },
-  swatch: { width: 36, height: 36, borderRadius: 18 },
   btnSuivant: {
     borderRadius: 16,
     padding: 17,
@@ -1343,6 +1618,16 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   btnAnnulerTexte: { fontSize: 15, fontWeight: "600" },
+  btnSupprimerTexte: {
+    padding: 14,
+    alignItems: "center",
+    marginTop: 6,
+  },
+  btnSupprimerTexteLabel: {
+    fontSize: 15,
+    color: "#E24B4A",
+    fontWeight: "600",
+  },
   questionFinanciere: {
     fontSize: 16,
     fontWeight: "600",
@@ -1377,4 +1662,13 @@ const styles = StyleSheet.create({
   },
   categorieChipTexte: { fontSize: 13, fontWeight: "600" },
   categorieChipTexteActif: { color: "#FFFFFF" },
+  switchRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 14,
+    marginTop: 6,
+  },
+  switchLabel: { fontSize: 15, fontWeight: "600" },
+  switchSub: { fontSize: 12, marginTop: 2 },
 });

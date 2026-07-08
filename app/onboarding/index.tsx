@@ -1,11 +1,11 @@
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  Dimensions,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Dimensions,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 const PURPLE = "#8B6FE8";

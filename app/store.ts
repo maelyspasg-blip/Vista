@@ -6,6 +6,10 @@ export type Objectif = {
   cible: number;
   actuel: number;
   couleur: string;
+  recurrent?: boolean;
+  montantMensuel?: number;
+  jourDuMois?: number;
+  dernierVersement?: { mois: number; annee: number } | null;
 };
 
 export type Enveloppe = {
@@ -44,13 +48,17 @@ export type PaiementHistorique = {
 export type Evenement = {
   id: number;
   nom: string;
-  jour: number;
+  date: string;
   heure: string;
   duree: number;
   couleur: string;
   estFinancier: boolean;
   montant?: number;
   categorieLiee?: string;
+  recurrent?: boolean;
+  frequence?: "jour" | "semaine" | "mois" | "an";
+  touteLaJournee?: boolean;
+  notifierActif?: boolean;
 };
 
 export type Transaction = {
@@ -70,10 +78,18 @@ export type SnapshotEnveloppe = {
   type: "Fixe" | "Variable";
 };
 
+export type SnapshotObjectif = {
+  id: number;
+  nom: string;
+  actuel: number;
+  cible: number;
+};
+
 export type SnapshotMois = {
   mois: number;
   annee: number;
   enveloppes: SnapshotEnveloppe[];
+  objectifs: SnapshotObjectif[];
   epargne: number;
   disponible: number;
   totalDepense: number;
@@ -166,6 +182,9 @@ export function useObjectifs() {
       cible: number,
       montantInitial: number,
       couleur: string,
+      recurrent: boolean,
+      montantMensuel?: number,
+      jourDuMois?: number,
     ) => {
       const nouvel: Objectif = {
         id: Date.now(),
@@ -173,12 +192,80 @@ export function useObjectifs() {
         cible,
         actuel: montantInitial,
         couleur,
+        recurrent,
+        montantMensuel: recurrent ? montantMensuel : undefined,
+        jourDuMois: recurrent ? jourDuMois : undefined,
+        dernierVersement: null,
       };
       setEtat({ objectifs: [...etat.objectifs, nouvel] });
     },
 
     modifierEpargneMois: (montant: number) => {
       setEtat({ epargneMois: montant });
+    },
+
+    modifierObjectif: (
+      id: number,
+      champs: Partial<
+        Pick<
+          Objectif,
+          "nom" | "cible" | "couleur" | "recurrent" | "montantMensuel" | "jourDuMois"
+        >
+      >,
+    ) => {
+      setEtat({
+        objectifs: etat.objectifs.map((o) =>
+          o.id === id ? { ...o, ...champs } : o,
+        ),
+      });
+    },
+
+    ajouterFondsObjectif: (id: number, montant: number) => {
+      setEtat({
+        objectifs: etat.objectifs.map((o) =>
+          o.id === id ? { ...o, actuel: o.actuel + montant } : o,
+        ),
+        epargneMois: etat.epargneMois + montant,
+      });
+    },
+
+    verifierVersementsObjectifs: () => {
+      const aujourdhui = new Date();
+      const jourActuel = aujourdhui.getDate();
+      const moisActuel = aujourdhui.getMonth();
+      const anneeActuelle = aujourdhui.getFullYear();
+
+      let totalVerse = 0;
+      const objectifsMaj = etat.objectifs.map((o) => {
+        const dejaVerseCeMois =
+          o.dernierVersement?.mois === moisActuel &&
+          o.dernierVersement?.annee === anneeActuelle;
+        if (
+          o.recurrent &&
+          o.montantMensuel &&
+          o.jourDuMois &&
+          jourActuel >= o.jourDuMois &&
+          !dejaVerseCeMois
+        ) {
+          totalVerse += o.montantMensuel;
+          return {
+            ...o,
+            actuel: o.actuel + o.montantMensuel,
+            dernierVersement: { mois: moisActuel, annee: anneeActuelle },
+          };
+        }
+        return o;
+      });
+
+      const aChange = objectifsMaj.some(
+        (o, i) => o.actuel !== etat.objectifs[i].actuel,
+      );
+      if (aChange) {
+        setEtat({
+          objectifs: objectifsMaj,
+          epargneMois: etat.epargneMois + totalVerse,
+        });
+      }
     },
 
     supprimerObjectif: (id: number) => {
@@ -210,6 +297,12 @@ export function useObjectifs() {
           couleur: e.couleur,
           type: e.type,
         })),
+        objectifs: etat.objectifs.map((o) => ({
+          id: o.id,
+          nom: o.nom,
+          actuel: o.actuel,
+          cible: o.cible,
+        })),
         epargne: etat.epargneMois,
         disponible: etat.argentDisponible,
         totalDepense:
@@ -236,6 +329,16 @@ export function useObjectifs() {
       const aujourdhui = new Date();
       aujourdhui.setHours(0, 0, 0, 0);
 
+      const dejaPayeeCeMois = (enveloppeId: number, dateEcheance: Date) =>
+        etat.historiquePaiements.some((p) => {
+          if (p.enveloppeId !== enveloppeId) return false;
+          const d = new Date(p.date);
+          return (
+            d.getMonth() === dateEcheance.getMonth() &&
+            d.getFullYear() === dateEcheance.getFullYear()
+          );
+        });
+
       const nouveauxPaiements: PaiementHistorique[] = [];
 
       const enveloppesMaj = etat.enveloppes.map((env) => {
@@ -243,26 +346,33 @@ export function useObjectifs() {
           const dateEcheance = new Date(env.dateFixe);
           dateEcheance.setHours(0, 0, 0, 0);
           if (dateEcheance <= aujourdhui) {
-            nouveauxPaiements.push({
-              id: Date.now() + Math.random(),
-              enveloppeId: env.id,
-              nom: env.nom,
-              montant: env.budget,
-              date: env.dateFixe,
-              couleur: env.couleur,
-            });
+            const dejaEnregistree = dejaPayeeCeMois(env.id, dateEcheance);
+            if (!dejaEnregistree) {
+              nouveauxPaiements.push({
+                id: Date.now() + Math.random(),
+                enveloppeId: env.id,
+                nom: env.nom,
+                montant: env.budget,
+                date: env.dateFixe,
+                couleur: env.couleur,
+              });
+            }
             if (env.repeteChaqueMois) {
               const prochaine = new Date(dateEcheance);
               prochaine.setMonth(prochaine.getMonth() + 1);
               const prochaineStr = `${prochaine.getFullYear()}-${String(prochaine.getMonth() + 1).padStart(2, "0")}-${String(prochaine.getDate()).padStart(2, "0")}`;
               return {
                 ...env,
-                depense: env.depense + env.budget,
+                depense: dejaEnregistree ? env.depense : env.budget,
                 payee: false,
                 dateFixe: prochaineStr,
               };
             }
-            return { ...env, depense: env.budget, payee: true };
+            return {
+              ...env,
+              depense: dejaEnregistree ? env.depense : env.budget,
+              payee: true,
+            };
           }
         }
         return env;
@@ -285,25 +395,34 @@ export function useObjectifs() {
     },
 
     ajouterEvenement: (
+      id: number,
       nom: string,
-      jour: number,
+      date: string,
       heure: string,
       duree: number,
       couleur: string,
       estFinancier: boolean,
       montant?: number,
       categorieLiee?: string,
+      recurrent?: boolean,
+      frequence?: "jour" | "semaine" | "mois" | "an",
+      touteLaJournee?: boolean,
+      notifierActif?: boolean,
     ) => {
       const nouvelEvenement: Evenement = {
-        id: Date.now(),
+        id,
         nom,
-        jour,
+        date,
         heure,
         duree,
         couleur,
         estFinancier,
         montant,
         categorieLiee,
+        recurrent,
+        frequence: recurrent ? frequence : undefined,
+        touteLaJournee,
+        notifierActif,
       };
       setEtat({ evenements: [...etat.evenements, nouvelEvenement] });
       if (estFinancier && montant) {
@@ -332,6 +451,14 @@ export function useObjectifs() {
 
     supprimerEvenement: (id: number) => {
       setEtat({ evenements: etat.evenements.filter((e) => e.id !== id) });
+    },
+
+    modifierEvenement: (id: number, champs: Partial<Omit<Evenement, "id">>) => {
+      setEtat({
+        evenements: etat.evenements.map((e) =>
+          e.id === id ? { ...e, ...champs } : e,
+        ),
+      });
     },
 
     ajouterTransaction: (

@@ -133,6 +133,7 @@ export default function Analytics() {
   useFocusEffect(
     useCallback(() => {
       objStore.verifierEcheancesFixes();
+      objStore.verifierVersementsObjectifs();
     }, []),
   );
 
@@ -302,6 +303,20 @@ export default function Analytics() {
   const topDepensesTri = topDepenses
     .sort((a, b) => b.montant - a.montant)
     .slice(0, 5);
+
+  const snapshotMoisPrecedent = objStore.historiquesMois.find(
+    (s) =>
+      s.mois === moisPrecedent.getMonth() &&
+      s.annee === moisPrecedent.getFullYear(),
+  );
+  const objectifsAvecDelta = objStore.objectifs.map((obj) => {
+    const pct = obj.cible > 0 ? Math.min((obj.actuel / obj.cible) * 100, 100) : 0;
+    const objPrecedent = snapshotMoisPrecedent?.objectifs.find(
+      (o) => o.id === obj.id,
+    );
+    const delta = objPrecedent ? obj.actuel - objPrecedent.actuel : null;
+    return { ...obj, pct, delta };
+  });
 
   const toggleCategorie = (id: number) => {
     setCategoriesSelectionnees((prev) =>
@@ -709,6 +724,61 @@ export default function Analytics() {
           ))}
         </View>
 
+        {objectifsAvecDelta.length > 0 && (
+          <>
+            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+              Objectifs d'épargne
+            </Text>
+            {objectifsAvecDelta.map((obj) => (
+              <View
+                key={obj.id}
+                style={[
+                  styles.objectifStatItem,
+                  {
+                    backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                    borderColor: C.carteBorder,
+                  },
+                ]}
+              >
+                <View style={styles.objectifStatHeader}>
+                  <Text style={[styles.objectifStatNom, { color: C.texte }]}>
+                    {obj.nom}
+                  </Text>
+                  <Text style={[styles.objectifStatPct, { color: obj.couleur }]}>
+                    {Math.round(obj.pct)}%
+                  </Text>
+                </View>
+                <View style={[styles.cbarTrack, { backgroundColor: C.separateur }]}>
+                  <View
+                    style={[
+                      styles.cbarFill,
+                      { width: `${obj.pct}%`, backgroundColor: obj.couleur },
+                    ]}
+                  />
+                </View>
+                <View style={styles.objectifStatFooter}>
+                  <Text
+                    style={[styles.objectifStatMontant, { color: C.texteMuted }]}
+                  >
+                    {obj.actuel} € / {obj.cible} €
+                  </Text>
+                  {obj.delta !== null && (
+                    <Text
+                      style={[
+                        styles.objectifStatDelta,
+                        { color: obj.delta >= 0 ? C.accentText : C.peachText },
+                      ]}
+                    >
+                      {obj.delta >= 0 ? "+" : ""}
+                      {obj.delta}€ vs mois dernier
+                    </Text>
+                  )}
+                </View>
+              </View>
+            ))}
+          </>
+        )}
+
         {topDepensesTri.length > 0 && (
           <>
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
@@ -938,5 +1008,27 @@ const styles = StyleSheet.create({
   topNom: { flex: 1, fontSize: 13, fontWeight: "600", color: "#1A1A1A" },
   topMois: { fontSize: 11, color: "#999", marginRight: 8 },
   topMontant: { fontSize: 13, fontWeight: "700", color: "#1A1A1A" },
+  objectifStatItem: {
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 0.5,
+    marginBottom: 10,
+  },
+  objectifStatHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  objectifStatNom: { fontSize: 14, fontWeight: "700" },
+  objectifStatPct: { fontSize: 14, fontWeight: "700" },
+  objectifStatFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  objectifStatMontant: { fontSize: 12, fontWeight: "600" },
+  objectifStatDelta: { fontSize: 11, fontWeight: "700" },
 });
 

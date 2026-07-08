@@ -16,8 +16,8 @@ export default function TabLayout() {
           height: 60,
           paddingBottom: 8,
         },
-        tabBarActiveTintColor: C.purple,
-        tabBarInactiveTintColor: C.texteMuted,
+        tabBarActiveTintColor: C.tabActif,
+        tabBarInactiveTintColor: C.tabInactif,
         tabBarLabelStyle: {
           fontSize: 10,
           fontWeight: "500",
@@ -29,16 +29,7 @@ export default function TabLayout() {
         options={{
           title: "Aperçu",
           tabBarIcon: ({ color }) => (
-            <Ionicons name="sparkles-outline" size={22} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="planning"
-        options={{
-          title: "Planning",
-          tabBarIcon: ({ color }) => (
-            <Ionicons name="calendar-outline" size={22} color={color} />
+            <Ionicons name="search-outline" size={22} color={color} />
           ),
         }}
       />
@@ -48,6 +39,15 @@ export default function TabLayout() {
           title: "Budget",
           tabBarIcon: ({ color }) => (
             <Ionicons name="wallet-outline" size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="planning"
+        options={{
+          title: "Planning",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="calendar-outline" size={22} color={color} />
           ),
         }}
       />

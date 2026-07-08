@@ -2,6 +2,7 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   InputAccessoryView,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -24,6 +25,7 @@ export default function Budget() {
   useFocusEffect(
     useCallback(() => {
       objStore.verifierEcheancesFixes();
+      objStore.verifierVersementsObjectifs();
     }, []),
   );
 
@@ -51,8 +53,19 @@ export default function Budget() {
     return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
   });
 
-  const totalReel = objStore.enveloppes.reduce((acc, e) => acc + e.depense, 0);
+  const totalDepenses = objStore.enveloppes.reduce(
+    (acc, e) => acc + e.depense,
+    0,
+  );
+  const totalEpargne = objStore.epargneMois;
+  const totalReel = totalDepenses + totalEpargne;
   const budgetTotal = objStore.argentDisponible;
+  const pctDepenses =
+    budgetTotal > 0 ? Math.min((totalDepenses / budgetTotal) * 100, 100) : 0;
+  const pctEpargne =
+    budgetTotal > 0
+      ? Math.min((totalEpargne / budgetTotal) * 100, 100 - pctDepenses)
+      : 0;
 
   const depenseDominante = [...enveloppesCourantes].sort(
     (a, b) => b.depense - a.depense,
@@ -113,13 +126,45 @@ export default function Budget() {
             <View
               style={[
                 styles.progressFill,
-                {
-                  width: `${budgetTotal > 0 ? Math.min((totalReel / budgetTotal) * 100, 100) : 0}%`,
-                  backgroundColor: C.bleuGris,
-                },
+                { width: `${pctDepenses}%`, backgroundColor: C.bleuGris },
               ]}
             />
+            {totalEpargne > 0 && (
+              <View
+                style={[
+                  styles.progressFillEpargne,
+                  {
+                    width: `${pctEpargne}%`,
+                    left: `${pctDepenses}%`,
+                    backgroundColor: C.purple,
+                  },
+                ]}
+              />
+            )}
           </View>
+          {totalEpargne > 0 && (
+            <View style={styles.heroLegende}>
+              <View style={styles.heroLegendeItem}>
+                <View
+                  style={[
+                    styles.heroLegendeDot,
+                    { backgroundColor: C.bleuGris },
+                  ]}
+                />
+                <Text style={[styles.heroLegendeTexte, { color: C.texteMuted }]}>
+                  Dépenses {totalDepenses} €
+                </Text>
+              </View>
+              <View style={styles.heroLegendeItem}>
+                <View
+                  style={[styles.heroLegendeDot, { backgroundColor: C.purple }]}
+                />
+                <Text style={[styles.heroLegendeTexte, { color: C.texteMuted }]}>
+                  Épargne {totalEpargne} €
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
 
         {depenseDominante && depenseDominante.depense > 0 && (
@@ -190,9 +235,14 @@ export default function Budget() {
                 onPress={() => toggleEnveloppe(env.id)}
               >
                 <View style={styles.envRow}>
-                  <Text style={[styles.envNom, { color: C.texte }]}>
-                    {env.nom}
-                  </Text>
+                  <View style={styles.envNomRow}>
+                    <View
+                      style={[styles.envDot, { backgroundColor: env.couleur }]}
+                    />
+                    <Text style={[styles.envNom, { color: C.texte }]}>
+                      {env.nom}
+                    </Text>
+                  </View>
                   <View style={styles.envRowRight}>
                     <Text style={[styles.envMontant, { color: env.couleur }]}>
                       {env.depense} € / {env.budget} €
@@ -359,9 +409,11 @@ export default function Budget() {
           <View
             style={[styles.accessoryBar, { backgroundColor: C.fondSecondaire }]}
           >
-            <Text style={[styles.accessoryTexte, { color: C.accent }]}>
-              Terminé
-            </Text>
+            <TouchableOpacity onPress={() => Keyboard.dismiss()}>
+              <Text style={[styles.accessoryTexte, { color: C.accent }]}>
+                Terminé
+              </Text>
+            </TouchableOpacity>
           </View>
         </InputAccessoryView>
       )}
@@ -504,8 +556,23 @@ const styles = StyleSheet.create({
   },
   heroAmount: { fontSize: 42, fontWeight: "700", marginBottom: 4 },
   heroSub: { fontSize: 13, marginBottom: 16 },
-  progressBg: { height: 6, borderRadius: 3, overflow: "hidden" },
-  progressFill: { height: "100%", borderRadius: 3 },
+  progressBg: {
+    height: 6,
+    borderRadius: 3,
+    overflow: "hidden",
+    position: "relative",
+  },
+  progressFill: { height: "100%", borderRadius: 3, position: "absolute", left: 0 },
+  progressFillEpargne: { height: "100%", borderRadius: 3, position: "absolute" },
+  heroLegende: {
+    flexDirection: "row",
+    gap: 16,
+    marginTop: 12,
+    flexWrap: "wrap",
+  },
+  heroLegendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
+  heroLegendeDot: { width: 7, height: 7, borderRadius: 4 },
+  heroLegendeTexte: { fontSize: 12, fontWeight: "600" },
   insightBanner: {
     borderRadius: 13,
     padding: 14,
@@ -536,6 +603,8 @@ const styles = StyleSheet.create({
     marginBottom: 11,
   },
   envNom: { fontSize: 16, fontWeight: "700" },
+  envNomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  envDot: { width: 10, height: 10, borderRadius: 5 },
   envRowRight: { flexDirection: "row", alignItems: "center", gap: 8 },
   envMontant: { fontSize: 14, fontWeight: "700" },
   chevron: { fontSize: 14, fontWeight: "700" },

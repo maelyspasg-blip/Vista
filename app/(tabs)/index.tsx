@@ -3,6 +3,7 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   InputAccessoryView,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,27 +17,9 @@ import {
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import Svg, { Circle } from "react-native-svg";
-import { Enveloppe, useObjectifs } from "../store";
+import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
+import { Enveloppe, Objectif, useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
-
-const PALETTE_COULEURS = [
-  "#5DC8A0",
-  "#F4956A",
-  "#8B6FE8",
-  "#4A90D9",
-  "#D9A04A",
-  "#D94A8C",
-  "#5BC0BE",
-  "#9B5DE5",
-  "#E84C1E",
-  "#2EC4B6",
-  "#FF6B6B",
-  "#4ECDC4",
-  "#FFD166",
-  "#6A4C93",
-  "#1982C4",
-  "#C73E1D",
-];
 
 function bgClair(couleur: string) {
   return couleur + "22";
@@ -142,6 +125,7 @@ export default function Dashboard() {
   useFocusEffect(
     useCallback(() => {
       objStore.verifierEcheancesFixes();
+      objStore.verifierVersementsObjectifs();
 
       const maintenant = new Date();
       const moisActuel = maintenant.getMonth();
@@ -210,14 +194,19 @@ export default function Dashboard() {
   const [nouveauAfficherPlanning, setNouveauAfficherPlanning] = useState(false);
 
   const [modalEpargneVisible, setModalEpargneVisible] = useState(false);
-  const [vueModal, setVueModal] = useState<"epargne" | "nouvelObjectif">(
-    "epargne",
-  );
+  const [vueModal, setVueModal] = useState<"liste" | "form">("liste");
   const [epargneTemp, setEpargneTemp] = useState(String(objStore.epargneMois));
+  const [objectifEnEdition, setObjectifEnEdition] = useState<Objectif | null>(
+    null,
+  );
   const [nomObjectif, setNomObjectif] = useState("");
   const [cibleObjectif, setCibleObjectif] = useState("");
   const [montantInitialObjectif, setMontantInitialObjectif] = useState("");
   const [couleurObjectif, setCouleurObjectif] = useState(PALETTE_COULEURS[0]);
+  const [recurrentObjectif, setRecurrentObjectif] = useState(false);
+  const [montantMensuelObjectif, setMontantMensuelObjectif] = useState("");
+  const [jourDuMoisObjectif, setJourDuMoisObjectif] = useState("1");
+  const [montantAjoutObjectif, setMontantAjoutObjectif] = useState("");
 
   const totalDepenseEnveloppes = enveloppes.reduce(
     (acc, e) => acc + e.depense,
@@ -225,7 +214,6 @@ export default function Dashboard() {
   );
   const totalDepense = totalDepenseEnveloppes + objStore.epargneMois;
   const disponibleNum = parseFloat(argentDisponible) || 0;
-  const resteAVivre = disponibleNum - totalDepense;
   const pctUtilise =
     disponibleNum > 0
       ? Math.min((totalDepenseEnveloppes / disponibleNum) * 100, 100)
@@ -352,27 +340,89 @@ export default function Dashboard() {
 
   const ouvrirModalEpargne = () => {
     setEpargneTemp(String(objStore.epargneMois));
-    setVueModal("epargne");
+    setVueModal("liste");
     setModalEpargneVisible(true);
   };
 
-  const sauvegarderEpargne = () => {
+  const sauvegarderEtFermerEpargne = () => {
     objStore.modifierEpargneMois(parseFloat(epargneTemp) || 0);
+    setModalEpargneVisible(false);
   };
 
-  const creerObjectif = () => {
-    if (!nomObjectif || !cibleObjectif) return;
-    objStore.ajouterObjectif(
-      nomObjectif,
-      parseFloat(cibleObjectif) || 0,
-      parseFloat(montantInitialObjectif) || 0,
-      couleurObjectif,
-    );
+  const resetFormObjectif = () => {
     setNomObjectif("");
     setCibleObjectif("");
     setMontantInitialObjectif("");
     setCouleurObjectif(PALETTE_COULEURS[0]);
-    setVueModal("epargne");
+    setRecurrentObjectif(false);
+    setMontantMensuelObjectif("");
+    setJourDuMoisObjectif("1");
+    setMontantAjoutObjectif("");
+  };
+
+  const ouvrirCreationObjectif = () => {
+    setObjectifEnEdition(null);
+    resetFormObjectif();
+    setVueModal("form");
+  };
+
+  const ouvrirEditionObjectif = (obj: Objectif) => {
+    setObjectifEnEdition(obj);
+    setNomObjectif(obj.nom);
+    setCibleObjectif(String(obj.cible));
+    setMontantInitialObjectif("");
+    setCouleurObjectif(obj.couleur);
+    setRecurrentObjectif(obj.recurrent ?? false);
+    setMontantMensuelObjectif(
+      obj.montantMensuel ? String(obj.montantMensuel) : "",
+    );
+    setJourDuMoisObjectif(obj.jourDuMois ? String(obj.jourDuMois) : "1");
+    setMontantAjoutObjectif("");
+    setVueModal("form");
+  };
+
+  const sauvegarderObjectif = () => {
+    if (!nomObjectif || !cibleObjectif) return;
+    const cible = parseFloat(cibleObjectif) || 0;
+    const montantMensuel = recurrentObjectif
+      ? parseFloat(montantMensuelObjectif) || 0
+      : undefined;
+    const jourDuMois = recurrentObjectif
+      ? Math.min(28, Math.max(1, parseInt(jourDuMoisObjectif, 10) || 1))
+      : undefined;
+
+    if (objectifEnEdition) {
+      objStore.modifierObjectif(objectifEnEdition.id, {
+        nom: nomObjectif,
+        cible,
+        couleur: couleurObjectif,
+        recurrent: recurrentObjectif,
+        montantMensuel,
+        jourDuMois,
+      });
+    } else {
+      objStore.ajouterObjectif(
+        nomObjectif,
+        cible,
+        parseFloat(montantInitialObjectif) || 0,
+        couleurObjectif,
+        recurrentObjectif,
+        montantMensuel,
+        jourDuMois,
+      );
+    }
+    resetFormObjectif();
+    setObjectifEnEdition(null);
+    setVueModal("liste");
+  };
+
+  const ajouterFondsObjectif = () => {
+    if (!objectifEnEdition || !montantAjoutObjectif) return;
+    objStore.ajouterFondsObjectif(
+      objectifEnEdition.id,
+      parseFloat(montantAjoutObjectif) || 0,
+    );
+    setMontantAjoutObjectif("");
   };
 
   return (
@@ -417,7 +467,7 @@ export default function Dashboard() {
           style={[
             styles.hero,
             {
-              backgroundColor: theme === "sombre" ? C.carte : C.purple,
+              backgroundColor: theme === "sombre" ? C.carte : C.hero,
               borderWidth: theme === "sombre" ? 0.5 : 0,
               borderColor: C.carteBorder,
             },
@@ -468,30 +518,26 @@ export default function Dashboard() {
               </View>
             )}
           </View>
-          <View style={styles.heroFooter}>
-            <Text style={styles.heroSub}>
-              {Math.round(pctUtilise + pctEpargne)}% du disponible
-            </Text>
-            <Text style={styles.heroSub}>{resteAVivre} € libres</Text>
-          </View>
+        </View>
 
-          <View style={styles.heroDivider} />
-
+        <View
+          style={[
+            styles.hero,
+            {
+              backgroundColor: theme === "sombre" ? C.carte : C.hero,
+              borderWidth: theme === "sombre" ? 0.5 : 0,
+              borderColor: C.carteBorder,
+            },
+          ]}
+        >
           <Text style={styles.heroLabel}>RESTE ESTIMÉ CE MOIS</Text>
           <Text
             style={[
-              styles.resteEstimeAmount,
+              styles.heroAmount,
               { color: resteEstime < 0 ? "#FFD2D2" : "#FFFFFF" },
             ]}
           >
             {resteEstime} €
-          </Text>
-          <Text style={styles.heroSubDetail}>
-            Budget {disponibleNum}€ · Dépensé {totalDepenseEnveloppes}€ ·
-            Dépenses prévues {totalPrevu}€ · Épargne {objStore.epargneMois}€
-          </Text>
-          <Text style={styles.heroPhraseClaire}>
-            Il te restera environ {resteEstime} € à la fin du mois
           </Text>
           <View style={styles.barBg}>
             <View
@@ -531,7 +577,7 @@ export default function Dashboard() {
               <View
                 style={[styles.heroLegendeDot, { backgroundColor: C.peach }]}
               />
-              <Text style={styles.heroSub}>Dépenses prévues {totalPrevu}€</Text>
+              <Text style={styles.heroSub}>Prévues {totalPrevu}€</Text>
             </View>
             {objStore.epargneMois > 0 && (
               <View style={styles.heroLegendeItem}>
@@ -563,24 +609,6 @@ export default function Dashboard() {
         </View>
 
         <View style={styles.statsRow}>
-          <View
-            style={[
-              styles.statCard,
-              {
-                backgroundColor: theme === "sombre" ? C.carte : C.purpleLight,
-                borderWidth: theme === "sombre" ? 0.5 : 0,
-                borderColor: C.carteBorder,
-              },
-            ]}
-          >
-            <Text style={[styles.statLabel, { color: C.purple }]}>
-              PROJECTION FIN DE MOIS
-            </Text>
-            <Text style={[styles.statValue, { color: C.purpleText }]}>
-              {resteEstime} €
-            </Text>
-          </View>
-
           <TouchableOpacity
             style={[
               styles.statCard,
@@ -592,7 +620,7 @@ export default function Dashboard() {
             ]}
             activeOpacity={0.7}
             onPress={() => {
-              setDisponibleTemp(argentDisponible);
+              setDisponibleTemp(disponibleNum === 0 ? "" : argentDisponible);
               setEditionDisponible(true);
             }}
           >
@@ -602,32 +630,9 @@ export default function Dashboard() {
               </Text>
               <Ionicons name="pencil-outline" size={12} color={C.peach} />
             </View>
-            {editionDisponible ? (
-              <View style={styles.editDisponibleRow}>
-                <TextInput
-                  style={[
-                    styles.editDisponibleInput,
-                    { backgroundColor: C.fondPage, color: C.peachText },
-                  ]}
-                  keyboardType="numeric"
-                  value={disponibleTemp}
-                  onChangeText={setDisponibleTemp}
-                  onSubmitEditing={sauvegarderDisponible}
-                  returnKeyType="done"
-                  autoFocus
-                  inputAccessoryViewID={ACCESSORY_ID}
-                />
-                <TouchableOpacity onPress={sauvegarderDisponible}>
-                  <Text style={[styles.validerTexte, { color: C.peach }]}>
-                    OK
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <Text style={[styles.statValue, { color: C.peachText }]}>
-                {disponibleNum} €
-              </Text>
-            )}
+            <Text style={[styles.statValue, { color: C.peachText }]}>
+              {disponibleNum} €
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -825,12 +830,72 @@ export default function Dashboard() {
               { backgroundColor: C.fondSecondaire, borderTopColor: C.separateur },
             ]}
           >
-            <Text style={[styles.accessoryTexte, { color: C.purple }]}>
-              Terminé
-            </Text>
+            <TouchableOpacity onPress={() => Keyboard.dismiss()}>
+              <Text style={[styles.accessoryTexte, { color: C.purple }]}>
+                Terminé
+              </Text>
+            </TouchableOpacity>
           </View>
         </InputAccessoryView>
       )}
+
+      <Modal
+        visible={editionDisponible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditionDisponible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.modalOverlayTouch}>
+            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+              <Text style={[styles.modalTitre, { color: C.texte }]}>
+                Montant disponible
+              </Text>
+              <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                Montant total pour ce mois
+              </Text>
+              <View style={styles.modalInputRow}>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { flex: 1, backgroundColor: C.fondSecondaire, color: C.texte },
+                  ]}
+                  keyboardType="numeric"
+                  value={disponibleTemp}
+                  onChangeText={setDisponibleTemp}
+                  returnKeyType="done"
+                  onSubmitEditing={() => Keyboard.dismiss()}
+                  autoFocus
+                  inputAccessoryViewID={ACCESSORY_ID}
+                />
+                <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.btnAjouter, { backgroundColor: C.hero }]}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  sauvegarderDisponible();
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.btnAjouterTexte}>Enregistrer</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.btnAnnuler}
+                onPress={() => setEditionDisponible(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                  Annuler
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <Modal
         visible={modalEnveloppeVisible}
@@ -944,26 +1009,14 @@ export default function Dashboard() {
                   </Text>
                 </TouchableOpacity>
                 {paletteOuverteTemp && (
-                  <View style={styles.paletteGrid}>
-                    {PALETTE_COULEURS.map((c) => (
-                      <TouchableOpacity
-                        key={c}
-                        style={[
-                          styles.swatch,
-                          { backgroundColor: c },
-                          couleurTemp === c && {
-                            borderWidth: 3,
-                            borderColor: C.texte,
-                          },
-                        ]}
-                        onPress={() => {
-                          setCouleurTemp(c);
-                          setPaletteOuverteTemp(false);
-                        }}
-                        activeOpacity={0.7}
-                      />
-                    ))}
-                  </View>
+                  <ColorPicker
+                    value={couleurTemp}
+                    onChange={(c) => {
+                      setCouleurTemp(c);
+                      setPaletteOuverteTemp(false);
+                    }}
+                    borderColor={C.texte}
+                  />
                 )}
 
                 {typeTemp === "Variable" ? (
@@ -1194,26 +1247,14 @@ export default function Dashboard() {
                   </Text>
                 </TouchableOpacity>
                 {paletteOuverteNouvelle && (
-                  <View style={styles.paletteGrid}>
-                    {PALETTE_COULEURS.map((c) => (
-                      <TouchableOpacity
-                        key={c}
-                        style={[
-                          styles.swatch,
-                          { backgroundColor: c },
-                          nouvelleCouleur === c && {
-                            borderWidth: 3,
-                            borderColor: C.texte,
-                          },
-                        ]}
-                        onPress={() => {
-                          setNouvelleCouleur(c);
-                          setPaletteOuverteNouvelle(false);
-                        }}
-                        activeOpacity={0.7}
-                      />
-                    ))}
-                  </View>
+                  <ColorPicker
+                    value={nouvelleCouleur}
+                    onChange={(c) => {
+                      setNouvelleCouleur(c);
+                      setPaletteOuverteNouvelle(false);
+                    }}
+                    borderColor={C.texte}
+                  />
                 )}
 
                 {nouveauType === "Variable" ? (
@@ -1326,10 +1367,12 @@ export default function Dashboard() {
         >
           <View style={styles.modalOverlayTouch}>
             <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
-              {vueModal === "epargne" ? (
+              {vueModal === "liste" ? (
                 <>
                   <View style={styles.modalHeader}>
-                    <Text style={[styles.modalTitre, { color: C.texte }]}>Épargne de ce mois</Text>
+                    <Text style={[styles.modalTitre, { color: C.texte }]}>
+                      Épargne
+                    </Text>
                     <TouchableOpacity
                       onPress={() => setModalEpargneVisible(false)}
                       activeOpacity={0.6}
@@ -1342,19 +1385,22 @@ export default function Dashboard() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                   >
+                    <Text style={[styles.sectionTitle, { color: C.texteMuted }]}>
+                      CE MOIS-CI
+                    </Text>
                     <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                      Montant à mettre de côté ce mois
+                      Épargne par mois
                     </Text>
                     <View style={styles.modalInputRow}>
                       <TextInput
                         style={[
-                      styles.input,
-                      {
-                        flex: 1,
-                        backgroundColor: C.fondSecondaire,
-                        color: C.texte,
-                      },
-                    ]}
+                          styles.input,
+                          {
+                            flex: 1,
+                            backgroundColor: C.fondSecondaire,
+                            color: C.texte,
+                          },
+                        ]}
                         keyboardType="numeric"
                         value={epargneTemp}
                         onChangeText={setEpargneTemp}
@@ -1363,25 +1409,16 @@ export default function Dashboard() {
                       />
                       <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
                     </View>
-                    <Text style={[styles.modalAide, { color: C.texteMuted }]}>
-                      Cet argent sera compté comme dépensé mais n'apparaîtra pas
-                      dans le graphique de tes dépenses courantes.
-                    </Text>
-
-                    <TouchableOpacity
-                      style={[styles.btnAjouter, { backgroundColor: C.purple }]}
-                      onPress={sauvegarderEpargne}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.btnAjouterTexte}>
-                        Enregistrer le montant
-                      </Text>
-                    </TouchableOpacity>
 
                     <View style={[styles.separateur, { backgroundColor: C.separateur }]} />
 
-                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                      Tes objectifs d'épargne
+                    <Text
+                      style={[
+                        styles.sectionTitle,
+                        { color: C.texteMuted, marginBottom: 12 },
+                      ]}
+                    >
+                      TES OBJECTIFS
                     </Text>
                     {objStore.objectifs.length === 0 && (
                       <Text style={[styles.modalVideTexte, { color: C.texteMuted }]}>
@@ -1389,13 +1426,26 @@ export default function Dashboard() {
                       </Text>
                     )}
                     {objStore.objectifs.map((obj) => {
-                      const pct = Math.min((obj.actuel / obj.cible) * 100, 100);
+                      const pct =
+                        obj.cible > 0
+                          ? Math.min((obj.actuel / obj.cible) * 100, 100)
+                          : 0;
                       return (
-                        <View key={obj.id} style={[styles.objectifModalItem, { backgroundColor: C.fondSecondaire }]}>
+                        <TouchableOpacity
+                          key={obj.id}
+                          style={[styles.objectifModalItem, { backgroundColor: C.fondSecondaire }]}
+                          onPress={() => ouvrirEditionObjectif(obj)}
+                          activeOpacity={0.7}
+                        >
                           <View style={styles.objectifModalHeader}>
-                            <Text style={[styles.objectifModalNom, { color: C.texte }]}>
-                              {obj.nom}
-                            </Text>
+                            <View style={styles.envNomRow}>
+                              <Text style={[styles.objectifModalNom, { color: C.texte }]}>
+                                {obj.nom}
+                              </Text>
+                              {obj.recurrent && (
+                                <Ionicons name="repeat" size={13} color={C.texteMuted} />
+                              )}
+                            </View>
                             <TouchableOpacity
                               onPress={() => objStore.supprimerObjectif(obj.id)}
                             >
@@ -1421,27 +1471,37 @@ export default function Dashboard() {
                               ]}
                             />
                           </View>
-                        </View>
+                        </TouchableOpacity>
                       );
                     })}
 
                     <TouchableOpacity
                       style={styles.btnNouvelObjectifBouton}
-                      onPress={() => setVueModal("nouvelObjectif")}
+                      onPress={ouvrirCreationObjectif}
                       activeOpacity={0.7}
                     >
                       <Text style={[styles.btnNouvelObjectif, { color: C.purple }]}>
-                        + Créer un nouvel objectif
+                        + Ajouter
                       </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.btnAjouter, { backgroundColor: C.purple }]}
+                      onPress={sauvegarderEtFermerEpargne}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.btnAjouterTexte}>Enregistrer</Text>
                     </TouchableOpacity>
                   </ScrollView>
                 </>
               ) : (
                 <>
                   <View style={styles.modalHeader}>
-                    <Text style={[styles.modalTitre, { color: C.texte }]}>Nouvel objectif</Text>
+                    <Text style={[styles.modalTitre, { color: C.texte }]}>
+                      {objectifEnEdition ? "Modifier l'objectif" : "Nouvel objectif"}
+                    </Text>
                     <TouchableOpacity
-                      onPress={() => setVueModal("epargne")}
+                      onPress={() => setVueModal("liste")}
                       activeOpacity={0.6}
                     >
                       <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>✕</Text>
@@ -1487,61 +1547,163 @@ export default function Dashboard() {
                       <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
                     </View>
 
-                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                      Déjà mis de côté (optionnel)
-                    </Text>
-                    <View style={styles.modalInputRow}>
-                      <TextInput
-                        style={[
-                      styles.input,
-                      {
-                        flex: 1,
-                        backgroundColor: C.fondSecondaire,
-                        color: C.texte,
-                      },
-                    ]}
-                        placeholder="0"
-                        placeholderTextColor={C.texteMuted}
-                        keyboardType="numeric"
-                        value={montantInitialObjectif}
-                        onChangeText={setMontantInitialObjectif}
-                        returnKeyType="done"
-                        inputAccessoryViewID={ACCESSORY_ID}
+                    {!objectifEnEdition && (
+                      <>
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Déjà mis de côté (optionnel)
+                        </Text>
+                        <View style={styles.modalInputRow}>
+                          <TextInput
+                            style={[
+                          styles.input,
+                          {
+                            flex: 1,
+                            backgroundColor: C.fondSecondaire,
+                            color: C.texte,
+                          },
+                        ]}
+                            placeholder="0"
+                            placeholderTextColor={C.texteMuted}
+                            keyboardType="numeric"
+                            value={montantInitialObjectif}
+                            onChangeText={setMontantInitialObjectif}
+                            returnKeyType="done"
+                            inputAccessoryViewID={ACCESSORY_ID}
+                          />
+                          <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
+                        </View>
+                      </>
+                    )}
+
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
+                          Montant fixe chaque mois
+                        </Text>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                          Versement automatique récurrent
+                        </Text>
+                      </View>
+                      <Switch
+                        value={recurrentObjectif}
+                        onValueChange={setRecurrentObjectif}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={recurrentObjectif ? C.purple : "#FFF"}
                       />
-                      <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
                     </View>
 
-                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Couleur</Text>
-                    <View style={styles.paletteGrid}>
-                      {PALETTE_COULEURS.map((c) => (
-                        <TouchableOpacity
-                          key={c}
+                    {recurrentObjectif && (
+                      <>
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Montant mensuel
+                        </Text>
+                        <View style={styles.modalInputRow}>
+                          <TextInput
+                            style={[
+                          styles.input,
+                          {
+                            flex: 1,
+                            backgroundColor: C.fondSecondaire,
+                            color: C.texte,
+                          },
+                        ]}
+                            placeholder="Ex : 100"
+                            placeholderTextColor={C.texteMuted}
+                            keyboardType="numeric"
+                            value={montantMensuelObjectif}
+                            onChangeText={setMontantMensuelObjectif}
+                            returnKeyType="done"
+                            inputAccessoryViewID={ACCESSORY_ID}
+                          />
+                          <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
+                        </View>
+
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Jour du mois
+                        </Text>
+                        <TextInput
                           style={[
-                            styles.swatch,
-                            { backgroundColor: c },
-                            couleurObjectif === c && {
-                              borderWidth: 3,
-                              borderColor: C.texte,
-                            },
-                          ]}
-                          onPress={() => setCouleurObjectif(c)}
-                          activeOpacity={0.7}
+                        styles.input,
+                        { backgroundColor: C.fondSecondaire, color: C.texte },
+                      ]}
+                          placeholder="Ex : 1"
+                          placeholderTextColor={C.texteMuted}
+                          keyboardType="number-pad"
+                          value={jourDuMoisObjectif}
+                          onChangeText={setJourDuMoisObjectif}
+                          returnKeyType="done"
+                          inputAccessoryViewID={ACCESSORY_ID}
                         />
-                      ))}
-                    </View>
+                      </>
+                    )}
+
+                    {objectifEnEdition && !recurrentObjectif && (
+                      <>
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Ajouter un montant
+                        </Text>
+                        <View style={styles.modalInputRow}>
+                          <TextInput
+                            style={[
+                          styles.input,
+                          {
+                            flex: 1,
+                            backgroundColor: C.fondSecondaire,
+                            color: C.texte,
+                          },
+                        ]}
+                            placeholder="0"
+                            placeholderTextColor={C.texteMuted}
+                            keyboardType="numeric"
+                            value={montantAjoutObjectif}
+                            onChangeText={setMontantAjoutObjectif}
+                            returnKeyType="done"
+                            inputAccessoryViewID={ACCESSORY_ID}
+                          />
+                          <TouchableOpacity
+                            style={[styles.btnAjoutRapide, { backgroundColor: C.purple }]}
+                            onPress={ajouterFondsObjectif}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={styles.btnAjoutRapideTexte}>Ajouter</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </>
+                    )}
+
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Couleur</Text>
+                    <ColorPicker
+                      value={couleurObjectif}
+                      onChange={setCouleurObjectif}
+                      borderColor={C.texte}
+                    />
 
                     <TouchableOpacity
                       style={[styles.btnAjouter, { backgroundColor: C.purple }]}
-                      onPress={creerObjectif}
+                      onPress={sauvegarderObjectif}
                       activeOpacity={0.7}
                     >
                       <Text style={styles.btnAjouterTexte}>
-                        Créer l'objectif
+                        Enregistrer
                       </Text>
                     </TouchableOpacity>
+                    {objectifEnEdition && (
+                      <TouchableOpacity
+                        style={styles.btnSupprimerTexte}
+                        onPress={() => {
+                          objStore.supprimerObjectif(objectifEnEdition.id);
+                          setVueModal("liste");
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.btnSupprimerTexteLabel}>
+                          Supprimer l'objectif
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                     <TouchableOpacity
                       style={styles.btnAnnuler}
-                      onPress={() => setVueModal("epargne")}
+                      onPress={() => setVueModal("liste")}
                       activeOpacity={0.7}
                     >
                       <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>Retour</Text>
@@ -1587,10 +1749,11 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   heroLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: "rgba(255,255,255,0.6)",
     letterSpacing: 1,
     marginBottom: 8,
+    fontWeight: "600",
   },
   themeBouton: {
     width: 36,
@@ -1632,29 +1795,10 @@ const styles = StyleSheet.create({
   },
   heroLegendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   heroLegendeDot: { width: 7, height: 7, borderRadius: 4 },
-  heroFooter: { flexDirection: "row", justifyContent: "space-between" },
-  heroSub: { fontSize: 13, color: "rgba(255,255,255,0.7)" },
-  heroDivider: {
-    height: 1,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    marginVertical: 16,
-  },
-  resteEstimeAmount: { fontSize: 28, fontWeight: "700", marginBottom: 8 },
-  heroSubDetail: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.6)",
-    marginBottom: 4,
-    lineHeight: 17,
-  },
-  heroPhraseClaire: {
-    fontSize: 13,
-    color: "rgba(255,255,255,0.85)",
-    fontWeight: "600",
-    marginBottom: 14,
-  },
+  heroSub: { fontSize: 14, color: "rgba(255,255,255,0.7)" },
   barSegment: { height: "100%" },
-  lectureBanner: { borderRadius: 12, padding: 11, marginTop: 14 },
-  lectureTexte: { fontSize: 13, fontWeight: "700", textAlign: "center" },
+  lectureBanner: { borderRadius: 12, padding: 12, marginTop: 6 },
+  lectureTexte: { fontSize: 14, fontWeight: "700", textAlign: "center" },
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
   statCard: {
     flex: 1,
@@ -1677,17 +1821,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   statValue: { fontSize: 19, fontWeight: "700" },
-  editDisponibleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  editDisponibleInput: {
-    fontSize: 18,
-    fontWeight: "700",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    minWidth: 64,
-    textAlign: "center",
-  },
-  validerTexte: { fontSize: 14, fontWeight: "700" },
   epargneCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -1819,13 +1952,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   couleurChevron: { fontSize: 14 },
-  paletteGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 11,
-    marginBottom: 18,
-  },
-  swatch: { width: 36, height: 36, borderRadius: 18 },
   typeRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
   typeChip: {
     flex: 1,
@@ -1857,6 +1983,13 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   btnAjouterTexte: { fontSize: 17, color: "#FFFFFF", fontWeight: "700" },
+  btnAjoutRapide: {
+    borderRadius: 13,
+    paddingHorizontal: 16,
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  btnAjoutRapideTexte: { fontSize: 14, color: "#FFFFFF", fontWeight: "700" },
   btnSupprimerTexte: {
     padding: 14,
     alignItems: "center",
