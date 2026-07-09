@@ -1,4 +1,8 @@
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import {
+  useFocusEffect,
+  useLocalSearchParams,
+  useRouter,
+} from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -34,6 +38,8 @@ type LigneAVenir = {
   couleur: string;
   date: string;
   recurrenceLabel?: string;
+  source: "envelope" | "evenement";
+  categorie?: string;
 };
 
 function dateVersISO(date: Date): string {
@@ -46,10 +52,17 @@ function formaterDateCourte(dateISO: string): string {
   return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 }
 
+function formaterDateLongue(dateISO: string): string {
+  const d = new Date(dateISO);
+  if (Number.isNaN(d.getTime())) return dateISO;
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+}
+
 export default function Budget() {
   const objStore = useObjectifs();
   const { couleurs: C } = useTheme();
   const params = useLocalSearchParams<{ section?: string }>();
+  const router = useRouter();
 
   const [enveloppeOuverte, setEnveloppeOuverte] = useState<string | null>(null);
   const [modalAjoutVisible, setModalAjoutVisible] = useState(false);
@@ -58,6 +71,12 @@ export default function Budget() {
   const [enveloppeTx, setEnveloppeTx] = useState<string | null>(null);
   const [ajoutTransactionEnCours, setAjoutTransactionEnCours] =
     useState(false);
+  const [gestionEvenement, setGestionEvenement] = useState<{
+    id: string;
+    nom: string;
+    date: string;
+    categorie?: string;
+  } | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const positionAutresDepenses = useRef(0);
 
@@ -82,6 +101,12 @@ export default function Budget() {
 
   const enveloppesCourantes = objStore.enveloppes.filter(
     (e) => e.type === "Variable",
+  );
+
+  const categoriesAffichees = objStore.enveloppes.filter(
+    (e) =>
+      e.type === "Variable" ||
+      objStore.evenements.some((ev) => ev.categorieLiee === e.nom),
   );
 
   const enveloppesAVenir = objStore.enveloppes.filter((e) => {
@@ -133,6 +158,7 @@ export default function Budget() {
       couleur: env.couleur,
       date: env.dateFixe!,
       recurrenceLabel: env.repeteChaqueMois ? "tous les mois" : undefined,
+      source: "envelope" as const,
     })),
     ...evenementsAVenir.map((e) => ({
       id: e.id,
@@ -141,6 +167,8 @@ export default function Budget() {
       couleur: e.couleur,
       date: e.date,
       recurrenceLabel: undefined,
+      source: "evenement" as const,
+      categorie: e.categorieLiee,
     })),
     ...autresDepensesAVenir.map((e) => ({
       id: e.id,
@@ -148,6 +176,7 @@ export default function Budget() {
       montant: e.montant!,
       couleur: e.couleur,
       date: e.date,
+      source: "evenement" as const,
       recurrenceLabel: undefined,
     })),
   ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -317,7 +346,7 @@ export default function Budget() {
           </View>
         ))}
 
-        {enveloppesCourantes.map((env) => {
+        {categoriesAffichees.map((env) => {
           const pct = Math.min((env.depense / env.budget) * 100, 100);
           const estOuverte = enveloppeOuverte === env.id;
 
@@ -347,6 +376,22 @@ export default function Budget() {
                 source: "evenement" as const,
               })),
           ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+          const lignesAVenirCategorie = objStore.evenements
+            .filter(
+              (e) =>
+                e.estFinancier &&
+                !e.montantApplique &&
+                e.montant &&
+                e.categorieLiee === env.nom,
+            )
+            .map((e) => ({
+              id: e.id,
+              nom: e.nom,
+              montant: e.montant!,
+              date: e.date,
+            }))
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
           return (
             <View
@@ -391,63 +436,154 @@ export default function Budget() {
                 <View
                   style={[styles.txListe, { borderTopColor: C.separateur }]}
                 >
-                  {lignesDepense.length === 0 ? (
+                  {lignesDepense.length === 0 &&
+                  lignesAVenirCategorie.length === 0 ? (
                     <Text style={[styles.txVide, { color: C.texteMuted }]}>
                       Aucune dépense enregistrée
                     </Text>
                   ) : (
-                    lignesDepense.map((ligne) => (
-                      <View
-                        key={`${ligne.source}-${ligne.id}`}
-                        style={styles.txLigne}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.txNom, { color: C.texte }]}>
-                            {ligne.nom}
-                          </Text>
-                          <Text
-                            style={[styles.txDate, { color: C.texteMuted }]}
+                    <>
+                      {lignesDepense.map((ligne) => {
+                        const contenu = (
+                          <>
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={[styles.txNom, { color: C.texte }]}
+                              >
+                                {ligne.nom}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.txDate,
+                                  { color: C.texteMuted },
+                                ]}
+                              >
+                                {formaterDateCourte(ligne.date)}
+                              </Text>
+                            </View>
+                            <Text
+                              style={[
+                                styles.txMontant,
+                                { color: env.couleur },
+                              ]}
+                            >
+                              - {ligne.montant} €
+                            </Text>
+                            {ligne.source === "transaction" && (
+                              <TouchableOpacity
+                                onPress={() =>
+                                  objStore.supprimerTransaction(ligne.id)
+                                }
+                                style={styles.txSupprimer}
+                              >
+                                <Text
+                                  style={[
+                                    styles.txSupprimerTexte,
+                                    { color: C.texteMuted },
+                                  ]}
+                                >
+                                  ✕
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+                          </>
+                        );
+
+                        if (ligne.source === "evenement") {
+                          return (
+                            <TouchableOpacity
+                              key={`evenement-${ligne.id}`}
+                              style={styles.txLigne}
+                              activeOpacity={0.6}
+                              onPress={() =>
+                                setGestionEvenement({
+                                  id: ligne.id,
+                                  nom: ligne.nom,
+                                  date: ligne.date,
+                                  categorie: env.nom,
+                                })
+                              }
+                            >
+                              {contenu}
+                            </TouchableOpacity>
+                          );
+                        }
+
+                        return (
+                          <View
+                            key={`transaction-${ligne.id}`}
+                            style={styles.txLigne}
                           >
-                            {formaterDateCourte(ligne.date)}
-                          </Text>
-                        </View>
-                        <Text
-                          style={[styles.txMontant, { color: env.couleur }]}
-                        >
-                          - {ligne.montant} €
-                        </Text>
+                            {contenu}
+                          </View>
+                        );
+                      })}
+                      {lignesAVenirCategorie.map((ligne) => (
                         <TouchableOpacity
+                          key={`avenir-${ligne.id}`}
+                          style={[styles.txLigne, { opacity: 0.6 }]}
+                          activeOpacity={0.6}
                           onPress={() =>
-                            ligne.source === "transaction"
-                              ? objStore.supprimerTransaction(ligne.id)
-                              : objStore.supprimerEvenement(ligne.id)
+                            setGestionEvenement({
+                              id: ligne.id,
+                              nom: ligne.nom,
+                              date: ligne.date,
+                              categorie: env.nom,
+                            })
                           }
-                          style={styles.txSupprimer}
                         >
+                          <View style={{ flex: 1 }}>
+                            <View style={styles.txNomAVenirRow}>
+                              <Text
+                                style={[styles.txNom, { color: C.texte }]}
+                              >
+                                {ligne.nom}
+                              </Text>
+                              <View
+                                style={[
+                                  styles.badgeAVenir,
+                                  { backgroundColor: C.bleuGrisLight },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.badgeAVenirTexte,
+                                    { color: C.bleuGris },
+                                  ]}
+                                >
+                                  À venir
+                                </Text>
+                              </View>
+                            </View>
+                            <Text
+                              style={[styles.txDate, { color: C.texteMuted }]}
+                            >
+                              {formaterDateCourte(ligne.date)}
+                            </Text>
+                          </View>
                           <Text
-                            style={[
-                              styles.txSupprimerTexte,
-                              { color: C.texteMuted },
-                            ]}
+                            style={[styles.txMontant, { color: env.couleur }]}
                           >
-                            ✕
+                            - {ligne.montant} €
                           </Text>
                         </TouchableOpacity>
-                      </View>
-                    ))
+                      ))}
+                    </>
                   )}
-                  <TouchableOpacity
-                    style={[
-                      styles.btnAjouterIci,
-                      { backgroundColor: env.couleur },
-                    ]}
-                    onPress={() => ouvrirAjout(env.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.btnAjouterIciTexte}>
-                      + Ajouter une dépense ici
-                    </Text>
-                  </TouchableOpacity>
+                  {env.type === "Variable" && (
+                    <TouchableOpacity
+                      style={[
+                        styles.btnAjouterIci,
+                        { backgroundColor: env.couleur },
+                      ]}
+                      onPress={() => ouvrirAjout(env.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.btnAjouterIciTexte}>
+                        + Ajouter une dépense ici
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
             </View>
@@ -518,14 +654,8 @@ export default function Budget() {
               "fr-FR",
               { day: "numeric", month: "long" },
             );
-            return (
-              <View
-                key={ligne.id}
-                style={[
-                  styles.fixeCard,
-                  { backgroundColor: ligne.couleur + "22" },
-                ]}
-              >
+            const contenu = (
+              <>
                 <View
                   style={[
                     styles.fixeBarre,
@@ -565,6 +695,41 @@ export default function Budget() {
                     </Text>
                   )}
                 </View>
+              </>
+            );
+
+            if (ligne.source === "evenement") {
+              return (
+                <TouchableOpacity
+                  key={ligne.id}
+                  style={[
+                    styles.fixeCard,
+                    { backgroundColor: ligne.couleur + "22" },
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={() =>
+                    setGestionEvenement({
+                      id: ligne.id,
+                      nom: ligne.nom,
+                      date: ligne.date,
+                      categorie: ligne.categorie,
+                    })
+                  }
+                >
+                  {contenu}
+                </TouchableOpacity>
+              );
+            }
+
+            return (
+              <View
+                key={ligne.id}
+                style={[
+                  styles.fixeCard,
+                  { backgroundColor: ligne.couleur + "22" },
+                ]}
+              >
+                {contenu}
               </View>
             );
           })
@@ -714,6 +879,74 @@ export default function Budget() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <Modal
+        visible={gestionEvenement !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setGestionEvenement(null)}
+      >
+        <View style={styles.modalOverlayTouch}>
+          <View
+            style={[
+              styles.modalCard,
+              { backgroundColor: C.carte, paddingBottom: 26 },
+            ]}
+          >
+            <Text style={[styles.modalTitre, { color: C.texte }]}>
+              {gestionEvenement?.nom}
+            </Text>
+            <Text
+              style={[
+                styles.modalLabel,
+                { color: C.texteMuted, marginBottom: 20 },
+              ]}
+            >
+              {gestionEvenement &&
+                `Créé dans Planning pour le ${formaterDateLongue(gestionEvenement.date)}` +
+                  (gestionEvenement.categorie
+                    ? `, lié à ${gestionEvenement.categorie}.`
+                    : ".")}
+            </Text>
+            <TouchableOpacity
+              style={[styles.btnValider, { backgroundColor: C.hero }]}
+              onPress={() => {
+                if (gestionEvenement) {
+                  router.push({
+                    pathname: "/planning",
+                    params: { editEventId: gestionEvenement.id },
+                  });
+                }
+                setGestionEvenement(null);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.btnValiderTexte}>Modifier</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btnValider, { backgroundColor: "#E24B4A" }]}
+              onPress={() => {
+                if (gestionEvenement) {
+                  objStore.supprimerEvenement(gestionEvenement.id);
+                }
+                setGestionEvenement(null);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.btnValiderTexte}>Supprimer</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.btnAnnuler}
+              onPress={() => setGestionEvenement(null)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                Annuler
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -801,6 +1034,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   txNom: { fontSize: 13, fontWeight: "600" },
+  txNomAVenirRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  badgeAVenir: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 20 },
+  badgeAVenirTexte: { fontSize: 10, fontWeight: "600" },
   txDate: { fontSize: 11 },
   txMontant: { fontSize: 13, fontWeight: "700" },
   txSupprimer: { padding: 4 },

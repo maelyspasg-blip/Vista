@@ -1,6 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import {
+  useFocusEffect,
+  useLocalSearchParams,
+  useRouter,
+} from "expo-router";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   InputAccessoryView,
@@ -158,6 +162,14 @@ function obtenirGrilleMoisComplete(date: Date) {
   return jours;
 }
 
+function decouperEnSemaines(jours: Date[]): Date[][] {
+  const semaines: Date[][] = [];
+  for (let i = 0; i < jours.length; i += 7) {
+    semaines.push(jours.slice(i, i + 7));
+  }
+  return semaines;
+}
+
 type EvenementUnifie = {
   id: string;
   nom: string;
@@ -176,6 +188,7 @@ export default function Planning() {
   const objStore = useObjectifs();
   const { couleurs: C } = useTheme();
   const router = useRouter();
+  const params = useLocalSearchParams<{ editEventId?: string }>();
 
   const [vue, setVue] = useState<"jour" | "semaine" | "mois">("jour");
   const [dateActuelle, setDateActuelle] = useState(new Date());
@@ -383,11 +396,11 @@ export default function Planning() {
     setModalCreationVisible(true);
   };
 
-  const ouvrirCreationRapide = (heureTexte: string) => {
+  const ouvrirCreationRapide = (heureTexte: string, date: Date = dateActuelle) => {
     setNomEvent("");
     setHeureEvent(heureTexte);
     setDureeEvent("1");
-    setDateEvent(dateActuelle);
+    setDateEvent(date);
     setCouleurEvent(PALETTE_COULEURS[0]);
     setEstFinancierEvent(false);
     setMontantEvent("");
@@ -416,6 +429,17 @@ export default function Planning() {
     setNotifierEvent(ev.notifierActif ?? false);
     setModalCreationVisible(true);
   };
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!params.editEventId) return;
+      const source = objStore.evenements.find(
+        (e) => e.id === params.editEventId,
+      );
+      if (source) ouvrirEditionEvenement(source);
+      router.setParams({ editEventId: undefined });
+    }, [params.editEventId]),
+  );
 
   const sauvegarderModificationEvenement = () => {
     if (!nomEvent || evenementEnEditionId === null) return;
@@ -850,7 +874,10 @@ export default function Planning() {
                           activeOpacity={0.5}
                           onPress={() => {
                             setDateActuelle(jourDate);
-                            ouvrirCreationRapide(`${HEURE_DEBUT + hi}h00`);
+                            ouvrirCreationRapide(
+                              `${HEURE_DEBUT + hi}h00`,
+                              jourDate,
+                            );
                           }}
                         />
                       ))}
@@ -891,7 +918,7 @@ export default function Planning() {
           )}
 
           {vue === "mois" && (
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={{ flex: 1 }}>
               <View style={styles.monthDayHeadRow}>
                 {JOURS_SEMAINE.map((j) => (
                   <Text
@@ -903,56 +930,80 @@ export default function Planning() {
                 ))}
               </View>
               <View style={[styles.monthGrid, { borderColor: C.separateur }]}>
-                {obtenirGrilleMoisComplete(dateActuelle).map((jourDate, i) => {
-                  const estAujourdhui = memeJour(jourDate, AUJOURDHUI);
-                  const estMoisActuel =
-                    jourDate.getMonth() === dateActuelle.getMonth();
-                  const evsToutLaJourneeMois = evsToutLaJourneeJour(jourDate);
-                  const evsHorairesMois = evsHorairesJour(jourDate);
-                  const evs = [...evsToutLaJourneeMois, ...evsHorairesMois];
+                {decouperEnSemaines(obtenirGrilleMoisComplete(dateActuelle)).map(
+                  (semaine, si) => (
+                    <View key={si} style={styles.monthRow}>
+                      {semaine.map((jourDate, di) => {
+                        const estAujourdhui = memeJour(jourDate, AUJOURDHUI);
+                        const estMoisActuel =
+                          jourDate.getMonth() === dateActuelle.getMonth();
+                        const evsToutLaJourneeMois =
+                          evsToutLaJourneeJour(jourDate);
+                        const evsHorairesMois = evsHorairesJour(jourDate);
+                        const evs = [...evsToutLaJourneeMois, ...evsHorairesMois];
+                        const evsVisibles = evs.slice(0, 3);
+                        const nbSupplementaires = evs.length - evsVisibles.length;
 
-                  return (
-                    <TouchableOpacity
-                      key={i}
-                      style={[styles.monthCell, { borderColor: C.separateur }]}
-                      activeOpacity={0.7}
-                      onPress={() => ouvrirJour(jourDate)}
-                    >
-                      <Text
-                        style={[
-                          styles.monthNum,
-                          { color: C.texteMuted },
-                          estAujourdhui && { color: C.purple, fontWeight: "700" },
-                          !estMoisActuel && styles.monthNumHorsMois,
-                        ]}
-                      >
-                        {jourDate.getDate()}
-                      </Text>
-                      {evs.slice(0, 2).map((ev) => (
-                        <View
-                          key={ev.id}
-                          style={[
-                            styles.monthEventLine,
-                            { backgroundColor: ev.couleur + "22" },
-                          ]}
-                        >
-                          <Text
+                        return (
+                          <TouchableOpacity
+                            key={di}
                             style={[
-                              styles.monthEventTexte,
-                              { color: ev.couleur },
+                              styles.monthCell,
+                              { borderColor: C.separateur },
                             ]}
-                            numberOfLines={1}
+                            activeOpacity={0.7}
+                            onPress={() => ouvrirJour(jourDate)}
                           >
-                            {ev.nom.slice(0, 8)}
-                            {ev.nom.length > 8 ? "…" : ""}
-                          </Text>
-                        </View>
-                      ))}
-                    </TouchableOpacity>
-                  );
-                })}
+                            <Text
+                              style={[
+                                styles.monthNum,
+                                { color: C.texteMuted },
+                                estAujourdhui && {
+                                  color: C.purple,
+                                  fontWeight: "700",
+                                },
+                                !estMoisActuel && styles.monthNumHorsMois,
+                              ]}
+                            >
+                              {jourDate.getDate()}
+                            </Text>
+                            {evsVisibles.map((ev) => (
+                              <View
+                                key={ev.id}
+                                style={[
+                                  styles.monthEventLine,
+                                  { backgroundColor: ev.couleur + "22" },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.monthEventTexte,
+                                    { color: ev.couleur },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {ev.nom}
+                                </Text>
+                              </View>
+                            ))}
+                            {nbSupplementaires > 0 && (
+                              <Text
+                                style={[
+                                  styles.monthEventPlus,
+                                  { color: C.texteMuted },
+                                ]}
+                              >
+                                +{nbSupplementaires}
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ),
+                )}
               </View>
-            </ScrollView>
+            </View>
           )}
         </View>
       </GestureDetector>
@@ -1145,34 +1196,32 @@ export default function Planning() {
                               Aucune
                             </Text>
                           </TouchableOpacity>
-                          {objStore.enveloppes
-                            .filter((e) => e.type === "Variable")
-                            .map((env) => (
-                              <TouchableOpacity
-                                key={env.id}
+                          {objStore.enveloppes.map((env) => (
+                            <TouchableOpacity
+                              key={env.id}
+                              style={[
+                                styles.categorieChip,
+                                { backgroundColor: C.fondSecondaire },
+                                categorieEvent === env.nom && {
+                                  backgroundColor: env.couleur,
+                                },
+                              ]}
+                              onPress={() => setCategorieEvent(env.nom)}
+                              activeOpacity={0.7}
+                            >
+                              <Text
                                 style={[
-                                  styles.categorieChip,
-                                  { backgroundColor: C.fondSecondaire },
+                                  styles.categorieChipTexte,
+                                  { color: C.texteMuted },
                                   categorieEvent === env.nom && {
-                                    backgroundColor: env.couleur,
+                                    color: "#FFFFFF",
                                   },
                                 ]}
-                                onPress={() => setCategorieEvent(env.nom)}
-                                activeOpacity={0.7}
                               >
-                                <Text
-                                  style={[
-                                    styles.categorieChipTexte,
-                                    { color: C.texteMuted },
-                                    categorieEvent === env.nom && {
-                                      color: "#FFFFFF",
-                                    },
-                                  ]}
-                                >
-                                  {env.nom}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
+                                {env.nom}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
                         </View>
 
                         <Text style={[styles.modalAide, { color: C.texteMuted }]}>
@@ -1448,25 +1497,25 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   weekEventBlockTexte: { fontSize: 9, fontWeight: "600" },
-  monthDayHeadRow: { flexDirection: "row", marginBottom: 4 },
-  monthDayHead: { flex: 1, textAlign: "center", fontSize: 10 },
+  monthDayHeadRow: { flexDirection: "row", marginBottom: 6 },
+  monthDayHead: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: "600" },
   monthGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flex: 1,
     borderWidth: 0.5,
     borderRadius: 14,
     overflow: "hidden",
   },
+  monthRow: { flex: 1, flexDirection: "row" },
   monthCell: {
-    width: "14.28%",
-    minHeight: 62,
+    flex: 1,
     borderWidth: 0.25,
-    padding: 3,
+    padding: 5,
   },
-  monthNum: { fontSize: 10 },
+  monthNum: { fontSize: 13, fontWeight: "600" },
   monthNumHorsMois: { opacity: 0.5 },
-  monthEventLine: { borderRadius: 3, paddingHorizontal: 2, marginTop: 2 },
-  monthEventTexte: { fontSize: 7, fontWeight: "600" },
+  monthEventLine: { borderRadius: 4, paddingHorizontal: 3, paddingVertical: 1, marginTop: 3 },
+  monthEventTexte: { fontSize: 10, fontWeight: "600" },
+  monthEventPlus: { fontSize: 9, fontWeight: "600", marginTop: 2 },
   accessoryBar: {
     padding: 10,
     alignItems: "flex-end",

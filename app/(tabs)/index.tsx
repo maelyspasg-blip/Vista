@@ -26,6 +26,10 @@ function bgClair(couleur: string) {
   return couleur + "22";
 }
 
+function dateVersISO(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function DonutChart({
   data,
   couleurs: C,
@@ -154,7 +158,7 @@ export default function Dashboard() {
   const [paletteOuverteTemp, setPaletteOuverteTemp] = useState(false);
   const [typeTemp, setTypeTemp] = useState<"Variable" | "Fixe">("Variable");
   const [recurrenteTemp, setRecurrenteTemp] = useState(false);
-  const [dateTemp, setDateTemp] = useState("2026-06-16");
+  const [dateTemp, setDateTemp] = useState(dateVersISO(new Date()));
   const [repeteChaqueMoisTemp, setRepeteChaqueMoisTemp] = useState(false);
   const [afficherPlanningTemp, setAfficherPlanningTemp] = useState(false);
 
@@ -167,7 +171,7 @@ export default function Dashboard() {
     "Variable",
   );
   const [estRecurrente, setEstRecurrente] = useState(false);
-  const [nouvelleDate, setNouvelleDate] = useState("2026-06-16");
+  const [nouvelleDate, setNouvelleDate] = useState(dateVersISO(new Date()));
   const [nouveauRepeteChaqueMois, setNouveauRepeteChaqueMois] = useState(false);
   const [nouveauAfficherPlanning, setNouveauAfficherPlanning] = useState(false);
   const [creationEnveloppeEnCours, setCreationEnveloppeEnCours] =
@@ -261,7 +265,7 @@ export default function Dashboard() {
     setPaletteOuverteTemp(false);
     setTypeTemp(env.type);
     setRecurrenteTemp(env.recurrente);
-    setDateTemp(env.dateFixe || "2026-06-16");
+    setDateTemp(env.dateFixe || dateVersISO(new Date()));
     setRepeteChaqueMoisTemp(env.repeteChaqueMois || false);
     setAfficherPlanningTemp(env.afficherDansPlanning || false);
     setModalEnveloppeVisible(true);
@@ -327,7 +331,7 @@ export default function Dashboard() {
     setPaletteOuverteNouvelle(false);
     setNouveauType("Variable");
     setEstRecurrente(false);
-    setNouvelleDate("2026-06-16");
+    setNouvelleDate(dateVersISO(new Date()));
     setNouveauRepeteChaqueMois(false);
     setNouveauAfficherPlanning(false);
     setModalAjoutVisible(false);
@@ -703,7 +707,10 @@ export default function Dashboard() {
               styles.btnAjoutEnveloppe,
               { backgroundColor: C.purpleLight },
             ]}
-            onPress={() => setModalAjoutVisible(true)}
+            onPress={() => {
+              setNouvelleDate(dateVersISO(new Date()));
+              setModalAjoutVisible(true);
+            }}
             activeOpacity={0.7}
           >
             <Text style={[styles.btnAjoutTexte, { color: C.purple }]}>

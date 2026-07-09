@@ -1,6 +1,9 @@
+import { Picker } from "@react-native-picker/picker";
 import { useState } from "react";
 import {
   Dimensions,
+  Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -33,8 +36,41 @@ const CHART_W = SCREEN_W - 80;
 const CHART_H = 160;
 const PADDING_X = 16;
 
-type Periode = "3mois" | "6mois" | "12mois";
 type Vue = "global" | "categorie";
+
+function formaterPeriode(nbMois: number): string {
+  if (nbMois >= 12 && nbMois % 12 === 0) {
+    const ans = nbMois / 12;
+    return `${ans} an${ans > 1 ? "s" : ""}`;
+  }
+  return `${nbMois} mois`;
+}
+
+const PERIODE_MAX_MOIS = 120; // plafond fixe (10 ans), indépendant des données de l'utilisateur
+
+type OptionPeriode = {
+  valeur: number;
+  label: string;
+  disponible: boolean;
+  prochaine: boolean;
+};
+
+function genererOptionsPeriode(nbMoisDisponibles: number): OptionPeriode[] {
+  const options: OptionPeriode[] = [];
+  let prochaineTrouvee = false;
+
+  const ajouter = (valeur: number) => {
+    const disponible = valeur <= nbMoisDisponibles;
+    const prochaine = !disponible && !prochaineTrouvee;
+    if (prochaine) prochaineTrouvee = true;
+    options.push({ valeur, label: formaterPeriode(valeur), disponible, prochaine });
+  };
+
+  for (let m = 3; m <= 12; m++) ajouter(m);
+  for (let a = 2; a * 12 <= PERIODE_MAX_MOIS; a++) ajouter(a * 12);
+
+  return options;
+}
 
 function GraphiqueLignes({
   donneesReelles,
@@ -122,14 +158,19 @@ function GraphiqueLignes({
 export default function Analytics() {
   const objStore = useObjectifs();
   const { theme, couleurs: C } = useTheme();
-  const [periode, setPeriode] = useState<Periode>("3mois");
+  const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
+  const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
   const [vue, setVue] = useState<Vue>("global");
   const [titoirOuvert, setTiroirOuvert] = useState(false);
   const [categoriesSelectionnees, setCategoriesSelectionnees] = useState<
     string[]
   >([]);
 
-  const nbMois = periode === "3mois" ? 3 : periode === "6mois" ? 6 : 12;
+  const optionsPeriode = genererOptionsPeriode(
+    objStore.historiquesMois.length + 1,
+  );
+
+  const nbMois = nbMoisSelectionne;
 
   const moisAffiches = Array.from({ length: nbMois }, (_, i) => {
     const d = new Date(ANNEE_ACTUELLE, MOIS_ACTUEL - nbMois + 1 + i, 1);
@@ -434,37 +475,69 @@ export default function Analytics() {
           </View>
         )}
 
-        <View style={styles.chipRow}>
-          {(["3mois", "6mois", "12mois"] as Periode[]).map((p) => (
-            <TouchableOpacity
-              key={p}
-              style={[
-                styles.chip,
-                { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
-                periode === p && {
-                  backgroundColor: C.purple,
-                  borderColor: C.purple,
-                },
-              ]}
-              onPress={() => setPeriode(p)}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  styles.chipTexte,
-                  { color: C.texteMuted },
-                  periode === p && styles.chipTexteActif,
-                ]}
+        <TouchableOpacity
+          style={[
+            styles.periodeBouton,
+            { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+          ]}
+          onPress={() => setPeriodePickerVisible(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.periodeBoutonLabel, { color: C.texteMuted }]}>
+            PÉRIODE
+          </Text>
+          <Text style={[styles.periodeBoutonValeur, { color: C.texte }]}>
+            {formaterPeriode(nbMoisSelectionne)}
+          </Text>
+        </TouchableOpacity>
+
+        <Modal
+          visible={periodePickerVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setPeriodePickerVisible(false)}
+        >
+          <View style={styles.modalOverlayTouch}>
+            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitre, { color: C.texte }]}>
+                  Période
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setPeriodePickerVisible(false)}
+                  activeOpacity={0.6}
+                >
+                  <Text style={[styles.modalTermine, { color: C.purple }]}>
+                    Terminé
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <Picker
+                selectedValue={nbMoisSelectionne}
+                onValueChange={(valeur) =>
+                  setNbMoisSelectionne(Number(valeur))
+                }
+                itemStyle={{ color: C.texte }}
               >
-                {p === "3mois"
-                  ? "3 mois"
-                  : p === "6mois"
-                    ? "6 mois"
-                    : "12 mois"}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+                {optionsPeriode.map((o) => (
+                  <Picker.Item
+                    key={o.valeur}
+                    label={o.prochaine ? `${o.label} (bientôt disponible)` : o.label}
+                    value={o.valeur}
+                    enabled={o.disponible}
+                    color={
+                      Platform.OS === "android"
+                        ? o.disponible
+                          ? C.texte
+                          : C.texteMuted
+                        : undefined
+                    }
+                  />
+                ))}
+              </Picker>
+            </View>
+          </View>
+        </Modal>
 
         {pasSuffisammentDonnees && (
           <View
@@ -816,6 +889,40 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   sousTitre: { fontSize: 13, color: "#999", marginTop: 2 },
+  periodeBouton: {
+    borderRadius: 13,
+    borderWidth: 0.5,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 10,
+    alignSelf: "flex-start",
+  },
+  periodeBoutonLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  periodeBoutonValeur: { fontSize: 15, fontWeight: "700" },
+  modalOverlayTouch: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    justifyContent: "flex-end",
+  },
+  modalCard: {
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingHorizontal: 26,
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingTop: 20,
+  },
+  modalTitre: { fontSize: 18, fontWeight: "700" },
+  modalTermine: { fontSize: 16, fontWeight: "600" },
   chipRow: { flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" },
   chip: {
     paddingHorizontal: 16,

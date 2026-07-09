@@ -684,19 +684,27 @@ function verifierArchivageMoisInterne() {
   const anneeActuelle = maintenant.getFullYear();
   const dernier = etat.dernierMoisArchive;
 
-  if (dernier !== null) {
-    if (
-      dernier.annee < anneeActuelle ||
-      (dernier.annee === anneeActuelle && dernier.mois < moisActuel)
-    ) {
-      archiverMoisActuelInterne(dernier.mois, dernier.annee);
-    }
-  } else {
+  if (dernier === null) {
     const moisCourant = 5;
     const anneeCourante = 2026;
     if (moisActuel > moisCourant || anneeActuelle > anneeCourante) {
       archiverMoisActuelInterne(moisCourant, anneeCourante);
     }
+    return;
+  }
+
+  // `dernier` est le dernier mois déjà archivé : on regarde si le mois
+  // suivant est lui aussi terminé, auquel cas on l'archive à son tour.
+  // Ça fait avancer le curseur d'un mois à chaque appel jusqu'à rattraper
+  // le mois en cours (jamais archivé tant qu'il n'est pas terminé).
+  const prochain = new Date(dernier.annee, dernier.mois + 1, 1);
+  const moisAArchiver = prochain.getMonth();
+  const anneeAArchiver = prochain.getFullYear();
+  const estMoisEnCours =
+    moisAArchiver === moisActuel && anneeAArchiver === anneeActuelle;
+
+  if (!estMoisEnCours) {
+    archiverMoisActuelInterne(moisAArchiver, anneeAArchiver);
   }
 }
 
