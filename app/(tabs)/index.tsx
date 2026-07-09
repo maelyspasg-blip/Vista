@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useRouter } from "expo-router";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   InputAccessoryView,
@@ -122,33 +122,7 @@ export default function Dashboard() {
   const objStore = useObjectifs();
   const { theme, couleurs, toggleTheme } = useTheme();
   const C = couleurs;
-
-  useFocusEffect(
-    useCallback(() => {
-      objStore.verifierEcheancesFixes();
-      objStore.verifierVersementsObjectifs();
-
-      const maintenant = new Date();
-      const moisActuel = maintenant.getMonth();
-      const anneeActuelle = maintenant.getFullYear();
-      const dernier = objStore.dernierMoisArchive;
-
-      if (dernier !== null) {
-        if (
-          dernier.annee < anneeActuelle ||
-          (dernier.annee === anneeActuelle && dernier.mois < moisActuel)
-        ) {
-          objStore.archiverMoisActuel(dernier.mois, dernier.annee);
-        }
-      } else {
-        const moisCourant = 5;
-        const anneeCourante = 2026;
-        if (moisActuel > moisCourant || anneeActuelle > anneeCourante) {
-          objStore.archiverMoisActuel(moisCourant, anneeCourante);
-        }
-      }
-    }, []),
-  );
+  const router = useRouter();
 
   const enveloppes = objStore.enveloppes;
   const setEnveloppes = (nouvellesEnveloppes: Enveloppe[]) =>
@@ -156,6 +130,9 @@ export default function Dashboard() {
   const [argentDisponible, setArgentDisponibleLocal] = useState(
     String(objStore.argentDisponible),
   );
+  useEffect(() => {
+    setArgentDisponibleLocal(String(objStore.argentDisponible));
+  }, [objStore.argentDisponible]);
   const setArgentDisponible = (val: string) => {
     setArgentDisponibleLocal(val);
     objStore.modifierArgentDisponible(parseFloat(val) || 0);
@@ -210,12 +187,31 @@ export default function Dashboard() {
   const [montantMensuelObjectif, setMontantMensuelObjectif] = useState("");
   const [jourDuMoisObjectif, setJourDuMoisObjectif] = useState("1");
   const [montantAjoutObjectif, setMontantAjoutObjectif] = useState("");
+  const [sauvegardeObjectifEnCours, setSauvegardeObjectifEnCours] =
+    useState(false);
 
   const totalDepenseEnveloppes = enveloppes.reduce(
     (acc, e) => acc + e.depense,
     0,
   );
   const totalDepense = totalDepenseEnveloppes + objStore.epargneMois;
+
+  const depensesNonCategorisees = objStore.evenements
+    .filter((e) => e.estFinancier && e.montant)
+    .filter((e) => !e.categorieLiee || e.categorieLiee === "Aucune")
+    .filter((e) => {
+      const d = new Date(e.date);
+      d.setHours(0, 0, 0, 0);
+      const aujourdhui = new Date();
+      aujourdhui.setHours(0, 0, 0, 0);
+      return (
+        d <= aujourdhui &&
+        d.getMonth() === maintenant.getMonth() &&
+        d.getFullYear() === maintenant.getFullYear()
+      );
+    })
+    .reduce((acc, e) => acc + (e.montant ?? 0), 0);
+
   const disponibleNum = parseFloat(argentDisponible) || 0;
   const pctUtilise =
     disponibleNum > 0
@@ -385,8 +381,8 @@ export default function Dashboard() {
     setVueModal("form");
   };
 
-  const sauvegarderObjectif = () => {
-    if (!nomObjectif || !cibleObjectif) return;
+  const sauvegarderObjectif = async () => {
+    if (!nomObjectif || !cibleObjectif || sauvegardeObjectifEnCours) return;
     const cible = parseFloat(cibleObjectif) || 0;
     const montantMensuel = recurrentObjectif
       ? parseFloat(montantMensuelObjectif) || 0
@@ -405,7 +401,8 @@ export default function Dashboard() {
         jourDuMois,
       });
     } else {
-      objStore.ajouterObjectif(
+      setSauvegardeObjectifEnCours(true);
+      const nouvel = await objStore.ajouterObjectif(
         nomObjectif,
         cible,
         parseFloat(montantInitialObjectif) || 0,
@@ -414,6 +411,8 @@ export default function Dashboard() {
         montantMensuel,
         jourDuMois,
       );
+      setSauvegardeObjectifEnCours(false);
+      if (!nouvel) return;
     }
     resetFormObjectif();
     setObjectifEnEdition(null);
@@ -667,6 +666,33 @@ export default function Dashboard() {
             {objStore.epargneMois} €
           </Text>
         </TouchableOpacity>
+
+        {depensesNonCategorisees > 0 && (
+          <TouchableOpacity
+            style={styles.indicateurNonCategorise}
+            activeOpacity={0.7}
+            onPress={() =>
+              router.push({
+                pathname: "/budget",
+                params: { section: "autres-depenses" },
+              })
+            }
+          >
+            <Ionicons
+              name="information-circle-outline"
+              size={14}
+              color={C.texteMuted}
+            />
+            <Text
+              style={[
+                styles.indicateurNonCategoriseTexte,
+                { color: C.texteMuted },
+              ]}
+            >
+              {depensesNonCategorisees}€ de dépenses non catégorisées
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: C.texteMuted }]}>
@@ -1696,13 +1722,24 @@ export default function Dashboard() {
                     />
 
                     <TouchableOpacity
-                      style={[styles.btnAjouter, { backgroundColor: C.purple }]}
+                      style={[
+                        styles.btnAjouter,
+                        {
+                          backgroundColor: C.purple,
+                          opacity: sauvegardeObjectifEnCours ? 0.6 : 1,
+                        },
+                      ]}
                       onPress={sauvegarderObjectif}
                       activeOpacity={0.7}
+                      disabled={sauvegardeObjectifEnCours}
                     >
-                      <Text style={styles.btnAjouterTexte}>
-                        Enregistrer
-                      </Text>
+                      {sauvegardeObjectifEnCours ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.btnAjouterTexte}>
+                          Enregistrer
+                        </Text>
+                      )}
                     </TouchableOpacity>
                     {objectifEnEdition && (
                       <TouchableOpacity
@@ -1738,6 +1775,15 @@ export default function Dashboard() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 20 },
+  indicateurNonCategorise: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 10,
+    marginBottom: 4,
+    alignSelf: "flex-start",
+  },
+  indicateurNonCategoriseTexte: { fontSize: 12, fontWeight: "500" },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",

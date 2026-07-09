@@ -1,6 +1,7 @@
-import { useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -18,22 +19,58 @@ import { useObjectifs } from "../store";
 
 const ACCESSORY_ID = "numericDone";
 
+type LigneDepense = {
+  id: string;
+  nom: string;
+  montant: number;
+  date: string;
+  source: "transaction" | "evenement";
+};
+
+type LigneAVenir = {
+  id: string;
+  nom: string;
+  montant: number;
+  couleur: string;
+  date: string;
+  recurrenceLabel?: string;
+};
+
+function dateVersISO(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function formaterDateCourte(dateISO: string): string {
+  const d = new Date(dateISO);
+  if (Number.isNaN(d.getTime())) return dateISO;
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
 export default function Budget() {
   const objStore = useObjectifs();
   const { couleurs: C } = useTheme();
-
-  useFocusEffect(
-    useCallback(() => {
-      objStore.verifierEcheancesFixes();
-      objStore.verifierVersementsObjectifs();
-    }, []),
-  );
+  const params = useLocalSearchParams<{ section?: string }>();
 
   const [enveloppeOuverte, setEnveloppeOuverte] = useState<string | null>(null);
   const [modalAjoutVisible, setModalAjoutVisible] = useState(false);
   const [nomTx, setNomTx] = useState("");
   const [montantTx, setMontantTx] = useState("");
   const [enveloppeTx, setEnveloppeTx] = useState<string | null>(null);
+  const [ajoutTransactionEnCours, setAjoutTransactionEnCours] =
+    useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const positionAutresDepenses = useRef(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (params.section === "autres-depenses") {
+        scrollRef.current?.scrollTo({
+          y: positionAutresDepenses.current,
+          animated: true,
+        });
+      }
+    }, [params.section]),
+  );
 
   const MOIS_ACTUEL = new Date().getMonth();
   const ANNEE_ACTUELLE = new Date().getFullYear();
@@ -52,6 +89,68 @@ export default function Budget() {
     const d = new Date(e.dateFixe);
     return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
   });
+
+  const evenementsAVenir = objStore.evenements.filter((e) => {
+    if (!e.estFinancier || !e.montant) return false;
+    if (!e.categorieLiee || e.categorieLiee === "Aucune") return false;
+    if (e.montantApplique) return false;
+    return true;
+  });
+
+  const autresDepenses = objStore.evenements.filter(
+    (e) =>
+      e.estFinancier &&
+      e.montant &&
+      (!e.categorieLiee || e.categorieLiee === "Aucune"),
+  );
+
+  const aujourdhui = new Date();
+  aujourdhui.setHours(0, 0, 0, 0);
+
+  const autresDepensesPayees = autresDepenses
+    .filter((e) => {
+      const d = new Date(e.date);
+      d.setHours(0, 0, 0, 0);
+      return (
+        d <= aujourdhui &&
+        d.getMonth() === MOIS_ACTUEL &&
+        d.getFullYear() === ANNEE_ACTUELLE
+      );
+    })
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const autresDepensesAVenir = autresDepenses.filter((e) => {
+    const d = new Date(e.date);
+    d.setHours(0, 0, 0, 0);
+    return d > aujourdhui;
+  });
+
+  const lignesAVenir: LigneAVenir[] = [
+    ...enveloppesAVenir.map((env) => ({
+      id: env.id,
+      nom: env.nom,
+      montant: env.budget,
+      couleur: env.couleur,
+      date: env.dateFixe!,
+      recurrenceLabel: env.repeteChaqueMois ? "tous les mois" : undefined,
+    })),
+    ...evenementsAVenir.map((e) => ({
+      id: e.id,
+      nom: e.nom,
+      montant: e.montant!,
+      couleur: e.couleur,
+      date: e.date,
+      recurrenceLabel: undefined,
+    })),
+    ...autresDepensesAVenir.map((e) => ({
+      id: e.id,
+      nom: e.nom,
+      montant: e.montant!,
+      couleur: e.couleur,
+      date: e.date,
+      recurrenceLabel: undefined,
+    })),
+  ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   const totalDepenses = objStore.enveloppes.reduce(
     (acc, e) => acc + e.depense,
@@ -78,18 +177,18 @@ export default function Budget() {
     setModalAjoutVisible(true);
   };
 
-  const validerAjout = () => {
-    if (!nomTx || !montantTx || !enveloppeTx) return;
-    const dateStr = new Date().toLocaleDateString("fr-FR", {
-      day: "numeric",
-      month: "short",
-    });
-    objStore.ajouterTransaction(
+  const validerAjout = async () => {
+    if (!nomTx || !montantTx || !enveloppeTx || ajoutTransactionEnCours) return;
+    const dateStr = dateVersISO(new Date());
+    setAjoutTransactionEnCours(true);
+    const nouvelle = await objStore.ajouterTransaction(
       nomTx,
       parseFloat(montantTx),
       enveloppeTx,
       dateStr,
     );
+    setAjoutTransactionEnCours(false);
+    if (!nouvelle) return;
     setModalAjoutVisible(false);
   };
 
@@ -111,7 +210,7 @@ export default function Budget() {
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <View style={[styles.heroCard, { backgroundColor: C.bleuGrisLight }]}>
           <Text style={[styles.heroLabel, { color: C.bleuGris }]}>
             TOTAL DÉPENSÉ
@@ -221,9 +320,33 @@ export default function Budget() {
         {enveloppesCourantes.map((env) => {
           const pct = Math.min((env.depense / env.budget) * 100, 100);
           const estOuverte = enveloppeOuverte === env.id;
-          const txEnveloppe = objStore.transactions.filter(
-            (t) => t.enveloppeId === env.id,
-          );
+
+          const lignesDepense: LigneDepense[] = [
+            ...objStore.transactions
+              .filter((t) => t.enveloppeId === env.id)
+              .map((t) => ({
+                id: t.id,
+                nom: t.nom,
+                montant: t.montant,
+                date: t.date,
+                source: "transaction" as const,
+              })),
+            ...objStore.evenements
+              .filter(
+                (e) =>
+                  e.estFinancier &&
+                  e.montantApplique &&
+                  e.montant &&
+                  e.categorieLiee === env.nom,
+              )
+              .map((e) => ({
+                id: e.id,
+                nom: e.nom,
+                montant: e.montant!,
+                date: e.date,
+                source: "evenement" as const,
+              })),
+          ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
           return (
             <View
@@ -268,30 +391,37 @@ export default function Budget() {
                 <View
                   style={[styles.txListe, { borderTopColor: C.separateur }]}
                 >
-                  {txEnveloppe.length === 0 ? (
+                  {lignesDepense.length === 0 ? (
                     <Text style={[styles.txVide, { color: C.texteMuted }]}>
                       Aucune dépense enregistrée
                     </Text>
                   ) : (
-                    txEnveloppe.map((tx) => (
-                      <View key={tx.id} style={styles.txLigne}>
+                    lignesDepense.map((ligne) => (
+                      <View
+                        key={`${ligne.source}-${ligne.id}`}
+                        style={styles.txLigne}
+                      >
                         <View style={{ flex: 1 }}>
                           <Text style={[styles.txNom, { color: C.texte }]}>
-                            {tx.nom}
+                            {ligne.nom}
                           </Text>
                           <Text
                             style={[styles.txDate, { color: C.texteMuted }]}
                           >
-                            {tx.date}
+                            {formaterDateCourte(ligne.date)}
                           </Text>
                         </View>
                         <Text
                           style={[styles.txMontant, { color: env.couleur }]}
                         >
-                          - {tx.montant} €
+                          - {ligne.montant} €
                         </Text>
                         <TouchableOpacity
-                          onPress={() => objStore.supprimerTransaction(tx.id)}
+                          onPress={() =>
+                            ligne.source === "transaction"
+                              ? objStore.supprimerTransaction(ligne.id)
+                              : objStore.supprimerEvenement(ligne.id)
+                          }
                           style={styles.txSupprimer}
                         >
                           <Text
@@ -324,13 +454,49 @@ export default function Budget() {
           );
         })}
 
+        {autresDepensesPayees.length > 0 && (
+          <View
+            onLayout={(evt) => {
+              positionAutresDepenses.current = evt.nativeEvent.layout.y;
+            }}
+          >
+            <Text
+              style={[
+                styles.sectionTitle,
+                { color: C.texteMuted, marginTop: 8 },
+              ]}
+            >
+              AUTRES DÉPENSES
+            </Text>
+            <View
+              style={[styles.envCard, { backgroundColor: C.fondSecondaire }]}
+            >
+              {autresDepensesPayees.map((e) => (
+                <View key={e.id} style={styles.txLigne}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.txNom, { color: C.texte }]}>
+                      {e.nom}
+                    </Text>
+                    <Text style={[styles.txDate, { color: C.texteMuted }]}>
+                      {formaterDateCourte(e.date)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.txMontant, { color: C.texte }]}>
+                    - {e.montant} €
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
         <Text
           style={[styles.sectionTitle, { color: C.texteMuted, marginTop: 8 }]}
         >
           À VENIR CE MOIS-CI
         </Text>
 
-        {enveloppesAVenir.length === 0 ? (
+        {lignesAVenir.length === 0 ? (
           <View
             style={[
               styles.videContainer,
@@ -342,42 +508,45 @@ export default function Budget() {
             </Text>
           </View>
         ) : (
-          enveloppesAVenir.map((env) => {
+          lignesAVenir.map((ligne) => {
             const pctBudget =
               budgetTotal > 0
-                ? Math.round((env.budget / budgetTotal) * 100)
+                ? Math.round((ligne.montant / budgetTotal) * 100)
                 : 0;
             const estLourd = pctBudget >= 30;
-            const dateAffichee = env.dateFixe
-              ? new Date(env.dateFixe).toLocaleDateString("fr-FR", {
-                  day: "numeric",
-                  month: "long",
-                })
-              : "";
+            const dateAffichee = new Date(ligne.date).toLocaleDateString(
+              "fr-FR",
+              { day: "numeric", month: "long" },
+            );
             return (
               <View
-                key={env.id}
+                key={ligne.id}
                 style={[
                   styles.fixeCard,
-                  { backgroundColor: env.couleur + "22" },
+                  { backgroundColor: ligne.couleur + "22" },
                 ]}
               >
                 <View
-                  style={[styles.fixeBarre, { backgroundColor: env.couleur }]}
+                  style={[
+                    styles.fixeBarre,
+                    { backgroundColor: ligne.couleur },
+                  ]}
                 />
                 <View style={styles.fixeContent}>
                   <View style={styles.fixeRow}>
-                    <Text style={[styles.fixeNom, { color: env.couleur }]}>
-                      {env.nom}
+                    <Text style={[styles.fixeNom, { color: ligne.couleur }]}>
+                      {ligne.nom}
                     </Text>
-                    <Text style={[styles.fixeMontant, { color: env.couleur }]}>
-                      {env.budget} €
+                    <Text
+                      style={[styles.fixeMontant, { color: ligne.couleur }]}
+                    >
+                      {ligne.montant} €
                     </Text>
                   </View>
                   <View style={styles.fixeRowBottom}>
                     <Text style={[styles.fixeMeta, { color: C.texteMuted }]}>
                       {dateAffichee}
-                      {env.repeteChaqueMois ? " · tous les mois" : ""}
+                      {ligne.recurrenceLabel ? ` · ${ligne.recurrenceLabel}` : ""}
                     </Text>
                     <View
                       style={[
@@ -510,11 +679,24 @@ export default function Budget() {
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.btnValider, { backgroundColor: C.hero }]}
+                  style={[
+                    styles.btnValider,
+                    {
+                      backgroundColor: C.hero,
+                      opacity: ajoutTransactionEnCours ? 0.6 : 1,
+                    },
+                  ]}
                   onPress={validerAjout}
                   activeOpacity={0.7}
+                  disabled={ajoutTransactionEnCours}
                 >
-                  <Text style={styles.btnValiderTexte}>Ajouter la dépense</Text>
+                  {ajoutTransactionEnCours ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.btnValiderTexte}>
+                      Ajouter la dépense
+                    </Text>
+                  )}
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.btnAnnuler}

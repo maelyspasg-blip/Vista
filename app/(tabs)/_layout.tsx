@@ -1,17 +1,46 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import { useEffect } from "react";
-import { View } from "react-native";
+import { AppState, View } from "react-native";
 import { SyncErrorBanner } from "../SyncErrorBanner";
 import { useObjectifs } from "../store";
 import { useTheme } from "../ThemeContext";
+
+const INTERVALLE_VERIFICATION_MS = 60000;
 
 export default function TabLayout() {
   const { couleurs: C } = useTheme();
   const objStore = useObjectifs();
 
   useEffect(() => {
-    objStore.chargerEnveloppes();
+    const verifierEtat = () => {
+      objStore.verifierEcheancesFixes();
+      objStore.verifierVersementsObjectifs();
+      objStore.verifierEvenementsFinanciers();
+      objStore.verifierArchivageMois();
+    };
+
+    (async () => {
+      await Promise.all([
+        objStore.chargerEnveloppes(),
+        objStore.chargerObjectifs(),
+        objStore.chargerEvenements(),
+        objStore.chargerTransactions(),
+        objStore.chargerHistoriquePaiements(),
+        objStore.chargerHistoriquesMois(),
+      ]);
+      verifierEtat();
+    })();
+
+    const intervalle = setInterval(verifierEtat, INTERVALLE_VERIFICATION_MS);
+    const abonnement = AppState.addEventListener("change", (etatApp) => {
+      if (etatApp === "active") verifierEtat();
+    });
+
+    return () => {
+      clearInterval(intervalle);
+      abonnement.remove();
+    };
   }, []);
 
   return (

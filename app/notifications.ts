@@ -17,7 +17,7 @@ export async function demanderPermissionNotifications(): Promise<boolean> {
 }
 
 export async function programmerNotificationsEvenement(
-  id: number,
+  id: string,
   nom: string,
   dateEvenement: Date,
 ): Promise<void> {
@@ -50,7 +50,7 @@ export async function programmerNotificationsEvenement(
   }
 }
 
-export async function annulerNotificationsEvenement(id: number): Promise<void> {
+export async function annulerNotificationsEvenement(id: string): Promise<void> {
   await Notifications.cancelScheduledNotificationAsync(`evt-${id}-veille`).catch(
     () => {},
   );

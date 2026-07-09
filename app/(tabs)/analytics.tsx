@@ -1,5 +1,4 @@
-import { useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import {
   Dimensions,
   ScrollView,
@@ -129,13 +128,6 @@ export default function Analytics() {
   const [categoriesSelectionnees, setCategoriesSelectionnees] = useState<
     string[]
   >([]);
-
-  useFocusEffect(
-    useCallback(() => {
-      objStore.verifierEcheancesFixes();
-      objStore.verifierVersementsObjectifs();
-    }, []),
-  );
 
   const nbMois = periode === "3mois" ? 3 : periode === "6mois" ? 6 : 12;
 

@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  ActivityIndicator,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -168,7 +169,7 @@ type EvenementUnifie = {
   touteLaJournee: boolean;
   date: Date;
   modifiable: boolean;
-  evenementId?: number;
+  evenementId?: string;
 };
 
 export default function Planning() {
@@ -180,25 +181,24 @@ export default function Planning() {
   const [dateActuelle, setDateActuelle] = useState(new Date());
 
   const [modalCreationVisible, setModalCreationVisible] = useState(false);
-  const [etapeCreation, setEtapeCreation] = useState<
-    "infos" | "financier" | "categorie"
-  >("infos");
   const [nomEvent, setNomEvent] = useState("");
   const [heureEvent, setHeureEvent] = useState("9h00");
   const [dureeEvent, setDureeEvent] = useState("1");
   const [dateEvent, setDateEvent] = useState(new Date());
   const [couleurEvent, setCouleurEvent] = useState(PALETTE_COULEURS[0]);
+  const [estFinancierEvent, setEstFinancierEvent] = useState(false);
   const [montantEvent, setMontantEvent] = useState("");
   const [categorieEvent, setCategorieEvent] = useState("Aucune");
-  const [creationRapide, setCreationRapide] = useState(false);
   const [recurrentEvent, setRecurrentEvent] = useState(false);
   const [frequenceEvent, setFrequenceEvent] =
     useState<FrequenceEvenement>("semaine");
   const [journeeEntiereEvent, setJourneeEntiereEvent] = useState(false);
   const [notifierEvent, setNotifierEvent] = useState(false);
   const [evenementEnEditionId, setEvenementEnEditionId] = useState<
-    number | null
+    string | null
   >(null);
+  const [creationEvenementEnCours, setCreationEvenementEnCours] =
+    useState(false);
 
   const tousLesEvenements: EvenementUnifie[] = [];
 
@@ -372,15 +372,14 @@ export default function Planning() {
     setDureeEvent("1");
     setDateEvent(dateActuelle);
     setCouleurEvent(PALETTE_COULEURS[0]);
+    setEstFinancierEvent(false);
     setMontantEvent("");
     setCategorieEvent("Aucune");
-    setCreationRapide(false);
     setRecurrentEvent(false);
     setFrequenceEvent("semaine");
     setJourneeEntiereEvent(false);
     setNotifierEvent(false);
     setEvenementEnEditionId(null);
-    setEtapeCreation("infos");
     setModalCreationVisible(true);
   };
 
@@ -390,13 +389,14 @@ export default function Planning() {
     setDureeEvent("1");
     setDateEvent(dateActuelle);
     setCouleurEvent(PALETTE_COULEURS[0]);
-    setCreationRapide(true);
+    setEstFinancierEvent(false);
+    setMontantEvent("");
+    setCategorieEvent("Aucune");
     setRecurrentEvent(false);
     setFrequenceEvent("semaine");
     setJourneeEntiereEvent(false);
     setNotifierEvent(false);
     setEvenementEnEditionId(null);
-    setEtapeCreation("infos");
     setModalCreationVisible(true);
   };
 
@@ -408,16 +408,18 @@ export default function Planning() {
     setDureeEvent(String(ev.duree || 1));
     setCouleurEvent(ev.couleur);
     setJourneeEntiereEvent(ev.touteLaJournee ?? false);
+    setEstFinancierEvent(ev.estFinancier);
+    setMontantEvent(ev.montant ? String(ev.montant) : "");
+    setCategorieEvent(ev.categorieLiee ?? "Aucune");
     setRecurrentEvent(ev.recurrent ?? false);
     setFrequenceEvent(ev.frequence ?? "semaine");
     setNotifierEvent(ev.notifierActif ?? false);
-    setCreationRapide(false);
-    setEtapeCreation("infos");
     setModalCreationVisible(true);
   };
 
   const sauvegarderModificationEvenement = () => {
     if (!nomEvent || evenementEnEditionId === null) return;
+    const montant = estFinancierEvent ? parseFloat(montantEvent) || 0 : undefined;
     objStore.modifierEvenement(evenementEnEditionId, {
       nom: nomEvent,
       date: dateVersISO(dateEvent),
@@ -425,6 +427,9 @@ export default function Planning() {
       duree: parseFloat(dureeEvent) || 1,
       couleur: couleurEvent,
       touteLaJournee: journeeEntiereEvent,
+      estFinancier: estFinancierEvent,
+      montant,
+      categorieLiee: estFinancierEvent ? categorieEvent : undefined,
       recurrent: recurrentEvent,
       frequence: recurrentEvent ? frequenceEvent : undefined,
       notifierActif: notifierEvent,
@@ -448,31 +453,30 @@ export default function Planning() {
     ouvrirEditionEvenement(source);
   };
 
-  const finaliserCreationEvenement = async (
-    estFinancier: boolean,
-    montant?: number,
-    categorieLiee?: string,
-  ) => {
-    const id = Date.now();
-    objStore.ajouterEvenement(
-      id,
-      nomEvent,
-      dateVersISO(dateEvent),
-      heureEvent,
-      parseFloat(dureeEvent) || 1,
-      couleurEvent,
-      estFinancier,
+  const finaliserCreationEvenement = async () => {
+    if (creationEvenementEnCours) return;
+    setCreationEvenementEnCours(true);
+    const montant = estFinancierEvent ? parseFloat(montantEvent) || 0 : undefined;
+    const nouvel = await objStore.ajouterEvenement({
+      nom: nomEvent,
+      date: dateVersISO(dateEvent),
+      heure: heureEvent,
+      duree: parseFloat(dureeEvent) || 1,
+      couleur: couleurEvent,
+      estFinancier: estFinancierEvent,
       montant,
-      categorieLiee,
-      recurrentEvent,
-      frequenceEvent,
-      journeeEntiereEvent,
-      notifierEvent,
-    );
+      categorieLiee: estFinancierEvent ? categorieEvent : undefined,
+      recurrent: recurrentEvent,
+      frequence: recurrentEvent ? frequenceEvent : undefined,
+      touteLaJournee: journeeEntiereEvent,
+      notifierActif: notifierEvent,
+    });
+    setCreationEvenementEnCours(false);
+    if (!nouvel) return;
     if (notifierEvent && !recurrentEvent) {
       const autorise = await demanderPermissionNotifications();
       if (autorise) {
-        await programmerNotificationsEvenement(id, nomEvent, dateEvent);
+        await programmerNotificationsEvenement(nouvel.id, nomEvent, dateEvent);
       }
     }
     setModalCreationVisible(false);
@@ -480,26 +484,12 @@ export default function Planning() {
 
   const validerInfos = () => {
     if (!nomEvent) return;
+    if (estFinancierEvent && !montantEvent) return;
     if (evenementEnEditionId !== null) {
       sauvegarderModificationEvenement();
       return;
     }
-    if (creationRapide) {
-      finaliserCreationEvenement(false);
-      return;
-    }
-    setEtapeCreation("financier");
-  };
-
-  const choisirNonFinancier = () => {
-    finaliserCreationEvenement(false);
-  };
-
-  const choisirFinancier = () => setEtapeCreation("categorie");
-
-  const validerCreationFinanciere = () => {
-    if (!montantEvent) return;
-    finaliserCreationEvenement(true, parseFloat(montantEvent), categorieEvent);
+    finaliserCreationEvenement();
   };
 
   function calculerPositions(evs: EvenementUnifie[]) {
@@ -828,12 +818,14 @@ export default function Planning() {
                       {evsToutLaJourneeCol.length > 0 && (
                         <View style={styles.weekAlldayZone}>
                           {evsToutLaJourneeCol.map((ev) => (
-                            <View
+                            <TouchableOpacity
                               key={ev.id}
                               style={[
                                 styles.weekAlldayPill,
                                 { backgroundColor: ev.couleur + "33" },
                               ]}
+                              activeOpacity={0.7}
+                              onPress={() => gererClicEvenement(ev)}
                             >
                               <Text
                                 style={[
@@ -844,7 +836,7 @@ export default function Planning() {
                               >
                                 {ev.nom}
                               </Text>
-                            </View>
+                            </TouchableOpacity>
                           ))}
                         </View>
                       )}
@@ -863,7 +855,7 @@ export default function Planning() {
                         />
                       ))}
                       {positions.map(({ ev, top, height, left, width }) => (
-                        <View
+                        <TouchableOpacity
                           key={ev.id}
                           style={[
                             styles.weekEventBlock,
@@ -876,6 +868,8 @@ export default function Planning() {
                               borderLeftColor: ev.couleur,
                             },
                           ]}
+                          activeOpacity={0.7}
+                          onPress={() => gererClicEvenement(ev)}
                         >
                           <Text
                             style={[
@@ -886,7 +880,7 @@ export default function Planning() {
                           >
                             {ev.nom}
                           </Text>
-                        </View>
+                        </TouchableOpacity>
                       ))}
                     </View>
                   );
@@ -992,8 +986,7 @@ export default function Planning() {
         >
           <View style={styles.modalOverlayTouch}>
             <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
-              {etapeCreation === "infos" && (
-                <>
+              <>
                   <View style={styles.modalHeader}>
                     <Text style={[styles.modalTitre, { color: C.texte }]}>
                       {evenementEnEditionId !== null
@@ -1084,6 +1077,115 @@ export default function Planning() {
                     <View style={styles.switchRow}>
                       <View>
                         <Text style={[styles.switchLabel, { color: C.texte }]}>
+                          Cet événement coûte de l'argent
+                        </Text>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                          Sera ajouté à ton budget
+                        </Text>
+                      </View>
+                      <Switch
+                        value={estFinancierEvent}
+                        onValueChange={setEstFinancierEvent}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={estFinancierEvent ? C.purple : "#FFF"}
+                      />
+                    </View>
+
+                    {estFinancierEvent && (
+                      <>
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Montant
+                        </Text>
+                        <View style={styles.modalInputRow}>
+                          <TextInput
+                            style={[
+                              styles.input,
+                              {
+                                flex: 1,
+                                backgroundColor: C.fondSecondaire,
+                                color: C.texte,
+                              },
+                            ]}
+                            placeholder="Ex : 30"
+                            placeholderTextColor={C.texteMuted}
+                            keyboardType="numeric"
+                            value={montantEvent}
+                            onChangeText={setMontantEvent}
+                            returnKeyType="done"
+                            inputAccessoryViewID={ACCESSORY_ID}
+                          />
+                          <Text style={[styles.modalEuro, { color: C.texteMuted }]}>
+                            €
+                          </Text>
+                        </View>
+
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Lier à une catégorie (optionnel)
+                        </Text>
+                        <View style={styles.categorieGrid}>
+                          <TouchableOpacity
+                            style={[
+                              styles.categorieChip,
+                              { backgroundColor: C.fondSecondaire },
+                              categorieEvent === "Aucune" && {
+                                backgroundColor: C.purple,
+                              },
+                            ]}
+                            onPress={() => setCategorieEvent("Aucune")}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.categorieChipTexte,
+                                { color: C.texteMuted },
+                                categorieEvent === "Aucune" &&
+                                  styles.categorieChipTexteActif,
+                              ]}
+                            >
+                              Aucune
+                            </Text>
+                          </TouchableOpacity>
+                          {objStore.enveloppes
+                            .filter((e) => e.type === "Variable")
+                            .map((env) => (
+                              <TouchableOpacity
+                                key={env.id}
+                                style={[
+                                  styles.categorieChip,
+                                  { backgroundColor: C.fondSecondaire },
+                                  categorieEvent === env.nom && {
+                                    backgroundColor: env.couleur,
+                                  },
+                                ]}
+                                onPress={() => setCategorieEvent(env.nom)}
+                                activeOpacity={0.7}
+                              >
+                                <Text
+                                  style={[
+                                    styles.categorieChipTexte,
+                                    { color: C.texteMuted },
+                                    categorieEvent === env.nom && {
+                                      color: "#FFFFFF",
+                                    },
+                                  ]}
+                                >
+                                  {env.nom}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                        </View>
+
+                        <Text style={[styles.modalAide, { color: C.texteMuted }]}>
+                          {categorieEvent === "Aucune"
+                            ? `Une nouvelle ligne "${nomEvent}" apparaîtra dans tes dépenses prévues.`
+                            : `Le montant sera ajouté à ta dépense "${categorieEvent}".`}
+                        </Text>
+                      </>
+                    )}
+
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
                           Répéter cet événement
                         </Text>
                         <Text style={[styles.switchSub, { color: C.texteMuted }]}>
@@ -1164,17 +1266,26 @@ export default function Planning() {
                     />
 
                     <TouchableOpacity
-                      style={[styles.btnSuivant, { backgroundColor: C.purple }]}
+                      style={[
+                        styles.btnSuivant,
+                        {
+                          backgroundColor: C.purple,
+                          opacity: creationEvenementEnCours ? 0.6 : 1,
+                        },
+                      ]}
                       onPress={validerInfos}
                       activeOpacity={0.7}
+                      disabled={creationEvenementEnCours}
                     >
-                      <Text style={styles.btnSuivantTexte}>
-                        {evenementEnEditionId !== null
-                          ? "Enregistrer les modifications"
-                          : creationRapide
-                            ? "Créer l'événement"
-                            : "Continuer"}
-                      </Text>
+                      {creationEvenementEnCours ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.btnSuivantTexte}>
+                          {evenementEnEditionId !== null
+                            ? "Enregistrer les modifications"
+                            : "Créer l'événement"}
+                        </Text>
+                      )}
                     </TouchableOpacity>
                     {evenementEnEditionId !== null && (
                       <TouchableOpacity
@@ -1189,212 +1300,7 @@ export default function Planning() {
                     )}
                   </ScrollView>
                 </>
-              )}
 
-              {etapeCreation === "financier" && (
-                <>
-                  <View style={styles.modalHeader}>
-                    <Text style={[styles.modalTitre, { color: C.texte }]}>
-                      {nomEvent}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => setModalCreationVisible(false)}
-                      activeOpacity={0.6}
-                    >
-                      <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>
-                        ✕
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <Text style={[styles.questionFinanciere, { color: C.texte }]}>
-                    Ça va coûter de l'argent ?
-                  </Text>
-
-                  <TouchableOpacity
-                    style={[styles.choixCard, { backgroundColor: C.fondSecondaire }]}
-                    onPress={choisirNonFinancier}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons
-                      name="calendar-outline"
-                      size={24}
-                      color={C.texte}
-                      style={styles.choixEmoji}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.choixTitre, { color: C.texte }]}>
-                        Non, c'est juste un rappel
-                      </Text>
-                      <Text style={[styles.choixSousTitre, { color: C.texteMuted }]}>
-                        Aucun impact sur le budget
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.choixCard, { backgroundColor: C.peachLight }]}
-                    onPress={choisirFinancier}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons
-                      name="cash-outline"
-                      size={24}
-                      color={C.texte}
-                      style={styles.choixEmoji}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.choixTitre, { color: C.peachText }]}>
-                        Oui, ça va me coûter de l'argent
-                      </Text>
-                      <Text style={[styles.choixSousTitre, { color: C.texteMuted }]}>
-                        Sera ajouté à ton budget
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.btnAnnuler}
-                    onPress={() => setEtapeCreation("infos")}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
-                      Retour
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              )}
-
-              {etapeCreation === "categorie" && (
-                <>
-                  <View style={styles.modalHeader}>
-                    <Text style={[styles.modalTitre, { color: C.texte }]}>
-                      Combien ça coûte ?
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => setModalCreationVisible(false)}
-                      activeOpacity={0.6}
-                    >
-                      <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>
-                        ✕
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <ScrollView
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                  >
-                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                      Montant
-                    </Text>
-                    <View style={styles.modalInputRow}>
-                      <TextInput
-                        style={[
-                          styles.input,
-                          {
-                            flex: 1,
-                            backgroundColor: C.fondSecondaire,
-                            color: C.texte,
-                          },
-                        ]}
-                        placeholder="Ex : 30"
-                        placeholderTextColor={C.texteMuted}
-                        keyboardType="numeric"
-                        value={montantEvent}
-                        onChangeText={setMontantEvent}
-                        returnKeyType="done"
-                        autoFocus
-                        inputAccessoryViewID={ACCESSORY_ID}
-                      />
-                      <Text style={[styles.modalEuro, { color: C.texteMuted }]}>
-                        €
-                      </Text>
-                    </View>
-
-                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                      Lier à une catégorie (optionnel)
-                    </Text>
-                    <View style={styles.categorieGrid}>
-                      <TouchableOpacity
-                        style={[
-                          styles.categorieChip,
-                          { backgroundColor: C.fondSecondaire },
-                          categorieEvent === "Aucune" && {
-                            backgroundColor: C.purple,
-                          },
-                        ]}
-                        onPress={() => setCategorieEvent("Aucune")}
-                        activeOpacity={0.7}
-                      >
-                        <Text
-                          style={[
-                            styles.categorieChipTexte,
-                            { color: C.texteMuted },
-                            categorieEvent === "Aucune" &&
-                              styles.categorieChipTexteActif,
-                          ]}
-                        >
-                          Aucune
-                        </Text>
-                      </TouchableOpacity>
-                      {objStore.enveloppes
-                        .filter((e) => e.type === "Variable")
-                        .map((env) => (
-                          <TouchableOpacity
-                            key={env.id}
-                            style={[
-                              styles.categorieChip,
-                              { backgroundColor: C.fondSecondaire },
-                              categorieEvent === env.nom && {
-                                backgroundColor: env.couleur,
-                              },
-                            ]}
-                            onPress={() => setCategorieEvent(env.nom)}
-                            activeOpacity={0.7}
-                          >
-                            <Text
-                              style={[
-                                styles.categorieChipTexte,
-                                { color: C.texteMuted },
-                                categorieEvent === env.nom && {
-                                  color: "#FFFFFF",
-                                },
-                              ]}
-                            >
-                              {env.nom}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                    </View>
-
-                    <Text style={[styles.modalAide, { color: C.texteMuted }]}>
-                      {categorieEvent === "Aucune"
-                        ? `Une nouvelle ligne "${nomEvent}" apparaîtra dans tes dépenses prévues.`
-                        : `Le montant sera ajouté à ta dépense "${categorieEvent}".`}
-                    </Text>
-
-                    <TouchableOpacity
-                      style={[styles.btnSuivant, { backgroundColor: C.purple }]}
-                      onPress={validerCreationFinanciere}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.btnSuivantTexte}>
-                        Créer l'événement
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.btnAnnuler}
-                      onPress={() => setEtapeCreation("financier")}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
-                        Retour
-                      </Text>
-                    </TouchableOpacity>
-                  </ScrollView>
-                </>
-              )}
             </View>
           </View>
         </KeyboardAvoidingView>

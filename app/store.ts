@@ -2,7 +2,7 @@ import { useState } from "react";
 import { supabase } from "../supabaseClient";
 
 export type Objectif = {
-  id: number;
+  id: string;
   nom: string;
   cible: number;
   actuel: number;
@@ -28,17 +28,8 @@ export type Enveloppe = {
   afficherDansPlanning?: boolean;
 };
 
-export type DepensePrevue = {
-  id: number;
-  nom: string;
-  montant: number;
-  type: "Fixe" | "Non courante";
-  statut: "Payé" | "À venir" | "Planifié";
-  couleur: string;
-};
-
 export type PaiementHistorique = {
-  id: number;
+  id: string;
   enveloppeId: string;
   nom: string;
   montant: number;
@@ -47,7 +38,7 @@ export type PaiementHistorique = {
 };
 
 export type Evenement = {
-  id: number;
+  id: string;
   nom: string;
   date: string;
   heure: string;
@@ -60,10 +51,11 @@ export type Evenement = {
   frequence?: "jour" | "semaine" | "mois" | "an";
   touteLaJournee?: boolean;
   notifierActif?: boolean;
+  montantApplique?: boolean;
 };
 
 export type Transaction = {
-  id: number;
+  id: string;
   nom: string;
   montant: number;
   enveloppeId: string;
@@ -80,13 +72,14 @@ export type SnapshotEnveloppe = {
 };
 
 export type SnapshotObjectif = {
-  id: number;
+  id: string;
   nom: string;
   actuel: number;
   cible: number;
 };
 
 export type SnapshotMois = {
+  id: string;
   mois: number;
   annee: number;
   enveloppes: SnapshotEnveloppe[];
@@ -96,7 +89,6 @@ export type SnapshotMois = {
   totalDepense: number;
 };
 
-const DEPENSES_PREVUES_INIT: DepensePrevue[] = [];
 const EVENEMENTS_INIT: Evenement[] = [];
 const TRANSACTIONS_INIT: Transaction[] = [];
 
@@ -105,7 +97,6 @@ type EtatStore = {
   epargneMois: number;
   enveloppes: Enveloppe[];
   argentDisponible: number;
-  depensesPrevues: DepensePrevue[];
   transactions: Transaction[];
   evenements: Evenement[];
   historiquePaiements: PaiementHistorique[];
@@ -119,7 +110,6 @@ let etat: EtatStore = {
   epargneMois: 0,
   enveloppes: [],
   argentDisponible: 0,
-  depensesPrevues: DEPENSES_PREVUES_INIT,
   transactions: TRANSACTIONS_INIT,
   evenements: EVENEMENTS_INIT,
   historiquePaiements: [],
@@ -251,6 +241,607 @@ function appliquerEnveloppes(nouvellesEnveloppes: Enveloppe[]) {
   });
 }
 
+type ObjectifRow = {
+  id: string;
+  user_id: string;
+  nom: string;
+  cible: number;
+  actuel: number;
+  couleur: string;
+  recurrent: boolean | null;
+  montant_mensuel: number | null;
+  jour_du_mois: number | null;
+  dernier_versement_mois: number | null;
+  dernier_versement_annee: number | null;
+};
+
+function objectifDepuisLigne(l: ObjectifRow): Objectif {
+  return {
+    id: l.id,
+    nom: l.nom,
+    cible: l.cible,
+    actuel: l.actuel,
+    couleur: l.couleur,
+    recurrent: l.recurrent ?? undefined,
+    montantMensuel: l.montant_mensuel ?? undefined,
+    jourDuMois: l.jour_du_mois ?? undefined,
+    dernierVersement:
+      l.dernier_versement_mois !== null && l.dernier_versement_annee !== null
+        ? { mois: l.dernier_versement_mois, annee: l.dernier_versement_annee }
+        : null,
+  };
+}
+
+function objectifVersColonnes(o: Omit<Objectif, "id">) {
+  return {
+    nom: o.nom,
+    cible: o.cible,
+    actuel: o.actuel,
+    couleur: o.couleur,
+    recurrent: o.recurrent ?? null,
+    montant_mensuel: o.montantMensuel ?? null,
+    jour_du_mois: o.jourDuMois ?? null,
+    dernier_versement_mois: o.dernierVersement?.mois ?? null,
+    dernier_versement_annee: o.dernierVersement?.annee ?? null,
+  };
+}
+
+function majObjectifSupabase(id: string, colonnes: Record<string, unknown>) {
+  supabase
+    .from("objectifs")
+    .update(colonnes)
+    .eq("id", id)
+    .then(({ error }) => {
+      if (error) {
+        console.error("Supabase update objectif a échoué :", error);
+        signalerErreurSync(
+          `Impossible de sauvegarder l'objectif : ${error.message}`,
+        );
+      }
+    });
+}
+
+type EvenementRow = {
+  id: string;
+  user_id: string;
+  nom: string;
+  date: string;
+  heure: string;
+  duree: number;
+  couleur: string;
+  est_financier: boolean;
+  montant: number | null;
+  categorie_liee: string | null;
+  recurrent: boolean | null;
+  frequence: "jour" | "semaine" | "mois" | "an" | null;
+  toute_la_journee: boolean | null;
+  notifier_actif: boolean | null;
+  montant_applique: boolean | null;
+};
+
+function heureDepuisColonneSupabase(heure: string): string {
+  const [hStr, mStr] = heure.split(":");
+  const h = parseInt(hStr, 10) || 0;
+  const m = parseInt(mStr, 10) || 0;
+  return `${h}h${String(m).padStart(2, "0")}`;
+}
+
+function heureVersColonneSupabase(heure: string): string {
+  const [hStr, mStr] = heure.split(/[h:]/);
+  const h = Math.min(23, Math.max(0, parseInt(hStr, 10) || 0));
+  const m = Math.min(59, Math.max(0, parseInt(mStr, 10) || 0));
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function evenementDepuisLigne(l: EvenementRow): Evenement {
+  return {
+    id: l.id,
+    nom: l.nom,
+    date: l.date,
+    heure: heureDepuisColonneSupabase(l.heure),
+    duree: l.duree,
+    couleur: l.couleur,
+    estFinancier: l.est_financier,
+    montant: l.montant ?? undefined,
+    categorieLiee: l.categorie_liee ?? undefined,
+    recurrent: l.recurrent ?? undefined,
+    frequence: l.frequence ?? undefined,
+    touteLaJournee: l.toute_la_journee ?? undefined,
+    notifierActif: l.notifier_actif ?? undefined,
+    montantApplique: l.montant_applique ?? undefined,
+  };
+}
+
+function evenementVersColonnes(e: Omit<Evenement, "id">) {
+  return {
+    nom: e.nom,
+    date: e.date,
+    heure: heureVersColonneSupabase(e.heure),
+    duree: e.duree,
+    couleur: e.couleur,
+    est_financier: e.estFinancier,
+    montant: e.montant ?? null,
+    categorie_liee: e.categorieLiee ?? null,
+    recurrent: e.recurrent ?? null,
+    frequence: e.frequence ?? null,
+    toute_la_journee: e.touteLaJournee ?? null,
+    notifier_actif: e.notifierActif ?? null,
+    montant_applique: e.montantApplique ?? null,
+  };
+}
+
+function majEvenementSupabase(id: string, colonnes: Record<string, unknown>) {
+  supabase
+    .from("evenements")
+    .update(colonnes)
+    .eq("id", id)
+    .then(({ error }) => {
+      if (error) {
+        console.error("Supabase update evenement a échoué :", error);
+        signalerErreurSync(
+          `Impossible de sauvegarder l'événement : ${error.message}`,
+        );
+      }
+    });
+}
+
+type TransactionRow = {
+  id: string;
+  user_id: string;
+  enveloppe_id: string;
+  nom: string;
+  montant: number;
+  date: string;
+};
+
+function transactionDepuisLigne(l: TransactionRow): Transaction {
+  return {
+    id: l.id,
+    nom: l.nom,
+    montant: l.montant,
+    enveloppeId: l.enveloppe_id,
+    date: l.date,
+  };
+}
+
+type PaiementHistoriqueRow = {
+  id: string;
+  user_id: string;
+  enveloppe_id: string;
+  nom: string;
+  montant: number;
+  date: string;
+  couleur: string;
+};
+
+function paiementHistoriqueDepuisLigne(
+  l: PaiementHistoriqueRow,
+): PaiementHistorique {
+  return {
+    id: l.id,
+    enveloppeId: l.enveloppe_id,
+    nom: l.nom,
+    montant: l.montant,
+    date: l.date,
+    couleur: l.couleur,
+  };
+}
+
+function paiementHistoriqueVersColonnes(p: Omit<PaiementHistorique, "id">) {
+  return {
+    enveloppe_id: p.enveloppeId,
+    nom: p.nom,
+    montant: p.montant,
+    date: p.date,
+    couleur: p.couleur,
+  };
+}
+
+async function ajouterPaiementHistoriqueInterne(
+  champs: Omit<PaiementHistorique, "id">,
+) {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      console.error(
+        "Historisation du paiement refusée : aucun utilisateur connecté.",
+      );
+      signalerErreurSync("Tu dois être connecté pour historiser un paiement.");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("historique_paiements")
+      .insert({ ...paiementHistoriqueVersColonnes(champs), user_id: user.id })
+      .select()
+      .single();
+
+    if (error || !data) {
+      console.error("Supabase insert historique_paiements a échoué :", error);
+      signalerErreurSync(
+        error
+          ? `Impossible d'enregistrer le paiement : ${error.message}`
+          : "Impossible d'enregistrer le paiement : réponse vide de Supabase.",
+      );
+      return;
+    }
+
+    const nouveau = paiementHistoriqueDepuisLigne(data);
+    setEtat({ historiquePaiements: [...etat.historiquePaiements, nouveau] });
+  } catch (e) {
+    console.error("Historisation du paiement a échoué :", e);
+    signalerErreurSync(
+      "Impossible d'enregistrer le paiement : problème de connexion.",
+    );
+  }
+}
+
+function transactionVersColonnes(t: Omit<Transaction, "id">) {
+  return {
+    enveloppe_id: t.enveloppeId,
+    nom: t.nom,
+    montant: t.montant,
+    date: t.date,
+  };
+}
+
+function majDernierMoisArchiveSupabase(mois: number, annee: number) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({
+        dernier_mois_archive_mois: mois,
+        dernier_mois_archive_annee: annee,
+      })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error(
+            "Supabase update dernier_mois_archive a échoué :",
+            error,
+          );
+          signalerErreurSync(
+            `Impossible de sauvegarder l'état d'archivage : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
+async function enregistrerSnapshotMoisSupabase(params: {
+  mois: number;
+  annee: number;
+  epargne: number;
+  disponible: number;
+  totalDepense: number;
+  enveloppes: SnapshotEnveloppe[];
+  objectifs: SnapshotObjectif[];
+}): Promise<string | null> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      console.error("Archivage du mois refusé : aucun utilisateur connecté.");
+      signalerErreurSync("Tu dois être connecté pour archiver le mois.");
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from("snapshots_mois")
+      .insert({
+        user_id: user.id,
+        mois: params.mois,
+        annee: params.annee,
+        epargne: params.epargne,
+        disponible: params.disponible,
+        total_depense: params.totalDepense,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      console.error("Supabase insert snapshots_mois a échoué :", error);
+      signalerErreurSync(
+        error
+          ? `Impossible d'archiver le mois : ${error.message}`
+          : "Impossible d'archiver le mois : réponse vide de Supabase.",
+      );
+      return null;
+    }
+
+    const snapshotId: string = data.id;
+
+    if (params.enveloppes.length > 0) {
+      const { error: erreurEnv } = await supabase
+        .from("snapshot_enveloppes")
+        .insert(
+          params.enveloppes.map((e) => ({
+            snapshot_mois_id: snapshotId,
+            enveloppe_id: e.id,
+            nom: e.nom,
+            depense: e.depense,
+            budget: e.budget,
+            couleur: e.couleur,
+            type: e.type,
+          })),
+        );
+      if (erreurEnv) {
+        console.error(
+          "Supabase insert snapshot_enveloppes a échoué :",
+          erreurEnv,
+        );
+        signalerErreurSync(
+          `Impossible d'archiver le détail des enveloppes : ${erreurEnv.message}`,
+        );
+      }
+    }
+
+    if (params.objectifs.length > 0) {
+      const { error: erreurObj } = await supabase
+        .from("snapshot_objectifs")
+        .insert(
+          params.objectifs.map((o) => ({
+            snapshot_mois_id: snapshotId,
+            objectif_id: o.id,
+            nom: o.nom,
+            actuel: o.actuel,
+            cible: o.cible,
+          })),
+        );
+      if (erreurObj) {
+        console.error(
+          "Supabase insert snapshot_objectifs a échoué :",
+          erreurObj,
+        );
+        signalerErreurSync(
+          `Impossible d'archiver le détail des objectifs : ${erreurObj.message}`,
+        );
+      }
+    }
+
+    return snapshotId;
+  } catch (e) {
+    console.error("Archivage du mois a échoué :", e);
+    signalerErreurSync(
+      "Impossible d'archiver le mois : problème de connexion.",
+    );
+    return null;
+  }
+}
+
+async function archiverMoisActuelInterne(mois: number, annee: number) {
+  const dejaArchive = etat.historiquesMois.some(
+    (s) => s.mois === mois && s.annee === annee,
+  );
+  if (dejaArchive) return;
+
+  const enveloppesSnapshot: SnapshotEnveloppe[] = etat.enveloppes.map(
+    (e) => ({
+      id: e.id,
+      nom: e.nom,
+      depense: e.depense,
+      budget: e.budget,
+      couleur: e.couleur,
+      type: e.type,
+    }),
+  );
+  const objectifsSnapshot: SnapshotObjectif[] = etat.objectifs.map((o) => ({
+    id: o.id,
+    nom: o.nom,
+    actuel: o.actuel,
+    cible: o.cible,
+  }));
+  const epargne = etat.epargneMois;
+  const disponible = etat.argentDisponible;
+  const totalDepense =
+    etat.enveloppes.reduce((acc, e) => acc + e.depense, 0) + etat.epargneMois;
+
+  const enveloppesMaj = etat.enveloppes.map((e) => ({
+    ...e,
+    depense: 0,
+    payee: e.type === "Fixe" ? false : e.payee,
+  }));
+
+  const snapshotId = await enregistrerSnapshotMoisSupabase({
+    mois,
+    annee,
+    epargne,
+    disponible,
+    totalDepense,
+    enveloppes: enveloppesSnapshot,
+    objectifs: objectifsSnapshot,
+  });
+
+  const snapshot: SnapshotMois = {
+    id: snapshotId ?? `local-${Date.now()}`,
+    mois,
+    annee,
+    enveloppes: enveloppesSnapshot,
+    objectifs: objectifsSnapshot,
+    epargne,
+    disponible,
+    totalDepense,
+  };
+
+  setEtat({
+    historiquesMois: [...etat.historiquesMois, snapshot],
+    dernierMoisArchive: { mois, annee },
+    epargneMois: 0,
+    transactions: [],
+  });
+  appliquerEnveloppes(enveloppesMaj);
+  majEpargneMoisSupabase(0);
+  majDernierMoisArchiveSupabase(mois, annee);
+}
+
+function verifierArchivageMoisInterne() {
+  const maintenant = new Date();
+  const moisActuel = maintenant.getMonth();
+  const anneeActuelle = maintenant.getFullYear();
+  const dernier = etat.dernierMoisArchive;
+
+  if (dernier !== null) {
+    if (
+      dernier.annee < anneeActuelle ||
+      (dernier.annee === anneeActuelle && dernier.mois < moisActuel)
+    ) {
+      archiverMoisActuelInterne(dernier.mois, dernier.annee);
+    }
+  } else {
+    const moisCourant = 5;
+    const anneeCourante = 2026;
+    if (moisActuel > moisCourant || anneeActuelle > anneeCourante) {
+      archiverMoisActuelInterne(moisCourant, anneeCourante);
+    }
+  }
+}
+
+function verifierEvenementsFinanciersInterne() {
+  const aujourdhui = new Date();
+  aujourdhui.setHours(0, 0, 0, 0);
+
+  const aAppliquer = etat.evenements.filter((e) => {
+    if (!e.estFinancier || !e.montant) return false;
+    if (!e.categorieLiee || e.categorieLiee === "Aucune") return false;
+    if (e.montantApplique) return false;
+    const dateEvenement = new Date(e.date);
+    dateEvenement.setHours(0, 0, 0, 0);
+    return dateEvenement <= aujourdhui;
+  });
+
+  if (aAppliquer.length === 0) return;
+
+  let enveloppesMaj = etat.enveloppes;
+  aAppliquer.forEach((e) => {
+    enveloppesMaj = enveloppesMaj.map((env) =>
+      env.nom === e.categorieLiee
+        ? { ...env, depense: env.depense + (e.montant ?? 0) }
+        : env,
+    );
+  });
+
+  const idsAAppliquer = new Set(aAppliquer.map((e) => e.id));
+  setEtat({
+    evenements: etat.evenements.map((e) =>
+      idsAAppliquer.has(e.id) ? { ...e, montantApplique: true } : e,
+    ),
+  });
+  appliquerEnveloppes(enveloppesMaj);
+
+  aAppliquer.forEach((e) => {
+    majEvenementSupabase(e.id, { montant_applique: true });
+  });
+}
+
+async function verifierEcheancesFixesInterne() {
+  const aujourdhui = new Date();
+  aujourdhui.setHours(0, 0, 0, 0);
+
+  const dejaPayeeCeMois = (enveloppeId: string, dateEcheance: Date) =>
+    etat.historiquePaiements.some((p) => {
+      if (p.enveloppeId !== enveloppeId) return false;
+      const d = new Date(p.date);
+      return (
+        d.getMonth() === dateEcheance.getMonth() &&
+        d.getFullYear() === dateEcheance.getFullYear()
+      );
+    });
+
+  const nouveauxPaiements: Omit<PaiementHistorique, "id">[] = [];
+
+  const enveloppesMaj = etat.enveloppes.map((env) => {
+    if (env.type === "Fixe" && env.dateFixe && !env.payee) {
+      const dateEcheance = new Date(env.dateFixe);
+      dateEcheance.setHours(0, 0, 0, 0);
+      if (dateEcheance <= aujourdhui) {
+        const dejaEnregistree = dejaPayeeCeMois(env.id, dateEcheance);
+        if (!dejaEnregistree) {
+          nouveauxPaiements.push({
+            enveloppeId: env.id,
+            nom: env.nom,
+            montant: env.budget,
+            date: env.dateFixe,
+            couleur: env.couleur,
+          });
+        }
+        if (env.repeteChaqueMois) {
+          const prochaine = new Date(dateEcheance);
+          prochaine.setMonth(prochaine.getMonth() + 1);
+          const prochaineStr = `${prochaine.getFullYear()}-${String(prochaine.getMonth() + 1).padStart(2, "0")}-${String(prochaine.getDate()).padStart(2, "0")}`;
+          return {
+            ...env,
+            depense: dejaEnregistree ? env.depense : env.budget,
+            payee: false,
+            dateFixe: prochaineStr,
+          };
+        }
+        return {
+          ...env,
+          depense: dejaEnregistree ? env.depense : env.budget,
+          payee: true,
+        };
+      }
+    }
+    return env;
+  });
+
+  const aChange = enveloppesMaj.some(
+    (env, i) =>
+      env.payee !== etat.enveloppes[i].payee ||
+      env.dateFixe !== etat.enveloppes[i].dateFixe,
+  );
+  if (!aChange) return;
+
+  appliquerEnveloppes(enveloppesMaj);
+
+  for (const champs of nouveauxPaiements) {
+    await ajouterPaiementHistoriqueInterne(champs);
+  }
+}
+
+function majEpargneMoisSupabase(montant: number) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({ epargne_mois: montant })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error("Supabase update epargne_mois a échoué :", error);
+          signalerErreurSync(
+            `Impossible de sauvegarder l'épargne du mois : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
+function majArgentDisponibleSupabase(montant: number) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({ argent_disponible: montant })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error(
+            "Supabase update argent_disponible a échoué :",
+            error,
+          );
+          signalerErreurSync(
+            `Impossible de sauvegarder le montant disponible : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
 export function useObjectifs() {
   const [local, setLocal] = useState<EtatStore>(etat);
 
@@ -264,7 +855,6 @@ export function useObjectifs() {
     epargneMois: local.epargneMois,
     enveloppes: local.enveloppes,
     argentDisponible: local.argentDisponible,
-    depensesPrevues: local.depensesPrevues,
     transactions: local.transactions,
     evenements: local.evenements,
     historiquePaiements: local.historiquePaiements,
@@ -278,63 +868,136 @@ export function useObjectifs() {
     },
 
     chargerEnveloppes: async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
 
-      const { data, error } = await supabase
-        .from("enveloppes")
-        .select("*")
-        .eq("user_id", user.id);
+        const { data, error } = await supabase
+          .from("enveloppes")
+          .select("*")
+          .eq("user_id", user.id);
 
-      if (error) {
-        console.error("Supabase select enveloppes a échoué :", error);
+        if (error) {
+          console.error("Supabase select enveloppes a échoué :", error);
+          signalerErreurSync(
+            `Impossible de charger tes enveloppes : ${error.message}`,
+          );
+          return;
+        }
+
+        setEtat({ enveloppes: (data ?? []).map(enveloppeDepuisLigne) });
+      } catch (e) {
+        console.error("Chargement des enveloppes a échoué :", e);
         signalerErreurSync(
-          `Impossible de charger tes enveloppes : ${error.message}`,
+          "Impossible de charger tes enveloppes : problème de connexion.",
         );
-        return;
       }
-
-      setEtat({ enveloppes: (data ?? []).map(enveloppeDepuisLigne) });
     },
 
     ajouterEnveloppe: async (
       champs: Omit<Enveloppe, "id">,
     ): Promise<Enveloppe | null> => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        console.error(
-          "Création d'enveloppe refusée : aucun utilisateur connecté (supabase.auth.getUser() a renvoyé null).",
-        );
-        signalerErreurSync("Tu dois être connecté pour créer une enveloppe.");
-        return null;
-      }
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          console.error(
+            "Création d'enveloppe refusée : aucun utilisateur connecté (supabase.auth.getUser() a renvoyé null).",
+          );
+          signalerErreurSync("Tu dois être connecté pour créer une enveloppe.");
+          return null;
+        }
 
-      const { data, error } = await supabase
-        .from("enveloppes")
-        .insert({ ...enveloppeVersColonnes(champs), user_id: user.id })
-        .select()
-        .single();
+        const { data, error } = await supabase
+          .from("enveloppes")
+          .insert({ ...enveloppeVersColonnes(champs), user_id: user.id })
+          .select()
+          .single();
 
-      if (error || !data) {
-        console.error("Supabase insert enveloppe a échoué :", error);
+        if (error || !data) {
+          console.error("Supabase insert enveloppe a échoué :", error);
+          signalerErreurSync(
+            error
+              ? `Impossible de créer l'enveloppe : ${error.message}`
+              : "Impossible de créer l'enveloppe : réponse vide de Supabase.",
+          );
+          return null;
+        }
+
+        const nouvelle = enveloppeDepuisLigne(data);
+        setEtat({ enveloppes: [...etat.enveloppes, nouvelle] });
+        return nouvelle;
+      } catch (e) {
+        console.error("Création d'enveloppe a échoué :", e);
         signalerErreurSync(
-          error
-            ? `Impossible de créer l'enveloppe : ${error.message}`
-            : "Impossible de créer l'enveloppe : réponse vide de Supabase.",
+          "Impossible de créer l'enveloppe : problème de connexion.",
         );
         return null;
       }
-
-      const nouvelle = enveloppeDepuisLigne(data);
-      setEtat({ enveloppes: [...etat.enveloppes, nouvelle] });
-      return nouvelle;
     },
 
-    ajouterObjectif: (
+    chargerObjectifs: async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const [{ data, error }, { data: profil, error: erreurProfil }] =
+          await Promise.all([
+            supabase.from("objectifs").select("*").eq("user_id", user.id),
+            supabase
+              .from("profils")
+              .select(
+                "epargne_mois, argent_disponible, dernier_mois_archive_mois, dernier_mois_archive_annee",
+              )
+              .eq("user_id", user.id)
+              .single(),
+          ]);
+
+        if (error) {
+          console.error("Supabase select objectifs a échoué :", error);
+          signalerErreurSync(
+            `Impossible de charger tes objectifs : ${error.message}`,
+          );
+          return;
+        }
+        if (erreurProfil) {
+          console.error("Supabase select profil a échoué :", erreurProfil);
+          signalerErreurSync(
+            `Impossible de charger ton épargne du mois : ${erreurProfil.message}`,
+          );
+        }
+
+        const dernierMoisArchive =
+          profil?.dernier_mois_archive_mois !== undefined &&
+          profil?.dernier_mois_archive_mois !== null &&
+          profil?.dernier_mois_archive_annee !== undefined &&
+          profil?.dernier_mois_archive_annee !== null
+            ? {
+                mois: profil.dernier_mois_archive_mois,
+                annee: profil.dernier_mois_archive_annee,
+              }
+            : etat.dernierMoisArchive;
+
+        setEtat({
+          objectifs: (data ?? []).map(objectifDepuisLigne),
+          epargneMois: profil?.epargne_mois ?? etat.epargneMois,
+          argentDisponible: profil?.argent_disponible ?? etat.argentDisponible,
+          dernierMoisArchive,
+        });
+      } catch (e) {
+        console.error("Chargement des objectifs a échoué :", e);
+        signalerErreurSync(
+          "Impossible de charger tes objectifs : problème de connexion.",
+        );
+      }
+    },
+
+    ajouterObjectif: async (
       nom: string,
       cible: number,
       montantInitial: number,
@@ -342,27 +1005,253 @@ export function useObjectifs() {
       recurrent: boolean,
       montantMensuel?: number,
       jourDuMois?: number,
-    ) => {
-      const nouvel: Objectif = {
-        id: Date.now(),
-        nom,
-        cible,
-        actuel: montantInitial,
-        couleur,
-        recurrent,
-        montantMensuel: recurrent ? montantMensuel : undefined,
-        jourDuMois: recurrent ? jourDuMois : undefined,
-        dernierVersement: null,
-      };
-      setEtat({ objectifs: [...etat.objectifs, nouvel] });
+    ): Promise<Objectif | null> => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          console.error(
+            "Création d'objectif refusée : aucun utilisateur connecté (supabase.auth.getUser() a renvoyé null).",
+          );
+          signalerErreurSync("Tu dois être connecté pour créer un objectif.");
+          return null;
+        }
+
+        const champs: Omit<Objectif, "id"> = {
+          nom,
+          cible,
+          actuel: montantInitial,
+          couleur,
+          recurrent,
+          montantMensuel: recurrent ? montantMensuel : undefined,
+          jourDuMois: recurrent ? jourDuMois : undefined,
+          dernierVersement: null,
+        };
+
+        const { data, error } = await supabase
+          .from("objectifs")
+          .insert({ ...objectifVersColonnes(champs), user_id: user.id })
+          .select()
+          .single();
+
+        if (error || !data) {
+          console.error("Supabase insert objectif a échoué :", error);
+          signalerErreurSync(
+            error
+              ? `Impossible de créer l'objectif : ${error.message}`
+              : "Impossible de créer l'objectif : réponse vide de Supabase.",
+          );
+          return null;
+        }
+
+        const nouvel = objectifDepuisLigne(data);
+        setEtat({ objectifs: [...etat.objectifs, nouvel] });
+        return nouvel;
+      } catch (e) {
+        console.error("Création d'objectif a échoué :", e);
+        signalerErreurSync(
+          "Impossible de créer l'objectif : problème de connexion.",
+        );
+        return null;
+      }
+    },
+
+    chargerEvenements: async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from("evenements")
+          .select("*")
+          .eq("user_id", user.id);
+
+        if (error) {
+          console.error("Supabase select evenements a échoué :", error);
+          signalerErreurSync(
+            `Impossible de charger tes événements : ${error.message}`,
+          );
+          return;
+        }
+
+        setEtat({ evenements: (data ?? []).map(evenementDepuisLigne) });
+      } catch (e) {
+        console.error("Chargement des événements a échoué :", e);
+        signalerErreurSync(
+          "Impossible de charger tes événements : problème de connexion.",
+        );
+      }
+    },
+
+    chargerTransactions: async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from("transactions")
+          .select("*")
+          .eq("user_id", user.id);
+
+        if (error) {
+          console.error("Supabase select transactions a échoué :", error);
+          signalerErreurSync(
+            `Impossible de charger tes dépenses : ${error.message}`,
+          );
+          return;
+        }
+
+        setEtat({ transactions: (data ?? []).map(transactionDepuisLigne) });
+      } catch (e) {
+        console.error("Chargement des dépenses a échoué :", e);
+        signalerErreurSync(
+          "Impossible de charger tes dépenses : problème de connexion.",
+        );
+      }
+    },
+
+    chargerHistoriquePaiements: async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from("historique_paiements")
+          .select("*")
+          .eq("user_id", user.id);
+
+        if (error) {
+          console.error(
+            "Supabase select historique_paiements a échoué :",
+            error,
+          );
+          signalerErreurSync(
+            `Impossible de charger l'historique des paiements : ${error.message}`,
+          );
+          return;
+        }
+
+        setEtat({
+          historiquePaiements: (data ?? []).map(paiementHistoriqueDepuisLigne),
+        });
+      } catch (e) {
+        console.error("Chargement de l'historique des paiements a échoué :", e);
+        signalerErreurSync(
+          "Impossible de charger l'historique des paiements : problème de connexion.",
+        );
+      }
+    },
+
+    chargerHistoriquesMois: async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: snapshots, error } = await supabase
+          .from("snapshots_mois")
+          .select("*")
+          .eq("user_id", user.id);
+
+        if (error) {
+          console.error("Supabase select snapshots_mois a échoué :", error);
+          signalerErreurSync(
+            `Impossible de charger l'historique mensuel : ${error.message}`,
+          );
+          return;
+        }
+
+        if (!snapshots || snapshots.length === 0) {
+          setEtat({ historiquesMois: [] });
+          return;
+        }
+
+        const snapshotIds = snapshots.map((s) => s.id);
+
+        const [
+          { data: enveloppesRows, error: erreurEnv },
+          { data: objectifsRows, error: erreurObj },
+        ] = await Promise.all([
+          supabase
+            .from("snapshot_enveloppes")
+            .select("*")
+            .in("snapshot_mois_id", snapshotIds),
+          supabase
+            .from("snapshot_objectifs")
+            .select("*")
+            .in("snapshot_mois_id", snapshotIds),
+        ]);
+
+        if (erreurEnv) {
+          console.error(
+            "Supabase select snapshot_enveloppes a échoué :",
+            erreurEnv,
+          );
+          signalerErreurSync(
+            `Impossible de charger le détail des enveloppes archivées : ${erreurEnv.message}`,
+          );
+        }
+        if (erreurObj) {
+          console.error(
+            "Supabase select snapshot_objectifs a échoué :",
+            erreurObj,
+          );
+          signalerErreurSync(
+            `Impossible de charger le détail des objectifs archivés : ${erreurObj.message}`,
+          );
+        }
+
+        const historiquesMois: SnapshotMois[] = snapshots.map((s) => ({
+          id: s.id,
+          mois: s.mois,
+          annee: s.annee,
+          epargne: s.epargne,
+          disponible: s.disponible,
+          totalDepense: s.total_depense,
+          enveloppes: (enveloppesRows ?? [])
+            .filter((e) => e.snapshot_mois_id === s.id)
+            .map((e) => ({
+              id: e.enveloppe_id,
+              nom: e.nom,
+              depense: e.depense,
+              budget: e.budget,
+              couleur: e.couleur,
+              type: e.type,
+            })),
+          objectifs: (objectifsRows ?? [])
+            .filter((o) => o.snapshot_mois_id === s.id)
+            .map((o) => ({
+              id: o.objectif_id,
+              nom: o.nom,
+              actuel: o.actuel,
+              cible: o.cible,
+            })),
+        }));
+
+        setEtat({ historiquesMois });
+      } catch (e) {
+        console.error("Chargement de l'historique mensuel a échoué :", e);
+        signalerErreurSync(
+          "Impossible de charger l'historique mensuel : problème de connexion.",
+        );
+      }
     },
 
     modifierEpargneMois: (montant: number) => {
       setEtat({ epargneMois: montant });
+      majEpargneMoisSupabase(montant);
     },
 
     modifierObjectif: (
-      id: number,
+      id: string,
       champs: Partial<
         Pick<
           Objectif,
@@ -375,15 +1264,35 @@ export function useObjectifs() {
           o.id === id ? { ...o, ...champs } : o,
         ),
       });
+
+      const colonnes: Record<string, unknown> = {};
+      if ("nom" in champs) colonnes.nom = champs.nom;
+      if ("cible" in champs) colonnes.cible = champs.cible;
+      if ("couleur" in champs) colonnes.couleur = champs.couleur;
+      if ("recurrent" in champs) colonnes.recurrent = champs.recurrent ?? null;
+      if ("montantMensuel" in champs)
+        colonnes.montant_mensuel = champs.montantMensuel ?? null;
+      if ("jourDuMois" in champs)
+        colonnes.jour_du_mois = champs.jourDuMois ?? null;
+
+      majObjectifSupabase(id, colonnes);
     },
 
-    ajouterFondsObjectif: (id: number, montant: number) => {
+    ajouterFondsObjectif: (id: string, montant: number) => {
+      const objectif = etat.objectifs.find((o) => o.id === id);
+      if (!objectif) return;
+      const nouveauActuel = objectif.actuel + montant;
+      const nouvelleEpargneMois = etat.epargneMois + montant;
+
       setEtat({
         objectifs: etat.objectifs.map((o) =>
-          o.id === id ? { ...o, actuel: o.actuel + montant } : o,
+          o.id === id ? { ...o, actuel: nouveauActuel } : o,
         ),
-        epargneMois: etat.epargneMois + montant,
+        epargneMois: nouvelleEpargneMois,
       });
+
+      majObjectifSupabase(id, { actuel: nouveauActuel });
+      majEpargneMoisSupabase(nouvelleEpargneMois);
     },
 
     verifierVersementsObjectifs: () => {
@@ -393,6 +1302,7 @@ export function useObjectifs() {
       const anneeActuelle = aujourdhui.getFullYear();
 
       let totalVerse = 0;
+      const objectifsVerses: Objectif[] = [];
       const objectifsMaj = etat.objectifs.map((o) => {
         const dejaVerseCeMois =
           o.dernierVersement?.mois === moisActuel &&
@@ -405,28 +1315,49 @@ export function useObjectifs() {
           !dejaVerseCeMois
         ) {
           totalVerse += o.montantMensuel;
-          return {
+          const maj: Objectif = {
             ...o,
             actuel: o.actuel + o.montantMensuel,
             dernierVersement: { mois: moisActuel, annee: anneeActuelle },
           };
+          objectifsVerses.push(maj);
+          return maj;
         }
         return o;
       });
 
-      const aChange = objectifsMaj.some(
-        (o, i) => o.actuel !== etat.objectifs[i].actuel,
-      );
-      if (aChange) {
+      if (objectifsVerses.length > 0) {
+        const nouvelleEpargneMois = etat.epargneMois + totalVerse;
         setEtat({
           objectifs: objectifsMaj,
-          epargneMois: etat.epargneMois + totalVerse,
+          epargneMois: nouvelleEpargneMois,
         });
+
+        objectifsVerses.forEach((o) => {
+          majObjectifSupabase(o.id, {
+            actuel: o.actuel,
+            dernier_versement_mois: o.dernierVersement!.mois,
+            dernier_versement_annee: o.dernierVersement!.annee,
+          });
+        });
+        majEpargneMoisSupabase(nouvelleEpargneMois);
       }
     },
 
-    supprimerObjectif: (id: number) => {
+    supprimerObjectif: (id: string) => {
       setEtat({ objectifs: etat.objectifs.filter((o) => o.id !== id) });
+      supabase
+        .from("objectifs")
+        .delete()
+        .eq("id", id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Supabase delete objectif a échoué :", error);
+            signalerErreurSync(
+              `Impossible de supprimer l'objectif : ${error.message}`,
+            );
+          }
+        });
     },
 
     modifierEnveloppes: (enveloppes: Enveloppe[]) => {
@@ -435,212 +1366,233 @@ export function useObjectifs() {
 
     modifierArgentDisponible: (montant: number) => {
       setEtat({ argentDisponible: montant });
+      majArgentDisponibleSupabase(montant);
     },
 
     archiverMoisActuel: (mois: number, annee: number) => {
-      const dejaArchive = etat.historiquesMois.some(
-        (s) => s.mois === mois && s.annee === annee,
-      );
-      if (dejaArchive) return;
+      archiverMoisActuelInterne(mois, annee);
+    },
 
-      const snapshot: SnapshotMois = {
-        mois,
-        annee,
-        enveloppes: etat.enveloppes.map((e) => ({
-          id: e.id,
-          nom: e.nom,
-          depense: e.depense,
-          budget: e.budget,
-          couleur: e.couleur,
-          type: e.type,
-        })),
-        objectifs: etat.objectifs.map((o) => ({
-          id: o.id,
-          nom: o.nom,
-          actuel: o.actuel,
-          cible: o.cible,
-        })),
-        epargne: etat.epargneMois,
-        disponible: etat.argentDisponible,
-        totalDepense:
-          etat.enveloppes.reduce((acc, e) => acc + e.depense, 0) +
-          etat.epargneMois,
-      };
+    verifierArchivageMois: () => {
+      verifierArchivageMoisInterne();
+    },
 
-      const enveloppesMaj = etat.enveloppes.map((e) => ({
-        ...e,
-        depense: 0,
-        payee: e.type === "Fixe" ? false : e.payee,
-      }));
-
-      setEtat({
-        historiquesMois: [...etat.historiquesMois, snapshot],
-        dernierMoisArchive: { mois, annee },
-        epargneMois: 0,
-        transactions: [],
-      });
-      appliquerEnveloppes(enveloppesMaj);
+    verifierEvenementsFinanciers: () => {
+      verifierEvenementsFinanciersInterne();
     },
 
     verifierEcheancesFixes: () => {
-      const aujourdhui = new Date();
-      aujourdhui.setHours(0, 0, 0, 0);
+      verifierEcheancesFixesInterne();
+    },
 
-      const dejaPayeeCeMois = (enveloppeId: string, dateEcheance: Date) =>
-        etat.historiquePaiements.some((p) => {
-          if (p.enveloppeId !== enveloppeId) return false;
-          const d = new Date(p.date);
-          return (
-            d.getMonth() === dateEcheance.getMonth() &&
-            d.getFullYear() === dateEcheance.getFullYear()
+    ajouterEvenement: async (
+      champs: Omit<Evenement, "id">,
+    ): Promise<Evenement | null> => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          console.error(
+            "Création d'événement refusée : aucun utilisateur connecté (supabase.auth.getUser() a renvoyé null).",
           );
-        });
-
-      const nouveauxPaiements: PaiementHistorique[] = [];
-
-      const enveloppesMaj = etat.enveloppes.map((env) => {
-        if (env.type === "Fixe" && env.dateFixe && !env.payee) {
-          const dateEcheance = new Date(env.dateFixe);
-          dateEcheance.setHours(0, 0, 0, 0);
-          if (dateEcheance <= aujourdhui) {
-            const dejaEnregistree = dejaPayeeCeMois(env.id, dateEcheance);
-            if (!dejaEnregistree) {
-              nouveauxPaiements.push({
-                id: Date.now() + Math.random(),
-                enveloppeId: env.id,
-                nom: env.nom,
-                montant: env.budget,
-                date: env.dateFixe,
-                couleur: env.couleur,
-              });
-            }
-            if (env.repeteChaqueMois) {
-              const prochaine = new Date(dateEcheance);
-              prochaine.setMonth(prochaine.getMonth() + 1);
-              const prochaineStr = `${prochaine.getFullYear()}-${String(prochaine.getMonth() + 1).padStart(2, "0")}-${String(prochaine.getDate()).padStart(2, "0")}`;
-              return {
-                ...env,
-                depense: dejaEnregistree ? env.depense : env.budget,
-                payee: false,
-                dateFixe: prochaineStr,
-              };
-            }
-            return {
-              ...env,
-              depense: dejaEnregistree ? env.depense : env.budget,
-              payee: true,
-            };
-          }
+          signalerErreurSync("Tu dois être connecté pour créer un événement.");
+          return null;
         }
-        return env;
-      });
 
-      const aChange = enveloppesMaj.some(
-        (env, i) =>
-          env.payee !== etat.enveloppes[i].payee ||
-          env.dateFixe !== etat.enveloppes[i].dateFixe,
-      );
-      if (aChange) {
-        setEtat({
-          historiquePaiements: [
-            ...etat.historiquePaiements,
-            ...nouveauxPaiements,
-          ],
-        });
+        const { data, error } = await supabase
+          .from("evenements")
+          .insert({ ...evenementVersColonnes(champs), user_id: user.id })
+          .select()
+          .single();
+
+        if (error || !data) {
+          console.error("Supabase insert evenement a échoué :", error);
+          signalerErreurSync(
+            error
+              ? `Impossible de créer l'événement : ${error.message}`
+              : "Impossible de créer l'événement : réponse vide de Supabase.",
+          );
+          return null;
+        }
+
+        const nouvel = evenementDepuisLigne(data);
+        setEtat({ evenements: [...etat.evenements, nouvel] });
+
+        if (
+          nouvel.estFinancier &&
+          nouvel.montant &&
+          nouvel.categorieLiee &&
+          nouvel.categorieLiee !== "Aucune"
+        ) {
+          verifierEvenementsFinanciersInterne();
+        }
+
+        return nouvel;
+      } catch (e) {
+        console.error("Création d'événement a échoué :", e);
+        signalerErreurSync(
+          "Impossible de créer l'événement : problème de connexion.",
+        );
+        return null;
+      }
+    },
+
+    supprimerEvenement: (id: string) => {
+      const ev = etat.evenements.find((e) => e.id === id);
+      setEtat({ evenements: etat.evenements.filter((e) => e.id !== id) });
+
+      if (
+        ev?.estFinancier &&
+        ev.montantApplique &&
+        ev.montant &&
+        ev.categorieLiee &&
+        ev.categorieLiee !== "Aucune"
+      ) {
+        const enveloppesMaj = etat.enveloppes.map((e) =>
+          e.nom === ev.categorieLiee
+            ? { ...e, depense: Math.max(0, e.depense - ev.montant!) }
+            : e,
+        );
         appliquerEnveloppes(enveloppesMaj);
       }
+
+      supabase
+        .from("evenements")
+        .delete()
+        .eq("id", id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Supabase delete evenement a échoué :", error);
+            signalerErreurSync(
+              `Impossible de supprimer l'événement : ${error.message}`,
+            );
+          }
+        });
     },
 
-    ajouterEvenement: (
-      id: number,
-      nom: string,
-      date: string,
-      heure: string,
-      duree: number,
-      couleur: string,
-      estFinancier: boolean,
-      montant?: number,
-      categorieLiee?: string,
-      recurrent?: boolean,
-      frequence?: "jour" | "semaine" | "mois" | "an",
-      touteLaJournee?: boolean,
-      notifierActif?: boolean,
-    ) => {
-      const nouvelEvenement: Evenement = {
-        id,
-        nom,
-        date,
-        heure,
-        duree,
-        couleur,
-        estFinancier,
-        montant,
-        categorieLiee,
-        recurrent,
-        frequence: recurrent ? frequence : undefined,
-        touteLaJournee,
-        notifierActif,
-      };
-      setEtat({ evenements: [...etat.evenements, nouvelEvenement] });
-      if (estFinancier && montant) {
-        if (categorieLiee && categorieLiee !== "Aucune") {
-          const enveloppesMaj = etat.enveloppes.map((e) =>
-            e.nom === categorieLiee
-              ? { ...e, depense: e.depense + montant }
-              : e,
-          );
-          appliquerEnveloppes(enveloppesMaj);
-        } else {
-          const nouvelleDepensePrevue: DepensePrevue = {
-            id: Date.now() + 1,
-            nom,
-            montant,
-            type: "Non courante",
-            statut: "Planifié",
-            couleur,
-          };
-          setEtat({
-            depensesPrevues: [...etat.depensesPrevues, nouvelleDepensePrevue],
-          });
-        }
-      }
-    },
+    modifierEvenement: (id: string, champs: Partial<Omit<Evenement, "id">>) => {
+      const ancien = etat.evenements.find((e) => e.id === id);
 
-    supprimerEvenement: (id: number) => {
-      setEtat({ evenements: etat.evenements.filter((e) => e.id !== id) });
-    },
-
-    modifierEvenement: (id: number, champs: Partial<Omit<Evenement, "id">>) => {
       setEtat({
         evenements: etat.evenements.map((e) =>
           e.id === id ? { ...e, ...champs } : e,
         ),
       });
+
+      const colonnes: Record<string, unknown> = {};
+      if ("nom" in champs) colonnes.nom = champs.nom;
+      if ("date" in champs) colonnes.date = champs.date;
+      if ("heure" in champs)
+        colonnes.heure = champs.heure
+          ? heureVersColonneSupabase(champs.heure)
+          : champs.heure;
+      if ("duree" in champs) colonnes.duree = champs.duree;
+      if ("couleur" in champs) colonnes.couleur = champs.couleur;
+      if ("estFinancier" in champs) colonnes.est_financier = champs.estFinancier;
+      if ("montant" in champs) colonnes.montant = champs.montant ?? null;
+      if ("categorieLiee" in champs)
+        colonnes.categorie_liee = champs.categorieLiee ?? null;
+      if ("recurrent" in champs) colonnes.recurrent = champs.recurrent ?? null;
+      if ("frequence" in champs) colonnes.frequence = champs.frequence ?? null;
+      if ("touteLaJournee" in champs)
+        colonnes.toute_la_journee = champs.touteLaJournee ?? null;
+      if ("notifierActif" in champs)
+        colonnes.notifier_actif = champs.notifierActif ?? null;
+
+      const champsFinanciers =
+        "estFinancier" in champs ||
+        "montant" in champs ||
+        "categorieLiee" in champs ||
+        "date" in champs;
+
+      if (ancien?.montantApplique && champsFinanciers) {
+        if (
+          ancien.estFinancier &&
+          ancien.montant &&
+          ancien.categorieLiee &&
+          ancien.categorieLiee !== "Aucune"
+        ) {
+          const enveloppesMaj = etat.enveloppes.map((env) =>
+            env.nom === ancien.categorieLiee
+              ? { ...env, depense: Math.max(0, env.depense - ancien.montant!) }
+              : env,
+          );
+          appliquerEnveloppes(enveloppesMaj);
+        }
+        colonnes.montant_applique = null;
+        setEtat({
+          evenements: etat.evenements.map((e) =>
+            e.id === id ? { ...e, montantApplique: undefined } : e,
+          ),
+        });
+      }
+
+      majEvenementSupabase(id, colonnes);
+
+      if (champsFinanciers) {
+        verifierEvenementsFinanciersInterne();
+      }
     },
 
-    ajouterTransaction: (
+    ajouterTransaction: async (
       nom: string,
       montant: number,
       enveloppeId: string,
       date: string,
-    ) => {
-      const nouvelleTransaction: Transaction = {
-        id: Date.now(),
-        nom,
-        montant,
-        enveloppeId,
-        date,
-      };
-      const enveloppesMaj = etat.enveloppes.map((e) =>
-        e.id === enveloppeId ? { ...e, depense: e.depense + montant } : e,
-      );
-      setEtat({
-        transactions: [...etat.transactions, nouvelleTransaction],
-      });
-      appliquerEnveloppes(enveloppesMaj);
+    ): Promise<Transaction | null> => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          console.error(
+            "Création de dépense refusée : aucun utilisateur connecté (supabase.auth.getUser() a renvoyé null).",
+          );
+          signalerErreurSync("Tu dois être connecté pour ajouter une dépense.");
+          return null;
+        }
+
+        const champs: Omit<Transaction, "id"> = {
+          nom,
+          montant,
+          enveloppeId,
+          date,
+        };
+
+        const { data, error } = await supabase
+          .from("transactions")
+          .insert({ ...transactionVersColonnes(champs), user_id: user.id })
+          .select()
+          .single();
+
+        if (error || !data) {
+          console.error("Supabase insert transaction a échoué :", error);
+          signalerErreurSync(
+            error
+              ? `Impossible d'ajouter la dépense : ${error.message}`
+              : "Impossible d'ajouter la dépense : réponse vide de Supabase.",
+          );
+          return null;
+        }
+
+        const nouvelle = transactionDepuisLigne(data);
+        const enveloppesMaj = etat.enveloppes.map((e) =>
+          e.id === enveloppeId ? { ...e, depense: e.depense + montant } : e,
+        );
+        setEtat({ transactions: [...etat.transactions, nouvelle] });
+        appliquerEnveloppes(enveloppesMaj);
+        return nouvelle;
+      } catch (e) {
+        console.error("Ajout de dépense a échoué :", e);
+        signalerErreurSync(
+          "Impossible d'ajouter la dépense : problème de connexion.",
+        );
+        return null;
+      }
     },
 
-    supprimerTransaction: (id: number) => {
+    supprimerTransaction: (id: string) => {
       const tx = etat.transactions.find((t) => t.id === id);
       if (!tx) return;
       const enveloppesMaj = etat.enveloppes.map((e) =>
@@ -652,6 +1604,18 @@ export function useObjectifs() {
         transactions: etat.transactions.filter((t) => t.id !== id),
       });
       appliquerEnveloppes(enveloppesMaj);
+      supabase
+        .from("transactions")
+        .delete()
+        .eq("id", id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Supabase delete transaction a échoué :", error);
+            signalerErreurSync(
+              `Impossible de supprimer la dépense : ${error.message}`,
+            );
+          }
+        });
     },
   };
 }
