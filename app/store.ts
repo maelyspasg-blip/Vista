@@ -11,6 +11,7 @@ export type Objectif = {
   montantMensuel?: number;
   jourDuMois?: number;
   dernierVersement?: { mois: number; annee: number } | null;
+  contributionMois: number;
 };
 
 export type Enveloppe = {
@@ -41,6 +42,7 @@ export type Evenement = {
   id: string;
   nom: string;
   date: string;
+  dateFin?: string;
   heure: string;
   duree: number;
   couleur: string;
@@ -97,6 +99,7 @@ type EtatStore = {
   epargneMois: number;
   enveloppes: Enveloppe[];
   argentDisponible: number;
+  argentDisponibleRecurrent: boolean;
   transactions: Transaction[];
   evenements: Evenement[];
   historiquePaiements: PaiementHistorique[];
@@ -110,6 +113,7 @@ let etat: EtatStore = {
   epargneMois: 0,
   enveloppes: [],
   argentDisponible: 0,
+  argentDisponibleRecurrent: false,
   transactions: TRANSACTIONS_INIT,
   evenements: EVENEMENTS_INIT,
   historiquePaiements: [],
@@ -128,7 +132,7 @@ function setEtat(nouvelEtat: Partial<EtatStore>) {
 
 let minuteurErreurSync: ReturnType<typeof setTimeout> | null = null;
 
-function signalerErreurSync(message: string) {
+export function signalerErreurSync(message: string) {
   setEtat({ erreurSync: message });
   if (minuteurErreurSync) clearTimeout(minuteurErreurSync);
   minuteurErreurSync = setTimeout(() => {
@@ -253,6 +257,7 @@ type ObjectifRow = {
   jour_du_mois: number | null;
   dernier_versement_mois: number | null;
   dernier_versement_annee: number | null;
+  contribution_mois: number | null;
 };
 
 function objectifDepuisLigne(l: ObjectifRow): Objectif {
@@ -269,6 +274,7 @@ function objectifDepuisLigne(l: ObjectifRow): Objectif {
       l.dernier_versement_mois !== null && l.dernier_versement_annee !== null
         ? { mois: l.dernier_versement_mois, annee: l.dernier_versement_annee }
         : null,
+    contributionMois: l.contribution_mois ?? 0,
   };
 }
 
@@ -283,6 +289,7 @@ function objectifVersColonnes(o: Omit<Objectif, "id">) {
     jour_du_mois: o.jourDuMois ?? null,
     dernier_versement_mois: o.dernierVersement?.mois ?? null,
     dernier_versement_annee: o.dernierVersement?.annee ?? null,
+    contribution_mois: o.contributionMois ?? 0,
   };
 }
 
@@ -306,6 +313,7 @@ type EvenementRow = {
   user_id: string;
   nom: string;
   date: string;
+  date_fin: string | null;
   heure: string;
   duree: number;
   couleur: string;
@@ -338,6 +346,7 @@ function evenementDepuisLigne(l: EvenementRow): Evenement {
     id: l.id,
     nom: l.nom,
     date: l.date,
+    dateFin: l.date_fin ?? undefined,
     heure: heureDepuisColonneSupabase(l.heure),
     duree: l.duree,
     couleur: l.couleur,
@@ -356,6 +365,7 @@ function evenementVersColonnes(e: Omit<Evenement, "id">) {
   return {
     nom: e.nom,
     date: e.date,
+    date_fin: e.dateFin ?? null,
     heure: heureVersColonneSupabase(e.heure),
     duree: e.duree,
     couleur: e.couleur,
@@ -667,15 +677,30 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     totalDepense,
   };
 
+  const objectifsMaj = etat.objectifs.map((o) => ({
+    ...o,
+    contributionMois: 0,
+  }));
+
+  const nouveauDisponible = etat.argentDisponibleRecurrent ? disponible : 0;
+
   setEtat({
     historiquesMois: [...etat.historiquesMois, snapshot],
     dernierMoisArchive: { mois, annee },
     epargneMois: 0,
     transactions: [],
+    objectifs: objectifsMaj,
+    argentDisponible: nouveauDisponible,
   });
   appliquerEnveloppes(enveloppesMaj);
   majEpargneMoisSupabase(0);
   majDernierMoisArchiveSupabase(mois, annee);
+  if (nouveauDisponible !== disponible) {
+    majArgentDisponibleSupabase(nouveauDisponible, etat.argentDisponibleRecurrent);
+  }
+  objectifsMaj.forEach((o) => {
+    majObjectifSupabase(o.id, { contribution_mois: 0 });
+  });
 }
 
 function verifierArchivageMoisInterne() {
@@ -829,12 +854,12 @@ function majEpargneMoisSupabase(montant: number) {
   });
 }
 
-function majArgentDisponibleSupabase(montant: number) {
+function majArgentDisponibleSupabase(montant: number, recurrent: boolean) {
   supabase.auth.getUser().then(({ data: { user } }) => {
     if (!user) return;
     supabase
       .from("profils")
-      .update({ argent_disponible: montant })
+      .update({ argent_disponible: montant, argent_disponible_recurrent: recurrent })
       .eq("user_id", user.id)
       .then(({ error }) => {
         if (error) {
@@ -863,6 +888,7 @@ export function useObjectifs() {
     epargneMois: local.epargneMois,
     enveloppes: local.enveloppes,
     argentDisponible: local.argentDisponible,
+    argentDisponibleRecurrent: local.argentDisponibleRecurrent,
     transactions: local.transactions,
     evenements: local.evenements,
     historiquePaiements: local.historiquePaiements,
@@ -960,7 +986,7 @@ export function useObjectifs() {
             supabase
               .from("profils")
               .select(
-                "epargne_mois, argent_disponible, dernier_mois_archive_mois, dernier_mois_archive_annee",
+                "epargne_mois, argent_disponible, argent_disponible_recurrent, dernier_mois_archive_mois, dernier_mois_archive_annee",
               )
               .eq("user_id", user.id)
               .single(),
@@ -995,6 +1021,9 @@ export function useObjectifs() {
           objectifs: (data ?? []).map(objectifDepuisLigne),
           epargneMois: profil?.epargne_mois ?? etat.epargneMois,
           argentDisponible: profil?.argent_disponible ?? etat.argentDisponible,
+          argentDisponibleRecurrent:
+            profil?.argent_disponible_recurrent ??
+            etat.argentDisponibleRecurrent,
           dernierMoisArchive,
         });
       } catch (e) {
@@ -1035,6 +1064,7 @@ export function useObjectifs() {
           montantMensuel: recurrent ? montantMensuel : undefined,
           jourDuMois: recurrent ? jourDuMois : undefined,
           dernierVersement: null,
+          contributionMois: montantInitial > 0 ? montantInitial : 0,
         };
 
         const { data, error } = await supabase
@@ -1055,6 +1085,13 @@ export function useObjectifs() {
 
         const nouvel = objectifDepuisLigne(data);
         setEtat({ objectifs: [...etat.objectifs, nouvel] });
+
+        if (montantInitial > 0) {
+          const nouvelleEpargneMois = etat.epargneMois + montantInitial;
+          setEtat({ epargneMois: nouvelleEpargneMois });
+          majEpargneMoisSupabase(nouvelleEpargneMois);
+        }
+
         return nouvel;
       } catch (e) {
         console.error("Création d'objectif a échoué :", e);
@@ -1290,16 +1327,26 @@ export function useObjectifs() {
       const objectif = etat.objectifs.find((o) => o.id === id);
       if (!objectif) return;
       const nouveauActuel = objectif.actuel + montant;
+      const nouvelleContributionMois = objectif.contributionMois + montant;
       const nouvelleEpargneMois = etat.epargneMois + montant;
 
       setEtat({
         objectifs: etat.objectifs.map((o) =>
-          o.id === id ? { ...o, actuel: nouveauActuel } : o,
+          o.id === id
+            ? {
+                ...o,
+                actuel: nouveauActuel,
+                contributionMois: nouvelleContributionMois,
+              }
+            : o,
         ),
         epargneMois: nouvelleEpargneMois,
       });
 
-      majObjectifSupabase(id, { actuel: nouveauActuel });
+      majObjectifSupabase(id, {
+        actuel: nouveauActuel,
+        contribution_mois: nouvelleContributionMois,
+      });
       majEpargneMoisSupabase(nouvelleEpargneMois);
     },
 
@@ -1326,6 +1373,7 @@ export function useObjectifs() {
           const maj: Objectif = {
             ...o,
             actuel: o.actuel + o.montantMensuel,
+            contributionMois: o.contributionMois + o.montantMensuel,
             dernierVersement: { mois: moisActuel, annee: anneeActuelle },
           };
           objectifsVerses.push(maj);
@@ -1344,6 +1392,7 @@ export function useObjectifs() {
         objectifsVerses.forEach((o) => {
           majObjectifSupabase(o.id, {
             actuel: o.actuel,
+            contribution_mois: o.contributionMois,
             dernier_versement_mois: o.dernierVersement!.mois,
             dernier_versement_annee: o.dernierVersement!.annee,
           });
@@ -1372,9 +1421,9 @@ export function useObjectifs() {
       appliquerEnveloppes(enveloppes);
     },
 
-    modifierArgentDisponible: (montant: number) => {
-      setEtat({ argentDisponible: montant });
-      majArgentDisponibleSupabase(montant);
+    modifierArgentDisponible: (montant: number, recurrent: boolean) => {
+      setEtat({ argentDisponible: montant, argentDisponibleRecurrent: recurrent });
+      majArgentDisponibleSupabase(montant, recurrent);
     },
 
     archiverMoisActuel: (mois: number, annee: number) => {
@@ -1491,6 +1540,7 @@ export function useObjectifs() {
       const colonnes: Record<string, unknown> = {};
       if ("nom" in champs) colonnes.nom = champs.nom;
       if ("date" in champs) colonnes.date = champs.date;
+      if ("dateFin" in champs) colonnes.date_fin = champs.dateFin ?? null;
       if ("heure" in champs)
         colonnes.heure = champs.heure
           ? heureVersColonneSupabase(champs.heure)

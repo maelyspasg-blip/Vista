@@ -6,7 +6,7 @@ import "react-native-gesture-handler";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { supabase } from "../supabaseClient";
 import { getOnboardingVu } from "./onboardingStorage";
-import { ThemeProvider } from "./ThemeContext";
+import { Theme, ThemeProvider } from "./ThemeContext";
 
 export default function RootLayout() {
   const router = useRouter();
@@ -14,15 +14,32 @@ export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
   const [onboardingVu, setOnboardingVu] = useState(false);
   const [chargement, setChargement] = useState(true);
+  const [themeInitial, setThemeInitial] = useState<Theme | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
-    Promise.all([supabase.auth.getSession(), getOnboardingVu()]).then(
-      ([{ data }, vu]) => {
-        setSession(data.session);
-        setOnboardingVu(vu);
-        setChargement(false);
-      },
-    );
+    (async () => {
+      const [{ data }, vu] = await Promise.all([
+        supabase.auth.getSession(),
+        getOnboardingVu(),
+      ]);
+      setSession(data.session);
+      setOnboardingVu(vu);
+
+      if (data.session) {
+        const { data: profil } = await supabase
+          .from("profils")
+          .select("theme")
+          .eq("user_id", data.session.user.id)
+          .single();
+        if (profil?.theme === "clair" || profil?.theme === "sombre") {
+          setThemeInitial(profil.theme);
+        }
+      }
+
+      setChargement(false);
+    })();
 
     const { data: abonnement } = supabase.auth.onAuthStateChange(
       (_event, nouvelleSession) => {
@@ -59,7 +76,7 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider>
+      <ThemeProvider themeInitial={themeInitial}>
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="onboarding/index" />
           <Stack.Screen name="onboarding/inscription" />

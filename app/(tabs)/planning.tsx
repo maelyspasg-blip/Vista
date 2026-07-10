@@ -4,7 +4,7 @@ import {
   useLocalSearchParams,
   useRouter,
 } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   InputAccessoryView,
@@ -21,6 +21,7 @@ import {
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Calendar } from "react-native-calendars";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import {
   demanderPermissionNotifications,
@@ -91,6 +92,15 @@ function genererOccurrencesEvenement(
     iterations++;
   }
   return occurrences;
+}
+
+function formaterDateCourte(date: Date): string {
+  const texte = date.toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  return texte.charAt(0).toUpperCase() + texte.slice(1);
 }
 
 function formaterDateAffichage(date: Date) {
@@ -186,18 +196,29 @@ type EvenementUnifie = {
 
 export default function Planning() {
   const objStore = useObjectifs();
-  const { couleurs: C } = useTheme();
+  const { theme, couleurs: C } = useTheme();
   const router = useRouter();
   const params = useLocalSearchParams<{ editEventId?: string }>();
 
   const [vue, setVue] = useState<"jour" | "semaine" | "mois">("jour");
   const [dateActuelle, setDateActuelle] = useState(new Date());
+  const [maintenant, setMaintenant] = useState(() => new Date());
+
+  useEffect(() => {
+    const intervalle = setInterval(() => setMaintenant(new Date()), 60000);
+    return () => clearInterval(intervalle);
+  }, []);
 
   const [modalCreationVisible, setModalCreationVisible] = useState(false);
   const [nomEvent, setNomEvent] = useState("");
   const [heureEvent, setHeureEvent] = useState("9h00");
   const [dureeEvent, setDureeEvent] = useState("1");
   const [dateEvent, setDateEvent] = useState(new Date());
+  const [multiJoursEvent, setMultiJoursEvent] = useState(false);
+  const [dateFinEvent, setDateFinEvent] = useState(new Date());
+  const [calendrierOuvert, setCalendrierOuvert] = useState<
+    "aucun" | "debut" | "fin"
+  >("aucun");
   const [couleurEvent, setCouleurEvent] = useState(PALETTE_COULEURS[0]);
   const [estFinancierEvent, setEstFinancierEvent] = useState(false);
   const [montantEvent, setMontantEvent] = useState("");
@@ -223,6 +244,41 @@ export default function Planning() {
 
   objStore.evenements.forEach((e) => {
     const dateDebut = new Date(e.date);
+    dateDebut.setHours(0, 0, 0, 0);
+    const dateFinBase = e.dateFin ? new Date(e.dateFin) : null;
+    if (dateFinBase) dateFinBase.setHours(0, 0, 0, 0);
+    const nbJoursSupplementaires = dateFinBase
+      ? Math.round((dateFinBase.getTime() - dateDebut.getTime()) / 86400000)
+      : 0;
+
+    const pousserOccurrence = (debutOccurrence: Date) => {
+      const jours =
+        nbJoursSupplementaires > 0
+          ? Array.from({ length: nbJoursSupplementaires + 1 }, (_, k) => {
+              const d = new Date(debutOccurrence);
+              d.setDate(d.getDate() + k);
+              return d;
+            })
+          : [debutOccurrence];
+
+      jours.forEach((d, k) => {
+        tousLesEvenements.push({
+          id: `manuel-${e.id}-${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`,
+          nom: e.nom,
+          heure: e.heure,
+          duree: e.duree,
+          couleur: e.couleur,
+          // Le montant n'est compté qu'une fois, le premier jour de l'événement.
+          estFinancier: k === 0 ? e.estFinancier : false,
+          montant: k === 0 ? e.montant : undefined,
+          touteLaJournee: nbJoursSupplementaires > 0 ? true : e.touteLaJournee ?? false,
+          date: d,
+          modifiable: true,
+          evenementId: e.id,
+        });
+      });
+    };
+
     if (e.recurrent && e.frequence) {
       const occurrences = genererOccurrencesEvenement(
         dateDebut,
@@ -230,35 +286,9 @@ export default function Planning() {
         debutFenetreRecurrence,
         finFenetreRecurrence,
       );
-      occurrences.forEach((d) => {
-        tousLesEvenements.push({
-          id: `manuel-${e.id}-${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`,
-          nom: e.nom,
-          heure: e.heure,
-          duree: e.duree,
-          couleur: e.couleur,
-          estFinancier: e.estFinancier,
-          montant: e.montant,
-          touteLaJournee: e.touteLaJournee ?? false,
-          date: d,
-          modifiable: !e.estFinancier,
-          evenementId: e.id,
-        });
-      });
+      occurrences.forEach((d) => pousserOccurrence(d));
     } else {
-      tousLesEvenements.push({
-        id: `manuel-${e.id}`,
-        nom: e.nom,
-        heure: e.heure,
-        duree: e.duree,
-        couleur: e.couleur,
-        estFinancier: e.estFinancier,
-        montant: e.montant,
-        touteLaJournee: e.touteLaJournee ?? false,
-        date: dateDebut,
-        modifiable: !e.estFinancier,
-        evenementId: e.id,
-      });
+      pousserOccurrence(dateDebut);
     }
   });
 
@@ -384,6 +414,9 @@ export default function Planning() {
     setHeureEvent("9h00");
     setDureeEvent("1");
     setDateEvent(dateActuelle);
+    setMultiJoursEvent(false);
+    setDateFinEvent(dateActuelle);
+    setCalendrierOuvert("aucun");
     setCouleurEvent(PALETTE_COULEURS[0]);
     setEstFinancierEvent(false);
     setMontantEvent("");
@@ -401,6 +434,9 @@ export default function Planning() {
     setHeureEvent(heureTexte);
     setDureeEvent("1");
     setDateEvent(date);
+    setMultiJoursEvent(false);
+    setDateFinEvent(date);
+    setCalendrierOuvert("aucun");
     setCouleurEvent(PALETTE_COULEURS[0]);
     setEstFinancierEvent(false);
     setMontantEvent("");
@@ -417,6 +453,9 @@ export default function Planning() {
     setEvenementEnEditionId(ev.id);
     setNomEvent(ev.nom);
     setDateEvent(new Date(ev.date));
+    setMultiJoursEvent(!!ev.dateFin);
+    setDateFinEvent(new Date(ev.dateFin ?? ev.date));
+    setCalendrierOuvert("aucun");
     setHeureEvent(ev.heure || "9h00");
     setDureeEvent(String(ev.duree || 1));
     setCouleurEvent(ev.couleur);
@@ -447,10 +486,11 @@ export default function Planning() {
     objStore.modifierEvenement(evenementEnEditionId, {
       nom: nomEvent,
       date: dateVersISO(dateEvent),
+      dateFin: multiJoursEvent ? dateVersISO(dateFinEvent) : undefined,
       heure: heureEvent,
       duree: parseFloat(dureeEvent) || 1,
       couleur: couleurEvent,
-      touteLaJournee: journeeEntiereEvent,
+      touteLaJournee: journeeEntiereEvent || multiJoursEvent,
       estFinancier: estFinancierEvent,
       montant,
       categorieLiee: estFinancierEvent ? categorieEvent : undefined,
@@ -484,6 +524,7 @@ export default function Planning() {
     const nouvel = await objStore.ajouterEvenement({
       nom: nomEvent,
       date: dateVersISO(dateEvent),
+      dateFin: multiJoursEvent ? dateVersISO(dateFinEvent) : undefined,
       heure: heureEvent,
       duree: parseFloat(dureeEvent) || 1,
       couleur: couleurEvent,
@@ -492,7 +533,7 @@ export default function Planning() {
       categorieLiee: estFinancierEvent ? categorieEvent : undefined,
       recurrent: recurrentEvent,
       frequence: recurrentEvent ? frequenceEvent : undefined,
-      touteLaJournee: journeeEntiereEvent,
+      touteLaJournee: journeeEntiereEvent || multiJoursEvent,
       notifierActif: notifierEvent,
     });
     setCreationEvenementEnCours(false);
@@ -575,19 +616,25 @@ export default function Planning() {
       const fin = new Date(debut);
       fin.setDate(debut.getDate() + 6);
       const mois = [
-        "jan",
-        "fév",
-        "mar",
-        "avr",
+        "janvier",
+        "février",
+        "mars",
+        "avril",
         "mai",
-        "jun",
-        "jul",
-        "aoû",
-        "sep",
-        "oct",
-        "nov",
-        "déc",
+        "juin",
+        "juillet",
+        "août",
+        "septembre",
+        "octobre",
+        "novembre",
+        "décembre",
       ];
+      const memeMois =
+        debut.getMonth() === fin.getMonth() &&
+        debut.getFullYear() === fin.getFullYear();
+      if (memeMois) {
+        return `${debut.getDate()} – ${fin.getDate()} ${mois[fin.getMonth()]}`;
+      }
       return `${debut.getDate()} ${mois[debut.getMonth()]} – ${fin.getDate()} ${mois[fin.getMonth()]}`;
     }
     return dateActuelle.toLocaleDateString("fr-FR", {
@@ -595,6 +642,30 @@ export default function Planning() {
       year: "numeric",
     });
   };
+
+  const debutSemaineVue = debutSemaine(dateActuelle);
+  const joursSemaineVue = Array.from({ length: 7 }, (_, i) => {
+    const jourDate = new Date(debutSemaineVue);
+    jourDate.setDate(debutSemaineVue.getDate() + i);
+    return {
+      jourDate,
+      estAujourdhui: memeJour(jourDate, AUJOURDHUI),
+      evsToutLaJournee: evsToutLaJourneeJour(jourDate),
+      positions: calculerPositions(evsHorairesJour(jourDate)),
+    };
+  });
+  const semaineADesEvenementsJourEntier = joursSemaineVue.some(
+    (j) => j.evsToutLaJournee.length > 0,
+  );
+
+  const minutesActuelles = maintenant.getHours() * 60 + maintenant.getMinutes();
+  const ligneActuelleVisible =
+    minutesActuelles >= HEURE_DEBUT * 60 &&
+    minutesActuelles <= (HEURE_DEBUT + HEURES.length) * 60;
+  const topLigneActuelle =
+    ((minutesActuelles - HEURE_DEBUT * 60) / 60) * HAUTEUR_HEURE;
+  const teinteAujourdhui =
+    theme === "sombre" ? "rgba(139,111,232,0.3)" : "#E3DDFB";
 
   return (
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
@@ -769,6 +840,17 @@ export default function Planning() {
                         </TouchableOpacity>
                       ),
                     )}
+                    {memeJour(dateActuelle, AUJOURDHUI) &&
+                      ligneActuelleVisible && (
+                        <View
+                          style={[
+                            styles.ligneActuelle,
+                            { top: topLigneActuelle },
+                          ]}
+                        >
+                          <View style={styles.ligneActuellePoint} />
+                        </View>
+                      )}
                   </View>
                 </View>
                 <View style={{ height: 40 }} />
@@ -783,36 +865,75 @@ export default function Planning() {
             >
               <View style={styles.weekHeadRow}>
                 <View style={{ width: 32 }} />
-                {Array.from({ length: 7 }, (_, i) => {
-                  const debut = debutSemaine(dateActuelle);
-                  const jourDate = new Date(debut);
-                  jourDate.setDate(debut.getDate() + i);
-                  const estAujourdhui = memeJour(jourDate, AUJOURDHUI);
-                  return (
-                    <TouchableOpacity
-                      key={i}
-                      style={styles.weekHeadCol}
-                      activeOpacity={0.7}
-                      onPress={() => ouvrirJour(jourDate)}
+                {joursSemaineVue.map(({ jourDate, estAujourdhui }, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    style={[
+                      styles.weekHeadCol,
+                      estAujourdhui && { backgroundColor: teinteAujourdhui },
+                    ]}
+                    activeOpacity={0.7}
+                    onPress={() => ouvrirJour(jourDate)}
+                  >
+                    <Text style={[styles.weekHeadNom, { color: C.texteMuted }]}>
+                      {JOURS_SEMAINE[i]}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.weekHeadNum,
+                        { color: C.texte },
+                        estAujourdhui && [
+                          styles.weekHeadNumAujourdhui,
+                          { backgroundColor: C.purple, color: "#FFFFFF" },
+                        ],
+                      ]}
                     >
-                      <Text style={[styles.weekHeadNom, { color: C.texteMuted }]}>
-                        {JOURS_SEMAINE[i]}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.weekHeadNum,
-                          { color: C.texte },
-                          estAujourdhui && { color: C.purple },
-                        ]}
-                      >
-                        {jourDate.getDate()}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                      {jourDate.getDate()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
-              <View style={styles.timelineInner}>
+              {semaineADesEvenementsJourEntier && (
+                <View
+                  style={[styles.weekAlldayRow, { borderColor: C.separateur }]}
+                >
+                  <View style={{ width: 32 }} />
+                  {joursSemaineVue.map(({ evsToutLaJournee }, i) => (
+                    <View key={i} style={styles.weekAlldayCol}>
+                      {evsToutLaJournee.map((ev) => (
+                        <TouchableOpacity
+                          key={ev.id}
+                          style={[
+                            styles.weekAlldayPill,
+                            { backgroundColor: ev.couleur + "33" },
+                          ]}
+                          activeOpacity={0.7}
+                          onPress={() => gererClicEvenement(ev)}
+                        >
+                          <Text
+                            style={[
+                              styles.weekAlldayTexte,
+                              { color: ev.couleur },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {ev.nom}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <View
+                style={[
+                  styles.timelineInner,
+                  styles.weekTimelineInner,
+                  { borderColor: C.separateur },
+                ]}
+              >
                 <View style={styles.heuresCol}>
                   {HEURES.map((h) => (
                     <View key={h} style={styles.heureRow}>
@@ -823,47 +944,18 @@ export default function Planning() {
                   ))}
                 </View>
 
-                {Array.from({ length: 7 }, (_, i) => {
-                  const debut = debutSemaine(dateActuelle);
-                  const jourDate = new Date(debut);
-                  jourDate.setDate(debut.getDate() + i);
-                  const evsToutLaJourneeCol = evsToutLaJourneeJour(jourDate);
-                  const evsJourCol = evsHorairesJour(jourDate);
-                  const positions = calculerPositions(evsJourCol);
-
-                  return (
+                {joursSemaineVue.map(
+                  ({ jourDate, estAujourdhui, positions }, i) => (
                     <View
                       key={i}
                       style={[
                         styles.weekDayTimelineCol,
                         { borderLeftColor: C.separateur },
+                        estAujourdhui && {
+                          backgroundColor: teinteAujourdhui,
+                        },
                       ]}
                     >
-                      {evsToutLaJourneeCol.length > 0 && (
-                        <View style={styles.weekAlldayZone}>
-                          {evsToutLaJourneeCol.map((ev) => (
-                            <TouchableOpacity
-                              key={ev.id}
-                              style={[
-                                styles.weekAlldayPill,
-                                { backgroundColor: ev.couleur + "33" },
-                              ]}
-                              activeOpacity={0.7}
-                              onPress={() => gererClicEvenement(ev)}
-                            >
-                              <Text
-                                style={[
-                                  styles.weekAlldayTexte,
-                                  { color: ev.couleur },
-                                ]}
-                                numberOfLines={1}
-                              >
-                                {ev.nom}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      )}
                       {HEURES.map((h, hi) => (
                         <TouchableOpacity
                           key={h}
@@ -909,9 +1001,19 @@ export default function Planning() {
                           </Text>
                         </TouchableOpacity>
                       ))}
+                      {estAujourdhui && ligneActuelleVisible && (
+                        <View
+                          style={[
+                            styles.ligneActuelle,
+                            { top: topLigneActuelle },
+                          ]}
+                        >
+                          <View style={styles.ligneActuellePoint} />
+                        </View>
+                      )}
                     </View>
-                  );
-                })}
+                  ),
+                )}
               </View>
               <View style={{ height: 40 }} />
             </ScrollView>
@@ -950,6 +1052,9 @@ export default function Planning() {
                             style={[
                               styles.monthCell,
                               { borderColor: C.separateur },
+                              estAujourdhui && {
+                                backgroundColor: teinteAujourdhui,
+                              },
                             ]}
                             activeOpacity={0.7}
                             onPress={() => ouvrirJour(jourDate)}
@@ -958,10 +1063,6 @@ export default function Planning() {
                               style={[
                                 styles.monthNum,
                                 { color: C.texteMuted },
-                                estAujourdhui && {
-                                  color: C.purple,
-                                  fontWeight: "700",
-                                },
                                 !estMoisActuel && styles.monthNumHorsMois,
                               ]}
                             >
@@ -1074,54 +1175,314 @@ export default function Planning() {
                       autoFocus
                     />
 
-                    <View style={styles.switchRow}>
-                      <View>
-                        <Text style={[styles.switchLabel, { color: C.texte }]}>
-                          Toute la journée
-                        </Text>
-                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                          Sans horaire précis
-                        </Text>
-                      </View>
-                      <Switch
-                        value={journeeEntiereEvent}
-                        onValueChange={setJourneeEntiereEvent}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={journeeEntiereEvent ? C.purple : "#FFF"}
-                      />
-                    </View>
-
-                    {!journeeEntiereEvent && (
+                    {!multiJoursEvent ? (
                       <>
-                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                          Heure
+                        <Text
+                          style={[styles.modalLabel, { color: C.texteMuted }]}
+                        >
+                          Date
                         </Text>
-                        <TextInput
+                        <TouchableOpacity
                           style={[
-                            styles.input,
-                            { backgroundColor: C.fondSecondaire, color: C.texte },
+                            styles.dateChamp,
+                            { backgroundColor: C.fondSecondaire },
                           ]}
-                          placeholder="Ex : 14h30"
-                          placeholderTextColor={C.texteMuted}
-                          value={heureEvent}
-                          onChangeText={setHeureEvent}
-                          returnKeyType="done"
-                        />
+                          onPress={() =>
+                            setCalendrierOuvert(
+                              calendrierOuvert === "debut" ? "aucun" : "debut",
+                            )
+                          }
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.dateChampTexte, { color: C.texte }]}>
+                            {formaterDateCourte(dateEvent)}
+                          </Text>
+                          <Ionicons
+                            name="calendar-outline"
+                            size={18}
+                            color={C.texteMuted}
+                          />
+                        </TouchableOpacity>
+                        {calendrierOuvert === "debut" && (
+                          <View
+                            style={[
+                              styles.calendarWrap,
+                              { borderColor: C.separateur },
+                            ]}
+                          >
+                            <Calendar
+                              current={dateVersISO(dateEvent)}
+                              onDayPress={(day) => {
+                                setDateEvent(new Date(day.dateString));
+                                setCalendrierOuvert("aucun");
+                              }}
+                              markedDates={{
+                                [dateVersISO(dateEvent)]: {
+                                  selected: true,
+                                  selectedColor: C.purple,
+                                },
+                              }}
+                              theme={{
+                                calendarBackground: C.carte,
+                                dayTextColor: C.texte,
+                                monthTextColor: C.texte,
+                                textDisabledColor: C.texteMuted,
+                                textSectionTitleColor: C.texteMuted,
+                                selectedDayTextColor: "#FFFFFF",
+                                selectedDayBackgroundColor: C.purple,
+                                todayTextColor: C.purple,
+                                arrowColor: C.purple,
+                              }}
+                            />
+                          </View>
+                        )}
+                        <TouchableOpacity
+                          onPress={() => {
+                            setMultiJoursEvent(true);
+                            setDateFinEvent(dateEvent);
+                            setJourneeEntiereEvent(true);
+                            setCalendrierOuvert("aucun");
+                          }}
+                          activeOpacity={0.6}
+                        >
+                          <Text style={[styles.lienDiscret, { color: C.purple }]}>
+                            Sur plusieurs jours
+                          </Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <>
+                        <View style={styles.dateDuAuRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={[
+                                styles.modalLabel,
+                                { color: C.texteMuted },
+                              ]}
+                            >
+                              Du
+                            </Text>
+                            <TouchableOpacity
+                              style={[
+                                styles.dateChamp,
+                                { backgroundColor: C.fondSecondaire },
+                              ]}
+                              onPress={() =>
+                                setCalendrierOuvert(
+                                  calendrierOuvert === "debut"
+                                    ? "aucun"
+                                    : "debut",
+                                )
+                              }
+                              activeOpacity={0.7}
+                            >
+                              <Text
+                                style={[
+                                  styles.dateChampTexte,
+                                  { color: C.texte },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {formaterDateCourte(dateEvent)}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={[
+                                styles.modalLabel,
+                                { color: C.texteMuted },
+                              ]}
+                            >
+                              Au
+                            </Text>
+                            <TouchableOpacity
+                              style={[
+                                styles.dateChamp,
+                                { backgroundColor: C.fondSecondaire },
+                              ]}
+                              onPress={() =>
+                                setCalendrierOuvert(
+                                  calendrierOuvert === "fin" ? "aucun" : "fin",
+                                )
+                              }
+                              activeOpacity={0.7}
+                            >
+                              <Text
+                                style={[
+                                  styles.dateChampTexte,
+                                  { color: C.texte },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {formaterDateCourte(dateFinEvent)}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        {calendrierOuvert === "debut" && (
+                          <View
+                            style={[
+                              styles.calendarWrap,
+                              { borderColor: C.separateur },
+                            ]}
+                          >
+                            <Calendar
+                              current={dateVersISO(dateEvent)}
+                              onDayPress={(day) => {
+                                const d = new Date(day.dateString);
+                                setDateEvent(d);
+                                if (dateFinEvent < d) setDateFinEvent(d);
+                                setCalendrierOuvert("aucun");
+                              }}
+                              markedDates={{
+                                [dateVersISO(dateEvent)]: {
+                                  selected: true,
+                                  selectedColor: C.purple,
+                                },
+                              }}
+                              theme={{
+                                calendarBackground: C.carte,
+                                dayTextColor: C.texte,
+                                monthTextColor: C.texte,
+                                textDisabledColor: C.texteMuted,
+                                textSectionTitleColor: C.texteMuted,
+                                selectedDayTextColor: "#FFFFFF",
+                                selectedDayBackgroundColor: C.purple,
+                                todayTextColor: C.purple,
+                                arrowColor: C.purple,
+                              }}
+                            />
+                          </View>
+                        )}
+                        {calendrierOuvert === "fin" && (
+                          <View
+                            style={[
+                              styles.calendarWrap,
+                              { borderColor: C.separateur },
+                            ]}
+                          >
+                            <Calendar
+                              current={dateVersISO(dateFinEvent)}
+                              minDate={dateVersISO(dateEvent)}
+                              onDayPress={(day) => {
+                                const d = new Date(day.dateString);
+                                if (d < dateEvent) return;
+                                setDateFinEvent(d);
+                                setCalendrierOuvert("aucun");
+                              }}
+                              markedDates={{
+                                [dateVersISO(dateFinEvent)]: {
+                                  selected: true,
+                                  selectedColor: C.purple,
+                                },
+                              }}
+                              theme={{
+                                calendarBackground: C.carte,
+                                dayTextColor: C.texte,
+                                monthTextColor: C.texte,
+                                textDisabledColor: C.texteMuted,
+                                textSectionTitleColor: C.texteMuted,
+                                selectedDayTextColor: "#FFFFFF",
+                                selectedDayBackgroundColor: C.purple,
+                                todayTextColor: C.purple,
+                                arrowColor: C.purple,
+                              }}
+                            />
+                          </View>
+                        )}
+                        <TouchableOpacity
+                          onPress={() => {
+                            setMultiJoursEvent(false);
+                            setCalendrierOuvert("aucun");
+                          }}
+                          activeOpacity={0.6}
+                        >
+                          <Text style={[styles.lienDiscret, { color: C.purple }]}>
+                            Revenir à un seul jour
+                          </Text>
+                        </TouchableOpacity>
+                      </>
+                    )}
 
-                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                          Durée (en heures)
-                        </Text>
-                        <TextInput
-                          style={[
-                            styles.input,
-                            { backgroundColor: C.fondSecondaire, color: C.texte },
-                          ]}
-                          keyboardType="numeric"
-                          value={dureeEvent}
-                          onChangeText={setDureeEvent}
-                          returnKeyType="done"
-                          inputAccessoryViewID={ACCESSORY_ID}
-                        />
+                    {!multiJoursEvent && (
+                      <>
+                        <View style={styles.switchRow}>
+                          <View>
+                            <Text
+                              style={[styles.switchLabel, { color: C.texte }]}
+                            >
+                              Toute la journée
+                            </Text>
+                            <Text
+                              style={[
+                                styles.switchSub,
+                                { color: C.texteMuted },
+                              ]}
+                            >
+                              Sans horaire précis
+                            </Text>
+                          </View>
+                          <Switch
+                            value={journeeEntiereEvent}
+                            onValueChange={setJourneeEntiereEvent}
+                            trackColor={{
+                              false: C.separateur,
+                              true: C.purpleLight,
+                            }}
+                            thumbColor={journeeEntiereEvent ? C.purple : "#FFF"}
+                          />
+                        </View>
+
+                        {!journeeEntiereEvent && (
+                          <>
+                            <Text
+                              style={[
+                                styles.modalLabel,
+                                { color: C.texteMuted },
+                              ]}
+                            >
+                              Heure
+                            </Text>
+                            <TextInput
+                              style={[
+                                styles.input,
+                                {
+                                  backgroundColor: C.fondSecondaire,
+                                  color: C.texte,
+                                },
+                              ]}
+                              placeholder="Ex : 14h30"
+                              placeholderTextColor={C.texteMuted}
+                              value={heureEvent}
+                              onChangeText={setHeureEvent}
+                              returnKeyType="done"
+                            />
+
+                            <Text
+                              style={[
+                                styles.modalLabel,
+                                { color: C.texteMuted },
+                              ]}
+                            >
+                              Durée (en heures)
+                            </Text>
+                            <TextInput
+                              style={[
+                                styles.input,
+                                {
+                                  backgroundColor: C.fondSecondaire,
+                                  color: C.texte,
+                                },
+                              ]}
+                              keyboardType="numeric"
+                              value={dureeEvent}
+                              onChangeText={setDureeEvent}
+                              returnKeyType="done"
+                              inputAccessoryViewID={ACCESSORY_ID}
+                            />
+                          </>
+                        )}
                       </>
                     )}
 
@@ -1436,6 +1797,11 @@ const styles = StyleSheet.create({
   alldayMontant: { fontSize: 12, fontWeight: "700" },
   timeline: { flex: 1 },
   timelineInner: { flexDirection: "row" },
+  weekTimelineInner: {
+    borderWidth: 0.5,
+    borderRadius: 14,
+    overflow: "hidden",
+  },
   heuresCol: { width: 32 },
   heureRow: {
     height: HAUTEUR_HEURE,
@@ -1464,20 +1830,57 @@ const styles = StyleSheet.create({
   badgeFinancier: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 6 },
   badgeFinancierTexte: { fontSize: 9, fontWeight: "700", color: "#FFFFFF" },
   eventHeure: { fontSize: 9 },
+  ligneActuelle: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 1.5,
+    backgroundColor: "#E24B4A",
+    zIndex: 5,
+  },
+  ligneActuellePoint: {
+    position: "absolute",
+    left: -4,
+    top: -3.5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#E24B4A",
+  },
   weekHeadRow: { flexDirection: "row", marginBottom: 4 },
-  weekHeadCol: { flex: 1, alignItems: "center", paddingVertical: 6 },
+  weekHeadCol: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
   weekHeadNom: { fontSize: 9 },
   weekHeadNum: {
     fontSize: 13,
     fontWeight: "600",
     marginTop: 2,
   },
+  weekHeadNumAujourdhui: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    textAlign: "center",
+    lineHeight: 22,
+    overflow: "hidden",
+  },
   weekDayTimelineCol: {
     flex: 1,
     position: "relative",
     borderLeftWidth: 0.5,
   },
-  weekAlldayZone: { paddingVertical: 2, paddingHorizontal: 2 },
+  weekAlldayRow: {
+    flexDirection: "row",
+    borderTopWidth: 0.5,
+    borderBottomWidth: 0.5,
+    paddingVertical: 4,
+    marginBottom: 6,
+  },
+  weekAlldayCol: { flex: 1, paddingHorizontal: 2, gap: 2 },
   weekAlldayPill: {
     borderRadius: 4,
     paddingHorizontal: 3,
@@ -1553,6 +1956,28 @@ const styles = StyleSheet.create({
   modalInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   modalEuro: { fontSize: 17, marginBottom: 12 },
   modalAide: { fontSize: 12, lineHeight: 18, marginBottom: 14 },
+  dateChamp: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderRadius: 13,
+    padding: 16,
+    marginBottom: 8,
+  },
+  dateChampTexte: { fontSize: 15, fontWeight: "600" },
+  dateDuAuRow: { flexDirection: "row", gap: 10 },
+  calendarWrap: {
+    borderRadius: 13,
+    borderWidth: 0.5,
+    overflow: "hidden",
+    marginBottom: 12,
+  },
+  lienDiscret: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 14,
+    marginTop: 2,
+  },
   input: {
     borderRadius: 13,
     padding: 16,

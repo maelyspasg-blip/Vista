@@ -137,11 +137,14 @@ export default function Dashboard() {
   useEffect(() => {
     setArgentDisponibleLocal(String(objStore.argentDisponible));
   }, [objStore.argentDisponible]);
-  const setArgentDisponible = (val: string) => {
+  const setArgentDisponible = (val: string, recurrent: boolean) => {
     setArgentDisponibleLocal(val);
-    objStore.modifierArgentDisponible(parseFloat(val) || 0);
+    objStore.modifierArgentDisponible(parseFloat(val) || 0, recurrent);
   };
   const [editionDisponible, setEditionDisponible] = useState(false);
+  const [disponibleRecurrentTemp, setDisponibleRecurrentTemp] = useState(
+    objStore.argentDisponibleRecurrent,
+  );
   const maintenant = new Date();
   const moisActuelLabel = maintenant.toLocaleDateString("fr-FR", {
     month: "long",
@@ -190,6 +193,7 @@ export default function Dashboard() {
   const [recurrentObjectif, setRecurrentObjectif] = useState(false);
   const [montantMensuelObjectif, setMontantMensuelObjectif] = useState("");
   const [jourDuMoisObjectif, setJourDuMoisObjectif] = useState("1");
+  const [calendrierJourOuvert, setCalendrierJourOuvert] = useState(false);
   const [montantAjoutObjectif, setMontantAjoutObjectif] = useState("");
   const [sauvegardeObjectifEnCours, setSauvegardeObjectifEnCours] =
     useState(false);
@@ -247,6 +251,55 @@ export default function Dashboard() {
           100 - pctDepenseEstime - pctPrevuEstime,
         )
       : 0;
+
+  const objectifsAvecContribution = objStore.objectifs.filter(
+    (o) => o.contributionMois > 0,
+  );
+  const contributionObjectifsTotal = objectifsAvecContribution.reduce(
+    (acc, o) => acc + o.contributionMois,
+    0,
+  );
+  const epargneGenerique = Math.max(
+    0,
+    objStore.epargneMois - contributionObjectifsTotal,
+  );
+  const segmentsEpargne: {
+    cle: string;
+    label: string;
+    couleur: string;
+    montant: number;
+  }[] = [
+    ...objectifsAvecContribution.map((o) => ({
+      cle: o.id,
+      label: o.nom,
+      couleur: o.couleur,
+      montant: o.contributionMois,
+    })),
+    ...(epargneGenerique > 0
+      ? [
+          {
+            cle: "generique",
+            label: "Épargne",
+            couleur: C.purple,
+            montant: epargneGenerique,
+          },
+        ]
+      : []),
+  ];
+  const segmentsEpargnePositionnes = segmentsEpargne.reduce<
+    { cle: string; label: string; couleur: string; montant: number; pct: number; left: number }[]
+  >((acc, s) => {
+    const pct =
+      objStore.epargneMois > 0
+        ? (s.montant / objStore.epargneMois) * pctEpargne
+        : 0;
+    const left =
+      acc.length > 0
+        ? acc[acc.length - 1].left + acc[acc.length - 1].pct
+        : pctUtilise;
+    acc.push({ ...s, pct, left });
+    return acc;
+  }, []);
   const lecture =
     resteEstime < 0
       ? { texte: "Risque de dépassement", couleurTexte: "#FFD2D2" }
@@ -338,7 +391,7 @@ export default function Dashboard() {
   };
 
   const sauvegarderDisponible = () => {
-    setArgentDisponible(disponibleTemp);
+    setArgentDisponible(disponibleTemp, disponibleRecurrentTemp);
     setEditionDisponible(false);
   };
 
@@ -361,6 +414,7 @@ export default function Dashboard() {
     setRecurrentObjectif(false);
     setMontantMensuelObjectif("");
     setJourDuMoisObjectif("1");
+    setCalendrierJourOuvert(false);
     setMontantAjoutObjectif("");
   };
 
@@ -381,6 +435,7 @@ export default function Dashboard() {
       obj.montantMensuel ? String(obj.montantMensuel) : "",
     );
     setJourDuMoisObjectif(obj.jourDuMois ? String(obj.jourDuMois) : "1");
+    setCalendrierJourOuvert(false);
     setMontantAjoutObjectif("");
     setVueModal("form");
   };
@@ -489,18 +544,19 @@ export default function Dashboard() {
                 { width: `${pctUtilise}%`, backgroundColor: C.accent },
               ]}
             />
-            {objStore.epargneMois > 0 && (
+            {segmentsEpargnePositionnes.map((s) => (
               <View
+                key={s.cle}
                 style={[
                   styles.barFillEpargne,
                   {
-                    width: `${pctEpargne}%`,
-                    left: `${pctUtilise}%`,
-                    backgroundColor: C.bleuGris,
+                    width: `${s.pct}%`,
+                    left: `${s.left}%`,
+                    backgroundColor: s.couleur,
                   },
                 ]}
               />
-            )}
+            ))}
           </View>
           <View style={styles.heroLegende}>
             <View style={styles.heroLegendeItem}>
@@ -511,19 +567,16 @@ export default function Dashboard() {
                 Dépenses {totalDepenseEnveloppes} €
               </Text>
             </View>
-            {objStore.epargneMois > 0 && (
-              <View style={styles.heroLegendeItem}>
+            {segmentsEpargnePositionnes.map((s) => (
+              <View key={s.cle} style={styles.heroLegendeItem}>
                 <View
-                  style={[
-                    styles.heroLegendeDot,
-                    { backgroundColor: C.bleuGris },
-                  ]}
+                  style={[styles.heroLegendeDot, { backgroundColor: s.couleur }]}
                 />
                 <Text style={styles.heroSub}>
-                  Épargne {objStore.epargneMois} €
+                  {s.label} {s.montant} €
                 </Text>
               </View>
-            )}
+            ))}
           </View>
         </View>
 
@@ -559,17 +612,24 @@ export default function Dashboard() {
                 { width: `${pctPrevuEstime}%`, backgroundColor: C.peach },
               ]}
             />
-            {objStore.epargneMois > 0 && (
-              <View
-                style={[
-                  styles.barSegment,
-                  {
-                    width: `${pctEpargneEstime}%`,
-                    backgroundColor: C.bleuGris,
-                  },
-                ]}
-              />
-            )}
+            {segmentsEpargne.map((s) => {
+              const pct =
+                objStore.epargneMois > 0
+                  ? (s.montant / objStore.epargneMois) * pctEpargneEstime
+                  : 0;
+              return (
+                <View
+                  key={s.cle}
+                  style={[
+                    styles.barSegment,
+                    {
+                      width: `${pct}%`,
+                      backgroundColor: s.couleur,
+                    },
+                  ]}
+                />
+              );
+            })}
           </View>
           <View style={styles.heroLegende}>
             <View style={styles.heroLegendeItem}>
@@ -586,19 +646,16 @@ export default function Dashboard() {
               />
               <Text style={styles.heroSub}>Prévues {totalPrevu}€</Text>
             </View>
-            {objStore.epargneMois > 0 && (
-              <View style={styles.heroLegendeItem}>
+            {segmentsEpargne.map((s) => (
+              <View key={s.cle} style={styles.heroLegendeItem}>
                 <View
-                  style={[
-                    styles.heroLegendeDot,
-                    { backgroundColor: C.bleuGris },
-                  ]}
+                  style={[styles.heroLegendeDot, { backgroundColor: s.couleur }]}
                 />
                 <Text style={styles.heroSub}>
-                  Épargne {objStore.epargneMois}€
+                  {s.label} {s.montant}€
                 </Text>
               </View>
-            )}
+            ))}
           </View>
 
           <View
@@ -628,6 +685,7 @@ export default function Dashboard() {
             activeOpacity={0.7}
             onPress={() => {
               setDisponibleTemp(disponibleNum === 0 ? "" : argentDisponible);
+              setDisponibleRecurrentTemp(objStore.argentDisponibleRecurrent);
               setEditionDisponible(true);
             }}
           >
@@ -909,6 +967,22 @@ export default function Dashboard() {
                   inputAccessoryViewID={ACCESSORY_ID}
                 />
                 <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
+              </View>
+              <View style={styles.switchRow}>
+                <View>
+                  <Text style={[styles.switchLabel, { color: C.texte }]}>
+                    Répéter ce montant chaque mois
+                  </Text>
+                  <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                    Repris automatiquement le mois suivant
+                  </Text>
+                </View>
+                <Switch
+                  value={disponibleRecurrentTemp}
+                  onValueChange={setDisponibleRecurrentTemp}
+                  trackColor={{ false: C.separateur, true: C.purpleLight }}
+                  thumbColor={disponibleRecurrentTemp ? C.purple : "#FFF"}
+                />
               </View>
               <TouchableOpacity
                 style={[styles.btnAjouter, { backgroundColor: C.hero }]}
@@ -1671,19 +1745,77 @@ export default function Dashboard() {
                         <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
                           Jour du mois
                         </Text>
-                        <TextInput
+                        <TouchableOpacity
                           style={[
-                        styles.input,
-                        { backgroundColor: C.fondSecondaire, color: C.texte },
-                      ]}
-                          placeholder="Ex : 1"
-                          placeholderTextColor={C.texteMuted}
-                          keyboardType="number-pad"
-                          value={jourDuMoisObjectif}
-                          onChangeText={setJourDuMoisObjectif}
-                          returnKeyType="done"
-                          inputAccessoryViewID={ACCESSORY_ID}
-                        />
+                            styles.dateChamp,
+                            { backgroundColor: C.fondSecondaire },
+                          ]}
+                          onPress={() =>
+                            setCalendrierJourOuvert(!calendrierJourOuvert)
+                          }
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[styles.dateChampTexte, { color: C.texte }]}
+                          >
+                            Le {jourDuMoisObjectif} de chaque mois
+                          </Text>
+                          <Ionicons
+                            name="calendar-outline"
+                            size={18}
+                            color={C.texteMuted}
+                          />
+                        </TouchableOpacity>
+                        {calendrierJourOuvert &&
+                          (() => {
+                            const jourSelectionne = Math.min(
+                              28,
+                              Math.max(1, parseInt(jourDuMoisObjectif, 10) || 1),
+                            );
+                            const maintenantObjectif = new Date();
+                            const dateAffichee = dateVersISO(
+                              new Date(
+                                maintenantObjectif.getFullYear(),
+                                maintenantObjectif.getMonth(),
+                                jourSelectionne,
+                              ),
+                            );
+                            return (
+                              <View
+                                style={[
+                                  styles.calendarWrap,
+                                  { borderColor: C.separateur },
+                                ]}
+                              >
+                                <Calendar
+                                  current={dateAffichee}
+                                  onDayPress={(day) => {
+                                    setJourDuMoisObjectif(
+                                      String(Math.min(28, day.day)),
+                                    );
+                                    setCalendrierJourOuvert(false);
+                                  }}
+                                  markedDates={{
+                                    [dateAffichee]: {
+                                      selected: true,
+                                      selectedColor: C.purple,
+                                    },
+                                  }}
+                                  theme={{
+                                    calendarBackground: C.carte,
+                                    dayTextColor: C.texte,
+                                    monthTextColor: C.texte,
+                                    textDisabledColor: C.texteMuted,
+                                    textSectionTitleColor: C.texteMuted,
+                                    selectedDayTextColor: "#FFFFFF",
+                                    selectedDayBackgroundColor: C.purple,
+                                    todayTextColor: C.purple,
+                                    arrowColor: C.purple,
+                                  }}
+                                />
+                              </View>
+                            );
+                          })()}
                       </>
                     )}
 
@@ -2037,6 +2169,15 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 0.5,
   },
+  dateChamp: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderRadius: 13,
+    padding: 16,
+    marginBottom: 8,
+  },
+  dateChampTexte: { fontSize: 15, fontWeight: "600" },
   switchRow: {
     flexDirection: "row",
     justifyContent: "space-between",

@@ -1,4 +1,6 @@
 import { createContext, useContext, useState } from "react";
+import { supabase } from "../supabaseClient";
+import { signalerErreurSync } from "./store";
 
 export type Theme = "clair" | "sombre";
 
@@ -77,11 +79,39 @@ const ThemeContext = createContext<ThemeContextType>({
   toggleTheme: () => {},
 });
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("clair");
+function majThemeSupabase(theme: Theme) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({ theme })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error("Supabase update theme a échoué :", error);
+          signalerErreurSync(
+            `Impossible de sauvegarder le thème : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
+export function ThemeProvider({
+  children,
+  themeInitial,
+}: {
+  children: React.ReactNode;
+  themeInitial?: Theme;
+}) {
+  const [theme, setTheme] = useState<Theme>(themeInitial ?? "clair");
 
   const toggleTheme = () => {
-    setTheme((t) => (t === "clair" ? "sombre" : "clair"));
+    setTheme((t) => {
+      const nouveau: Theme = t === "clair" ? "sombre" : "clair";
+      majThemeSupabase(nouveau);
+      return nouveau;
+    });
   };
 
   return (

@@ -195,6 +195,49 @@ export default function Budget() {
       ? Math.min((totalEpargne / budgetTotal) * 100, 100 - pctDepenses)
       : 0;
 
+  const objectifsAvecContribution = objStore.objectifs.filter(
+    (o) => o.contributionMois > 0,
+  );
+  const contributionObjectifsTotal = objectifsAvecContribution.reduce(
+    (acc, o) => acc + o.contributionMois,
+    0,
+  );
+  const epargneGenerique = Math.max(0, totalEpargne - contributionObjectifsTotal);
+  const segmentsEpargne: {
+    cle: string;
+    label: string;
+    couleur: string;
+    montant: number;
+  }[] = [
+    ...objectifsAvecContribution.map((o) => ({
+      cle: o.id,
+      label: o.nom,
+      couleur: o.couleur,
+      montant: o.contributionMois,
+    })),
+    ...(epargneGenerique > 0
+      ? [
+          {
+            cle: "generique",
+            label: "Épargne",
+            couleur: C.purple,
+            montant: epargneGenerique,
+          },
+        ]
+      : []),
+  ];
+  const segmentsEpargnePositionnes = segmentsEpargne.reduce<
+    { cle: string; label: string; couleur: string; montant: number; pct: number; left: number }[]
+  >((acc, s) => {
+    const pct = totalEpargne > 0 ? (s.montant / totalEpargne) * pctEpargne : 0;
+    const left =
+      acc.length > 0
+        ? acc[acc.length - 1].left + acc[acc.length - 1].pct
+        : pctDepenses;
+    acc.push({ ...s, pct, left });
+    return acc;
+  }, []);
+
   const depenseDominante = [...enveloppesCourantes].sort(
     (a, b) => b.depense - a.depense,
   )[0];
@@ -257,18 +300,19 @@ export default function Budget() {
                 { width: `${pctDepenses}%`, backgroundColor: C.bleuGris },
               ]}
             />
-            {totalEpargne > 0 && (
+            {segmentsEpargnePositionnes.map((s) => (
               <View
+                key={s.cle}
                 style={[
                   styles.progressFillEpargne,
                   {
-                    width: `${pctEpargne}%`,
-                    left: `${pctDepenses}%`,
-                    backgroundColor: C.purple,
+                    width: `${s.pct}%`,
+                    left: `${s.left}%`,
+                    backgroundColor: s.couleur,
                   },
                 ]}
               />
-            )}
+            ))}
           </View>
           {totalEpargne > 0 && (
             <View style={styles.heroLegende}>
@@ -283,14 +327,16 @@ export default function Budget() {
                   Dépenses {totalDepenses} €
                 </Text>
               </View>
-              <View style={styles.heroLegendeItem}>
-                <View
-                  style={[styles.heroLegendeDot, { backgroundColor: C.purple }]}
-                />
-                <Text style={[styles.heroLegendeTexte, { color: C.texteMuted }]}>
-                  Épargne {totalEpargne} €
-                </Text>
-              </View>
+              {segmentsEpargnePositionnes.map((s) => (
+                <View key={s.cle} style={styles.heroLegendeItem}>
+                  <View
+                    style={[styles.heroLegendeDot, { backgroundColor: s.couleur }]}
+                  />
+                  <Text style={[styles.heroLegendeTexte, { color: C.texteMuted }]}>
+                    {s.label} {s.montant} €
+                  </Text>
+                </View>
+              ))}
             </View>
           )}
         </View>
