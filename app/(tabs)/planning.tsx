@@ -538,7 +538,7 @@ export default function Planning() {
     });
     setCreationEvenementEnCours(false);
     if (!nouvel) return;
-    if (notifierEvent && !recurrentEvent) {
+    if (notifierEvent && !recurrentEvent && objStore.notificationsActives) {
       const autorise = await demanderPermissionNotifications();
       if (autorise) {
         await programmerNotificationsEvenement(nouvel.id, nomEvent, dateEvent);

@@ -543,14 +543,21 @@ export default function Analytics() {
           <View
             style={[
               styles.banniereInfo,
-              {
-                backgroundColor: theme === "sombre" ? C.carte : C.purpleLight,
-                borderWidth: theme === "sombre" ? 0.5 : 0,
-                borderColor: C.carteBorder,
-              },
+              theme === "sombre"
+                ? {
+                    backgroundColor: C.carte,
+                    borderWidth: 0.5,
+                    borderColor: C.carteBorder,
+                  }
+                : { backgroundColor: C.fond },
             ]}
           >
-            <Text style={[styles.banniereInfoTexte, { color: C.purpleText }]}>
+            <Text
+              style={[
+                styles.banniereInfoTexte,
+                { color: theme === "sombre" ? C.purpleText : C.texte },
+              ]}
+            >
               {nbMoisAvecDonnees === 1
                 ? `Données disponibles pour 1 mois seulement. Reviens dans ${nbMois - nbMoisAvecDonnees} mois pour une vue complète sur ${nbMois} mois.`
                 : `Données disponibles pour ${nbMoisAvecDonnees} mois sur ${nbMois}. La vue sera complète dans ${nbMois - nbMoisAvecDonnees} mois.`}
@@ -565,17 +572,37 @@ export default function Analytics() {
           <View
             style={[
               styles.kpiCard,
-              {
-                backgroundColor: theme === "sombre" ? C.carte : C.accentLight,
-                borderWidth: theme === "sombre" ? 0.5 : 0,
-                borderColor: C.carteBorder,
-              },
+              theme === "sombre"
+                ? {
+                    backgroundColor: C.carte,
+                    borderWidth: 0.5,
+                    borderColor: C.carteBorder,
+                    borderLeftWidth: 3,
+                    borderLeftColor: C.accent,
+                  }
+                : {
+                    backgroundColor: "#FFFFFF",
+                    borderWidth: 0.5,
+                    borderColor: "#E4E6EA",
+                    borderLeftWidth: 3,
+                    borderLeftColor: C.accent,
+                  },
             ]}
           >
-            <Text style={[styles.kpiLabel, { color: C.accent }]}>
+            <Text
+              style={[
+                styles.kpiLabel,
+                { color: theme === "sombre" ? C.accent : C.texteMuted },
+              ]}
+            >
               DÉPENSE MOY. / JOUR
             </Text>
-            <Text style={[styles.kpiVal, { color: C.accentText }]}>
+            <Text
+              style={[
+                styles.kpiVal,
+                { color: theme === "sombre" ? C.accentText : C.texte },
+              ]}
+            >
               {depenseMoyJour} €
             </Text>
             <Text
@@ -591,20 +618,45 @@ export default function Analytics() {
           <View
             style={[
               styles.kpiCard,
-              {
-                backgroundColor: theme === "sombre" ? C.carte : C.peachLight,
-                borderWidth: theme === "sombre" ? 0.5 : 0,
-                borderColor: C.carteBorder,
-              },
+              theme === "sombre"
+                ? {
+                    backgroundColor: C.carte,
+                    borderWidth: 0.5,
+                    borderColor: C.carteBorder,
+                    borderLeftWidth: 3,
+                    borderLeftColor: C.peach,
+                  }
+                : {
+                    backgroundColor: "#FFFFFF",
+                    borderWidth: 0.5,
+                    borderColor: "#E4E6EA",
+                    borderLeftWidth: 3,
+                    borderLeftColor: C.peach,
+                  },
             ]}
           >
-            <Text style={[styles.kpiLabel, { color: C.peach }]}>
+            <Text
+              style={[
+                styles.kpiLabel,
+                { color: theme === "sombre" ? C.peach : C.texteMuted },
+              ]}
+            >
               TAUX D'ÉPARGNE
             </Text>
-            <Text style={[styles.kpiVal, { color: C.peachText }]}>
+            <Text
+              style={[
+                styles.kpiVal,
+                { color: theme === "sombre" ? C.peachText : C.texte },
+              ]}
+            >
               {tauxEpargne}%
             </Text>
-            <Text style={[styles.kpiDelta, { color: C.peachText }]}>
+            <Text
+              style={[
+                styles.kpiDelta,
+                { color: theme === "sombre" ? C.peachText : C.texteMuted },
+              ]}
+            >
               Ce mois-ci
             </Text>
           </View>

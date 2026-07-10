@@ -5,6 +5,7 @@ import { ActivityIndicator, View } from "react-native";
 import "react-native-gesture-handler";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { supabase } from "../supabaseClient";
+import "./calendarLocale";
 import { getOnboardingVu } from "./onboardingStorage";
 import { Theme, ThemeProvider } from "./ThemeContext";
 
@@ -54,7 +55,7 @@ export default function RootLayout() {
     if (chargement) return;
 
     const dansOnboarding = segments[0] === "onboarding";
-    const dansTabs = segments[0] === "(tabs)";
+    const dansTabs = segments[0] === "(tabs)" || segments[0] === "profil";
     const surSlides = dansOnboarding && segments.length <= 1;
 
     if (session) {
@@ -83,6 +84,7 @@ export default function RootLayout() {
           <Stack.Screen name="onboarding/connexion" />
           <Stack.Screen name="onboarding/preferences" />
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="profil" />
         </Stack>
       </ThemeProvider>
     </GestureHandlerRootView>

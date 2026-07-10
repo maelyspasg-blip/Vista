@@ -58,3 +58,7 @@ export async function annulerNotificationsEvenement(id: string): Promise<void> {
     () => {},
   );
 }
+
+export async function annulerToutesNotifications(): Promise<void> {
+  await Notifications.cancelAllScheduledNotificationsAsync();
+}

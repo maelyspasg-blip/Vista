@@ -519,25 +519,63 @@ export default function Dashboard() {
                 color={C.iconeBouton}
               />
             </TouchableOpacity>
-            <View style={[styles.avatar, { backgroundColor: C.hero }]}>
-              <Text style={styles.avatarText}>M</Text>
-            </View>
+            <TouchableOpacity
+              style={[styles.avatar, { backgroundColor: C.hero }]}
+              onPress={() => router.push("/profil")}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.avatarText}>
+                {objStore.prenom ? objStore.prenom.charAt(0).toUpperCase() : "?"}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
         <View
           style={[
             styles.hero,
-            {
-              backgroundColor: theme === "sombre" ? C.carte : C.hero,
-              borderWidth: theme === "sombre" ? 0.5 : 0,
-              borderColor: C.carteBorder,
-            },
+            theme === "sombre"
+              ? {
+                  backgroundColor: C.carte,
+                  borderWidth: 0.5,
+                  borderColor: C.carteBorder,
+                  borderLeftWidth: 3,
+                  borderLeftColor: C.accent,
+                }
+              : {
+                  backgroundColor: "#FFFFFF",
+                  borderWidth: 0.5,
+                  borderColor: "#E4E6EA",
+                  borderLeftWidth: 3,
+                  borderLeftColor: C.accent,
+                },
           ]}
         >
-          <Text style={styles.heroLabel}>DÉPENSÉ CE MOIS</Text>
-          <Text style={styles.heroAmount}>{totalDepense} €</Text>
-          <View style={styles.barBg}>
+          <Text
+            style={[
+              styles.heroLabel,
+              { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
+            ]}
+          >
+            DÉPENSÉ CE MOIS
+          </Text>
+          <Text
+            style={[
+              styles.heroAmount,
+              { color: theme === "sombre" ? "#FFFFFF" : C.texte },
+            ]}
+          >
+            {totalDepense} €
+          </Text>
+          <View
+            style={[
+              styles.barBg,
+              {
+                backgroundColor:
+                  theme === "sombre" ? "rgba(255,255,255,0.2)" : C.separateur,
+              },
+            ]}
+          >
             <View
               style={[
                 styles.barFill,
@@ -563,7 +601,15 @@ export default function Dashboard() {
               <View
                 style={[styles.heroLegendeDot, { backgroundColor: C.accent }]}
               />
-              <Text style={styles.heroSub}>
+              <Text
+                style={[
+                  styles.heroSub,
+                  {
+                    color:
+                      theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                  },
+                ]}
+              >
                 Dépenses {totalDepenseEnveloppes} €
               </Text>
             </View>
@@ -572,7 +618,15 @@ export default function Dashboard() {
                 <View
                   style={[styles.heroLegendeDot, { backgroundColor: s.couleur }]}
                 />
-                <Text style={styles.heroSub}>
+                <Text
+                  style={[
+                    styles.heroSub,
+                    {
+                      color:
+                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                    },
+                  ]}
+                >
                   {s.label} {s.montant} €
                 </Text>
               </View>
@@ -583,23 +637,50 @@ export default function Dashboard() {
         <View
           style={[
             styles.hero,
-            {
-              backgroundColor: theme === "sombre" ? C.carte : C.hero,
-              borderWidth: theme === "sombre" ? 0.5 : 0,
-              borderColor: C.carteBorder,
-            },
+            theme === "sombre"
+              ? {
+                  backgroundColor: C.carte,
+                  borderWidth: 0.5,
+                  borderColor: C.carteBorder,
+                  borderLeftWidth: 3,
+                  borderLeftColor: C.peach,
+                }
+              : {
+                  backgroundColor: "#FFFFFF",
+                  borderWidth: 0.5,
+                  borderColor: "#E4E6EA",
+                  borderLeftWidth: 3,
+                  borderLeftColor: C.peach,
+                },
           ]}
         >
-          <Text style={styles.heroLabel}>RESTE ESTIMÉ CE MOIS</Text>
+          <Text
+            style={[
+              styles.heroLabel,
+              { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
+            ]}
+          >
+            RESTE ESTIMÉ CE MOIS
+          </Text>
           <Text
             style={[
               styles.heroAmount,
-              { color: resteEstime < 0 ? "#FFD2D2" : "#FFFFFF" },
+              theme === "sombre"
+                ? { color: resteEstime < 0 ? "#FFD2D2" : "#FFFFFF" }
+                : { color: resteEstime < 0 ? C.peachText : C.texte },
             ]}
           >
             {resteEstime} €
           </Text>
-          <View style={styles.barBg}>
+          <View
+            style={[
+              styles.barBg,
+              {
+                backgroundColor:
+                  theme === "sombre" ? "rgba(255,255,255,0.2)" : C.separateur,
+              },
+            ]}
+          >
             <View
               style={[
                 styles.barSegment,
@@ -636,7 +717,15 @@ export default function Dashboard() {
               <View
                 style={[styles.heroLegendeDot, { backgroundColor: C.accent }]}
               />
-              <Text style={styles.heroSub}>
+              <Text
+                style={[
+                  styles.heroSub,
+                  {
+                    color:
+                      theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                  },
+                ]}
+              >
                 Dépensé {totalDepenseEnveloppes}€
               </Text>
             </View>
@@ -644,14 +733,32 @@ export default function Dashboard() {
               <View
                 style={[styles.heroLegendeDot, { backgroundColor: C.peach }]}
               />
-              <Text style={styles.heroSub}>Prévues {totalPrevu}€</Text>
+              <Text
+                style={[
+                  styles.heroSub,
+                  {
+                    color:
+                      theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                  },
+                ]}
+              >
+                Prévues {totalPrevu}€
+              </Text>
             </View>
             {segmentsEpargne.map((s) => (
               <View key={s.cle} style={styles.heroLegendeItem}>
                 <View
                   style={[styles.heroLegendeDot, { backgroundColor: s.couleur }]}
                 />
-                <Text style={styles.heroSub}>
+                <Text
+                  style={[
+                    styles.heroSub,
+                    {
+                      color:
+                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                    },
+                  ]}
+                >
                   {s.label} {s.montant}€
                 </Text>
               </View>
@@ -661,11 +768,16 @@ export default function Dashboard() {
           <View
             style={[
               styles.lectureBanner,
-              { backgroundColor: lecture.couleurTexte + "33" },
+              theme === "sombre"
+                ? { backgroundColor: lecture.couleurTexte + "33" }
+                : { backgroundColor: C.fond },
             ]}
           >
             <Text
-              style={[styles.lectureTexte, { color: lecture.couleurTexte }]}
+              style={[
+                styles.lectureTexte,
+                { color: theme === "sombre" ? lecture.couleurTexte : C.texte },
+              ]}
             >
               {lecture.texte}
             </Text>
@@ -676,11 +788,21 @@ export default function Dashboard() {
           <TouchableOpacity
             style={[
               styles.statCard,
-              {
-                backgroundColor: theme === "sombre" ? C.carte : C.peachLight,
-                borderWidth: theme === "sombre" ? 0.5 : 0,
-                borderColor: C.carteBorder,
-              },
+              theme === "sombre"
+                ? {
+                    backgroundColor: C.carte,
+                    borderWidth: 0.5,
+                    borderColor: C.carteBorder,
+                    borderLeftWidth: 3,
+                    borderLeftColor: C.peach,
+                  }
+                : {
+                    backgroundColor: "#FFFFFF",
+                    borderWidth: 0.5,
+                    borderColor: "#E4E6EA",
+                    borderLeftWidth: 3,
+                    borderLeftColor: C.peach,
+                  },
             ]}
             activeOpacity={0.7}
             onPress={() => {
@@ -690,12 +812,26 @@ export default function Dashboard() {
             }}
           >
             <View style={styles.statLabelRow}>
-              <Text style={[styles.statLabel, { color: C.peach }]}>
+              <Text
+                style={[
+                  styles.statLabel,
+                  { color: theme === "sombre" ? C.peach : C.texteMuted },
+                ]}
+              >
                 DISPONIBLE
               </Text>
-              <Ionicons name="pencil-outline" size={12} color={C.peach} />
+              <Ionicons
+                name="pencil-outline"
+                size={12}
+                color={theme === "sombre" ? C.peach : C.texteMuted}
+              />
             </View>
-            <Text style={[styles.statValue, { color: C.peachText }]}>
+            <Text
+              style={[
+                styles.statValue,
+                { color: theme === "sombre" ? C.peachText : C.texte },
+              ]}
+            >
               {disponibleNum} €
             </Text>
           </TouchableOpacity>
@@ -704,7 +840,19 @@ export default function Dashboard() {
         <TouchableOpacity
           style={[
             styles.epargneCard,
-            { backgroundColor: C.carte, borderColor: C.carteBorder },
+            theme === "sombre"
+              ? {
+                  backgroundColor: C.carte,
+                  borderColor: C.carteBorder,
+                  borderLeftWidth: 3,
+                  borderLeftColor: C.purple,
+                }
+              : {
+                  backgroundColor: "#FFFFFF",
+                  borderColor: "#E4E6EA",
+                  borderLeftWidth: 3,
+                  borderLeftColor: C.purple,
+                },
           ]}
           activeOpacity={0.7}
           onPress={ouvrirModalEpargne}

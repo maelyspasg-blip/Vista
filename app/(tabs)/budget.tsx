@@ -60,7 +60,7 @@ function formaterDateLongue(dateISO: string): string {
 
 export default function Budget() {
   const objStore = useObjectifs();
-  const { couleurs: C } = useTheme();
+  const { couleurs: C, theme } = useTheme();
   const params = useLocalSearchParams<{ section?: string }>();
   const router = useRouter();
 
@@ -283,8 +283,30 @@ export default function Budget() {
       </View>
 
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
-        <View style={[styles.heroCard, { backgroundColor: C.bleuGrisLight }]}>
-          <Text style={[styles.heroLabel, { color: C.bleuGris }]}>
+        <View
+          style={[
+            styles.heroCard,
+            theme === "sombre"
+              ? {
+                  backgroundColor: C.bleuGrisLight,
+                  borderLeftWidth: 3,
+                  borderLeftColor: C.bleuGris,
+                }
+              : {
+                  backgroundColor: "#FFFFFF",
+                  borderWidth: 0.5,
+                  borderColor: "#E4E6EA",
+                  borderLeftWidth: 3,
+                  borderLeftColor: C.bleuGris,
+                },
+          ]}
+        >
+          <Text
+            style={[
+              styles.heroLabel,
+              { color: theme === "sombre" ? C.bleuGris : C.texteMuted },
+            ]}
+          >
             TOTAL DÉPENSÉ
           </Text>
           <Text style={[styles.heroAmount, { color: C.texte }]}>

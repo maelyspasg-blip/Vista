@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
+import { annulerToutesNotifications } from "./notifications";
 
 export type Objectif = {
   id: string;
@@ -100,6 +101,8 @@ type EtatStore = {
   enveloppes: Enveloppe[];
   argentDisponible: number;
   argentDisponibleRecurrent: boolean;
+  prenom: string;
+  notificationsActives: boolean;
   transactions: Transaction[];
   evenements: Evenement[];
   historiquePaiements: PaiementHistorique[];
@@ -114,6 +117,8 @@ let etat: EtatStore = {
   enveloppes: [],
   argentDisponible: 0,
   argentDisponibleRecurrent: false,
+  prenom: "",
+  notificationsActives: true,
   transactions: TRANSACTIONS_INIT,
   evenements: EVENEMENTS_INIT,
   historiquePaiements: [],
@@ -875,6 +880,45 @@ function majArgentDisponibleSupabase(montant: number, recurrent: boolean) {
   });
 }
 
+function majPrenomSupabase(prenom: string) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({ prenom })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error("Supabase update prenom a échoué :", error);
+          signalerErreurSync(
+            `Impossible de sauvegarder le prénom : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
+function majNotificationsActivesSupabase(actif: boolean) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({ notifications_actives: actif })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error(
+            "Supabase update notifications_actives a échoué :",
+            error,
+          );
+          signalerErreurSync(
+            `Impossible de sauvegarder les notifications : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
 export function useObjectifs() {
   const [local, setLocal] = useState<EtatStore>(etat);
 
@@ -889,6 +933,8 @@ export function useObjectifs() {
     enveloppes: local.enveloppes,
     argentDisponible: local.argentDisponible,
     argentDisponibleRecurrent: local.argentDisponibleRecurrent,
+    prenom: local.prenom,
+    notificationsActives: local.notificationsActives,
     transactions: local.transactions,
     evenements: local.evenements,
     historiquePaiements: local.historiquePaiements,
@@ -986,7 +1032,7 @@ export function useObjectifs() {
             supabase
               .from("profils")
               .select(
-                "epargne_mois, argent_disponible, argent_disponible_recurrent, dernier_mois_archive_mois, dernier_mois_archive_annee",
+                "epargne_mois, argent_disponible, argent_disponible_recurrent, prenom, notifications_actives, dernier_mois_archive_mois, dernier_mois_archive_annee",
               )
               .eq("user_id", user.id)
               .single(),
@@ -1024,6 +1070,9 @@ export function useObjectifs() {
           argentDisponibleRecurrent:
             profil?.argent_disponible_recurrent ??
             etat.argentDisponibleRecurrent,
+          prenom: profil?.prenom ?? etat.prenom,
+          notificationsActives:
+            profil?.notifications_actives ?? etat.notificationsActives,
           dernierMoisArchive,
         });
       } catch (e) {
@@ -1424,6 +1473,19 @@ export function useObjectifs() {
     modifierArgentDisponible: (montant: number, recurrent: boolean) => {
       setEtat({ argentDisponible: montant, argentDisponibleRecurrent: recurrent });
       majArgentDisponibleSupabase(montant, recurrent);
+    },
+
+    modifierPrenom: (prenom: string) => {
+      setEtat({ prenom });
+      majPrenomSupabase(prenom);
+    },
+
+    modifierNotificationsActives: (actif: boolean) => {
+      setEtat({ notificationsActives: actif });
+      majNotificationsActivesSupabase(actif);
+      if (!actif) {
+        annulerToutesNotifications();
+      }
     },
 
     archiverMoisActuel: (mois: number, annee: number) => {
