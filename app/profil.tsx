@@ -144,7 +144,7 @@ export default function Profil() {
   const supprimerCompte = () => {
     Alert.alert(
       "Supprimer ton compte ?",
-      "Cette action est définitive : toutes tes données (enveloppes, objectifs, transactions, historique) seront supprimées et ne pourront pas être récupérées.",
+      "Cette action est définitive : toutes tes données (catégories, objectifs, transactions, historique) seront supprimées et ne pourront pas être récupérées.",
       [
         { text: "Annuler", style: "cancel" },
         {

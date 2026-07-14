@@ -226,7 +226,7 @@ function appliquerEnveloppes(nouvellesEnveloppes: Enveloppe[]) {
           if (error) {
             console.error("Supabase delete enveloppe a échoué :", error);
             signalerErreurSync(
-              `Impossible de supprimer l'enveloppe : ${error.message}`,
+              `Impossible de supprimer la catégorie : ${error.message}`,
             );
           }
         });
@@ -243,7 +243,7 @@ function appliquerEnveloppes(nouvellesEnveloppes: Enveloppe[]) {
         if (error) {
           console.error("Supabase update enveloppe a échoué :", error);
           signalerErreurSync(
-            `Impossible de sauvegarder l'enveloppe : ${error.message}`,
+            `Impossible de sauvegarder la catégorie : ${error.message}`,
           );
         }
       });
@@ -590,7 +590,7 @@ async function enregistrerSnapshotMoisSupabase(params: {
           erreurEnv,
         );
         signalerErreurSync(
-          `Impossible d'archiver le détail des enveloppes : ${erreurEnv.message}`,
+          `Impossible d'archiver le détail des catégories : ${erreurEnv.message}`,
         );
       }
     }
@@ -962,7 +962,7 @@ export function useObjectifs() {
         if (error) {
           console.error("Supabase select enveloppes a échoué :", error);
           signalerErreurSync(
-            `Impossible de charger tes enveloppes : ${error.message}`,
+            `Impossible de charger tes catégories : ${error.message}`,
           );
           return;
         }
@@ -971,7 +971,7 @@ export function useObjectifs() {
       } catch (e) {
         console.error("Chargement des enveloppes a échoué :", e);
         signalerErreurSync(
-          "Impossible de charger tes enveloppes : problème de connexion.",
+          "Impossible de charger tes catégories : problème de connexion.",
         );
       }
     },
@@ -987,7 +987,7 @@ export function useObjectifs() {
           console.error(
             "Création d'enveloppe refusée : aucun utilisateur connecté (supabase.auth.getUser() a renvoyé null).",
           );
-          signalerErreurSync("Tu dois être connecté pour créer une enveloppe.");
+          signalerErreurSync("Tu dois être connecté pour créer une catégorie.");
           return null;
         }
 
@@ -1001,8 +1001,8 @@ export function useObjectifs() {
           console.error("Supabase insert enveloppe a échoué :", error);
           signalerErreurSync(
             error
-              ? `Impossible de créer l'enveloppe : ${error.message}`
-              : "Impossible de créer l'enveloppe : réponse vide de Supabase.",
+              ? `Impossible de créer la catégorie : ${error.message}`
+              : "Impossible de créer la catégorie : réponse vide de Supabase.",
           );
           return null;
         }
@@ -1013,7 +1013,7 @@ export function useObjectifs() {
       } catch (e) {
         console.error("Création d'enveloppe a échoué :", e);
         signalerErreurSync(
-          "Impossible de créer l'enveloppe : problème de connexion.",
+          "Impossible de créer la catégorie : problème de connexion.",
         );
         return null;
       }
@@ -1290,7 +1290,7 @@ export function useObjectifs() {
             erreurEnv,
           );
           signalerErreurSync(
-            `Impossible de charger le détail des enveloppes archivées : ${erreurEnv.message}`,
+            `Impossible de charger le détail des catégories archivées : ${erreurEnv.message}`,
           );
         }
         if (erreurObj) {
@@ -1468,6 +1468,63 @@ export function useObjectifs() {
 
     modifierEnveloppes: (enveloppes: Enveloppe[]) => {
       appliquerEnveloppes(enveloppes);
+    },
+
+    supprimerEnveloppe: async (id: string) => {
+      const enveloppe = etat.enveloppes.find((e) => e.id === id);
+      if (!enveloppe) return;
+
+      const evenementsLies = etat.evenements.filter(
+        (e) => e.categorieLiee === enveloppe.nom,
+      );
+
+      setEtat({
+        enveloppes: etat.enveloppes.filter((e) => e.id !== id),
+        transactions: etat.transactions.filter((t) => t.enveloppeId !== id),
+        evenements: etat.evenements.map((e) =>
+          e.categorieLiee === enveloppe.nom
+            ? { ...e, categorieLiee: undefined }
+            : e,
+        ),
+      });
+
+      const { error: erreurTransactions } = await supabase
+        .from("transactions")
+        .delete()
+        .eq("enveloppe_id", id);
+      if (erreurTransactions) {
+        console.error(
+          "Supabase delete transactions liées a échoué :",
+          erreurTransactions,
+        );
+        signalerErreurSync(
+          `Impossible de supprimer les transactions liées : ${erreurTransactions.message}`,
+        );
+      }
+
+      for (const e of evenementsLies) {
+        const { error: erreurEvenement } = await supabase
+          .from("evenements")
+          .update({ categorie_liee: null })
+          .eq("id", e.id);
+        if (erreurEvenement) {
+          console.error(
+            "Supabase update categorie_liee a échoué :",
+            erreurEvenement,
+          );
+          signalerErreurSync(
+            `Impossible de mettre à jour un événement lié : ${erreurEvenement.message}`,
+          );
+        }
+      }
+
+      const { error } = await supabase.from("enveloppes").delete().eq("id", id);
+      if (error) {
+        console.error("Supabase delete enveloppe a échoué :", error);
+        signalerErreurSync(
+          `Impossible de supprimer la catégorie : ${error.message}`,
+        );
+      }
     },
 
     modifierArgentDisponible: (montant: number, recurrent: boolean) => {

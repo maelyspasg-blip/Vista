@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -353,8 +354,22 @@ export default function Dashboard() {
 
   const supprimerEnveloppe = () => {
     if (!enveloppeEnEdition) return;
-    setEnveloppes(enveloppes.filter((e) => e.id !== enveloppeEnEdition.id));
-    setModalEnveloppeVisible(false);
+    const cible = enveloppeEnEdition;
+    Alert.alert(
+      `Supprimer "${cible.nom}" ?`,
+      "Cette action est définitive et supprimera aussi toutes les transactions liées. Cette catégorie ne sera plus disponible pour tes dépenses passées ou futures.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer",
+          style: "destructive",
+          onPress: () => {
+            objStore.supprimerEnveloppe(cible.id);
+            setModalEnveloppeVisible(false);
+          },
+        },
+      ],
+    );
   };
 
   const ajouterEnveloppe = async () => {
@@ -906,7 +921,7 @@ export default function Dashboard() {
 
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: C.texteMuted }]}>
-            ENVELOPPES
+            CATÉGORIES
           </Text>
           <TouchableOpacity
             style={[
@@ -1169,7 +1184,7 @@ export default function Dashboard() {
           <View style={styles.modalOverlayTouch}>
             <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
               <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitre, { color: C.texte }]}>Modifier l'enveloppe</Text>
+                <Text style={[styles.modalTitre, { color: C.texte }]}>Modifier la catégorie</Text>
               </View>
               <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -1228,7 +1243,7 @@ export default function Dashboard() {
                   </TouchableOpacity>
                 </View>
 
-                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Budget de l'enveloppe</Text>
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Budget de la catégorie</Text>
                 <View style={styles.modalInputRow}>
                   <TextInput
                     style={[
@@ -1366,7 +1381,7 @@ export default function Dashboard() {
                   activeOpacity={0.7}
                 >
                   <Text style={styles.btnSupprimerTexteLabel}>
-                    Supprimer l'enveloppe
+                    Supprimer la catégorie
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -1394,7 +1409,7 @@ export default function Dashboard() {
         >
           <View style={styles.modalOverlayTouch}>
             <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
-              <Text style={[styles.modalTitre, { color: C.texte }]}>Nouvelle enveloppe</Text>
+              <Text style={[styles.modalTitre, { color: C.texte }]}>Nouvelle catégorie</Text>
 
               <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -1610,7 +1625,7 @@ export default function Dashboard() {
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
                     <Text style={styles.btnAjouterTexte}>
-                      Créer l'enveloppe
+                      Créer la catégorie
                     </Text>
                   )}
                 </TouchableOpacity>

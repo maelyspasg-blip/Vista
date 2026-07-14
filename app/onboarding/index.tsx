@@ -30,7 +30,7 @@ const SLIDES = [
     emoji: "💰",
     titre: "Pilote ton budget",
     description:
-      "Crée tes enveloppes, suis tes dépenses en temps réel et visualise ton prévisionnel du mois.",
+      "Crée tes catégories, suis tes dépenses en temps réel et visualise ton prévisionnel du mois.",
     couleur: MINT,
     bg: "#E8F8F2",
   },
