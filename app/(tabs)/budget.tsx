@@ -94,17 +94,18 @@ export default function Budget() {
   const MOIS_ACTUEL = new Date().getMonth();
   const ANNEE_ACTUELLE = new Date().getFullYear();
 
-  const idsEnveloppesExistantes = new Set(
-    objStore.enveloppes.map((e) => e.id),
-  );
+  const enveloppesParId = new Map(objStore.enveloppes.map((e) => [e.id, e]));
 
   // Une catégorie supprimée définitivement n'a plus de ligne dans `enveloppes`,
   // mais son historique de paiement reste (c'est un reçu, cf. historique_paiements
   // et snapshots_mois qui ne sont jamais modifiés rétroactivement). On ne doit
   // en revanche plus le reconstruire en carte de catégorie : il disparaît
-  // simplement de l'affichage courant.
+  // simplement de l'affichage courant. Idem si la catégorie est repassée en
+  // "Variable" entre-temps : la carte "payée" (propre au type Fixe) ne doit
+  // plus s'afficher, sinon elle coexiste en double avec la carte Variable.
   const paiementsDuMois = objStore.historiquePaiements.filter((p) => {
-    if (!idsEnveloppesExistantes.has(p.enveloppeId)) return false;
+    const enveloppe = enveloppesParId.get(p.enveloppeId);
+    if (!enveloppe || enveloppe.type !== "Fixe") return false;
     const d = new Date(p.date);
     return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
   });
