@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import { useState } from "react";
 import {
@@ -152,6 +153,46 @@ function GraphiqueLignes({
         </SvgText>
       ))}
     </Svg>
+  );
+}
+
+function JaugeRepartition({
+  segments,
+  couleurs: C,
+}: {
+  segments: { cle: string; label: string; couleur: string; montant: number }[];
+  couleurs: typeof COULEURS.clair;
+}) {
+  const total = segments.reduce((acc, s) => acc + s.montant, 0);
+  if (total <= 0) return null;
+
+  return (
+    <View>
+      <View style={[styles.jaugeBarre, { backgroundColor: C.separateur }]}>
+        {segments.map((s) => (
+          <View
+            key={s.cle}
+            style={{ flex: s.montant, backgroundColor: s.couleur }}
+          />
+        ))}
+      </View>
+      <View style={styles.jaugeLegende}>
+        {segments.map((s) => (
+          <View key={s.cle} style={styles.jaugeLegendeItem}>
+            <View style={[styles.jaugeDot, { backgroundColor: s.couleur }]} />
+            <Text
+              style={[styles.jaugeNom, { color: C.texte }]}
+              numberOfLines={1}
+            >
+              {s.label}
+            </Text>
+            <Text style={[styles.jaugePct, { color: C.texteMuted }]}>
+              {Math.round((s.montant / total) * 100)}% · {s.montant} €
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -359,6 +400,24 @@ export default function Analytics() {
     return { ...obj, pct, delta };
   });
 
+  const repartitionDepenses = objStore.enveloppes
+    .filter((e) => e.type !== "Entrée" && e.depense > 0)
+    .map((e) => ({
+      cle: e.id,
+      label: e.nom,
+      couleur: e.couleur,
+      montant: e.depense,
+    }));
+
+  const repartitionEntrees = objStore.enveloppes
+    .filter((e) => e.type === "Entrée" && e.depense > 0)
+    .map((e) => ({
+      cle: e.id,
+      label: e.nom,
+      couleur: e.couleur,
+      montant: e.depense,
+    }));
+
   const toggleCategorie = (id: string) => {
     setCategoriesSelectionnees((prev) =>
       prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id],
@@ -462,9 +521,7 @@ export default function Analytics() {
                     {env.nom}
                   </Text>
                   {sel && (
-                    <Text style={[styles.tiroirCoche, { color: env.couleur }]}>
-                      ✓
-                    </Text>
+                    <Ionicons name="checkmark" size={16} color={env.couleur} />
                   )}
                 </TouchableOpacity>
               );
@@ -613,15 +670,21 @@ export default function Analytics() {
             >
               {depenseMoyJour} €
             </Text>
-            <Text
-              style={[
-                styles.kpiDelta,
-                { color: deltaDepMoy <= 0 ? C.accentText : C.peachText },
-              ]}
-            >
-              {deltaDepMoy > 0 ? "↑" : "↓"} {Math.abs(deltaDepMoy)}% vs mois
-              dernier
-            </Text>
+            <View style={styles.kpiDeltaRow}>
+              <Ionicons
+                name={deltaDepMoy > 0 ? "arrow-up" : "arrow-down"}
+                size={11}
+                color={deltaDepMoy <= 0 ? C.accentText : C.peachText}
+              />
+              <Text
+                style={[
+                  styles.kpiDelta,
+                  { color: deltaDepMoy <= 0 ? C.accentText : C.peachText },
+                ]}
+              >
+                {Math.abs(deltaDepMoy)}% vs mois dernier
+              </Text>
+            </View>
           </View>
           <View
             style={[
@@ -933,6 +996,44 @@ export default function Analytics() {
           </>
         )}
 
+        {repartitionDepenses.length > 0 && (
+          <>
+            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+              Répartition des dépenses
+            </Text>
+            <View
+              style={[
+                styles.chartCard,
+                {
+                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                  borderColor: C.carteBorder,
+                },
+              ]}
+            >
+              <JaugeRepartition segments={repartitionDepenses} couleurs={C} />
+            </View>
+          </>
+        )}
+
+        {repartitionEntrees.length > 0 && (
+          <>
+            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+              Entrées d&apos;argent
+            </Text>
+            <View
+              style={[
+                styles.chartCard,
+                {
+                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                  borderColor: C.vertLight,
+                },
+              ]}
+            >
+              <JaugeRepartition segments={repartitionEntrees} couleurs={C} />
+            </View>
+          </>
+        )}
+
         <View style={{ height: 40 }} />
       </ScrollView>
     </View>
@@ -1026,7 +1127,6 @@ const styles = StyleSheet.create({
   },
   tiroirRond: { width: 12, height: 12, borderRadius: 6 },
   tiroirNom: { flex: 1, fontSize: 14, color: "#1A1A1A", fontWeight: "500" },
-  tiroirCoche: { fontSize: 16, fontWeight: "700" },
   tiroirReset: { padding: 14, alignItems: "center" },
   tiroirResetTexte: { fontSize: 13, color: "#999", fontWeight: "600" },
   banniereInfo: {
@@ -1054,7 +1154,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   kpiVal: { fontSize: 22, fontWeight: "700" },
-  kpiDelta: { fontSize: 11, fontWeight: "600", marginTop: 3 },
+  kpiDelta: { fontSize: 11, fontWeight: "600" },
+  kpiDeltaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    marginTop: 3,
+  },
   chartCard: {
     backgroundColor: "#FAFAFA",
     borderRadius: 16,
@@ -1066,6 +1172,17 @@ const styles = StyleSheet.create({
   legendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   legendeDot: { width: 9, height: 9, borderRadius: 2 },
   legendeTexte: { fontSize: 11, color: "#999", fontWeight: "500" },
+  jaugeBarre: {
+    flexDirection: "row",
+    height: 16,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  jaugeLegende: { marginTop: 12, gap: 8 },
+  jaugeLegendeItem: { flexDirection: "row", alignItems: "center", gap: 8 },
+  jaugeDot: { width: 9, height: 9, borderRadius: 5 },
+  jaugeNom: { flex: 1, fontSize: 14, fontWeight: "600" },
+  jaugePct: { fontSize: 13, fontWeight: "500" },
   compareCard: {
     backgroundColor: "#FAFAFA",
     borderRadius: 16,

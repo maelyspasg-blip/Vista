@@ -215,6 +215,8 @@ export default function Dashboard() {
     useState(false);
   const [objectifsCloturesOuvert, setObjectifsCloturesOuvert] =
     useState(false);
+  const [entreesDisponibleOuvert, setEntreesDisponibleOuvert] =
+    useState(false);
 
   const enveloppesSansEntree = enveloppes.filter((e) => e.type !== "Entrée");
   const enveloppesEntree = enveloppes.filter((e) => e.type === "Entrée");
@@ -232,7 +234,7 @@ export default function Dashboard() {
   );
   const totalDepense = totalDepenseEnveloppes + objStore.epargneMois;
 
-  const derniereEntreeRecue = enveloppesEntree
+  const entreesRecuesCeMois = enveloppesEntree
     .filter((e) => {
       if (!e.payee || !e.dateFixe) return false;
       const d = new Date(e.dateFixe);
@@ -244,7 +246,11 @@ export default function Dashboard() {
     .sort(
       (a, b) =>
         new Date(b.dateFixe!).getTime() - new Date(a.dateFixe!).getTime(),
-    )[0];
+    );
+  const totalEntreesRecuesCeMois = entreesRecuesCeMois.reduce(
+    (acc, e) => acc + e.budget,
+    0,
+  );
 
   const depensesNonCategorisees = objStore.evenements
     .filter((e) => e.estFinancier && e.montant)
@@ -916,7 +922,7 @@ export default function Dashboard() {
         </View>
 
         <View style={styles.statsRow}>
-          <TouchableOpacity
+          <View
             style={[
               styles.statCard,
               theme === "sombre"
@@ -935,44 +941,84 @@ export default function Dashboard() {
                     borderLeftColor: C.peach,
                   },
             ]}
-            activeOpacity={0.7}
-            onPress={() => {
-              setDisponibleTemp(disponibleNum === 0 ? "" : argentDisponible);
-              setDisponibleRecurrentTemp(objStore.argentDisponibleRecurrent);
-              setDisponibleReportTemp(objStore.argentDisponibleReportAuto);
-              setEditionDisponible(true);
-            }}
           >
-            <View style={styles.statLabelRow}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => {
+                setDisponibleTemp(disponibleNum === 0 ? "" : argentDisponible);
+                setDisponibleRecurrentTemp(objStore.argentDisponibleRecurrent);
+                setDisponibleReportTemp(objStore.argentDisponibleReportAuto);
+                setEditionDisponible(true);
+              }}
+            >
+              <View style={styles.statLabelRow}>
+                <Text
+                  style={[
+                    styles.statLabel,
+                    { color: theme === "sombre" ? C.peach : C.texteMuted },
+                  ]}
+                >
+                  DISPONIBLE
+                </Text>
+                <Ionicons
+                  name="pencil-outline"
+                  size={12}
+                  color={theme === "sombre" ? C.peach : C.texteMuted}
+                />
+              </View>
               <Text
                 style={[
-                  styles.statLabel,
-                  { color: theme === "sombre" ? C.peach : C.texteMuted },
+                  styles.statValue,
+                  { color: theme === "sombre" ? C.peachText : C.texte },
                 ]}
               >
-                DISPONIBLE
+                {disponibleNum} €
               </Text>
-              <Ionicons
-                name="pencil-outline"
-                size={12}
-                color={theme === "sombre" ? C.peach : C.texteMuted}
-              />
-            </View>
-            <Text
-              style={[
-                styles.statValue,
-                { color: theme === "sombre" ? C.peachText : C.texte },
-              ]}
-            >
-              {disponibleNum} €
-            </Text>
-            {derniereEntreeRecue && (
-              <Text style={[styles.statImpactTexte, { color: C.vertText }]}>
-                +{derniereEntreeRecue.budget}€ grâce à {derniereEntreeRecue.nom}{" "}
-                le {formaterDateLongue(derniereEntreeRecue.dateFixe!)}
-              </Text>
+            </TouchableOpacity>
+
+            {entreesRecuesCeMois.length > 0 && (
+              <>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={styles.statImpactRow}
+                  onPress={() =>
+                    setEntreesDisponibleOuvert(!entreesDisponibleOuvert)
+                  }
+                >
+                  <Text style={[styles.statImpactTexte, { color: C.vertText }]}>
+                    {entreesRecuesCeMois.length} entrée
+                    {entreesRecuesCeMois.length > 1 ? "s" : ""} ce mois-ci,
+                    +{totalEntreesRecuesCeMois}€ au total
+                  </Text>
+                  <Text style={[styles.statImpactChevron, { color: C.vertText }]}>
+                    {entreesDisponibleOuvert ? "▾" : "▸"}
+                  </Text>
+                </TouchableOpacity>
+                {entreesDisponibleOuvert && (
+                  <View style={styles.statImpactTiroir}>
+                    {entreesRecuesCeMois.map((e) => (
+                      <View key={e.id} style={styles.statImpactLigne}>
+                        <Text
+                          style={[styles.statImpactLigneNom, { color: C.texte }]}
+                          numberOfLines={1}
+                        >
+                          {e.nom}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.statImpactLigneDetail,
+                            { color: C.vertText },
+                          ]}
+                        >
+                          +{e.budget}€ · {formaterDateLongue(e.dateFixe!)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </>
             )}
-          </TouchableOpacity>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -1193,13 +1239,13 @@ export default function Dashboard() {
           <View style={styles.graphContent}>
             <DonutChart
               couleurs={C}
-              data={enveloppes.map((e) => ({
+              data={enveloppesSansEntree.map((e) => ({
                 couleur: e.couleur,
                 valeur: e.depense,
               }))}
             />
             <View style={styles.graphLegende}>
-              {enveloppes
+              {enveloppesSansEntree
                 .filter((e) => e.depense > 0)
                 .map((e) => (
                   <View key={e.id} style={styles.legendeItem}>
@@ -1931,7 +1977,7 @@ export default function Dashboard() {
                       onPress={() => setModalEpargneVisible(false)}
                       activeOpacity={0.6}
                     >
-                      <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>✕</Text>
+                      <Ionicons name="close" size={20} color={C.texteMuted} />
                     </TouchableOpacity>
                   </View>
 
@@ -2021,7 +2067,7 @@ export default function Dashboard() {
                             <TouchableOpacity
                               onPress={() => objStore.supprimerObjectif(obj.id)}
                             >
-                              <Text style={[styles.objectifSupprimer, { color: C.texteMuted }]}>✕</Text>
+                              <Ionicons name="close" size={16} color={C.texteMuted} />
                             </TouchableOpacity>
                           </View>
                           <Text
@@ -2087,7 +2133,7 @@ export default function Dashboard() {
                                   <TouchableOpacity
                                     onPress={() => objStore.supprimerObjectif(obj.id)}
                                   >
-                                    <Text style={[styles.objectifSupprimer, { color: C.texteMuted }]}>✕</Text>
+                                    <Ionicons name="close" size={16} color={C.texteMuted} />
                                   </TouchableOpacity>
                                 </View>
                                 <Text
@@ -2141,7 +2187,7 @@ export default function Dashboard() {
                       onPress={() => setVueModal("liste")}
                       activeOpacity={0.6}
                     >
-                      <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>✕</Text>
+                      <Ionicons name="close" size={20} color={C.texteMuted} />
                     </TouchableOpacity>
                   </View>
 
@@ -2556,12 +2602,32 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   statValue: { fontSize: 19, fontWeight: "700" },
+  statImpactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    marginTop: 4,
+  },
   statImpactTexte: {
     fontSize: 11,
     fontWeight: "600",
     textAlign: "center",
-    marginTop: 4,
   },
+  statImpactChevron: { fontSize: 11 },
+  statImpactTiroir: {
+    alignSelf: "stretch",
+    marginTop: 8,
+    gap: 6,
+  },
+  statImpactLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  statImpactLigneNom: { flex: 1, fontSize: 12, fontWeight: "600" },
+  statImpactLigneDetail: { fontSize: 12, fontWeight: "600" },
   epargneCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -2663,7 +2729,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitre: { fontSize: 21, fontWeight: "700" },
-  btnFermerCroix: { fontSize: 18, padding: 4 },
   modalLabel: {
     fontSize: 13,
     fontWeight: "700",
@@ -2778,7 +2843,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   objectifModalNom: { fontSize: 15, fontWeight: "700" },
-  objectifSupprimer: { fontSize: 15, padding: 4 },
   objectifModalMontant: { fontSize: 14, fontWeight: "700", marginBottom: 8 },
   catBarBg: {
     height: 6,

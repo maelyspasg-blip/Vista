@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import {
   useFocusEffect,
   useLocalSearchParams,
@@ -433,14 +434,7 @@ export default function Budget() {
                           }
                           style={styles.txSupprimer}
                         >
-                          <Text
-                            style={[
-                              styles.txSupprimerTexte,
-                              { color: C.texteMuted },
-                            ]}
-                          >
-                            ✕
-                          </Text>
+                          <Ionicons name="close" size={14} color={C.texteMuted} />
                         </TouchableOpacity>
                       )}
                     </>
@@ -668,8 +662,9 @@ export default function Budget() {
               { backgroundColor: C.carte, borderColor: C.carteBorder },
             ]}
           >
+            <Ionicons name="bulb-outline" size={16} color={C.texte} />
             <Text style={[styles.insightTexte, { color: C.texte }]}>
-              💡 {depenseDominante.nom} représente ta plus grosse dépense ce
+              {depenseDominante.nom} représente ta plus grosse dépense ce
               mois-ci
             </Text>
           </View>
@@ -862,9 +857,12 @@ export default function Budget() {
                     </View>
                   </View>
                   {estLourd && (
-                    <Text style={[styles.alertePoids, { color: C.peach }]}>
-                      ⚠️ {pctBudget}% du budget total
-                    </Text>
+                    <View style={styles.alertePoidsRow}>
+                      <Ionicons name="warning-outline" size={12} color={C.peach} />
+                      <Text style={[styles.alertePoids, { color: C.peach }]}>
+                        {pctBudget}% du budget total
+                      </Text>
+                    </View>
                   )}
                 </View>
               </>
@@ -1161,12 +1159,15 @@ const styles = StyleSheet.create({
   heroLegendeDot: { width: 7, height: 7, borderRadius: 4 },
   heroLegendeTexte: { fontSize: 12, fontWeight: "600" },
   insightBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
     borderRadius: 13,
     padding: 14,
     marginBottom: 16,
     borderWidth: 0.5,
   },
-  insightTexte: { fontSize: 13, lineHeight: 19 },
+  insightTexte: { flex: 1, fontSize: 13, lineHeight: 19 },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1212,7 +1213,6 @@ const styles = StyleSheet.create({
   txDate: { fontSize: 11 },
   txMontant: { fontSize: 13, fontWeight: "700" },
   txSupprimer: { padding: 4 },
-  txSupprimerTexte: { fontSize: 13 },
   btnAjouterIci: {
     borderRadius: 12,
     padding: 11,
@@ -1253,7 +1253,13 @@ const styles = StyleSheet.create({
   fixeMeta: { fontSize: 12 },
   statutBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 20 },
   statutTexte: { fontSize: 11, fontWeight: "600" },
-  alertePoids: { fontSize: 11, marginTop: 6, fontWeight: "600" },
+  alertePoidsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 6,
+  },
+  alertePoids: { fontSize: 11, fontWeight: "600" },
   modalOverlay: { flex: 1, justifyContent: "flex-end" },
   modalOverlayTouch: {
     flex: 1,

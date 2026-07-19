@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -18,7 +19,7 @@ const { width } = Dimensions.get("window");
 const SLIDES = [
   {
     id: 1,
-    emoji: "👋",
+    icone: "hand-right-outline" as const,
     titre: "Bienvenue sur Vista",
     description:
       "Ton assistant financier personnel. Suis tes dépenses, anticipe tes besoins et garde le contrôle de ton budget.",
@@ -27,7 +28,7 @@ const SLIDES = [
   },
   {
     id: 2,
-    emoji: "💰",
+    icone: "wallet-outline" as const,
     titre: "Pilote ton budget",
     description:
       "Crée tes catégories, suis tes dépenses en temps réel et visualise ton prévisionnel du mois.",
@@ -36,7 +37,7 @@ const SLIDES = [
   },
   {
     id: 3,
-    emoji: "📅",
+    icone: "calendar-outline" as const,
     titre: "Organise ta semaine",
     description:
       "Planifie tes événements et connecte ton agenda à ton budget pour une vision complète de ta vie.",
@@ -76,7 +77,7 @@ export default function Onboarding() {
       </TouchableOpacity>
 
       <View style={[styles.illustration, { backgroundColor: slide.bg }]}>
-        <Text style={styles.emoji}>{slide.emoji}</Text>
+        <Ionicons name={slide.icone} size={80} color="#1A1A1A" />
       </View>
 
       <View style={styles.content}>
@@ -133,7 +134,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 40,
   },
-  emoji: { fontSize: 80 },
   content: { alignItems: "center", marginBottom: 32 },
   titre: {
     fontSize: 26,

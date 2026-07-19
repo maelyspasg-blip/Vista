@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -22,15 +23,15 @@ const PEACH = "#F4956A";
 const PEACH_LIGHT = "#FFF0EA";
 
 const INTERETS = [
-  { nom: "Voyages", emoji: "✈️" },
-  { nom: "Resto & Sorties", emoji: "🍽️" },
-  { nom: "Sport", emoji: "🏃" },
-  { nom: "Culture", emoji: "🎭" },
-  { nom: "Shopping", emoji: "🛍️" },
-  { nom: "Musique", emoji: "🎵" },
-  { nom: "Cinéma", emoji: "🎬" },
-  { nom: "Nature", emoji: "🌿" },
-  { nom: "Tech", emoji: "💻" },
+  { nom: "Voyages", icone: "airplane-outline" as const },
+  { nom: "Resto & Sorties", icone: "restaurant-outline" as const },
+  { nom: "Sport", icone: "fitness-outline" as const },
+  { nom: "Culture", icone: "color-palette-outline" as const },
+  { nom: "Shopping", icone: "bag-outline" as const },
+  { nom: "Musique", icone: "musical-notes-outline" as const },
+  { nom: "Cinéma", icone: "film-outline" as const },
+  { nom: "Nature", icone: "leaf-outline" as const },
+  { nom: "Tech", icone: "laptop-outline" as const },
 ];
 
 const COULEURS = [PURPLE, MINT, PEACH, "#C9B8F5", "#A8E6CF", "#FFD3B6"];
@@ -148,7 +149,11 @@ export default function Preferences() {
                 onPress={() => toggleInteret(interet.nom)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.interetEmoji}>{interet.emoji}</Text>
+                <Ionicons
+                  name={interet.icone}
+                  size={16}
+                  color={estSelectionne ? "#FFFFFF" : couleur}
+                />
                 <Text
                   style={[
                     styles.interetNom,
@@ -176,7 +181,7 @@ export default function Preferences() {
           {chargement ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={styles.btnTexte}>Lancer Vista 🚀</Text>
+            <Text style={styles.btnTexte}>Lancer Vista</Text>
           )}
         </TouchableOpacity>
 
@@ -255,9 +260,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 20,
-  },
-  interetEmoji: {
-    fontSize: 16,
   },
   interetNom: {
     fontSize: 13,

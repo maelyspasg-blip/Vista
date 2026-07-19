@@ -360,7 +360,7 @@ export default function Planning() {
     const d = new Date(p.date);
     tousLesEvenements.push({
       id: `histo-${p.id}`,
-      nom: `${p.nom} ✓`,
+      nom: p.nom,
       heure: "",
       duree: 0,
       couleur: "#BBBBBB",
@@ -1149,9 +1149,7 @@ export default function Planning() {
                       onPress={() => setModalCreationVisible(false)}
                       activeOpacity={0.6}
                     >
-                      <Text style={[styles.btnFermerCroix, { color: C.texteMuted }]}>
-                        ✕
-                      </Text>
+                      <Ionicons name="close" size={20} color={C.texteMuted} />
                     </TouchableOpacity>
                   </View>
 
@@ -1947,7 +1945,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitre: { fontSize: 21, fontWeight: "700", flex: 1 },
-  btnFermerCroix: { fontSize: 18, padding: 4 },
   modalLabel: {
     fontSize: 13,
     fontWeight: "700",
