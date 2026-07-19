@@ -13,6 +13,7 @@ export type Objectif = {
   jourDuMois?: number;
   dernierVersement?: { mois: number; annee: number } | null;
   contributionMois: number;
+  ferme?: boolean;
 };
 
 export type Enveloppe = {
@@ -23,7 +24,7 @@ export type Enveloppe = {
   couleur: string;
   recurrente: boolean;
   frequenceJours?: number;
-  type: "Fixe" | "Variable";
+  type: "Fixe" | "Variable" | "Entrée";
   dateFixe?: string;
   payee?: boolean;
   repeteChaqueMois?: boolean;
@@ -71,7 +72,7 @@ export type SnapshotEnveloppe = {
   depense: number;
   budget: number;
   couleur: string;
-  type: "Fixe" | "Variable";
+  type: "Fixe" | "Variable" | "Entrée";
 };
 
 export type SnapshotObjectif = {
@@ -101,6 +102,7 @@ type EtatStore = {
   enveloppes: Enveloppe[];
   argentDisponible: number;
   argentDisponibleRecurrent: boolean;
+  argentDisponibleReportAuto: boolean;
   prenom: string;
   notificationsActives: boolean;
   transactions: Transaction[];
@@ -117,6 +119,7 @@ let etat: EtatStore = {
   enveloppes: [],
   argentDisponible: 0,
   argentDisponibleRecurrent: false,
+  argentDisponibleReportAuto: false,
   prenom: "",
   notificationsActives: true,
   transactions: TRANSACTIONS_INIT,
@@ -154,7 +157,7 @@ type EnveloppeRow = {
   couleur: string;
   recurrente: boolean;
   frequence_jours: number | null;
-  type: "Fixe" | "Variable";
+  type: "Fixe" | "Variable" | "Entrée";
   date_fixe: string | null;
   payee: boolean | null;
   repete_chaque_mois: boolean | null;
@@ -263,6 +266,7 @@ type ObjectifRow = {
   dernier_versement_mois: number | null;
   dernier_versement_annee: number | null;
   contribution_mois: number | null;
+  ferme: boolean | null;
 };
 
 function objectifDepuisLigne(l: ObjectifRow): Objectif {
@@ -280,6 +284,7 @@ function objectifDepuisLigne(l: ObjectifRow): Objectif {
         ? { mois: l.dernier_versement_mois, annee: l.dernier_versement_annee }
         : null,
     contributionMois: l.contribution_mois ?? 0,
+    ferme: l.ferme ?? undefined,
   };
 }
 
@@ -295,6 +300,7 @@ function objectifVersColonnes(o: Omit<Objectif, "id">) {
     dernier_versement_mois: o.dernierVersement?.mois ?? null,
     dernier_versement_annee: o.dernierVersement?.annee ?? null,
     contribution_mois: o.contributionMois ?? 0,
+    ferme: o.ferme ?? false,
   };
 }
 
@@ -652,8 +658,18 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
   }));
   const epargne = etat.epargneMois;
   const disponible = etat.argentDisponible;
-  const totalDepense =
-    etat.enveloppes.reduce((acc, e) => acc + e.depense, 0) + etat.epargneMois;
+  const enveloppesSansEntree = etat.enveloppes.filter(
+    (e) => e.type !== "Entrée",
+  );
+  const enveloppesEntree = etat.enveloppes.filter(
+    (e) => e.type === "Entrée",
+  );
+  const depenseReelle = enveloppesSansEntree.reduce(
+    (acc, e) => acc + e.depense,
+    0,
+  );
+  const entreeRecue = enveloppesEntree.reduce((acc, e) => acc + e.depense, 0);
+  const totalDepense = depenseReelle + etat.epargneMois;
 
   const enveloppesMaj = etat.enveloppes.map((e) => ({
     ...e,
@@ -687,7 +703,10 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     contributionMois: 0,
   }));
 
-  const nouveauDisponible = etat.argentDisponibleRecurrent ? disponible : 0;
+  const resteReel = disponible + entreeRecue - depenseReelle - epargne;
+  const baseRecurrente = etat.argentDisponibleRecurrent ? disponible : 0;
+  const report = etat.argentDisponibleReportAuto ? resteReel : 0;
+  const nouveauDisponible = baseRecurrente + report;
 
   setEtat({
     historiquesMois: [...etat.historiquesMois, snapshot],
@@ -701,7 +720,11 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
   majEpargneMoisSupabase(0);
   majDernierMoisArchiveSupabase(mois, annee);
   if (nouveauDisponible !== disponible) {
-    majArgentDisponibleSupabase(nouveauDisponible, etat.argentDisponibleRecurrent);
+    majArgentDisponibleSupabase(
+      nouveauDisponible,
+      etat.argentDisponibleRecurrent,
+      etat.argentDisponibleReportAuto,
+    );
   }
   objectifsMaj.forEach((o) => {
     majObjectifSupabase(o.id, { contribution_mois: 0 });
@@ -746,6 +769,10 @@ function verifierEvenementsFinanciersInterne() {
     if (!e.estFinancier || !e.montant) return false;
     if (!e.categorieLiee || e.categorieLiee === "Aucune") return false;
     if (e.montantApplique) return false;
+    const enveloppeLiee = etat.enveloppes.find(
+      (env) => env.nom === e.categorieLiee,
+    );
+    if (enveloppeLiee?.type === "Entrée") return false;
     const dateEvenement = new Date(e.date);
     dateEvenement.setHours(0, 0, 0, 0);
     return dateEvenement <= aujourdhui;
@@ -823,7 +850,17 @@ async function verifierEcheancesFixesInterne() {
           payee: true,
         };
       }
+      return env;
     }
+
+    if (env.type === "Entrée" && env.dateFixe && !env.payee) {
+      const dateEcheance = new Date(env.dateFixe);
+      dateEcheance.setHours(0, 0, 0, 0);
+      if (dateEcheance <= aujourdhui) {
+        return { ...env, depense: env.budget, payee: true };
+      }
+    }
+
     return env;
   });
 
@@ -859,12 +896,20 @@ function majEpargneMoisSupabase(montant: number) {
   });
 }
 
-function majArgentDisponibleSupabase(montant: number, recurrent: boolean) {
+function majArgentDisponibleSupabase(
+  montant: number,
+  recurrent: boolean,
+  reportAuto: boolean,
+) {
   supabase.auth.getUser().then(({ data: { user } }) => {
     if (!user) return;
     supabase
       .from("profils")
-      .update({ argent_disponible: montant, argent_disponible_recurrent: recurrent })
+      .update({
+        argent_disponible: montant,
+        argent_disponible_recurrent: recurrent,
+        argent_disponible_report_auto: reportAuto,
+      })
       .eq("user_id", user.id)
       .then(({ error }) => {
         if (error) {
@@ -933,6 +978,7 @@ export function useObjectifs() {
     enveloppes: local.enveloppes,
     argentDisponible: local.argentDisponible,
     argentDisponibleRecurrent: local.argentDisponibleRecurrent,
+    argentDisponibleReportAuto: local.argentDisponibleReportAuto,
     prenom: local.prenom,
     notificationsActives: local.notificationsActives,
     transactions: local.transactions,
@@ -1032,7 +1078,7 @@ export function useObjectifs() {
             supabase
               .from("profils")
               .select(
-                "epargne_mois, argent_disponible, argent_disponible_recurrent, prenom, notifications_actives, dernier_mois_archive_mois, dernier_mois_archive_annee",
+                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, prenom, notifications_actives, dernier_mois_archive_mois, dernier_mois_archive_annee",
               )
               .eq("user_id", user.id)
               .single(),
@@ -1070,6 +1116,9 @@ export function useObjectifs() {
           argentDisponibleRecurrent:
             profil?.argent_disponible_recurrent ??
             etat.argentDisponibleRecurrent,
+          argentDisponibleReportAuto:
+            profil?.argent_disponible_report_auto ??
+            etat.argentDisponibleReportAuto,
           prenom: profil?.prenom ?? etat.prenom,
           notificationsActives:
             profil?.notifications_actives ?? etat.notificationsActives,
@@ -1412,6 +1461,7 @@ export function useObjectifs() {
           o.dernierVersement?.mois === moisActuel &&
           o.dernierVersement?.annee === anneeActuelle;
         if (
+          !o.ferme &&
           o.recurrent &&
           o.montantMensuel &&
           o.jourDuMois &&
@@ -1464,6 +1514,15 @@ export function useObjectifs() {
             );
           }
         });
+    },
+
+    cloturerObjectif: (id: string) => {
+      setEtat({
+        objectifs: etat.objectifs.map((o) =>
+          o.id === id ? { ...o, ferme: true } : o,
+        ),
+      });
+      majObjectifSupabase(id, { ferme: true });
     },
 
     modifierEnveloppes: (enveloppes: Enveloppe[]) => {
@@ -1527,9 +1586,17 @@ export function useObjectifs() {
       }
     },
 
-    modifierArgentDisponible: (montant: number, recurrent: boolean) => {
-      setEtat({ argentDisponible: montant, argentDisponibleRecurrent: recurrent });
-      majArgentDisponibleSupabase(montant, recurrent);
+    modifierArgentDisponible: (
+      montant: number,
+      recurrent: boolean,
+      reportAuto: boolean,
+    ) => {
+      setEtat({
+        argentDisponible: montant,
+        argentDisponibleRecurrent: recurrent,
+        argentDisponibleReportAuto: reportAuto,
+      });
+      majArgentDisponibleSupabase(montant, recurrent, reportAuto);
     },
 
     modifierPrenom: (prenom: string) => {

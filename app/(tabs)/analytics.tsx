@@ -183,18 +183,22 @@ export default function Analytics() {
     enveloppeIds?: string[],
   ) => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
-      const envsFiltrees = enveloppeIds
-        ? objStore.enveloppes.filter((e) => enveloppeIds.includes(e.id))
-        : objStore.enveloppes;
+      const envsFiltrees = (
+        enveloppeIds
+          ? objStore.enveloppes.filter((e) => enveloppeIds.includes(e.id))
+          : objStore.enveloppes
+      ).filter((e) => e.type !== "Entrée");
       return envsFiltrees.reduce((acc, e) => acc + e.depense, 0);
     }
     const snap = objStore.historiquesMois.find(
       (s) => s.mois === mois && s.annee === annee,
     );
     if (!snap) return null;
-    const envsFiltrees = enveloppeIds
-      ? snap.enveloppes.filter((e) => enveloppeIds.includes(e.id))
-      : snap.enveloppes;
+    const envsFiltrees = (
+      enveloppeIds
+        ? snap.enveloppes.filter((e) => enveloppeIds.includes(e.id))
+        : snap.enveloppes
+    ).filter((e) => e.type !== "Entrée");
     return envsFiltrees.reduce((acc, e) => acc + e.depense, 0);
   };
 
@@ -204,18 +208,22 @@ export default function Analytics() {
     enveloppeIds?: string[],
   ) => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
-      const envsFiltrees = enveloppeIds
-        ? objStore.enveloppes.filter((e) => enveloppeIds.includes(e.id))
-        : objStore.enveloppes;
+      const envsFiltrees = (
+        enveloppeIds
+          ? objStore.enveloppes.filter((e) => enveloppeIds.includes(e.id))
+          : objStore.enveloppes
+      ).filter((e) => e.type !== "Entrée");
       return envsFiltrees.reduce((acc, e) => acc + e.budget, 0);
     }
     const snap = objStore.historiquesMois.find(
       (s) => s.mois === mois && s.annee === annee,
     );
     if (!snap) return null;
-    const envsFiltrees = enveloppeIds
-      ? snap.enveloppes.filter((e) => enveloppeIds.includes(e.id))
-      : snap.enveloppes;
+    const envsFiltrees = (
+      enveloppeIds
+        ? snap.enveloppes.filter((e) => enveloppeIds.includes(e.id))
+        : snap.enveloppes
+    ).filter((e) => e.type !== "Entrée");
     return envsFiltrees.reduce((acc, e) => acc + e.budget, 0);
   };
 
@@ -310,7 +318,7 @@ export default function Analytics() {
   moisAffiches.forEach(({ mois, annee }) => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
       objStore.enveloppes.forEach((e) => {
-        if (e.depense > 0)
+        if (e.type !== "Entrée" && e.depense > 0)
           topDepenses.push({
             nom: e.nom,
             montant: e.depense,
@@ -323,7 +331,7 @@ export default function Analytics() {
         (s) => s.mois === mois && s.annee === annee,
       );
       snap?.enveloppes.forEach((e) => {
-        if (e.depense > 0)
+        if (e.type !== "Entrée" && e.depense > 0)
           topDepenses.push({
             nom: e.nom,
             montant: e.depense,

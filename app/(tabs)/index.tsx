@@ -31,6 +31,12 @@ function dateVersISO(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function formaterDateLongue(dateISO: string): string {
+  const d = new Date(dateISO);
+  if (Number.isNaN(d.getTime())) return dateISO;
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+}
+
 function DonutChart({
   data,
   couleurs: C,
@@ -138,13 +144,20 @@ export default function Dashboard() {
   useEffect(() => {
     setArgentDisponibleLocal(String(objStore.argentDisponible));
   }, [objStore.argentDisponible]);
-  const setArgentDisponible = (val: string, recurrent: boolean) => {
+  const setArgentDisponible = (
+    val: string,
+    recurrent: boolean,
+    reportAuto: boolean,
+  ) => {
     setArgentDisponibleLocal(val);
-    objStore.modifierArgentDisponible(parseFloat(val) || 0, recurrent);
+    objStore.modifierArgentDisponible(parseFloat(val) || 0, recurrent, reportAuto);
   };
   const [editionDisponible, setEditionDisponible] = useState(false);
   const [disponibleRecurrentTemp, setDisponibleRecurrentTemp] = useState(
     objStore.argentDisponibleRecurrent,
+  );
+  const [disponibleReportTemp, setDisponibleReportTemp] = useState(
+    objStore.argentDisponibleReportAuto,
   );
   const maintenant = new Date();
   const moisActuelLabel = maintenant.toLocaleDateString("fr-FR", {
@@ -160,7 +173,9 @@ export default function Dashboard() {
   const [budgetTemp, setBudgetTemp] = useState("");
   const [couleurTemp, setCouleurTemp] = useState(PALETTE_COULEURS[0]);
   const [paletteOuverteTemp, setPaletteOuverteTemp] = useState(false);
-  const [typeTemp, setTypeTemp] = useState<"Variable" | "Fixe">("Variable");
+  const [typeTemp, setTypeTemp] = useState<"Variable" | "Fixe" | "Entrée">(
+    "Variable",
+  );
   const [recurrenteTemp, setRecurrenteTemp] = useState(false);
   const [dateTemp, setDateTemp] = useState(dateVersISO(new Date()));
   const [repeteChaqueMoisTemp, setRepeteChaqueMoisTemp] = useState(false);
@@ -171,9 +186,9 @@ export default function Dashboard() {
   const [nouveauBudget, setNouveauBudget] = useState("");
   const [nouvelleCouleur, setNouvelleCouleur] = useState(PALETTE_COULEURS[0]);
   const [paletteOuverteNouvelle, setPaletteOuverteNouvelle] = useState(false);
-  const [nouveauType, setNouveauType] = useState<"Variable" | "Fixe">(
-    "Variable",
-  );
+  const [nouveauType, setNouveauType] = useState<
+    "Variable" | "Fixe" | "Entrée"
+  >("Variable");
   const [estRecurrente, setEstRecurrente] = useState(false);
   const [nouvelleDate, setNouvelleDate] = useState(dateVersISO(new Date()));
   const [nouveauRepeteChaqueMois, setNouveauRepeteChaqueMois] = useState(false);
@@ -198,12 +213,38 @@ export default function Dashboard() {
   const [montantAjoutObjectif, setMontantAjoutObjectif] = useState("");
   const [sauvegardeObjectifEnCours, setSauvegardeObjectifEnCours] =
     useState(false);
+  const [objectifsCloturesOuvert, setObjectifsCloturesOuvert] =
+    useState(false);
 
-  const totalDepenseEnveloppes = enveloppes.reduce(
+  const enveloppesSansEntree = enveloppes.filter((e) => e.type !== "Entrée");
+  const enveloppesEntree = enveloppes.filter((e) => e.type === "Entrée");
+  const totalDepenseEnveloppes = enveloppesSansEntree.reduce(
     (acc, e) => acc + e.depense,
     0,
   );
+  const totalEntreeRecue = enveloppesEntree.reduce(
+    (acc, e) => acc + e.depense,
+    0,
+  );
+  const totalEntreePrevue = enveloppesEntree.reduce(
+    (acc, e) => acc + Math.max(0, e.budget - e.depense),
+    0,
+  );
   const totalDepense = totalDepenseEnveloppes + objStore.epargneMois;
+
+  const derniereEntreeRecue = enveloppesEntree
+    .filter((e) => {
+      if (!e.payee || !e.dateFixe) return false;
+      const d = new Date(e.dateFixe);
+      return (
+        d.getMonth() === maintenant.getMonth() &&
+        d.getFullYear() === maintenant.getFullYear()
+      );
+    })
+    .sort(
+      (a, b) =>
+        new Date(b.dateFixe!).getTime() - new Date(a.dateFixe!).getTime(),
+    )[0];
 
   const depensesNonCategorisees = objStore.evenements
     .filter((e) => e.estFinancier && e.montant)
@@ -222,38 +263,45 @@ export default function Dashboard() {
     .reduce((acc, e) => acc + (e.montant ?? 0), 0);
 
   const disponibleNum = parseFloat(argentDisponible) || 0;
+  const disponibleEffectif = disponibleNum + totalEntreeRecue + totalEntreePrevue;
   const pctUtilise =
-    disponibleNum > 0
-      ? Math.min((totalDepenseEnveloppes / disponibleNum) * 100, 100)
+    disponibleEffectif > 0
+      ? Math.min((totalDepenseEnveloppes / disponibleEffectif) * 100, 100)
       : 0;
   const pctEpargne =
-    disponibleNum > 0
-      ? Math.min((objStore.epargneMois / disponibleNum) * 100, 100)
+    disponibleEffectif > 0
+      ? Math.min((objStore.epargneMois / disponibleEffectif) * 100, 100)
+      : 0;
+  const pctEntreeRecue =
+    disponibleEffectif > 0
+      ? Math.min((totalEntreeRecue / disponibleEffectif) * 100, 100)
       : 0;
 
-  const totalPrevu = enveloppes.reduce(
+  const totalPrevu = enveloppesSansEntree.reduce(
     (acc, e) => acc + Math.max(0, e.budget - e.depense),
     0,
   );
   const resteEstime =
-    disponibleNum - totalDepenseEnveloppes - totalPrevu - objStore.epargneMois;
+    disponibleEffectif - totalDepenseEnveloppes - totalPrevu - objStore.epargneMois;
   const pctDepenseEstime =
-    disponibleNum > 0
-      ? Math.min((totalDepenseEnveloppes / disponibleNum) * 100, 100)
+    disponibleEffectif > 0
+      ? Math.min((totalDepenseEnveloppes / disponibleEffectif) * 100, 100)
       : 0;
   const pctPrevuEstime =
-    disponibleNum > 0
-      ? Math.min((totalPrevu / disponibleNum) * 100, 100 - pctDepenseEstime)
+    disponibleEffectif > 0
+      ? Math.min((totalPrevu / disponibleEffectif) * 100, 100 - pctDepenseEstime)
       : 0;
   const pctEpargneEstime =
-    disponibleNum > 0
+    disponibleEffectif > 0
       ? Math.min(
-          (objStore.epargneMois / disponibleNum) * 100,
+          (objStore.epargneMois / disponibleEffectif) * 100,
           100 - pctDepenseEstime - pctPrevuEstime,
         )
       : 0;
 
-  const objectifsAvecContribution = objStore.objectifs.filter(
+  const objectifsActifs = objStore.objectifs.filter((o) => !o.ferme);
+  const objectifsClotures = objStore.objectifs.filter((o) => o.ferme);
+  const objectifsAvecContribution = objectifsActifs.filter(
     (o) => o.contributionMois > 0,
   );
   const contributionObjectifsTotal = objectifsAvecContribution.reduce(
@@ -301,10 +349,16 @@ export default function Dashboard() {
     acc.push({ ...s, pct, left });
     return acc;
   }, []);
+  const finSegmentsEpargne =
+    segmentsEpargnePositionnes.length > 0
+      ? segmentsEpargnePositionnes[segmentsEpargnePositionnes.length - 1]
+          .left +
+        segmentsEpargnePositionnes[segmentsEpargnePositionnes.length - 1].pct
+      : pctUtilise;
   const lecture =
     resteEstime < 0
       ? { texte: "Risque de dépassement", couleurTexte: "#FFD2D2" }
-      : resteEstime < disponibleNum * 0.15
+      : resteEstime < disponibleEffectif * 0.15
         ? { texte: "Tu es proche de la limite", couleurTexte: "#FFE0C2" }
         : {
             texte: "Tu devrais rester dans ton budget",
@@ -336,10 +390,13 @@ export default function Dashboard() {
               budget: parseFloat(budgetTemp) || 0,
               couleur: couleurTemp,
               type: typeTemp,
-              recurrente: typeTemp === "Variable" ? recurrenteTemp : false,
+              recurrente: typeTemp !== "Fixe" ? recurrenteTemp : false,
               frequenceJours:
-                typeTemp === "Variable" && recurrenteTemp ? 30 : undefined,
-              dateFixe: typeTemp === "Fixe" ? dateTemp : undefined,
+                typeTemp !== "Fixe" && recurrenteTemp ? 30 : undefined,
+              dateFixe:
+                typeTemp === "Fixe" || typeTemp === "Entrée"
+                  ? dateTemp
+                  : undefined,
               payee: typeTemp === "Fixe" ? (e.payee ?? false) : undefined,
               repeteChaqueMois:
                 typeTemp === "Fixe" ? repeteChaqueMoisTemp : undefined,
@@ -381,10 +438,13 @@ export default function Dashboard() {
       budget: parseFloat(nouveauBudget),
       couleur: nouvelleCouleur,
       type: nouveauType,
-      recurrente: nouveauType === "Variable" ? estRecurrente : false,
+      recurrente: nouveauType !== "Fixe" ? estRecurrente : false,
       frequenceJours:
-        nouveauType === "Variable" && estRecurrente ? 30 : undefined,
-      dateFixe: nouveauType === "Fixe" ? nouvelleDate : undefined,
+        nouveauType !== "Fixe" && estRecurrente ? 30 : undefined,
+      dateFixe:
+        nouveauType === "Fixe" || nouveauType === "Entrée"
+          ? nouvelleDate
+          : undefined,
       payee: nouveauType === "Fixe" ? false : undefined,
       repeteChaqueMois:
         nouveauType === "Fixe" ? nouveauRepeteChaqueMois : undefined,
@@ -406,7 +466,7 @@ export default function Dashboard() {
   };
 
   const sauvegarderDisponible = () => {
-    setArgentDisponible(disponibleTemp, disponibleRecurrentTemp);
+    setArgentDisponible(disponibleTemp, disponibleRecurrentTemp, disponibleReportTemp);
     setEditionDisponible(false);
   };
 
@@ -610,6 +670,18 @@ export default function Dashboard() {
                 ]}
               />
             ))}
+            {totalEntreeRecue > 0 && (
+              <View
+                style={[
+                  styles.barFillEpargne,
+                  {
+                    width: `${pctEntreeRecue}%`,
+                    left: `${finSegmentsEpargne}%`,
+                    backgroundColor: C.vert,
+                  },
+                ]}
+              />
+            )}
           </View>
           <View style={styles.heroLegende}>
             <View style={styles.heroLegendeItem}>
@@ -646,6 +718,24 @@ export default function Dashboard() {
                 </Text>
               </View>
             ))}
+            {totalEntreeRecue > 0 && (
+              <View style={styles.heroLegendeItem}>
+                <View
+                  style={[styles.heroLegendeDot, { backgroundColor: C.vert }]}
+                />
+                <Text
+                  style={[
+                    styles.heroSub,
+                    {
+                      color:
+                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                    },
+                  ]}
+                >
+                  Revenus {totalEntreeRecue} €
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -726,6 +816,14 @@ export default function Dashboard() {
                 />
               );
             })}
+            {totalEntreeRecue > 0 && (
+              <View
+                style={[
+                  styles.barSegment,
+                  { width: `${pctEntreeRecue}%`, backgroundColor: C.vert },
+                ]}
+              />
+            )}
           </View>
           <View style={styles.heroLegende}>
             <View style={styles.heroLegendeItem}>
@@ -778,6 +876,24 @@ export default function Dashboard() {
                 </Text>
               </View>
             ))}
+            {totalEntreeRecue > 0 && (
+              <View style={styles.heroLegendeItem}>
+                <View
+                  style={[styles.heroLegendeDot, { backgroundColor: C.vert }]}
+                />
+                <Text
+                  style={[
+                    styles.heroSub,
+                    {
+                      color:
+                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                    },
+                  ]}
+                >
+                  Revenus {totalEntreeRecue}€
+                </Text>
+              </View>
+            )}
           </View>
 
           <View
@@ -823,6 +939,7 @@ export default function Dashboard() {
             onPress={() => {
               setDisponibleTemp(disponibleNum === 0 ? "" : argentDisponible);
               setDisponibleRecurrentTemp(objStore.argentDisponibleRecurrent);
+              setDisponibleReportTemp(objStore.argentDisponibleReportAuto);
               setEditionDisponible(true);
             }}
           >
@@ -849,6 +966,12 @@ export default function Dashboard() {
             >
               {disponibleNum} €
             </Text>
+            {derniereEntreeRecue && (
+              <Text style={[styles.statImpactTexte, { color: C.vertText }]}>
+                +{derniereEntreeRecue.budget}€ grâce à {derniereEntreeRecue.nom}{" "}
+                le {formaterDateLongue(derniereEntreeRecue.dateFixe!)}
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -882,8 +1005,8 @@ export default function Dashboard() {
               Mis de côté ce mois
             </Text>
             <Text style={[styles.epargneSub, { color: C.texteMuted }]}>
-              {objStore.objectifs.length > 0
-                ? `${objStore.objectifs.length} objectif${objStore.objectifs.length > 1 ? "s" : ""} en cours`
+              {objectifsActifs.length > 0
+                ? `${objectifsActifs.length} objectif${objectifsActifs.length > 1 ? "s" : ""} en cours`
                 : "Créer un objectif d'épargne"}
             </Text>
           </View>
@@ -987,6 +1110,33 @@ export default function Dashboard() {
                         </View>
                       )}
                       {env.repeteChaqueMois && (
+                        <View
+                          style={[
+                            styles.recurrenceBadge,
+                            { backgroundColor: C.iconeBoutonFond },
+                          ]}
+                        >
+                          <Ionicons name="repeat" size={12} color={C.texte} />
+                        </View>
+                      )}
+                    </View>
+                  ) : env.type === "Entrée" ? (
+                    <View style={styles.badgesRow}>
+                      {env.dateFixe && (
+                        <View
+                          style={[
+                            styles.recurrenceBadge,
+                            { backgroundColor: C.vertLight },
+                          ]}
+                        >
+                          <Ionicons
+                            name="calendar-outline"
+                            size={12}
+                            color={C.vertText}
+                          />
+                        </View>
+                      )}
+                      {env.recurrente && (
                         <View
                           style={[
                             styles.recurrenceBadge,
@@ -1132,7 +1282,7 @@ export default function Dashboard() {
                 <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
               </View>
               <View style={styles.switchRow}>
-                <View>
+                <View style={styles.switchRowLabel}>
                   <Text style={[styles.switchLabel, { color: C.texte }]}>
                     Répéter ce montant chaque mois
                   </Text>
@@ -1145,6 +1295,24 @@ export default function Dashboard() {
                   onValueChange={setDisponibleRecurrentTemp}
                   trackColor={{ false: C.separateur, true: C.purpleLight }}
                   thumbColor={disponibleRecurrentTemp ? C.purple : "#FFF"}
+                />
+              </View>
+              <View style={styles.switchRow}>
+                <View style={styles.switchRowLabel}>
+                  <Text style={[styles.switchLabel, { color: C.texte }]}>
+                    Reporter le reste non dépensé au mois prochain
+                  </Text>
+                  <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                    Ce qu&apos;il reste une fois les dépenses et
+                    l&apos;épargne déduites s&apos;ajoute au Disponible du
+                    mois suivant, en plus du montant récurrent éventuel.
+                  </Text>
+                </View>
+                <Switch
+                  value={disponibleReportTemp}
+                  onValueChange={setDisponibleReportTemp}
+                  trackColor={{ false: C.separateur, true: C.purpleLight }}
+                  thumbColor={disponibleReportTemp ? C.purple : "#FFF"}
                 />
               </View>
               <TouchableOpacity
@@ -1241,6 +1409,25 @@ export default function Dashboard() {
                       Fixe
                     </Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.typeChip,
+                      { backgroundColor: C.fondSecondaire },
+                      typeTemp === "Entrée" && { backgroundColor: C.vert },
+                    ]}
+                    onPress={() => setTypeTemp("Entrée")}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.typeChipTexte,
+                        { color: C.texteMuted },
+                        typeTemp === "Entrée" && styles.typeChipTexteActif,
+                      ]}
+                    >
+                      Entrée d&apos;argent
+                    </Text>
+                  </TouchableOpacity>
                 </View>
 
                 <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Budget de la catégorie</Text>
@@ -1293,7 +1480,7 @@ export default function Dashboard() {
                   />
                 )}
 
-                {typeTemp === "Variable" ? (
+                {typeTemp !== "Fixe" && (
                   <View style={styles.switchRow}>
                     <View>
                       <Text style={[styles.switchLabel, { color: C.texte }]}>Récurrente</Text>
@@ -1308,7 +1495,35 @@ export default function Dashboard() {
                       thumbColor={recurrenteTemp ? C.purple : "#FFF"}
                     />
                   </View>
-                ) : (
+                )}
+
+                {typeTemp === "Entrée" && (
+                  <>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Date prévue</Text>
+                    <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
+                      <Calendar
+                        current={dateTemp}
+                        onDayPress={(day) => setDateTemp(day.dateString)}
+                        markedDates={{
+                          [dateTemp]: { selected: true, selectedColor: C.vert },
+                        }}
+                        theme={{
+                          calendarBackground: C.carte,
+                          dayTextColor: C.texte,
+                          monthTextColor: C.texte,
+                          textDisabledColor: C.texteMuted,
+                          textSectionTitleColor: C.texteMuted,
+                          selectedDayTextColor: "#FFFFFF",
+                          selectedDayBackgroundColor: C.vert,
+                          todayTextColor: C.vert,
+                          arrowColor: C.vert,
+                        }}
+                      />
+                    </View>
+                  </>
+                )}
+
+                {typeTemp === "Fixe" && (
                   <>
                     <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Date de paiement</Text>
                     <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
@@ -1470,11 +1685,32 @@ export default function Dashboard() {
                       Fixe
                     </Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.typeChip,
+                      { backgroundColor: C.fondSecondaire },
+                      nouveauType === "Entrée" && { backgroundColor: C.vert },
+                    ]}
+                    onPress={() => setNouveauType("Entrée")}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.typeChipTexte,
+                        { color: C.texteMuted },
+                        nouveauType === "Entrée" && styles.typeChipTexteActif,
+                      ]}
+                    >
+                      Entrée d&apos;argent
+                    </Text>
+                  </TouchableOpacity>
                 </View>
                 <Text style={[styles.modalAide, { color: C.texteMuted }]}>
                   {nouveauType === "Variable"
                     ? "Une dépense courante comme Courses ou Loisirs"
-                    : "Une dépense payée à une date précise, ponctuelle ou chaque mois"}
+                    : nouveauType === "Fixe"
+                      ? "Une dépense payée à une date précise, ponctuelle ou chaque mois"
+                      : "Une entrée d'argent qui s'ajoute à ton Disponible, comme un salaire ou un remboursement"}
                 </Text>
 
                 <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Budget mensuel</Text>
@@ -1531,7 +1767,7 @@ export default function Dashboard() {
                   />
                 )}
 
-                {nouveauType === "Variable" ? (
+                {nouveauType !== "Fixe" && (
                   <View style={styles.switchRow}>
                     <View>
                       <Text style={[styles.switchLabel, { color: C.texte }]}>Récurrente</Text>
@@ -1546,7 +1782,38 @@ export default function Dashboard() {
                       thumbColor={estRecurrente ? C.purple : "#FFF"}
                     />
                   </View>
-                ) : (
+                )}
+
+                {nouveauType === "Entrée" && (
+                  <>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Date prévue</Text>
+                    <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
+                      <Calendar
+                        current={nouvelleDate}
+                        onDayPress={(day) => setNouvelleDate(day.dateString)}
+                        markedDates={{
+                          [nouvelleDate]: {
+                            selected: true,
+                            selectedColor: C.vert,
+                          },
+                        }}
+                        theme={{
+                          calendarBackground: C.carte,
+                          dayTextColor: C.texte,
+                          monthTextColor: C.texte,
+                          textDisabledColor: C.texteMuted,
+                          textSectionTitleColor: C.texteMuted,
+                          selectedDayTextColor: "#FFFFFF",
+                          selectedDayBackgroundColor: C.vert,
+                          todayTextColor: C.vert,
+                          arrowColor: C.vert,
+                        }}
+                      />
+                    </View>
+                  </>
+                )}
+
+                {nouveauType === "Fixe" && (
                   <>
                     <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Date de paiement</Text>
                     <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
@@ -1707,16 +1974,17 @@ export default function Dashboard() {
                     >
                       TES OBJECTIFS
                     </Text>
-                    {objStore.objectifs.length === 0 && (
+                    {objectifsActifs.length === 0 && (
                       <Text style={[styles.modalVideTexte, { color: C.texteMuted }]}>
                         Aucun objectif pour le moment
                       </Text>
                     )}
-                    {objStore.objectifs.map((obj) => {
+                    {objectifsActifs.map((obj) => {
                       const pct =
                         obj.cible > 0
                           ? Math.min((obj.actuel / obj.cible) * 100, 100)
                           : 0;
+                      const atteint = obj.actuel >= obj.cible && obj.cible > 0;
                       return (
                         <TouchableOpacity
                           key={obj.id}
@@ -1731,6 +1999,23 @@ export default function Dashboard() {
                               </Text>
                               {obj.recurrent && (
                                 <Ionicons name="repeat" size={13} color={C.texteMuted} />
+                              )}
+                              {atteint && (
+                                <View
+                                  style={[
+                                    styles.badgeAtteint,
+                                    { backgroundColor: C.vertLight },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.badgeAtteintTexte,
+                                      { color: C.vertText },
+                                    ]}
+                                  >
+                                    Atteint
+                                  </Text>
+                                </View>
                               )}
                             </View>
                             <TouchableOpacity
@@ -1761,6 +2046,71 @@ export default function Dashboard() {
                         </TouchableOpacity>
                       );
                     })}
+
+                    {objectifsClotures.length > 0 && (
+                      <View style={{ marginBottom: 12 }}>
+                        <TouchableOpacity
+                          style={[
+                            styles.couleurTiroirBouton,
+                            { backgroundColor: C.fondSecondaire },
+                          ]}
+                          onPress={() =>
+                            setObjectifsCloturesOuvert(!objectifsCloturesOuvert)
+                          }
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.couleurTiroirTexte, { color: C.texte }]}>
+                            Objectifs clôturés ({objectifsClotures.length})
+                          </Text>
+                          <Text style={[styles.couleurChevron, { color: C.texteMuted }]}>
+                            {objectifsCloturesOuvert ? "▾" : "▸"}
+                          </Text>
+                        </TouchableOpacity>
+                        {objectifsCloturesOuvert &&
+                          objectifsClotures.map((obj) => {
+                            const pct =
+                              obj.cible > 0
+                                ? Math.min((obj.actuel / obj.cible) * 100, 100)
+                                : 0;
+                            return (
+                              <View
+                                key={obj.id}
+                                style={[
+                                  styles.objectifModalItem,
+                                  { backgroundColor: C.fondSecondaire, opacity: 0.7 },
+                                ]}
+                              >
+                                <View style={styles.objectifModalHeader}>
+                                  <Text style={[styles.objectifModalNom, { color: C.texte }]}>
+                                    {obj.nom}
+                                  </Text>
+                                  <TouchableOpacity
+                                    onPress={() => objStore.supprimerObjectif(obj.id)}
+                                  >
+                                    <Text style={[styles.objectifSupprimer, { color: C.texteMuted }]}>✕</Text>
+                                  </TouchableOpacity>
+                                </View>
+                                <Text
+                                  style={[
+                                    styles.objectifModalMontant,
+                                    { color: obj.couleur },
+                                  ]}
+                                >
+                                  {obj.actuel} € / {obj.cible} €
+                                </Text>
+                                <View style={[styles.catBarBg, { backgroundColor: C.separateur }]}>
+                                  <View
+                                    style={[
+                                      styles.catBarFill,
+                                      { width: `${pct}%`, backgroundColor: obj.couleur },
+                                    ]}
+                                  />
+                                </View>
+                              </View>
+                            );
+                          })}
+                      </View>
+                    )}
 
                     <TouchableOpacity
                       style={styles.btnNouvelObjectifBouton}
@@ -2043,6 +2393,26 @@ export default function Dashboard() {
                         </Text>
                       )}
                     </TouchableOpacity>
+                    {objectifEnEdition &&
+                      !objectifEnEdition.ferme &&
+                      objectifEnEdition.actuel >= objectifEnEdition.cible &&
+                      objectifEnEdition.cible > 0 && (
+                        <TouchableOpacity
+                          style={[
+                            styles.btnAjouter,
+                            { backgroundColor: C.vert },
+                          ]}
+                          onPress={() => {
+                            objStore.cloturerObjectif(objectifEnEdition.id);
+                            setVueModal("liste");
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.btnAjouterTexte}>
+                            Clôturer cet objectif
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                     {objectifEnEdition && (
                       <TouchableOpacity
                         style={styles.btnSupprimerTexte}
@@ -2186,6 +2556,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   statValue: { fontSize: 19, fontWeight: "700" },
+  statImpactTexte: {
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+    marginTop: 4,
+  },
   epargneCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -2240,6 +2616,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  badgeAtteint: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 20 },
+  badgeAtteintTexte: { fontSize: 10, fontWeight: "700" },
   envMontant: { fontSize: 14, fontWeight: "700" },
   envBarBg: {
     height: 6,
@@ -2348,6 +2726,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     marginTop: 8,
   },
+  switchRowLabel: { flex: 1, marginRight: 12 },
   switchLabel: { fontSize: 16, fontWeight: "600" },
   switchSub: { fontSize: 13, marginTop: 2 },
   btnAjouter: {

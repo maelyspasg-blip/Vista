@@ -19,7 +19,7 @@ import {
   View,
 } from "react-native";
 import { useTheme } from "../ThemeContext";
-import { useObjectifs } from "../store";
+import { Enveloppe, useObjectifs } from "../store";
 
 const ACCESSORY_ID = "numericDone";
 
@@ -40,6 +40,7 @@ type LigneAVenir = {
   recurrenceLabel?: string;
   source: "envelope" | "evenement";
   categorie?: string;
+  estEntree?: boolean;
 };
 
 function dateVersISO(date: Date): string {
@@ -117,11 +118,24 @@ export default function Budget() {
   const categoriesAffichees = objStore.enveloppes.filter(
     (e) =>
       e.type === "Variable" ||
-      objStore.evenements.some((ev) => ev.categorieLiee === e.nom),
+      (e.type !== "Entrée" &&
+        objStore.evenements.some((ev) => ev.categorieLiee === e.nom)),
   );
 
   const enveloppesAVenir = objStore.enveloppes.filter((e) => {
     if (e.type !== "Fixe" || e.payee || !e.dateFixe) return false;
+    const d = new Date(e.dateFixe);
+    return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
+  });
+
+  const entreesRecues = objStore.enveloppes.filter((e) => {
+    if (e.type !== "Entrée" || !e.payee || !e.dateFixe) return false;
+    const d = new Date(e.dateFixe);
+    return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
+  });
+
+  const entreesAVenir = objStore.enveloppes.filter((e) => {
+    if (e.type !== "Entrée" || e.payee || !e.dateFixe) return false;
     const d = new Date(e.dateFixe);
     return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
   });
@@ -171,6 +185,16 @@ export default function Budget() {
       recurrenceLabel: env.repeteChaqueMois ? "tous les mois" : undefined,
       source: "envelope" as const,
     })),
+    ...entreesAVenir.map((env) => ({
+      id: env.id,
+      nom: env.nom,
+      montant: env.budget,
+      couleur: env.couleur,
+      date: env.dateFixe!,
+      recurrenceLabel: undefined,
+      source: "envelope" as const,
+      estEntree: true,
+    })),
     ...evenementsAVenir.map((e) => ({
       id: e.id,
       nom: e.nom,
@@ -192,22 +216,41 @@ export default function Budget() {
     })),
   ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const totalDepenses = objStore.enveloppes.reduce(
+  const enveloppesSansEntree = objStore.enveloppes.filter(
+    (e) => e.type !== "Entrée",
+  );
+  const enveloppesEntree = objStore.enveloppes.filter(
+    (e) => e.type === "Entrée",
+  );
+  const totalDepenses = enveloppesSansEntree.reduce(
     (acc, e) => acc + e.depense,
+    0,
+  );
+  const totalEntreeRecue = enveloppesEntree.reduce(
+    (acc, e) => acc + e.depense,
+    0,
+  );
+  const totalEntreePrevue = enveloppesEntree.reduce(
+    (acc, e) => acc + Math.max(0, e.budget - e.depense),
     0,
   );
   const totalEpargne = objStore.epargneMois;
   const totalReel = totalDepenses + totalEpargne;
-  const budgetTotal = objStore.argentDisponible;
+  const budgetTotal =
+    objStore.argentDisponible + totalEntreeRecue + totalEntreePrevue;
   const pctDepenses =
     budgetTotal > 0 ? Math.min((totalDepenses / budgetTotal) * 100, 100) : 0;
   const pctEpargne =
     budgetTotal > 0
       ? Math.min((totalEpargne / budgetTotal) * 100, 100 - pctDepenses)
       : 0;
+  const pctEntreeRecue =
+    budgetTotal > 0
+      ? Math.min((totalEntreeRecue / budgetTotal) * 100, 100)
+      : 0;
 
   const objectifsAvecContribution = objStore.objectifs.filter(
-    (o) => o.contributionMois > 0,
+    (o) => !o.ferme && o.contributionMois > 0,
   );
   const contributionObjectifsTotal = objectifsAvecContribution.reduce(
     (acc, o) => acc + o.contributionMois,
@@ -279,6 +322,219 @@ export default function Budget() {
     setEnveloppeOuverte(enveloppeOuverte === id ? null : id);
   };
 
+  const renderCarteCategorie = (env: Enveloppe) => {
+    const pct = Math.min((env.depense / env.budget) * 100, 100);
+    const estOuverte = enveloppeOuverte === env.id;
+
+    const lignesDepense: LigneDepense[] = [
+      ...objStore.transactions
+        .filter((t) => t.enveloppeId === env.id)
+        .map((t) => ({
+          id: t.id,
+          nom: t.nom,
+          montant: t.montant,
+          date: t.date,
+          source: "transaction" as const,
+        })),
+      ...objStore.evenements
+        .filter(
+          (e) =>
+            e.estFinancier &&
+            e.montantApplique &&
+            e.montant &&
+            e.categorieLiee === env.nom,
+        )
+        .map((e) => ({
+          id: e.id,
+          nom: e.nom,
+          montant: e.montant!,
+          date: e.date,
+          source: "evenement" as const,
+        })),
+    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    const lignesAVenirCategorie = objStore.evenements
+      .filter(
+        (e) =>
+          e.estFinancier &&
+          !e.montantApplique &&
+          e.montant &&
+          e.categorieLiee === env.nom,
+      )
+      .map((e) => ({
+        id: e.id,
+        nom: e.nom,
+        montant: e.montant!,
+        date: e.date,
+      }))
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    return (
+      <View
+        key={env.id}
+        style={[styles.envCard, { backgroundColor: env.couleur + "22" }]}
+      >
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => toggleEnveloppe(env.id)}
+        >
+          <View style={styles.envRow}>
+            <View style={styles.envNomRow}>
+              <View style={[styles.envDot, { backgroundColor: env.couleur }]} />
+              <Text style={[styles.envNom, { color: C.texte }]}>
+                {env.nom}
+              </Text>
+            </View>
+            <View style={styles.envRowRight}>
+              <Text style={[styles.envMontant, { color: env.couleur }]}>
+                {env.depense} € / {env.budget} €
+              </Text>
+              <Text style={[styles.chevron, { color: env.couleur }]}>
+                {estOuverte ? "▾" : "▸"}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.envBarBg, { backgroundColor: C.separateur }]}>
+            <View
+              style={[
+                styles.envBarFill,
+                { width: `${pct}%`, backgroundColor: env.couleur },
+              ]}
+            />
+          </View>
+        </TouchableOpacity>
+
+        {estOuverte && (
+          <View style={[styles.txListe, { borderTopColor: C.separateur }]}>
+            {lignesDepense.length === 0 && lignesAVenirCategorie.length === 0 ? (
+              <Text style={[styles.txVide, { color: C.texteMuted }]}>
+                Aucune dépense enregistrée
+              </Text>
+            ) : (
+              <>
+                {lignesDepense.map((ligne) => {
+                  const contenu = (
+                    <>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.txNom, { color: C.texte }]}>
+                          {ligne.nom}
+                        </Text>
+                        <Text style={[styles.txDate, { color: C.texteMuted }]}>
+                          {formaterDateCourte(ligne.date)}
+                        </Text>
+                      </View>
+                      <Text style={[styles.txMontant, { color: env.couleur }]}>
+                        - {ligne.montant} €
+                      </Text>
+                      {ligne.source === "transaction" && (
+                        <TouchableOpacity
+                          onPress={() =>
+                            objStore.supprimerTransaction(ligne.id)
+                          }
+                          style={styles.txSupprimer}
+                        >
+                          <Text
+                            style={[
+                              styles.txSupprimerTexte,
+                              { color: C.texteMuted },
+                            ]}
+                          >
+                            ✕
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  );
+
+                  if (ligne.source === "evenement") {
+                    return (
+                      <TouchableOpacity
+                        key={`evenement-${ligne.id}`}
+                        style={styles.txLigne}
+                        activeOpacity={0.6}
+                        onPress={() =>
+                          setGestionEvenement({
+                            id: ligne.id,
+                            nom: ligne.nom,
+                            date: ligne.date,
+                            categorie: env.nom,
+                          })
+                        }
+                      >
+                        {contenu}
+                      </TouchableOpacity>
+                    );
+                  }
+
+                  return (
+                    <View key={`transaction-${ligne.id}`} style={styles.txLigne}>
+                      {contenu}
+                    </View>
+                  );
+                })}
+                {lignesAVenirCategorie.map((ligne) => (
+                  <TouchableOpacity
+                    key={`avenir-${ligne.id}`}
+                    style={[styles.txLigne, { opacity: 0.6 }]}
+                    activeOpacity={0.6}
+                    onPress={() =>
+                      setGestionEvenement({
+                        id: ligne.id,
+                        nom: ligne.nom,
+                        date: ligne.date,
+                        categorie: env.nom,
+                      })
+                    }
+                  >
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.txNomAVenirRow}>
+                        <Text style={[styles.txNom, { color: C.texte }]}>
+                          {ligne.nom}
+                        </Text>
+                        <View
+                          style={[
+                            styles.badgeAVenir,
+                            { backgroundColor: C.bleuGrisLight },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.badgeAVenirTexte,
+                              { color: C.bleuGris },
+                            ]}
+                          >
+                            À venir
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.txDate, { color: C.texteMuted }]}>
+                        {formaterDateCourte(ligne.date)}
+                      </Text>
+                    </View>
+                    <Text style={[styles.txMontant, { color: env.couleur }]}>
+                      - {ligne.montant} €
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
+            {env.type === "Variable" && (
+              <TouchableOpacity
+                style={[styles.btnAjouterIci, { backgroundColor: env.couleur }]}
+                onPress={() => ouvrirAjout(env.id)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.btnAjouterIciTexte}>
+                  + Ajouter une dépense ici
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
       <View style={[styles.header, { backgroundColor: C.fondPage }]}>
@@ -346,8 +602,29 @@ export default function Budget() {
                 ]}
               />
             ))}
+            {totalEntreeRecue > 0 && (
+              <View
+                style={[
+                  styles.progressFillEpargne,
+                  {
+                    width: `${pctEntreeRecue}%`,
+                    left: `${
+                      segmentsEpargnePositionnes.length > 0
+                        ? segmentsEpargnePositionnes[
+                            segmentsEpargnePositionnes.length - 1
+                          ].left +
+                          segmentsEpargnePositionnes[
+                            segmentsEpargnePositionnes.length - 1
+                          ].pct
+                        : pctDepenses
+                    }%`,
+                    backgroundColor: C.vert,
+                  },
+                ]}
+              />
+            )}
           </View>
-          {totalEpargne > 0 && (
+          {(totalEpargne > 0 || totalEntreeRecue > 0) && (
             <View style={styles.heroLegende}>
               <View style={styles.heroLegendeItem}>
                 <View
@@ -370,6 +647,16 @@ export default function Budget() {
                   </Text>
                 </View>
               ))}
+              {totalEntreeRecue > 0 && (
+                <View style={styles.heroLegendeItem}>
+                  <View
+                    style={[styles.heroLegendeDot, { backgroundColor: C.vert }]}
+                  />
+                  <Text style={[styles.heroLegendeTexte, { color: C.texteMuted }]}>
+                    Revenus {totalEntreeRecue} €
+                  </Text>
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -425,79 +712,30 @@ export default function Budget() {
           </View>
         ))}
 
-        {categoriesAffichees.map((env) => {
-          const pct = Math.min((env.depense / env.budget) * 100, 100);
-          const estOuverte = enveloppeOuverte === env.id;
+        {categoriesAffichees.map(renderCarteCategorie)}
 
-          const lignesDepense: LigneDepense[] = [
-            ...objStore.transactions
-              .filter((t) => t.enveloppeId === env.id)
-              .map((t) => ({
-                id: t.id,
-                nom: t.nom,
-                montant: t.montant,
-                date: t.date,
-                source: "transaction" as const,
-              })),
-            ...objStore.evenements
-              .filter(
-                (e) =>
-                  e.estFinancier &&
-                  e.montantApplique &&
-                  e.montant &&
-                  e.categorieLiee === env.nom,
-              )
-              .map((e) => ({
-                id: e.id,
-                nom: e.nom,
-                montant: e.montant!,
-                date: e.date,
-                source: "evenement" as const,
-              })),
-          ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-          const lignesAVenirCategorie = objStore.evenements
-            .filter(
-              (e) =>
-                e.estFinancier &&
-                !e.montantApplique &&
-                e.montant &&
-                e.categorieLiee === env.nom,
-            )
-            .map((e) => ({
-              id: e.id,
-              nom: e.nom,
-              montant: e.montant!,
-              date: e.date,
-            }))
-            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-          return (
-            <View
-              key={env.id}
-              style={[styles.envCard, { backgroundColor: env.couleur + "22" }]}
+        {entreesRecues.length > 0 && (
+          <>
+            <Text
+              style={[
+                styles.sectionTitle,
+                { color: C.texteMuted, marginTop: 20 },
+              ]}
             >
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => toggleEnveloppe(env.id)}
+              ENTRÉES D&apos;ARGENT REÇUES
+            </Text>
+            {entreesRecues.map((env) => (
+              <View
+                key={env.id}
+                style={[styles.envCard, { backgroundColor: env.couleur + "22" }]}
               >
                 <View style={styles.envRow}>
-                  <View style={styles.envNomRow}>
-                    <View
-                      style={[styles.envDot, { backgroundColor: env.couleur }]}
-                    />
-                    <Text style={[styles.envNom, { color: C.texte }]}>
-                      {env.nom}
-                    </Text>
-                  </View>
-                  <View style={styles.envRowRight}>
-                    <Text style={[styles.envMontant, { color: env.couleur }]}>
-                      {env.depense} € / {env.budget} €
-                    </Text>
-                    <Text style={[styles.chevron, { color: env.couleur }]}>
-                      {estOuverte ? "▾" : "▸"}
-                    </Text>
-                  </View>
+                  <Text style={[styles.envNom, { color: C.texte }]}>
+                    {env.nom}
+                  </Text>
+                  <Text style={[styles.envMontant, { color: env.couleur }]}>
+                    +{env.budget} € / {env.budget} €
+                  </Text>
                 </View>
                 <View
                   style={[styles.envBarBg, { backgroundColor: C.separateur }]}
@@ -505,169 +743,14 @@ export default function Budget() {
                   <View
                     style={[
                       styles.envBarFill,
-                      { width: `${pct}%`, backgroundColor: env.couleur },
+                      { width: "100%", backgroundColor: env.couleur },
                     ]}
                   />
                 </View>
-              </TouchableOpacity>
-
-              {estOuverte && (
-                <View
-                  style={[styles.txListe, { borderTopColor: C.separateur }]}
-                >
-                  {lignesDepense.length === 0 &&
-                  lignesAVenirCategorie.length === 0 ? (
-                    <Text style={[styles.txVide, { color: C.texteMuted }]}>
-                      Aucune dépense enregistrée
-                    </Text>
-                  ) : (
-                    <>
-                      {lignesDepense.map((ligne) => {
-                        const contenu = (
-                          <>
-                            <View style={{ flex: 1 }}>
-                              <Text
-                                style={[styles.txNom, { color: C.texte }]}
-                              >
-                                {ligne.nom}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.txDate,
-                                  { color: C.texteMuted },
-                                ]}
-                              >
-                                {formaterDateCourte(ligne.date)}
-                              </Text>
-                            </View>
-                            <Text
-                              style={[
-                                styles.txMontant,
-                                { color: env.couleur },
-                              ]}
-                            >
-                              - {ligne.montant} €
-                            </Text>
-                            {ligne.source === "transaction" && (
-                              <TouchableOpacity
-                                onPress={() =>
-                                  objStore.supprimerTransaction(ligne.id)
-                                }
-                                style={styles.txSupprimer}
-                              >
-                                <Text
-                                  style={[
-                                    styles.txSupprimerTexte,
-                                    { color: C.texteMuted },
-                                  ]}
-                                >
-                                  ✕
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-                          </>
-                        );
-
-                        if (ligne.source === "evenement") {
-                          return (
-                            <TouchableOpacity
-                              key={`evenement-${ligne.id}`}
-                              style={styles.txLigne}
-                              activeOpacity={0.6}
-                              onPress={() =>
-                                setGestionEvenement({
-                                  id: ligne.id,
-                                  nom: ligne.nom,
-                                  date: ligne.date,
-                                  categorie: env.nom,
-                                })
-                              }
-                            >
-                              {contenu}
-                            </TouchableOpacity>
-                          );
-                        }
-
-                        return (
-                          <View
-                            key={`transaction-${ligne.id}`}
-                            style={styles.txLigne}
-                          >
-                            {contenu}
-                          </View>
-                        );
-                      })}
-                      {lignesAVenirCategorie.map((ligne) => (
-                        <TouchableOpacity
-                          key={`avenir-${ligne.id}`}
-                          style={[styles.txLigne, { opacity: 0.6 }]}
-                          activeOpacity={0.6}
-                          onPress={() =>
-                            setGestionEvenement({
-                              id: ligne.id,
-                              nom: ligne.nom,
-                              date: ligne.date,
-                              categorie: env.nom,
-                            })
-                          }
-                        >
-                          <View style={{ flex: 1 }}>
-                            <View style={styles.txNomAVenirRow}>
-                              <Text
-                                style={[styles.txNom, { color: C.texte }]}
-                              >
-                                {ligne.nom}
-                              </Text>
-                              <View
-                                style={[
-                                  styles.badgeAVenir,
-                                  { backgroundColor: C.bleuGrisLight },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.badgeAVenirTexte,
-                                    { color: C.bleuGris },
-                                  ]}
-                                >
-                                  À venir
-                                </Text>
-                              </View>
-                            </View>
-                            <Text
-                              style={[styles.txDate, { color: C.texteMuted }]}
-                            >
-                              {formaterDateCourte(ligne.date)}
-                            </Text>
-                          </View>
-                          <Text
-                            style={[styles.txMontant, { color: env.couleur }]}
-                          >
-                            - {ligne.montant} €
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </>
-                  )}
-                  {env.type === "Variable" && (
-                    <TouchableOpacity
-                      style={[
-                        styles.btnAjouterIci,
-                        { backgroundColor: env.couleur },
-                      ]}
-                      onPress={() => ouvrirAjout(env.id)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.btnAjouterIciTexte}>
-                        + Ajouter une dépense ici
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
-            </View>
-          );
-        })}
+              </View>
+            ))}
+          </>
+        )}
 
         {autresDepensesPayees.length > 0 && (
           <View
@@ -728,7 +811,7 @@ export default function Budget() {
               budgetTotal > 0
                 ? Math.round((ligne.montant / budgetTotal) * 100)
                 : 0;
-            const estLourd = pctBudget >= 30;
+            const estLourd = !ligne.estEntree && pctBudget >= 30;
             const dateAffichee = new Date(ligne.date).toLocaleDateString(
               "fr-FR",
               { day: "numeric", month: "long" },
@@ -749,6 +832,7 @@ export default function Budget() {
                     <Text
                       style={[styles.fixeMontant, { color: ligne.couleur }]}
                     >
+                      {ligne.estEntree ? "+" : ""}
                       {ligne.montant} €
                     </Text>
                   </View>
@@ -760,11 +844,20 @@ export default function Budget() {
                     <View
                       style={[
                         styles.statutBadge,
-                        { backgroundColor: C.bleuGrisLight },
+                        {
+                          backgroundColor: ligne.estEntree
+                            ? C.vertLight
+                            : C.bleuGrisLight,
+                        },
                       ]}
                     >
-                      <Text style={[styles.statutTexte, { color: C.bleuGris }]}>
-                        À venir
+                      <Text
+                        style={[
+                          styles.statutTexte,
+                          { color: ligne.estEntree ? C.vertText : C.bleuGris },
+                        ]}
+                      >
+                        {ligne.estEntree ? "À recevoir" : "À venir"}
                       </Text>
                     </View>
                   </View>

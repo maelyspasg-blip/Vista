@@ -1557,7 +1557,9 @@ export default function Planning() {
                               Aucune
                             </Text>
                           </TouchableOpacity>
-                          {objStore.enveloppes.map((env) => (
+                          {objStore.enveloppes
+                            .filter((env) => env.type !== "Entrée")
+                            .map((env) => (
                             <TouchableOpacity
                               key={env.id}
                               style={[
