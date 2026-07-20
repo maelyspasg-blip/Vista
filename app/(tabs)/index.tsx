@@ -1,4 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
+import { getInitiales } from "../../utils/initiales";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -150,7 +153,7 @@ export default function Dashboard() {
     reportAuto: boolean,
   ) => {
     setArgentDisponibleLocal(val);
-    objStore.modifierArgentDisponible(parseFloat(val) || 0, recurrent, reportAuto);
+    objStore.modifierArgentDisponible(parseMontant(val) || 0, recurrent, reportAuto);
   };
   const [editionDisponible, setEditionDisponible] = useState(false);
   const [disponibleRecurrentTemp, setDisponibleRecurrentTemp] = useState(
@@ -268,7 +271,7 @@ export default function Dashboard() {
     })
     .reduce((acc, e) => acc + (e.montant ?? 0), 0);
 
-  const disponibleNum = parseFloat(argentDisponible) || 0;
+  const disponibleNum = parseMontant(argentDisponible) || 0;
   const disponibleEffectif = disponibleNum + totalEntreeRecue + totalEntreePrevue;
   const pctUtilise =
     disponibleEffectif > 0
@@ -393,7 +396,7 @@ export default function Dashboard() {
           ? {
               ...e,
               nom: nomTemp || e.nom,
-              budget: parseFloat(budgetTemp) || 0,
+              budget: parseMontant(budgetTemp) || 0,
               couleur: couleurTemp,
               type: typeTemp,
               recurrente: typeTemp !== "Fixe" ? recurrenteTemp : false,
@@ -441,7 +444,7 @@ export default function Dashboard() {
     const nouvelle = await objStore.ajouterEnveloppe({
       nom: nouveauNom,
       depense: 0,
-      budget: parseFloat(nouveauBudget),
+      budget: parseMontant(nouveauBudget),
       couleur: nouvelleCouleur,
       type: nouveauType,
       recurrente: nouveauType !== "Fixe" ? estRecurrente : false,
@@ -483,7 +486,7 @@ export default function Dashboard() {
   };
 
   const sauvegarderEtFermerEpargne = () => {
-    objStore.modifierEpargneMois(parseFloat(epargneTemp) || 0);
+    objStore.modifierEpargneMois(parseMontant(epargneTemp) || 0);
     setModalEpargneVisible(false);
   };
 
@@ -523,9 +526,9 @@ export default function Dashboard() {
 
   const sauvegarderObjectif = async () => {
     if (!nomObjectif || !cibleObjectif || sauvegardeObjectifEnCours) return;
-    const cible = parseFloat(cibleObjectif) || 0;
+    const cible = parseMontant(cibleObjectif) || 0;
     const montantMensuel = recurrentObjectif
-      ? parseFloat(montantMensuelObjectif) || 0
+      ? parseMontant(montantMensuelObjectif) || 0
       : undefined;
     const jourDuMois = recurrentObjectif
       ? Math.min(28, Math.max(1, parseInt(jourDuMoisObjectif, 10) || 1))
@@ -545,7 +548,7 @@ export default function Dashboard() {
       const nouvel = await objStore.ajouterObjectif(
         nomObjectif,
         cible,
-        parseFloat(montantInitialObjectif) || 0,
+        parseMontant(montantInitialObjectif) || 0,
         couleurObjectif,
         recurrentObjectif,
         montantMensuel,
@@ -563,7 +566,7 @@ export default function Dashboard() {
     if (!objectifEnEdition || !montantAjoutObjectif) return;
     objStore.ajouterFondsObjectif(
       objectifEnEdition.id,
-      parseFloat(montantAjoutObjectif) || 0,
+      parseMontant(montantAjoutObjectif) || 0,
     );
     setMontantAjoutObjectif("");
   };
@@ -605,9 +608,17 @@ export default function Dashboard() {
               onPress={() => router.push("/profil")}
               activeOpacity={0.7}
             >
-              <Text style={styles.avatarText}>
-                {objStore.prenom ? objStore.prenom.charAt(0).toUpperCase() : "?"}
-              </Text>
+              {objStore.avatarUrl ? (
+                <Image
+                  source={{ uri: objStore.avatarUrl }}
+                  style={styles.avatarImage}
+                  contentFit="cover"
+                />
+              ) : (
+                <Text style={styles.avatarText}>
+                  {getInitiales(objStore.prenom, objStore.nom)}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -1317,9 +1328,9 @@ export default function Dashboard() {
                     styles.input,
                     { flex: 1, backgroundColor: C.fondSecondaire, color: C.texte },
                   ]}
-                  keyboardType="numeric"
+                  keyboardType="decimal-pad"
                   value={disponibleTemp}
-                  onChangeText={setDisponibleTemp}
+                  onChangeText={(text) => setDisponibleTemp(sanitizeMontantInput(text))}
                   returnKeyType="done"
                   onSubmitEditing={() => Keyboard.dismiss()}
                   autoFocus
@@ -1487,9 +1498,9 @@ export default function Dashboard() {
                         color: C.texte,
                       },
                     ]}
-                    keyboardType="number-pad"
+                    keyboardType="decimal-pad"
                     value={budgetTemp}
-                    onChangeText={setBudgetTemp}
+                    onChangeText={(text) => setBudgetTemp(sanitizeMontantInput(text))}
                     returnKeyType="done"
                     inputAccessoryViewID={ACCESSORY_ID}
                   />
@@ -1772,9 +1783,9 @@ export default function Dashboard() {
                     ]}
                     placeholder="0"
                     placeholderTextColor={C.texteMuted}
-                    keyboardType="number-pad"
+                    keyboardType="decimal-pad"
                     value={nouveauBudget}
-                    onChangeText={setNouveauBudget}
+                    onChangeText={(text) => setNouveauBudget(sanitizeMontantInput(text))}
                     returnKeyType="done"
                     inputAccessoryViewID={ACCESSORY_ID}
                   />
@@ -2001,9 +2012,9 @@ export default function Dashboard() {
                             color: C.texte,
                           },
                         ]}
-                        keyboardType="numeric"
+                        keyboardType="decimal-pad"
                         value={epargneTemp}
-                        onChangeText={setEpargneTemp}
+                        onChangeText={(text) => setEpargneTemp(sanitizeMontantInput(text))}
                         returnKeyType="done"
                         inputAccessoryViewID={ACCESSORY_ID}
                       />
@@ -2221,9 +2232,9 @@ export default function Dashboard() {
                     ]}
                         placeholder="Ex : 1500"
                         placeholderTextColor={C.texteMuted}
-                        keyboardType="numeric"
+                        keyboardType="decimal-pad"
                         value={cibleObjectif}
-                        onChangeText={setCibleObjectif}
+                        onChangeText={(text) => setCibleObjectif(sanitizeMontantInput(text))}
                         returnKeyType="done"
                         inputAccessoryViewID={ACCESSORY_ID}
                       />
@@ -2247,9 +2258,9 @@ export default function Dashboard() {
                         ]}
                             placeholder="0"
                             placeholderTextColor={C.texteMuted}
-                            keyboardType="numeric"
+                            keyboardType="decimal-pad"
                             value={montantInitialObjectif}
-                            onChangeText={setMontantInitialObjectif}
+                            onChangeText={(text) => setMontantInitialObjectif(sanitizeMontantInput(text))}
                             returnKeyType="done"
                             inputAccessoryViewID={ACCESSORY_ID}
                           />
@@ -2292,9 +2303,9 @@ export default function Dashboard() {
                         ]}
                             placeholder="Ex : 100"
                             placeholderTextColor={C.texteMuted}
-                            keyboardType="numeric"
+                            keyboardType="decimal-pad"
                             value={montantMensuelObjectif}
-                            onChangeText={setMontantMensuelObjectif}
+                            onChangeText={(text) => setMontantMensuelObjectif(sanitizeMontantInput(text))}
                             returnKeyType="done"
                             inputAccessoryViewID={ACCESSORY_ID}
                           />
@@ -2395,9 +2406,9 @@ export default function Dashboard() {
                         ]}
                             placeholder="0"
                             placeholderTextColor={C.texteMuted}
-                            keyboardType="numeric"
+                            keyboardType="decimal-pad"
                             value={montantAjoutObjectif}
-                            onChangeText={setMontantAjoutObjectif}
+                            onChangeText={(text) => setMontantAjoutObjectif(sanitizeMontantInput(text))}
                             returnKeyType="done"
                             inputAccessoryViewID={ACCESSORY_ID}
                           />
@@ -2522,8 +2533,10 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
   avatarText: { color: "#FFFFFF", fontWeight: "700", fontSize: 15 },
+  avatarImage: { width: 38, height: 38 },
   hero: {
     borderRadius: 22,
     padding: 26,

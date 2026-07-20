@@ -13,6 +13,7 @@ import {
     View,
 } from "react-native";
 import { supabase } from "../../supabaseClient";
+import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { messageErreurAuth } from "../authErrors";
 
 const PURPLE = "#8B6FE8";
@@ -74,7 +75,7 @@ export default function Preferences() {
       .from("profils")
       .update({
         prenom: prenom.trim(),
-        argent_disponible: parseFloat(budget) || 0,
+        argent_disponible: parseMontant(budget) || 0,
       })
       .eq("user_id", user.id);
 
@@ -122,9 +123,9 @@ export default function Preferences() {
             style={[styles.input, { flex: 1 }]}
             placeholder="Ex : 1800"
             placeholderTextColor="#CCC"
-            keyboardType="numeric"
+            keyboardType="decimal-pad"
             value={budget}
-            onChangeText={setBudget}
+            onChangeText={(text) => setBudget(sanitizeMontantInput(text))}
           />
           <View style={styles.euroBox}>
             <Text style={styles.euroTexte}>€</Text>

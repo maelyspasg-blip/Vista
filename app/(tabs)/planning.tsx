@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import {
   useFocusEffect,
   useLocalSearchParams,
@@ -221,6 +222,9 @@ export default function Planning() {
   >("aucun");
   const [couleurEvent, setCouleurEvent] = useState(PALETTE_COULEURS[0]);
   const [estFinancierEvent, setEstFinancierEvent] = useState(false);
+  const [typeFinancierEvent, setTypeFinancierEvent] = useState<
+    "depense" | "entree"
+  >("depense");
   const [montantEvent, setMontantEvent] = useState("");
   const [categorieEvent, setCategorieEvent] = useState("Aucune");
   const [recurrentEvent, setRecurrentEvent] = useState(false);
@@ -419,6 +423,7 @@ export default function Planning() {
     setCalendrierOuvert("aucun");
     setCouleurEvent(PALETTE_COULEURS[0]);
     setEstFinancierEvent(false);
+    setTypeFinancierEvent("depense");
     setMontantEvent("");
     setCategorieEvent("Aucune");
     setRecurrentEvent(false);
@@ -439,6 +444,7 @@ export default function Planning() {
     setCalendrierOuvert("aucun");
     setCouleurEvent(PALETTE_COULEURS[0]);
     setEstFinancierEvent(false);
+    setTypeFinancierEvent("depense");
     setMontantEvent("");
     setCategorieEvent("Aucune");
     setRecurrentEvent(false);
@@ -461,6 +467,10 @@ export default function Planning() {
     setCouleurEvent(ev.couleur);
     setJourneeEntiereEvent(ev.touteLaJournee ?? false);
     setEstFinancierEvent(ev.estFinancier);
+    const enveloppeLiee = objStore.enveloppes.find(
+      (env) => env.nom === ev.categorieLiee,
+    );
+    setTypeFinancierEvent(enveloppeLiee?.type === "Entrée" ? "entree" : "depense");
     setMontantEvent(ev.montant ? String(ev.montant) : "");
     setCategorieEvent(ev.categorieLiee ?? "Aucune");
     setRecurrentEvent(ev.recurrent ?? false);
@@ -482,7 +492,7 @@ export default function Planning() {
 
   const sauvegarderModificationEvenement = () => {
     if (!nomEvent || evenementEnEditionId === null) return;
-    const montant = estFinancierEvent ? parseFloat(montantEvent) || 0 : undefined;
+    const montant = estFinancierEvent ? parseMontant(montantEvent) || 0 : undefined;
     objStore.modifierEvenement(evenementEnEditionId, {
       nom: nomEvent,
       date: dateVersISO(dateEvent),
@@ -520,7 +530,7 @@ export default function Planning() {
   const finaliserCreationEvenement = async () => {
     if (creationEvenementEnCours) return;
     setCreationEvenementEnCours(true);
-    const montant = estFinancierEvent ? parseFloat(montantEvent) || 0 : undefined;
+    const montant = estFinancierEvent ? parseMontant(montantEvent) || 0 : undefined;
     const nouvel = await objStore.ajouterEvenement({
       nom: nomEvent,
       date: dateVersISO(dateEvent),
@@ -550,6 +560,12 @@ export default function Planning() {
   const validerInfos = () => {
     if (!nomEvent) return;
     if (estFinancierEvent && !montantEvent) return;
+    if (
+      estFinancierEvent &&
+      typeFinancierEvent === "entree" &&
+      (!categorieEvent || categorieEvent === "Aucune")
+    )
+      return;
     if (evenementEnEditionId !== null) {
       sauvegarderModificationEvenement();
       return;
@@ -1487,7 +1503,7 @@ export default function Planning() {
                     <View style={styles.switchRow}>
                       <View>
                         <Text style={[styles.switchLabel, { color: C.texte }]}>
-                          Cet événement coûte de l'argent
+                          Ajouter une entrée ou dépense
                         </Text>
                         <Text style={[styles.switchSub, { color: C.texteMuted }]}>
                           Sera ajouté à ton budget
@@ -1503,6 +1519,61 @@ export default function Planning() {
 
                     {estFinancierEvent && (
                       <>
+                        <View style={styles.segmentRow}>
+                          <TouchableOpacity
+                            style={[
+                              styles.segmentBtn,
+                              { backgroundColor: C.fondSecondaire },
+                              typeFinancierEvent === "depense" && {
+                                backgroundColor: C.purple,
+                              },
+                            ]}
+                            onPress={() => {
+                              setTypeFinancierEvent("depense");
+                              setCategorieEvent("Aucune");
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.segmentBtnTexte,
+                                { color: C.texteMuted },
+                                typeFinancierEvent === "depense" && {
+                                  color: "#FFFFFF",
+                                },
+                              ]}
+                            >
+                              En moins
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.segmentBtn,
+                              { backgroundColor: C.fondSecondaire },
+                              typeFinancierEvent === "entree" && {
+                                backgroundColor: C.vert,
+                              },
+                            ]}
+                            onPress={() => {
+                              setTypeFinancierEvent("entree");
+                              setCategorieEvent("Aucune");
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.segmentBtnTexte,
+                                { color: C.texteMuted },
+                                typeFinancierEvent === "entree" && {
+                                  color: "#FFFFFF",
+                                },
+                              ]}
+                            >
+                              En plus
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
                         <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
                           Montant
                         </Text>
@@ -1518,9 +1589,9 @@ export default function Planning() {
                             ]}
                             placeholder="Ex : 30"
                             placeholderTextColor={C.texteMuted}
-                            keyboardType="numeric"
+                            keyboardType="decimal-pad"
                             value={montantEvent}
-                            onChangeText={setMontantEvent}
+                            onChangeText={(text) => setMontantEvent(sanitizeMontantInput(text))}
                             returnKeyType="done"
                             inputAccessoryViewID={ACCESSORY_ID}
                           />
@@ -1530,33 +1601,41 @@ export default function Planning() {
                         </View>
 
                         <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                          Lier à une catégorie (optionnel)
+                          {typeFinancierEvent === "entree"
+                            ? "Lier à une catégorie d'entrée d'argent"
+                            : "Lier à une catégorie (optionnel)"}
                         </Text>
                         <View style={styles.categorieGrid}>
-                          <TouchableOpacity
-                            style={[
-                              styles.categorieChip,
-                              { backgroundColor: C.fondSecondaire },
-                              categorieEvent === "Aucune" && {
-                                backgroundColor: C.purple,
-                              },
-                            ]}
-                            onPress={() => setCategorieEvent("Aucune")}
-                            activeOpacity={0.7}
-                          >
-                            <Text
+                          {typeFinancierEvent === "depense" && (
+                            <TouchableOpacity
                               style={[
-                                styles.categorieChipTexte,
-                                { color: C.texteMuted },
-                                categorieEvent === "Aucune" &&
-                                  styles.categorieChipTexteActif,
+                                styles.categorieChip,
+                                { backgroundColor: C.fondSecondaire },
+                                categorieEvent === "Aucune" && {
+                                  backgroundColor: C.purple,
+                                },
                               ]}
+                              onPress={() => setCategorieEvent("Aucune")}
+                              activeOpacity={0.7}
                             >
-                              Aucune
-                            </Text>
-                          </TouchableOpacity>
+                              <Text
+                                style={[
+                                  styles.categorieChipTexte,
+                                  { color: C.texteMuted },
+                                  categorieEvent === "Aucune" &&
+                                    styles.categorieChipTexteActif,
+                                ]}
+                              >
+                                Aucune
+                              </Text>
+                            </TouchableOpacity>
+                          )}
                           {objStore.enveloppes
-                            .filter((env) => env.type !== "Entrée")
+                            .filter((env) =>
+                              typeFinancierEvent === "entree"
+                                ? env.type === "Entrée"
+                                : env.type !== "Entrée",
+                            )
                             .map((env) => (
                             <TouchableOpacity
                               key={env.id}
@@ -1585,10 +1664,27 @@ export default function Planning() {
                           ))}
                         </View>
 
+                        {typeFinancierEvent === "entree" &&
+                          !objStore.enveloppes.some(
+                            (env) => env.type === "Entrée",
+                          ) && (
+                            <Text
+                              style={[styles.modalAide, { color: C.texteMuted }]}
+                            >
+                              Crée d&apos;abord une catégorie &quot;Entrée
+                              d&apos;argent&quot; depuis Aperçu pour pouvoir la
+                              choisir ici.
+                            </Text>
+                          )}
+
                         <Text style={[styles.modalAide, { color: C.texteMuted }]}>
-                          {categorieEvent === "Aucune"
-                            ? `Une nouvelle ligne "${nomEvent}" apparaîtra dans tes dépenses prévues.`
-                            : `Le montant sera ajouté à ta dépense "${categorieEvent}".`}
+                          {typeFinancierEvent === "entree"
+                            ? categorieEvent !== "Aucune"
+                              ? `Le montant sera ajouté à ton entrée d'argent "${categorieEvent}".`
+                              : ""
+                            : categorieEvent === "Aucune"
+                              ? `Une nouvelle ligne "${nomEvent}" apparaîtra dans tes dépenses prévues.`
+                              : `Le montant sera ajouté à ta dépense "${categorieEvent}".`}
                         </Text>
                       </>
                     )}
@@ -2050,4 +2146,16 @@ const styles = StyleSheet.create({
   },
   switchLabel: { fontSize: 15, fontWeight: "600" },
   switchSub: { fontSize: 12, marginTop: 2 },
+  segmentRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 16,
+  },
+  segmentBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  segmentBtnTexte: { fontSize: 14, fontWeight: "600" },
 });

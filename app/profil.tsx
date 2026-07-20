@@ -1,5 +1,10 @@
+import { Picker } from "@react-native-picker/picker";
 import { Ionicons } from "@expo/vector-icons";
+import { File, Paths } from "expo-file-system";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
+import * as Sharing from "expo-sharing";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,12 +20,64 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import * as XLSX from "xlsx";
 import { supabase } from "../supabaseClient";
+import {
+  DonneesExport,
+  genererClasseurExport,
+  MOIS_LABELS,
+  nomFichierExport,
+  PeriodeExport,
+} from "../utils/exportExcel";
+import { getInitiales } from "../utils/initiales";
 import { messageErreurAuth } from "./authErrors";
 import { demanderPermissionNotifications } from "./notifications";
 import { SyncErrorBanner } from "./SyncErrorBanner";
 import { useObjectifs } from "./store";
 import { Theme, useTheme } from "./ThemeContext";
+
+type OptionMoisExport = {
+  valeur: string;
+  label: string;
+  mois: number;
+  annee: number;
+};
+
+function construireOptionsMoisExport(
+  historiquesMois: { mois: number; annee: number }[],
+): OptionMoisExport[] {
+  const maintenant = new Date();
+  const moisActuel = maintenant.getMonth();
+  const anneeActuelle = maintenant.getFullYear();
+
+  let debut = { mois: moisActuel, annee: anneeActuelle };
+  historiquesMois.forEach((s) => {
+    if (
+      s.annee < debut.annee ||
+      (s.annee === debut.annee && s.mois < debut.mois)
+    ) {
+      debut = { mois: s.mois, annee: s.annee };
+    }
+  });
+
+  const options: OptionMoisExport[] = [];
+  let m = debut.mois;
+  let a = debut.annee;
+  while (a < anneeActuelle || (a === anneeActuelle && m <= moisActuel)) {
+    options.push({
+      valeur: `${a}-${String(m + 1).padStart(2, "0")}`,
+      label: `${MOIS_LABELS[m]} ${a}`,
+      mois: m,
+      annee: a,
+    });
+    m++;
+    if (m > 11) {
+      m = 0;
+      a++;
+    }
+  }
+  return options;
+}
 
 function styleCarte(theme: Theme, couleurLiseret: string) {
   return theme === "sombre"
@@ -41,10 +98,16 @@ export default function Profil() {
 
   const [email, setEmail] = useState("");
   const [prenomTemp, setPrenomTemp] = useState(objStore.prenom);
+  const [nomTemp, setNomTemp] = useState(objStore.nom);
+  const [televersementEnCours, setTeleversementEnCours] = useState(false);
 
   useEffect(() => {
     setPrenomTemp(objStore.prenom);
   }, [objStore.prenom]);
+
+  useEffect(() => {
+    setNomTemp(objStore.nom);
+  }, [objStore.nom]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -56,6 +119,135 @@ export default function Profil() {
     const valeur = prenomTemp.trim();
     if (!valeur || valeur === objStore.prenom) return;
     objStore.modifierPrenom(valeur);
+  };
+
+  const enregistrerNom = () => {
+    const valeur = nomTemp.trim();
+    if (valeur === objStore.nom) return;
+    objStore.modifierNom(valeur);
+  };
+
+  const changerPhotoProfil = async () => {
+    if (televersementEnCours) return;
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert(
+        "Photos refusées",
+        "Autorise l'accès à tes photos dans les réglages de ton téléphone pour changer ta photo de profil.",
+      );
+      return;
+    }
+
+    const resultat = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (resultat.canceled || !resultat.assets[0]) return;
+
+    const image = resultat.assets[0];
+    setTeleversementEnCours(true);
+    const succes = await objStore.televerserAvatar(
+      image.uri,
+      image.mimeType,
+    );
+    setTeleversementEnCours(false);
+
+    if (!succes) {
+      Alert.alert(
+        "Erreur",
+        "Impossible d'envoyer la photo pour le moment. Réessaie plus tard.",
+      );
+    }
+  };
+
+  const [modalExportVisible, setModalExportVisible] = useState(false);
+  const [exportEnCours, setExportEnCours] = useState(false);
+  const optionsMoisExport = construireOptionsMoisExport(
+    objStore.historiquesMois,
+  );
+  const [moisDebutExport, setMoisDebutExport] = useState(
+    () =>
+      optionsMoisExport[Math.max(0, optionsMoisExport.length - 6)]?.valeur ??
+      optionsMoisExport[0]?.valeur,
+  );
+  const [moisFinExport, setMoisFinExport] = useState(
+    () => optionsMoisExport[optionsMoisExport.length - 1]?.valeur,
+  );
+
+  const genererEtPartagerExport = async () => {
+    if (exportEnCours) return;
+    const optionDebut = optionsMoisExport.find(
+      (o) => o.valeur === moisDebutExport,
+    );
+    const optionFin = optionsMoisExport.find(
+      (o) => o.valeur === moisFinExport,
+    );
+    if (!optionDebut || !optionFin) return;
+    if (moisDebutExport > moisFinExport) {
+      Alert.alert(
+        "Période invalide",
+        "Le mois de début doit être avant (ou égal à) le mois de fin.",
+      );
+      return;
+    }
+
+    const periode: PeriodeExport = {
+      moisDebut: optionDebut.mois,
+      anneeDebut: optionDebut.annee,
+      moisFin: optionFin.mois,
+      anneeFin: optionFin.annee,
+    };
+    const donnees: DonneesExport = {
+      enveloppes: objStore.enveloppes,
+      transactions: objStore.transactions,
+      historiquesMois: objStore.historiquesMois,
+      epargneMois: objStore.epargneMois,
+      argentDisponible: objStore.argentDisponible,
+    };
+
+    setExportEnCours(true);
+    try {
+      const classeur = genererClasseurExport(donnees, periode);
+      const sortie = XLSX.write(classeur, {
+        bookType: "xlsx",
+        type: "array",
+      });
+      const octets =
+        sortie instanceof Uint8Array ? sortie : new Uint8Array(sortie);
+
+      const fichier = new File(Paths.cache, nomFichierExport(periode));
+      fichier.create({ overwrite: true });
+      fichier.write(octets);
+
+      const partageDisponible = await Sharing.isAvailableAsync();
+      if (!partageDisponible) {
+        Alert.alert(
+          "Erreur",
+          "Le partage de fichiers n'est pas disponible sur cet appareil.",
+        );
+        return;
+      }
+
+      await Sharing.shareAsync(fichier.uri, {
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        UTI: "com.microsoft.excel.xlsx",
+        dialogTitle: "Exporter les données Vista",
+      });
+      setModalExportVisible(false);
+    } catch (e) {
+      console.error("Export Excel a échoué :", e);
+      Alert.alert(
+        "Erreur",
+        "Impossible de générer le fichier d'export pour le moment.",
+      );
+    } finally {
+      setExportEnCours(false);
+    }
   };
 
   const [modalMotDePasseVisible, setModalMotDePasseVisible] = useState(false);
@@ -181,6 +373,34 @@ export default function Profil() {
           INFORMATIONS
         </Text>
         <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.purple)]}>
+          <View style={styles.avatarSection}>
+            <TouchableOpacity
+              style={[styles.avatarPreview, { backgroundColor: C.hero }]}
+              onPress={changerPhotoProfil}
+              activeOpacity={0.7}
+              disabled={televersementEnCours}
+            >
+              {televersementEnCours ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : objStore.avatarUrl ? (
+                <Image
+                  source={{ uri: objStore.avatarUrl }}
+                  style={styles.avatarPreviewImage}
+                  contentFit="cover"
+                />
+              ) : (
+                <Text style={styles.avatarPreviewTexte}>
+                  {getInitiales(objStore.prenom, objStore.nom)}
+                </Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={changerPhotoProfil} activeOpacity={0.7} disabled={televersementEnCours}>
+              <Text style={[styles.avatarChangerTexte, { color: C.purple }]}>
+                Changer la photo
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           <Text style={[styles.champLabel, { color: C.texteMuted }]}>
             Prénom
           </Text>
@@ -193,6 +413,24 @@ export default function Profil() {
             onChangeText={setPrenomTemp}
             onBlur={enregistrerPrenom}
             placeholder="Ton prénom"
+            placeholderTextColor={C.texteMuted}
+            returnKeyType="done"
+          />
+
+          <Text
+            style={[styles.champLabel, { color: C.texteMuted, marginTop: 16 }]}
+          >
+            Nom
+          </Text>
+          <TextInput
+            style={[
+              styles.input,
+              { color: C.texte, backgroundColor: C.fondSecondaire },
+            ]}
+            value={nomTemp}
+            onChangeText={setNomTemp}
+            onBlur={enregistrerNom}
+            placeholder="Ton nom"
             placeholderTextColor={C.texteMuted}
             returnKeyType="done"
           />
@@ -258,6 +496,22 @@ export default function Profil() {
               thumbColor={objStore.notificationsActives ? C.purple : "#FFF"}
             />
           </View>
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+          DONNÉES
+        </Text>
+        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.vert)]}>
+          <TouchableOpacity
+            style={[styles.btnSecondaire, { borderColor: C.separateur }]}
+            onPress={() => setModalExportVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="download-outline" size={16} color={C.texte} />
+            <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+              Exporter mes données (Excel)
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
@@ -396,6 +650,89 @@ export default function Profil() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <Modal
+        visible={modalExportVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalExportVisible(false)}
+      >
+        <View style={styles.modalOverlayTouch}>
+          <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+            <Text style={[styles.modalTitre, { color: C.texte }]}>
+              Exporter mes données
+            </Text>
+            <Text style={[styles.exportSousTitre, { color: C.texteMuted }]}>
+              Génère un fichier Excel avec le résumé mensuel, le comparatif
+              des dépenses et des entrées par catégorie, et le détail des
+              transactions du mois en cours.
+            </Text>
+
+            <Text
+              style={[styles.champLabel, { color: C.texteMuted, marginTop: 8 }]}
+            >
+              Du
+            </Text>
+            <Picker
+              selectedValue={moisDebutExport}
+              onValueChange={(valeur) => setMoisDebutExport(String(valeur))}
+              itemStyle={{ color: C.texte }}
+            >
+              {optionsMoisExport.map((o) => (
+                <Picker.Item key={o.valeur} label={o.label} value={o.valeur} />
+              ))}
+            </Picker>
+
+            <Text
+              style={[styles.champLabel, { color: C.texteMuted, marginTop: 8 }]}
+            >
+              Au
+            </Text>
+            <Picker
+              selectedValue={moisFinExport}
+              onValueChange={(valeur) => setMoisFinExport(String(valeur))}
+              itemStyle={{ color: C.texte }}
+            >
+              {optionsMoisExport.map((o) => (
+                <Picker.Item key={o.valeur} label={o.label} value={o.valeur} />
+              ))}
+            </Picker>
+
+            <TouchableOpacity
+              style={[
+                styles.btnPrincipal,
+                {
+                  backgroundColor: C.purple,
+                  opacity: exportEnCours ? 0.6 : 1,
+                  marginTop: 18,
+                },
+              ]}
+              onPress={genererEtPartagerExport}
+              activeOpacity={0.7}
+              disabled={exportEnCours}
+            >
+              {exportEnCours ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.btnPrincipalTexte}>
+                  Générer et partager
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.btnAnnuler}
+              onPress={() => setModalExportVisible(false)}
+              activeOpacity={0.7}
+              disabled={exportEnCours}
+            >
+              <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                Annuler
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -433,6 +770,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     marginBottom: 8,
+  },
+  avatarSection: {
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  avatarPreview: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    marginBottom: 10,
+  },
+  avatarPreviewImage: {
+    width: 76,
+    height: 76,
+  },
+  avatarPreviewTexte: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 26,
+  },
+  avatarChangerTexte: {
+    fontSize: 13,
+    fontWeight: "600",
   },
   champValeurStatique: {
     fontSize: 15,
@@ -473,6 +836,7 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   modalTitre: { fontSize: 18, fontWeight: "700", marginBottom: 18 },
+  exportSousTitre: { fontSize: 13, lineHeight: 18, marginBottom: 14 },
   erreurTexte: {
     fontSize: 13,
     color: "#E24B4A",

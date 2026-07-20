@@ -14,6 +14,7 @@ import {
 import Svg, { Circle, Line, Path, Text as SvgText } from "react-native-svg";
 import { useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
+import { calculerBadges } from "../../utils/badges";
 
 const MOIS_LABELS = [
   "Jan",
@@ -206,6 +207,15 @@ export default function Analytics() {
   const [categoriesSelectionnees, setCategoriesSelectionnees] = useState<
     string[]
   >([]);
+  const [modalBadgesVisible, setModalBadgesVisible] = useState(false);
+
+  const badges = calculerBadges({
+    enveloppes: objStore.enveloppes,
+    objectifs: objStore.objectifs,
+    epargneMois: objStore.epargneMois,
+    historiquesMois: objStore.historiquesMois,
+  });
+  const nbBadgesObtenus = badges.filter((b) => b.obtenu).length;
 
   const optionsPeriode = genererOptionsPeriode(
     objStore.historiquesMois.length + 1,
@@ -427,11 +437,23 @@ export default function Analytics() {
   return (
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <Text style={[styles.titre, { color: C.texte }]}>Stats</Text>
-          <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
-            {MOIS_LABELS[MOIS_ACTUEL]} {ANNEE_ACTUELLE}
-          </Text>
+        <View style={[styles.header, styles.headerRow]}>
+          <View>
+            <Text style={[styles.titre, { color: C.texte }]}>Stats</Text>
+            <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
+              {MOIS_LABELS[MOIS_ACTUEL]} {ANNEE_ACTUELLE}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.btnMenu,
+              { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+            ]}
+            onPress={() => setModalBadgesVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="ellipsis-horizontal" size={18} color={C.texte} />
+          </TouchableOpacity>
         </View>
 
         <View style={styles.chipRow}>
@@ -1036,6 +1058,71 @@ export default function Analytics() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <Modal
+        visible={modalBadgesVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalBadgesVisible(false)}
+      >
+        <View style={styles.modalOverlayTouch}>
+          <View style={[styles.modalCardBadges, { backgroundColor: C.carte }]}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={[styles.modalTitre, { color: C.texte }]}>
+                  Badges
+                </Text>
+                <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
+                  {nbBadgesObtenus} / {badges.length} obtenus
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setModalBadgesVisible(false)}
+                activeOpacity={0.6}
+              >
+                <Text style={[styles.modalTermine, { color: C.purple }]}>
+                  Terminé
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {badges.map((badge) => (
+                <View
+                  key={badge.id}
+                  style={[
+                    styles.badgeCarte,
+                    {
+                      backgroundColor: C.fondSecondaire,
+                      opacity: badge.obtenu ? 1 : 0.5,
+                    },
+                  ]}
+                >
+                  <Text style={styles.badgeEmoji}>{badge.emoji}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.badgeTitre, { color: C.texte }]}>
+                      {badge.titre}
+                    </Text>
+                    <Text
+                      style={[styles.badgeDescription, { color: C.texteMuted }]}
+                    >
+                      {badge.description}
+                    </Text>
+                  </View>
+                  {!badge.obtenu && (
+                    <Ionicons
+                      name="lock-closed"
+                      size={16}
+                      color={C.texteMuted}
+                    />
+                  )}
+                </View>
+              ))}
+              <View style={{ height: 20 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1043,6 +1130,19 @@ export default function Analytics() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 20 },
   header: { marginTop: 60, marginBottom: 16 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  btnMenu: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 0.5,
+  },
   titre: {
     fontSize: 22,
     fontWeight: "700",
@@ -1084,6 +1184,24 @@ const styles = StyleSheet.create({
   },
   modalTitre: { fontSize: 18, fontWeight: "700" },
   modalTermine: { fontSize: 16, fontWeight: "600" },
+  modalCardBadges: {
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingHorizontal: 26,
+    paddingBottom: 20,
+    maxHeight: "80%",
+  },
+  badgeCarte: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 12,
+  },
+  badgeEmoji: { fontSize: 28 },
+  badgeTitre: { fontSize: 15, fontWeight: "700" },
+  badgeDescription: { fontSize: 12, marginTop: 2 },
   chipRow: { flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" },
   chip: {
     paddingHorizontal: 16,

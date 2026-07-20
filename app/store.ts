@@ -104,6 +104,8 @@ type EtatStore = {
   argentDisponibleRecurrent: boolean;
   argentDisponibleReportAuto: boolean;
   prenom: string;
+  nom: string;
+  avatarUrl: string | null;
   notificationsActives: boolean;
   transactions: Transaction[];
   evenements: Evenement[];
@@ -121,6 +123,8 @@ let etat: EtatStore = {
   argentDisponibleRecurrent: false,
   argentDisponibleReportAuto: false,
   prenom: "",
+  nom: "",
+  avatarUrl: null,
   notificationsActives: true,
   transactions: TRANSACTIONS_INIT,
   evenements: EVENEMENTS_INIT,
@@ -769,10 +773,6 @@ function verifierEvenementsFinanciersInterne() {
     if (!e.estFinancier || !e.montant) return false;
     if (!e.categorieLiee || e.categorieLiee === "Aucune") return false;
     if (e.montantApplique) return false;
-    const enveloppeLiee = etat.enveloppes.find(
-      (env) => env.nom === e.categorieLiee,
-    );
-    if (enveloppeLiee?.type === "Entrée") return false;
     const dateEvenement = new Date(e.date);
     dateEvenement.setHours(0, 0, 0, 0);
     return dateEvenement <= aujourdhui;
@@ -943,6 +943,24 @@ function majPrenomSupabase(prenom: string) {
   });
 }
 
+function majNomSupabase(nom: string) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({ nom })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error("Supabase update nom a échoué :", error);
+          signalerErreurSync(
+            `Impossible de sauvegarder le nom : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
 function majNotificationsActivesSupabase(actif: boolean) {
   supabase.auth.getUser().then(({ data: { user } }) => {
     if (!user) return;
@@ -980,6 +998,8 @@ export function useObjectifs() {
     argentDisponibleRecurrent: local.argentDisponibleRecurrent,
     argentDisponibleReportAuto: local.argentDisponibleReportAuto,
     prenom: local.prenom,
+    nom: local.nom,
+    avatarUrl: local.avatarUrl,
     notificationsActives: local.notificationsActives,
     transactions: local.transactions,
     evenements: local.evenements,
@@ -1078,7 +1098,7 @@ export function useObjectifs() {
             supabase
               .from("profils")
               .select(
-                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, prenom, notifications_actives, dernier_mois_archive_mois, dernier_mois_archive_annee",
+                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, prenom, nom, avatar_url, notifications_actives, dernier_mois_archive_mois, dernier_mois_archive_annee",
               )
               .eq("user_id", user.id)
               .single(),
@@ -1120,6 +1140,8 @@ export function useObjectifs() {
             profil?.argent_disponible_report_auto ??
             etat.argentDisponibleReportAuto,
           prenom: profil?.prenom ?? etat.prenom,
+          nom: profil?.nom ?? etat.nom,
+          avatarUrl: profil?.avatar_url ?? etat.avatarUrl,
           notificationsActives:
             profil?.notifications_actives ?? etat.notificationsActives,
           dernierMoisArchive,
@@ -1602,6 +1624,72 @@ export function useObjectifs() {
     modifierPrenom: (prenom: string) => {
       setEtat({ prenom });
       majPrenomSupabase(prenom);
+    },
+
+    modifierNom: (nom: string) => {
+      setEtat({ nom });
+      majNomSupabase(nom);
+    },
+
+    televerserAvatar: async (
+      uri: string,
+      mimeType: string | undefined,
+    ): Promise<boolean> => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return false;
+
+        const extension = mimeType?.split("/")[1] ?? "jpg";
+        const chemin = `${user.id}/avatar.${extension}`;
+        const arrayBuffer = await fetch(uri).then((res) => res.arrayBuffer());
+
+        const { error: erreurUpload } = await supabase.storage
+          .from("avatars")
+          .upload(chemin, arrayBuffer, {
+            contentType: mimeType ?? "image/jpeg",
+            upsert: true,
+          });
+
+        if (erreurUpload) {
+          console.error("Supabase upload avatar a échoué :", erreurUpload);
+          signalerErreurSync(
+            `Impossible d'envoyer la photo : ${erreurUpload.message}`,
+          );
+          return false;
+        }
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from("avatars").getPublicUrl(chemin);
+        const avatarUrl = `${publicUrl}?t=${Date.now()}`;
+
+        const { error: erreurProfil } = await supabase
+          .from("profils")
+          .update({ avatar_url: avatarUrl })
+          .eq("user_id", user.id);
+
+        if (erreurProfil) {
+          console.error(
+            "Supabase update avatar_url a échoué :",
+            erreurProfil,
+          );
+          signalerErreurSync(
+            `Impossible de sauvegarder la photo : ${erreurProfil.message}`,
+          );
+          return false;
+        }
+
+        setEtat({ avatarUrl });
+        return true;
+      } catch (e) {
+        console.error("Téléversement de l'avatar a échoué :", e);
+        signalerErreurSync(
+          "Impossible d'envoyer la photo : problème de connexion.",
+        );
+        return false;
+      }
     },
 
     modifierNotificationsActives: (actif: boolean) => {

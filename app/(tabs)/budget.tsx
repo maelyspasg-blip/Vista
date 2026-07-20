@@ -7,6 +7,7 @@ import {
 import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -21,6 +22,7 @@ import {
 } from "react-native";
 import { useTheme } from "../ThemeContext";
 import { Enveloppe, useObjectifs } from "../store";
+import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 
 const ACCESSORY_ID = "numericDone";
 
@@ -205,6 +207,9 @@ export default function Budget() {
       recurrenceLabel: undefined,
       source: "evenement" as const,
       categorie: e.categorieLiee,
+      estEntree:
+        objStore.enveloppes.find((env) => env.nom === e.categorieLiee)
+          ?.type === "Entrée",
     })),
     ...autresDepensesAVenir.map((e) => ({
       id: e.id,
@@ -310,13 +315,28 @@ export default function Budget() {
     setAjoutTransactionEnCours(true);
     const nouvelle = await objStore.ajouterTransaction(
       nomTx,
-      parseFloat(montantTx),
+      parseMontant(montantTx),
       enveloppeTx,
       dateStr,
     );
     setAjoutTransactionEnCours(false);
     if (!nouvelle) return;
     setModalAjoutVisible(false);
+  };
+
+  const confirmerSuppressionTransaction = (nom: string, montant: number, id: string) => {
+    Alert.alert(
+      `Supprimer "${nom}" ?`,
+      `Cette dépense de ${montant} € sera définitivement supprimée.`,
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer",
+          style: "destructive",
+          onPress: () => objStore.supprimerTransaction(id),
+        },
+      ],
+    );
   };
 
   const toggleEnveloppe = (id: string) => {
@@ -430,7 +450,11 @@ export default function Budget() {
                       {ligne.source === "transaction" && (
                         <TouchableOpacity
                           onPress={() =>
-                            objStore.supprimerTransaction(ligne.id)
+                            confirmerSuppressionTransaction(
+                              ligne.nom,
+                              ligne.montant,
+                              ligne.id,
+                            )
                           }
                           style={styles.txSupprimer}
                         >
@@ -972,9 +996,9 @@ export default function Budget() {
                     ]}
                     placeholder="0"
                     placeholderTextColor={C.texteMuted}
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     value={montantTx}
-                    onChangeText={setMontantTx}
+                    onChangeText={(text) => setMontantTx(sanitizeMontantInput(text))}
                     returnKeyType="done"
                     inputAccessoryViewID={ACCESSORY_ID}
                   />
