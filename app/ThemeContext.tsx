@@ -7,7 +7,7 @@ export type Theme = "clair" | "sombre";
 export const COULEURS = {
   clair: {
     fond: "#F5F6F8",
-    fondPage: "#FFFFFF",
+    fondPage: "#F1EFF7",
     hero: "#2D3A4A",
     heroBanniereTexte: "rgba(255,255,255,0.8)",
     texte: "#2D3A4A",
