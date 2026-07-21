@@ -25,6 +25,7 @@ import Svg, { Circle } from "react-native-svg";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { Enveloppe, Objectif, useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
+import { InfoBulle } from "../InfoBulle";
 
 function bgClair(couleur: string) {
   return couleur + "22";
@@ -983,7 +984,7 @@ export default function Dashboard() {
                   { color: theme === "sombre" ? C.peachText : C.texte },
                 ]}
               >
-                {disponibleNum} €
+                {disponibleEffectif} €
               </Text>
             </TouchableOpacity>
 
@@ -997,9 +998,10 @@ export default function Dashboard() {
                   }
                 >
                   <Text style={[styles.statImpactTexte, { color: C.vertText }]}>
-                    {entreesRecuesCeMois.length} entrée
-                    {entreesRecuesCeMois.length > 1 ? "s" : ""} ce mois-ci,
-                    +{totalEntreesRecuesCeMois}€ au total
+                    dont {entreesRecuesCeMois.length} entrée
+                    {entreesRecuesCeMois.length > 1 ? "s" : ""} reçue
+                    {entreesRecuesCeMois.length > 1 ? "s" : ""} ce mois-ci
+                    (+{totalEntreesRecuesCeMois}€)
                   </Text>
                   <Text style={[styles.statImpactChevron, { color: C.vertText }]}>
                     {entreesDisponibleOuvert ? "▾" : "▸"}
@@ -1356,9 +1358,20 @@ export default function Dashboard() {
               </View>
               <View style={styles.switchRow}>
                 <View style={styles.switchRowLabel}>
-                  <Text style={[styles.switchLabel, { color: C.texte }]}>
-                    Reporter le reste non dépensé au mois prochain
-                  </Text>
+                  <View style={styles.switchLabelLigne}>
+                    <Text
+                      style={[
+                        styles.switchLabel,
+                        { color: C.texte, flexShrink: 1 },
+                      ]}
+                    >
+                      Reporter le reste non dépensé au mois prochain
+                    </Text>
+                    <InfoBulle
+                      titre="Reporter le reste"
+                      texte="Le reste est calculé comme Disponible + entrées d'argent - dépenses réelles - épargne. Ce montant est ajouté au Disponible du mois suivant."
+                    />
+                  </View>
                   <Text style={[styles.switchSub, { color: C.texteMuted }]}>
                     Ce qu&apos;il reste une fois les dépenses et
                     l&apos;épargne déduites s&apos;ajoute au Disponible du
@@ -1745,6 +1758,7 @@ export default function Dashboard() {
                   <TouchableOpacity
                     style={[
                       styles.typeChip,
+                      styles.typeChipAvecInfo,
                       { backgroundColor: C.fondSecondaire },
                       nouveauType === "Entrée" && { backgroundColor: C.vert },
                     ]}
@@ -1760,6 +1774,13 @@ export default function Dashboard() {
                     >
                       Entrée d&apos;argent
                     </Text>
+                    <InfoBulle
+                      titre="Entrée d'argent"
+                      texte="Une catégorie de type Entrée d'argent s'additionne à ton Disponible au lieu de s'en soustraire, contrairement à une catégorie de dépense classique."
+                      couleur={
+                        nouveauType === "Entrée" ? "#FFFFFF" : C.texteMuted
+                      }
+                    />
                   </TouchableOpacity>
                 </View>
                 <Text style={[styles.modalAide, { color: C.texteMuted }]}>
@@ -2116,9 +2137,20 @@ export default function Dashboard() {
                           }
                           activeOpacity={0.7}
                         >
-                          <Text style={[styles.couleurTiroirTexte, { color: C.texte }]}>
-                            Objectifs clôturés ({objectifsClotures.length})
-                          </Text>
+                          <View style={styles.objectifsClotureesTitreLigne}>
+                            <Text
+                              style={[
+                                styles.couleurTiroirTexte,
+                                { color: C.texte, flex: 0 },
+                              ]}
+                            >
+                              Objectifs clôturés ({objectifsClotures.length})
+                            </Text>
+                            <InfoBulle
+                              titre="Objectifs clôturés"
+                              texte="Un objectif clôturé n'est plus alimenté automatiquement chaque mois. C'est une action manuelle et définitive : il n'existe aucun moyen de le rouvrir, tu peux seulement le supprimer si besoin."
+                            />
+                          </View>
                           <Text style={[styles.couleurChevron, { color: C.texteMuted }]}>
                             {objectifsCloturesOuvert ? "▾" : "▸"}
                           </Text>
@@ -2773,6 +2805,12 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   couleurChevron: { fontSize: 14 },
+  objectifsClotureesTitreLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flex: 1,
+  },
   typeRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
   typeChip: {
     flex: 1,
@@ -2782,6 +2820,11 @@ const styles = StyleSheet.create({
   },
   typeChipTexte: { fontSize: 14, fontWeight: "600" },
   typeChipTexteActif: { color: "#FFFFFF" },
+  typeChipAvecInfo: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 4,
+  },
   calendarWrap: {
     borderRadius: 14,
     overflow: "hidden",
@@ -2806,6 +2849,7 @@ const styles = StyleSheet.create({
   },
   switchRowLabel: { flex: 1, marginRight: 12 },
   switchLabel: { fontSize: 16, fontWeight: "600" },
+  switchLabelLigne: { flexDirection: "row", alignItems: "center", gap: 6 },
   switchSub: { fontSize: 13, marginTop: 2 },
   btnAjouter: {
     borderRadius: 16,

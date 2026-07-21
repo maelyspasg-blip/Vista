@@ -23,6 +23,7 @@ import {
 import { useTheme } from "../ThemeContext";
 import { Enveloppe, useObjectifs } from "../store";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
+import { InfoBulle } from "../InfoBulle";
 
 const ACCESSORY_ID = "numericDone";
 
@@ -735,14 +736,20 @@ export default function Budget() {
 
         {entreesRecues.length > 0 && (
           <>
-            <Text
-              style={[
-                styles.sectionTitle,
-                { color: C.texteMuted, marginTop: 20 },
-              ]}
-            >
-              ENTRÉES D&apos;ARGENT REÇUES
-            </Text>
+            <View style={[styles.sectionTitleAvecInfo, { marginTop: 20 }]}>
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                ]}
+              >
+                ENTRÉES D&apos;ARGENT REÇUES
+              </Text>
+              <InfoBulle
+                titre="Entrées d'argent"
+                texte="Une catégorie de type Entrée d'argent s'additionne à ton Disponible au lieu de s'en soustraire, contrairement à une catégorie de dépense classique."
+              />
+            </View>
             {entreesRecues.map((env) => (
               <View
                 key={env.id}
@@ -1206,6 +1213,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   btnAjouter: { borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },
+  sectionTitleAvecInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 12,
+  },
   btnAjouterTexte: { fontSize: 12, fontWeight: "700" },
   envCard: { borderRadius: 16, padding: 18, marginBottom: 10 },
   envRow: {

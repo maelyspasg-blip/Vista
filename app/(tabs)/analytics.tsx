@@ -8,13 +8,16 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import Svg, { Circle, Line, Path, Text as SvgText } from "react-native-svg";
 import { useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
-import { calculerBadges } from "../../utils/badges";
+import { calculerSeries, TypeSerie } from "../../utils/series";
+import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
+import { InfoBulle } from "../InfoBulle";
 
 const MOIS_LABELS = [
   "Jan",
@@ -207,15 +210,35 @@ export default function Analytics() {
   const [categoriesSelectionnees, setCategoriesSelectionnees] = useState<
     string[]
   >([]);
-  const [modalBadgesVisible, setModalBadgesVisible] = useState(false);
+  const [modalSeriesVisible, setModalSeriesVisible] = useState(false);
+  const [historiqueOuvert, setHistoriqueOuvert] = useState<
+    Partial<Record<TypeSerie, boolean>>
+  >({});
+  const [editionSeuilOuverte, setEditionSeuilOuverte] = useState(false);
+  const [seuilEpargneTemp, setSeuilEpargneTemp] = useState("");
 
-  const badges = calculerBadges({
+  const series = calculerSeries({
     enveloppes: objStore.enveloppes,
-    objectifs: objStore.objectifs,
     epargneMois: objStore.epargneMois,
     historiquesMois: objStore.historiquesMois,
+    seuilEpargneConstante: objStore.seuilEpargneConstante,
   });
-  const nbBadgesObtenus = badges.filter((b) => b.obtenu).length;
+
+  const ouvrirEditionSeuil = () => {
+    setSeuilEpargneTemp(
+      objStore.seuilEpargneConstante !== null
+        ? String(objStore.seuilEpargneConstante)
+        : "",
+    );
+    setEditionSeuilOuverte(true);
+  };
+
+  const validerSeuilEpargne = () => {
+    const montant = parseMontant(seuilEpargneTemp);
+    if (!montant || montant <= 0) return;
+    objStore.modifierSeuilEpargneConstante(montant);
+    setEditionSeuilOuverte(false);
+  };
 
   const optionsPeriode = genererOptionsPeriode(
     objStore.historiquesMois.length + 1,
@@ -326,7 +349,19 @@ export default function Analytics() {
         )
       : 0;
 
-  const disponible = objStore.argentDisponible;
+  const enveloppesEntreeStats = objStore.enveloppes.filter(
+    (e) => e.type === "Entrée",
+  );
+  const totalEntreeRecueStats = enveloppesEntreeStats.reduce(
+    (acc, e) => acc + e.depense,
+    0,
+  );
+  const totalEntreePrevueStats = enveloppesEntreeStats.reduce(
+    (acc, e) => acc + Math.max(0, e.budget - e.depense),
+    0,
+  );
+  const disponible =
+    objStore.argentDisponible + totalEntreeRecueStats + totalEntreePrevueStats;
   const epargne = objStore.epargneMois;
   const tauxEpargne =
     disponible > 0 ? Math.round((epargne / disponible) * 100) : 0;
@@ -449,7 +484,7 @@ export default function Analytics() {
               styles.btnMenu,
               { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
             ]}
-            onPress={() => setModalBadgesVisible(true)}
+            onPress={() => setModalSeriesVisible(true)}
             activeOpacity={0.7}
           >
             <Ionicons name="ellipsis-horizontal" size={18} color={C.texte} />
@@ -1060,24 +1095,24 @@ export default function Analytics() {
       </ScrollView>
 
       <Modal
-        visible={modalBadgesVisible}
+        visible={modalSeriesVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setModalBadgesVisible(false)}
+        onRequestClose={() => setModalSeriesVisible(false)}
       >
         <View style={styles.modalOverlayTouch}>
           <View style={[styles.modalCardBadges, { backgroundColor: C.carte }]}>
             <View style={styles.modalHeader}>
               <View>
                 <Text style={[styles.modalTitre, { color: C.texte }]}>
-                  Badges
+                  Séries
                 </Text>
                 <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
-                  {nbBadgesObtenus} / {badges.length} obtenus
+                  Régularité mois après mois
                 </Text>
               </View>
               <TouchableOpacity
-                onPress={() => setModalBadgesVisible(false)}
+                onPress={() => setModalSeriesVisible(false)}
                 activeOpacity={0.6}
               >
                 <Text style={[styles.modalTermine, { color: C.purple }]}>
@@ -1087,37 +1122,256 @@ export default function Analytics() {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
-              {badges.map((badge) => (
-                <View
-                  key={badge.id}
-                  style={[
-                    styles.badgeCarte,
-                    {
-                      backgroundColor: C.fondSecondaire,
-                      opacity: badge.obtenu ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={styles.badgeEmoji}>{badge.emoji}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.badgeTitre, { color: C.texte }]}>
-                      {badge.titre}
-                    </Text>
-                    <Text
-                      style={[styles.badgeDescription, { color: C.texteMuted }]}
-                    >
-                      {badge.description}
-                    </Text>
+              {series.map((serie) => {
+                const config = CONFIG_SERIE[serie.type];
+                const active = serie.enCours > 0;
+                const seuilManquant =
+                  serie.type === "epargne-constante" &&
+                  objStore.seuilEpargneConstante === null;
+
+                return (
+                  <View
+                    key={serie.type}
+                    style={[
+                      styles.serieCarte,
+                      { backgroundColor: C.fondSecondaire },
+                    ]}
+                  >
+                    <View style={styles.serieEnTete}>
+                      <View
+                        style={[
+                          styles.serieIconeFond,
+                          { backgroundColor: active ? config.light(C) : C.carte },
+                        ]}
+                      >
+                        <Ionicons
+                          name={active ? config.icone : config.iconeVide}
+                          size={18}
+                          color={active ? config.base(C) : C.texteMuted}
+                        />
+                      </View>
+                      <View style={styles.serieTitreLigne}>
+                        <Text
+                          style={[
+                            styles.serieTitre,
+                            { color: C.texte, flex: 0 },
+                          ]}
+                        >
+                          {serie.titre}
+                        </Text>
+                        {serie.type === "budget-respecte" && (
+                          <InfoBulle
+                            titre="Budget respecté"
+                            texte="Le nombre de mois d'affilée où tes dépenses réelles sont restées sous ton budget total."
+                          />
+                        )}
+                        {serie.type === "epargne-constante" && (
+                          <InfoBulle
+                            titre="Épargne constante"
+                            texte={
+                              objStore.seuilEpargneConstante !== null
+                                ? `Le nombre de mois d'affilée où tu atteins ton seuil d'épargne personnalisé (actuellement ${objStore.seuilEpargneConstante}€).`
+                                : "Le nombre de mois d'affilée où tu atteins ton seuil d'épargne personnalisé. Définis un seuil ci-dessous pour commencer à le suivre."
+                            }
+                          />
+                        )}
+                      </View>
+                      <View style={styles.serieRecordPill}>
+                        <Ionicons
+                          name="trophy-outline"
+                          size={13}
+                          color={C.texteMuted}
+                        />
+                        <Text
+                          style={[styles.serieRecordTexte, { color: C.texteMuted }]}
+                        >
+                          Record {serie.record}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {serie.type === "epargne-constante" &&
+                    editionSeuilOuverte ? (
+                      <View style={styles.serieSeuilBloc}>
+                        {seuilManquant && (
+                          <Text
+                            style={[
+                              styles.serieDescription,
+                              { color: C.texteMuted },
+                            ]}
+                          >
+                            {serie.description}
+                          </Text>
+                        )}
+                        <View style={styles.modalInputRow}>
+                          <TextInput
+                            style={[
+                              styles.inputSeuil,
+                              { backgroundColor: C.carte, color: C.texte },
+                            ]}
+                            placeholder="Ex : 100"
+                            placeholderTextColor={C.texteMuted}
+                            keyboardType="decimal-pad"
+                            value={seuilEpargneTemp}
+                            onChangeText={(t) =>
+                              setSeuilEpargneTemp(sanitizeMontantInput(t))
+                            }
+                            autoFocus
+                            returnKeyType="done"
+                            onSubmitEditing={validerSeuilEpargne}
+                          />
+                          <TouchableOpacity
+                            style={[
+                              styles.btnSerieAction,
+                              { backgroundColor: C.purple },
+                            ]}
+                            onPress={validerSeuilEpargne}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons
+                              name="checkmark"
+                              size={18}
+                              color="#FFFFFF"
+                            />
+                          </TouchableOpacity>
+                          {!seuilManquant && (
+                            <TouchableOpacity
+                              style={[
+                                styles.btnSerieAction,
+                                { backgroundColor: C.carte },
+                              ]}
+                              onPress={() => setEditionSeuilOuverte(false)}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons
+                                name="close"
+                                size={18}
+                                color={C.texteMuted}
+                              />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
+                    ) : seuilManquant ? (
+                      <View style={styles.serieSeuilBloc}>
+                        <Text
+                          style={[styles.serieDescription, { color: C.texteMuted }]}
+                        >
+                          {serie.description}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.serieLienTexte}
+                          onPress={ouvrirEditionSeuil}
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[styles.serieLien, { color: C.purple }]}
+                          >
+                            Définir un seuil
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <>
+                        {serie.enCours > 0 ? (
+                          <View style={styles.serieNombreLigne}>
+                            <Text
+                              style={[styles.serieNombre, { color: C.texte }]}
+                            >
+                              {serie.enCours}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.serieNombreLabel,
+                                { color: C.texteMuted },
+                              ]}
+                            >
+                              {serie.enCours > 1
+                                ? "mois consécutifs"
+                                : "mois en cours"}
+                            </Text>
+                          </View>
+                        ) : (
+                          <Text
+                            style={[
+                              styles.serieNombreLabel,
+                              { color: C.texteMuted, marginBottom: 12 },
+                            ]}
+                          >
+                            Aucune série en cours
+                          </Text>
+                        )}
+
+                        <View style={styles.serieDots}>
+                          {serie.parMois.slice(-12).map((ok, i) => (
+                            <View
+                              key={i}
+                              style={[
+                                styles.serieDot,
+                                ok
+                                  ? { backgroundColor: config.base(C) }
+                                  : {
+                                      backgroundColor: "transparent",
+                                      borderWidth: 1.5,
+                                      borderColor: C.separateur,
+                                    },
+                              ]}
+                            />
+                          ))}
+                        </View>
+
+                        {serie.type === "epargne-constante" && (
+                          <TouchableOpacity
+                            onPress={ouvrirEditionSeuil}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[styles.serieLien, { color: C.texteMuted }]}
+                            >
+                              Seuil : {objStore.seuilEpargneConstante} € · Modifier
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {serie.historique.length > 0 && (
+                          <TouchableOpacity
+                            style={styles.serieHistoriqueBouton}
+                            onPress={() =>
+                              setHistoriqueOuvert((prev) => ({
+                                ...prev,
+                                [serie.type]: !prev[serie.type],
+                              }))
+                            }
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.serieLien,
+                                { color: C.texteMuted },
+                              ]}
+                            >
+                              {historiqueOuvert[serie.type]
+                                ? "Séries précédentes : " +
+                                  serie.historique.join(", ") +
+                                  " mois"
+                                : "Voir l'historique"}
+                            </Text>
+                            <Ionicons
+                              name={
+                                historiqueOuvert[serie.type]
+                                  ? "chevron-up"
+                                  : "chevron-down"
+                              }
+                              size={14}
+                              color={C.texteMuted}
+                            />
+                          </TouchableOpacity>
+                        )}
+                      </>
+                    )}
                   </View>
-                  {!badge.obtenu && (
-                    <Ionicons
-                      name="lock-closed"
-                      size={16}
-                      color={C.texteMuted}
-                    />
-                  )}
-                </View>
-              ))}
+                );
+              })}
               <View style={{ height: 20 }} />
             </ScrollView>
           </View>
@@ -1126,6 +1380,35 @@ export default function Analytics() {
     </View>
   );
 }
+
+const CONFIG_SERIE: Record<
+  TypeSerie,
+  {
+    icone: keyof typeof Ionicons.glyphMap;
+    iconeVide: keyof typeof Ionicons.glyphMap;
+    base: (c: typeof COULEURS.clair) => string;
+    light: (c: typeof COULEURS.clair) => string;
+  }
+> = {
+  "epargne-croissante": {
+    icone: "trending-up",
+    iconeVide: "trending-up",
+    base: (c) => c.vert,
+    light: (c) => c.vertLight,
+  },
+  "budget-respecte": {
+    icone: "checkmark-circle",
+    iconeVide: "checkmark-circle-outline",
+    base: (c) => c.purple,
+    light: (c) => c.purpleLight,
+  },
+  "epargne-constante": {
+    icone: "flame",
+    iconeVide: "flame-outline",
+    base: (c) => c.peach,
+    light: (c) => c.peachLight,
+  },
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 20 },
@@ -1191,17 +1474,76 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     maxHeight: "80%",
   },
-  badgeCarte: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
+  serieCarte: {
     borderRadius: 16,
-    padding: 14,
+    padding: 16,
     marginTop: 12,
   },
-  badgeEmoji: { fontSize: 28 },
-  badgeTitre: { fontSize: 15, fontWeight: "700" },
-  badgeDescription: { fontSize: 12, marginTop: 2 },
+  serieEnTete: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  serieIconeFond: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  serieTitre: { fontSize: 15, fontWeight: "700", flex: 1 },
+  serieTitreLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flex: 1,
+  },
+  serieRecordPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  serieRecordTexte: { fontSize: 12, fontWeight: "600" },
+  serieDescription: { fontSize: 13, lineHeight: 18 },
+  serieNombreLigne: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 8,
+    marginBottom: 12,
+  },
+  serieNombre: { fontSize: 32, fontWeight: "700" },
+  serieNombreLabel: { fontSize: 13, fontWeight: "500" },
+  serieDots: {
+    flexDirection: "row",
+    gap: 6,
+    marginBottom: 12,
+  },
+  serieDot: { width: 9, height: 9, borderRadius: 5 },
+  serieLien: { fontSize: 12, fontWeight: "600" },
+  serieLienTexte: { marginTop: 10, alignSelf: "flex-start" },
+  serieSeuilBloc: { gap: 10 },
+  modalInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  serieHistoriqueBouton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    alignSelf: "flex-start",
+  },
+  inputSeuil: {
+    flex: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  btnSerieAction: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   chipRow: { flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" },
   chip: {
     paddingHorizontal: 16,

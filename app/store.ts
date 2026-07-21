@@ -103,6 +103,7 @@ type EtatStore = {
   argentDisponible: number;
   argentDisponibleRecurrent: boolean;
   argentDisponibleReportAuto: boolean;
+  seuilEpargneConstante: number | null;
   prenom: string;
   nom: string;
   avatarUrl: string | null;
@@ -122,6 +123,7 @@ let etat: EtatStore = {
   argentDisponible: 0,
   argentDisponibleRecurrent: false,
   argentDisponibleReportAuto: false,
+  seuilEpargneConstante: null,
   prenom: "",
   nom: "",
   avatarUrl: null,
@@ -925,6 +927,27 @@ function majArgentDisponibleSupabase(
   });
 }
 
+function majSeuilEpargneConstanteSupabase(seuil: number | null) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({ seuil_epargne_constante: seuil })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error(
+            "Supabase update seuil_epargne_constante a échoué :",
+            error,
+          );
+          signalerErreurSync(
+            `Impossible de sauvegarder le seuil d'épargne : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
 function majPrenomSupabase(prenom: string) {
   supabase.auth.getUser().then(({ data: { user } }) => {
     if (!user) return;
@@ -997,6 +1020,7 @@ export function useObjectifs() {
     argentDisponible: local.argentDisponible,
     argentDisponibleRecurrent: local.argentDisponibleRecurrent,
     argentDisponibleReportAuto: local.argentDisponibleReportAuto,
+    seuilEpargneConstante: local.seuilEpargneConstante,
     prenom: local.prenom,
     nom: local.nom,
     avatarUrl: local.avatarUrl,
@@ -1098,7 +1122,7 @@ export function useObjectifs() {
             supabase
               .from("profils")
               .select(
-                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, prenom, nom, avatar_url, notifications_actives, dernier_mois_archive_mois, dernier_mois_archive_annee",
+                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, seuil_epargne_constante, prenom, nom, avatar_url, notifications_actives, dernier_mois_archive_mois, dernier_mois_archive_annee",
               )
               .eq("user_id", user.id)
               .single(),
@@ -1139,6 +1163,8 @@ export function useObjectifs() {
           argentDisponibleReportAuto:
             profil?.argent_disponible_report_auto ??
             etat.argentDisponibleReportAuto,
+          seuilEpargneConstante:
+            profil?.seuil_epargne_constante ?? etat.seuilEpargneConstante,
           prenom: profil?.prenom ?? etat.prenom,
           nom: profil?.nom ?? etat.nom,
           avatarUrl: profil?.avatar_url ?? etat.avatarUrl,
@@ -1619,6 +1645,11 @@ export function useObjectifs() {
         argentDisponibleReportAuto: reportAuto,
       });
       majArgentDisponibleSupabase(montant, recurrent, reportAuto);
+    },
+
+    modifierSeuilEpargneConstante: (seuil: number | null) => {
+      setEtat({ seuilEpargneConstante: seuil });
+      majSeuilEpargneConstanteSupabase(seuil);
     },
 
     modifierPrenom: (prenom: string) => {

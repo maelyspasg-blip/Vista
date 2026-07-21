@@ -226,7 +226,12 @@ export default function Planning() {
     "depense" | "entree"
   >("depense");
   const [montantEvent, setMontantEvent] = useState("");
-  const [categorieEvent, setCategorieEvent] = useState("Aucune");
+  const [categorieEvent, setCategorieEvent] = useState("");
+  const [creationCategorieOuverte, setCreationCategorieOuverte] =
+    useState(false);
+  const [nomNouvelleCategorie, setNomNouvelleCategorie] = useState("");
+  const [creationCategorieEnCours, setCreationCategorieEnCours] =
+    useState(false);
   const [recurrentEvent, setRecurrentEvent] = useState(false);
   const [frequenceEvent, setFrequenceEvent] =
     useState<FrequenceEvenement>("semaine");
@@ -425,7 +430,9 @@ export default function Planning() {
     setEstFinancierEvent(false);
     setTypeFinancierEvent("depense");
     setMontantEvent("");
-    setCategorieEvent("Aucune");
+    setCategorieEvent("");
+    setCreationCategorieOuverte(false);
+    setNomNouvelleCategorie("");
     setRecurrentEvent(false);
     setFrequenceEvent("semaine");
     setJourneeEntiereEvent(false);
@@ -446,7 +453,9 @@ export default function Planning() {
     setEstFinancierEvent(false);
     setTypeFinancierEvent("depense");
     setMontantEvent("");
-    setCategorieEvent("Aucune");
+    setCategorieEvent("");
+    setCreationCategorieOuverte(false);
+    setNomNouvelleCategorie("");
     setRecurrentEvent(false);
     setFrequenceEvent("semaine");
     setJourneeEntiereEvent(false);
@@ -472,7 +481,9 @@ export default function Planning() {
     );
     setTypeFinancierEvent(enveloppeLiee?.type === "Entrée" ? "entree" : "depense");
     setMontantEvent(ev.montant ? String(ev.montant) : "");
-    setCategorieEvent(ev.categorieLiee ?? "Aucune");
+    setCategorieEvent(ev.categorieLiee ?? "");
+    setCreationCategorieOuverte(false);
+    setNomNouvelleCategorie("");
     setRecurrentEvent(ev.recurrent ?? false);
     setFrequenceEvent(ev.frequence ?? "semaine");
     setNotifierEvent(ev.notifierActif ?? false);
@@ -557,15 +568,42 @@ export default function Planning() {
     setModalCreationVisible(false);
   };
 
+  const choisirCouleurAutomatique = () => {
+    const couleursUtilisees = new Set(
+      objStore.enveloppes.map((env) => env.couleur),
+    );
+    const disponible = PALETTE_COULEURS.find(
+      (c) => !couleursUtilisees.has(c),
+    );
+    return (
+      disponible ??
+      PALETTE_COULEURS[objStore.enveloppes.length % PALETTE_COULEURS.length]
+    );
+  };
+
+  const creerNouvelleCategorieInline = async () => {
+    const nom = nomNouvelleCategorie.trim();
+    if (!nom || creationCategorieEnCours) return;
+    setCreationCategorieEnCours(true);
+    const nouvelle = await objStore.ajouterEnveloppe({
+      nom,
+      depense: 0,
+      budget: parseMontant(montantEvent) || 0,
+      couleur: choisirCouleurAutomatique(),
+      type: typeFinancierEvent === "entree" ? "Entrée" : "Variable",
+      recurrente: false,
+    });
+    setCreationCategorieEnCours(false);
+    if (!nouvelle) return;
+    setCategorieEvent(nouvelle.nom);
+    setNomNouvelleCategorie("");
+    setCreationCategorieOuverte(false);
+  };
+
   const validerInfos = () => {
     if (!nomEvent) return;
     if (estFinancierEvent && !montantEvent) return;
-    if (
-      estFinancierEvent &&
-      typeFinancierEvent === "entree" &&
-      (!categorieEvent || categorieEvent === "Aucune")
-    )
-      return;
+    if (estFinancierEvent && !categorieEvent) return;
     if (evenementEnEditionId !== null) {
       sauvegarderModificationEvenement();
       return;
@@ -1530,7 +1568,9 @@ export default function Planning() {
                             ]}
                             onPress={() => {
                               setTypeFinancierEvent("depense");
-                              setCategorieEvent("Aucune");
+                              setCategorieEvent("");
+                              setCreationCategorieOuverte(false);
+                              setNomNouvelleCategorie("");
                             }}
                             activeOpacity={0.7}
                           >
@@ -1556,7 +1596,9 @@ export default function Planning() {
                             ]}
                             onPress={() => {
                               setTypeFinancierEvent("entree");
-                              setCategorieEvent("Aucune");
+                              setCategorieEvent("");
+                              setCreationCategorieOuverte(false);
+                              setNomNouvelleCategorie("");
                             }}
                             activeOpacity={0.7}
                           >
@@ -1603,33 +1645,9 @@ export default function Planning() {
                         <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
                           {typeFinancierEvent === "entree"
                             ? "Lier à une catégorie d'entrée d'argent"
-                            : "Lier à une catégorie (optionnel)"}
+                            : "Lier à une catégorie"}
                         </Text>
                         <View style={styles.categorieGrid}>
-                          {typeFinancierEvent === "depense" && (
-                            <TouchableOpacity
-                              style={[
-                                styles.categorieChip,
-                                { backgroundColor: C.fondSecondaire },
-                                categorieEvent === "Aucune" && {
-                                  backgroundColor: C.purple,
-                                },
-                              ]}
-                              onPress={() => setCategorieEvent("Aucune")}
-                              activeOpacity={0.7}
-                            >
-                              <Text
-                                style={[
-                                  styles.categorieChipTexte,
-                                  { color: C.texteMuted },
-                                  categorieEvent === "Aucune" &&
-                                    styles.categorieChipTexteActif,
-                                ]}
-                              >
-                                Aucune
-                              </Text>
-                            </TouchableOpacity>
-                          )}
                           {objStore.enveloppes
                             .filter((env) =>
                               typeFinancierEvent === "entree"
@@ -1662,30 +1680,102 @@ export default function Planning() {
                               </Text>
                             </TouchableOpacity>
                           ))}
+                          {!creationCategorieOuverte && (
+                            <TouchableOpacity
+                              style={[
+                                styles.categorieChip,
+                                styles.categorieChipNouvelle,
+                                { borderColor: C.purple },
+                              ]}
+                              onPress={() => setCreationCategorieOuverte(true)}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons name="add" size={14} color={C.purple} />
+                              <Text
+                                style={[
+                                  styles.categorieChipTexte,
+                                  { color: C.purple },
+                                ]}
+                              >
+                                Créer une nouvelle catégorie
+                              </Text>
+                            </TouchableOpacity>
+                          )}
                         </View>
 
-                        {typeFinancierEvent === "entree" &&
-                          !objStore.enveloppes.some(
-                            (env) => env.type === "Entrée",
-                          ) && (
-                            <Text
-                              style={[styles.modalAide, { color: C.texteMuted }]}
+                        {creationCategorieOuverte && (
+                          <View style={styles.modalInputRow}>
+                            <TextInput
+                              style={[
+                                styles.input,
+                                {
+                                  flex: 1,
+                                  backgroundColor: C.fondSecondaire,
+                                  color: C.texte,
+                                },
+                              ]}
+                              placeholder="Nom de la nouvelle catégorie"
+                              placeholderTextColor={C.texteMuted}
+                              value={nomNouvelleCategorie}
+                              onChangeText={setNomNouvelleCategorie}
+                              returnKeyType="done"
+                              autoFocus
+                              onSubmitEditing={creerNouvelleCategorieInline}
+                            />
+                            <TouchableOpacity
+                              style={[
+                                styles.btnCategorieAction,
+                                {
+                                  backgroundColor: C.purple,
+                                  opacity:
+                                    nomNouvelleCategorie.trim() &&
+                                    !creationCategorieEnCours
+                                      ? 1
+                                      : 0.5,
+                                },
+                              ]}
+                              onPress={creerNouvelleCategorieInline}
+                              activeOpacity={0.7}
+                              disabled={
+                                !nomNouvelleCategorie.trim() ||
+                                creationCategorieEnCours
+                              }
                             >
-                              Crée d&apos;abord une catégorie &quot;Entrée
-                              d&apos;argent&quot; depuis Aperçu pour pouvoir la
-                              choisir ici.
-                            </Text>
-                          )}
+                              {creationCategorieEnCours ? (
+                                <ActivityIndicator color="#FFFFFF" size="small" />
+                              ) : (
+                                <Ionicons
+                                  name="checkmark"
+                                  size={20}
+                                  color="#FFFFFF"
+                                />
+                              )}
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                styles.btnCategorieAction,
+                                { backgroundColor: C.fondSecondaire },
+                              ]}
+                              onPress={() => {
+                                setCreationCategorieOuverte(false);
+                                setNomNouvelleCategorie("");
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons name="close" size={20} color={C.texteMuted} />
+                            </TouchableOpacity>
+                          </View>
+                        )}
 
-                        <Text style={[styles.modalAide, { color: C.texteMuted }]}>
-                          {typeFinancierEvent === "entree"
-                            ? categorieEvent !== "Aucune"
+                        {categorieEvent !== "" && (
+                          <Text
+                            style={[styles.modalAide, { color: C.texteMuted }]}
+                          >
+                            {typeFinancierEvent === "entree"
                               ? `Le montant sera ajouté à ton entrée d'argent "${categorieEvent}".`
-                              : ""
-                            : categorieEvent === "Aucune"
-                              ? `Une nouvelle ligne "${nomEvent}" apparaîtra dans tes dépenses prévues.`
                               : `Le montant sera ajouté à ta dépense "${categorieEvent}".`}
-                        </Text>
+                          </Text>
+                        )}
                       </>
                     )}
 
@@ -2137,6 +2227,21 @@ const styles = StyleSheet.create({
   },
   categorieChipTexte: { fontSize: 13, fontWeight: "600" },
   categorieChipTexteActif: { color: "#FFFFFF" },
+  categorieChipNouvelle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "transparent",
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+  },
+  btnCategorieAction: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   switchRow: {
     flexDirection: "row",
     justifyContent: "space-between",
