@@ -287,25 +287,29 @@ export default function Dashboard() {
       ? Math.min((totalEntreeRecue / disponibleEffectif) * 100, 100)
       : 0;
 
-  const totalPrevu = enveloppesSansEntree.reduce(
-    (acc, e) => acc + Math.max(0, e.budget - e.depense),
-    0,
-  );
+  // "Reste estimé" doit correspondre exactement à ce qui sera reporté au
+  // mois suivant (voir archiverMoisActuelInterne dans store.ts), qui ne
+  // compte que les flux réellement réalisés — pas les entrées encore
+  // attendues ni les dépenses encore seulement prévues.
+  const disponibleReel = disponibleNum + totalEntreeRecue;
   const resteEstime =
-    disponibleEffectif - totalDepenseEnveloppes - totalPrevu - objStore.epargneMois;
+    disponibleReel - totalDepenseEnveloppes - objStore.epargneMois;
   const pctDepenseEstime =
-    disponibleEffectif > 0
-      ? Math.min((totalDepenseEnveloppes / disponibleEffectif) * 100, 100)
-      : 0;
-  const pctPrevuEstime =
-    disponibleEffectif > 0
-      ? Math.min((totalPrevu / disponibleEffectif) * 100, 100 - pctDepenseEstime)
+    disponibleReel > 0
+      ? Math.min((totalDepenseEnveloppes / disponibleReel) * 100, 100)
       : 0;
   const pctEpargneEstime =
-    disponibleEffectif > 0
+    disponibleReel > 0
       ? Math.min(
-          (objStore.epargneMois / disponibleEffectif) * 100,
-          100 - pctDepenseEstime - pctPrevuEstime,
+          (objStore.epargneMois / disponibleReel) * 100,
+          100 - pctDepenseEstime,
+        )
+      : 0;
+  const pctEntreeRecueEstime =
+    disponibleReel > 0
+      ? Math.min(
+          (totalEntreeRecue / disponibleReel) * 100,
+          100 - pctDepenseEstime - pctEpargneEstime,
         )
       : 0;
 
@@ -368,7 +372,7 @@ export default function Dashboard() {
   const lecture =
     resteEstime < 0
       ? { texte: "Risque de dépassement", couleurTexte: "#FFD2D2" }
-      : resteEstime < disponibleEffectif * 0.15
+      : resteEstime < disponibleReel * 0.15
         ? { texte: "Tu es proche de la limite", couleurTexte: "#FFE0C2" }
         : {
             texte: "Tu devrais rester dans ton budget",
@@ -810,12 +814,6 @@ export default function Dashboard() {
                 { width: `${pctDepenseEstime}%`, backgroundColor: C.accent },
               ]}
             />
-            <View
-              style={[
-                styles.barSegment,
-                { width: `${pctPrevuEstime}%`, backgroundColor: C.peach },
-              ]}
-            />
             {segmentsEpargne.map((s) => {
               const pct =
                 objStore.epargneMois > 0
@@ -838,7 +836,7 @@ export default function Dashboard() {
               <View
                 style={[
                   styles.barSegment,
-                  { width: `${pctEntreeRecue}%`, backgroundColor: C.vert },
+                  { width: `${pctEntreeRecueEstime}%`, backgroundColor: C.vert },
                 ]}
               />
             )}
@@ -858,22 +856,6 @@ export default function Dashboard() {
                 ]}
               >
                 Dépensé {totalDepenseEnveloppes}€
-              </Text>
-            </View>
-            <View style={styles.heroLegendeItem}>
-              <View
-                style={[styles.heroLegendeDot, { backgroundColor: C.peach }]}
-              />
-              <Text
-                style={[
-                  styles.heroSub,
-                  {
-                    color:
-                      theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
-                  },
-                ]}
-              >
-                Prévues {totalPrevu}€
               </Text>
             </View>
             {segmentsEpargne.map((s) => (

@@ -30,8 +30,10 @@ import {
   PeriodeExport,
 } from "../utils/exportExcel";
 import { getInitiales } from "../utils/initiales";
+import { CALCULS_DOC } from "../utils/calculsDoc";
 import { messageErreurAuth } from "./authErrors";
 import { demanderPermissionNotifications } from "./notifications";
+import { AccordionItem } from "./AccordionItem";
 import { SyncErrorBanner } from "./SyncErrorBanner";
 import { useObjectifs } from "./store";
 import { Theme, useTheme } from "./ThemeContext";
@@ -249,6 +251,11 @@ export default function Profil() {
       setExportEnCours(false);
     }
   };
+
+  const [modalCalculsVisible, setModalCalculsVisible] = useState(false);
+  const [pageCalculsActive, setPageCalculsActive] = useState(
+    CALCULS_DOC[0].page,
+  );
 
   const [modalMotDePasseVisible, setModalMotDePasseVisible] = useState(false);
   const [nouveauMotDePasse, setNouveauMotDePasse] = useState("");
@@ -515,6 +522,32 @@ export default function Profil() {
         </View>
 
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+          DÉTAIL DES CALCULS
+        </Text>
+        <View
+          style={[
+            styles.carte,
+            { backgroundColor: C.carte, borderColor: C.carteBorder },
+            styleCarte(theme, C.lavande),
+          ]}
+        >
+          <Text style={[styles.calculsIntro, { color: C.texteMuted }]}>
+            Comment chaque chiffre affiché dans l&apos;app est calculé,
+            page par page.
+          </Text>
+          <TouchableOpacity
+            style={[styles.btnSecondaire, { borderColor: C.separateur }]}
+            onPress={() => setModalCalculsVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="calculator-outline" size={16} color={C.texte} />
+            <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+              Voir le détail des calculs
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           COMPTE
         </Text>
         <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.peach)]}>
@@ -733,6 +766,82 @@ export default function Profil() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={modalCalculsVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalCalculsVisible(false)}
+      >
+        <View style={styles.modalOverlayTouch}>
+          <View
+            style={[styles.modalCardCalculs, { backgroundColor: C.carte }]}
+          >
+            <View style={styles.modalHeaderCalculs}>
+              <View>
+                <Text style={[styles.modalTitre, { color: C.texte, marginBottom: 2 }]}>
+                  Détail des calculs
+                </Text>
+                <Text style={[styles.exportSousTitre, { color: C.texteMuted, marginBottom: 0 }]}>
+                  Comment chaque chiffre est calculé
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setModalCalculsVisible(false)}
+                activeOpacity={0.6}
+              >
+                <Text style={[styles.modalTermine, { color: C.purple }]}>
+                  Terminé
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.chipRowCalculs}>
+              {CALCULS_DOC.map((groupe) => (
+                <TouchableOpacity
+                  key={groupe.page}
+                  style={[
+                    styles.chipCalculs,
+                    {
+                      backgroundColor: C.fondSecondaire,
+                      borderColor: C.carteBorder,
+                    },
+                    pageCalculsActive === groupe.page && {
+                      backgroundColor: C.purple,
+                      borderColor: C.purple,
+                    },
+                  ]}
+                  onPress={() => setPageCalculsActive(groupe.page)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.chipCalculsTexte,
+                      { color: C.texteMuted },
+                      pageCalculsActive === groupe.page && { color: "#FFFFFF" },
+                    ]}
+                  >
+                    {groupe.page}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {CALCULS_DOC.find((g) => g.page === pageCalculsActive)?.entrees.map(
+                (entree) => (
+                  <AccordionItem
+                    key={entree.titre}
+                    titre={entree.titre}
+                    texte={entree.explication}
+                  />
+                ),
+              )}
+              <View style={{ height: 20 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -816,6 +925,28 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   btnSecondaireTexte: { fontSize: 14, fontWeight: "600" },
+  calculsIntro: { fontSize: 13, lineHeight: 18, marginBottom: 14 },
+  modalCardCalculs: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    maxHeight: "85%",
+  },
+  modalHeaderCalculs: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 16,
+  },
+  modalTermine: { fontSize: 16, fontWeight: "600" },
+  chipRowCalculs: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  chipCalculs: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 0.5,
+  },
+  chipCalculsTexte: { fontSize: 13, fontWeight: "600" },
   switchRow: {
     flexDirection: "row",
     alignItems: "center",
