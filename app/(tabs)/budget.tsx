@@ -21,7 +21,7 @@ import {
   View,
 } from "react-native";
 import { useTheme } from "../ThemeContext";
-import { Enveloppe, useObjectifs } from "../store";
+import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { InfoBulle } from "../InfoBulle";
 
@@ -76,6 +76,12 @@ export default function Budget() {
   const [enveloppeTx, setEnveloppeTx] = useState<string | null>(null);
   const [ajoutTransactionEnCours, setAjoutTransactionEnCours] =
     useState(false);
+  const [creationModeleOuvertPour, setCreationModeleOuvertPour] = useState<
+    string | null
+  >(null);
+  const [nomModeleTemp, setNomModeleTemp] = useState("");
+  const [montantModeleTemp, setMontantModeleTemp] = useState("");
+  const [creationModeleEnCours, setCreationModeleEnCours] = useState(false);
   const [gestionEvenement, setGestionEvenement] = useState<{
     id: string;
     nom: string;
@@ -340,6 +346,39 @@ export default function Budget() {
     );
   };
 
+  const utiliserModele = (modele: ModeleDepense) => {
+    setNomTx(modele.nom);
+    setMontantTx(modele.montant !== null ? String(modele.montant) : "");
+    setEnveloppeTx(modele.enveloppeId);
+    setModalAjoutVisible(true);
+  };
+
+  const ouvrirCreationModele = (enveloppeId: string) => {
+    setNomModeleTemp("");
+    setMontantModeleTemp("");
+    setCreationModeleOuvertPour(enveloppeId);
+  };
+
+  const fermerCreationModele = () => {
+    setCreationModeleOuvertPour(null);
+    setNomModeleTemp("");
+    setMontantModeleTemp("");
+  };
+
+  const creerModele = async (enveloppeId: string) => {
+    const nom = nomModeleTemp.trim();
+    if (!nom || creationModeleEnCours) return;
+    setCreationModeleEnCours(true);
+    const nouveau = await objStore.ajouterModeleDepense(
+      nom,
+      montantModeleTemp ? parseMontant(montantModeleTemp) : null,
+      enveloppeId,
+    );
+    setCreationModeleEnCours(false);
+    if (!nouveau) return;
+    fermerCreationModele();
+  };
+
   const toggleEnveloppe = (id: string) => {
     setEnveloppeOuverte(enveloppeOuverte === id ? null : id);
   };
@@ -428,6 +467,124 @@ export default function Budget() {
 
         {estOuverte && (
           <View style={[styles.txListe, { borderTopColor: C.separateur }]}>
+            {env.type === "Variable" && (
+              <>
+                <View style={styles.modelesRow}>
+                  {objStore.modelesDepenses
+                    .filter((m) => m.enveloppeId === env.id)
+                    .map((m) => (
+                      <View
+                        key={m.id}
+                        style={[
+                          styles.modeleChip,
+                          { backgroundColor: env.couleur + "22" },
+                        ]}
+                      >
+                        <TouchableOpacity
+                          onPress={() => utiliserModele(m)}
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[
+                              styles.modeleChipTexte,
+                              { color: env.couleur },
+                            ]}
+                          >
+                            {m.nom}
+                            {m.montant !== null ? ` ${m.montant}€` : ""}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => objStore.supprimerModeleDepense(m.id)}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        >
+                          <Ionicons name="close" size={12} color={env.couleur} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  {creationModeleOuvertPour !== env.id && (
+                    <TouchableOpacity
+                      style={[
+                        styles.modeleChip,
+                        styles.modeleChipAjouter,
+                        { borderColor: C.separateur },
+                      ]}
+                      onPress={() => ouvrirCreationModele(env.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="add" size={12} color={C.texteMuted} />
+                      <Text
+                        style={[
+                          styles.modeleChipTexte,
+                          { color: C.texteMuted },
+                        ]}
+                      >
+                        Raccourci
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {creationModeleOuvertPour === env.id && (
+                  <View style={styles.modeleFormRow}>
+                    <TextInput
+                      style={[
+                        styles.modeleInput,
+                        { backgroundColor: C.fondSecondaire, color: C.texte },
+                      ]}
+                      placeholder="Nom"
+                      placeholderTextColor={C.texteMuted}
+                      value={nomModeleTemp}
+                      onChangeText={setNomModeleTemp}
+                      autoFocus
+                      returnKeyType="next"
+                      inputAccessoryViewID={ACCESSORY_ID}
+                    />
+                    <TextInput
+                      style={[
+                        styles.modeleInputMontant,
+                        { backgroundColor: C.fondSecondaire, color: C.texte },
+                      ]}
+                      placeholder="€"
+                      placeholderTextColor={C.texteMuted}
+                      keyboardType="decimal-pad"
+                      value={montantModeleTemp}
+                      onChangeText={(t) =>
+                        setMontantModeleTemp(sanitizeMontantInput(t))
+                      }
+                      returnKeyType="done"
+                      onSubmitEditing={() => creerModele(env.id)}
+                      inputAccessoryViewID={ACCESSORY_ID}
+                    />
+                    <TouchableOpacity
+                      style={[
+                        styles.modeleBtnAction,
+                        { backgroundColor: env.couleur },
+                      ]}
+                      onPress={() => creerModele(env.id)}
+                      activeOpacity={0.7}
+                      disabled={creationModeleEnCours}
+                    >
+                      {creationModeleEnCours ? (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      ) : (
+                        <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.modeleBtnAction,
+                        { backgroundColor: C.fondSecondaire },
+                      ]}
+                      onPress={fermerCreationModele}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="close" size={16} color={C.texteMuted} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </>
+            )}
             {lignesDepense.length === 0 && lignesAVenirCategorie.length === 0 ? (
               <Text style={[styles.txVide, { color: C.texteMuted }]}>
                 Aucune dépense enregistrée
@@ -1044,6 +1201,49 @@ export default function Budget() {
                   ))}
                 </View>
 
+                {enveloppeTx &&
+                  objStore.modelesDepenses.some(
+                    (m) => m.enveloppeId === enveloppeTx,
+                  ) && (
+                    <>
+                      <Text
+                        style={[styles.modalLabel, { color: C.texteMuted }]}
+                      >
+                        Raccourcis
+                      </Text>
+                      <View style={styles.envChoixGrid}>
+                        {objStore.modelesDepenses
+                          .filter((m) => m.enveloppeId === enveloppeTx)
+                          .map((m) => (
+                            <TouchableOpacity
+                              key={m.id}
+                              style={[
+                                styles.modeleChip,
+                                { backgroundColor: C.fondSecondaire },
+                              ]}
+                              onPress={() => {
+                                setNomTx(m.nom);
+                                setMontantTx(
+                                  m.montant !== null ? String(m.montant) : "",
+                                );
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <Text
+                                style={[
+                                  styles.modeleChipTexte,
+                                  { color: C.texte },
+                                ]}
+                              >
+                                {m.nom}
+                                {m.montant !== null ? ` ${m.montant}€` : ""}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                      </View>
+                    </>
+                  )}
+
                 <TouchableOpacity
                   style={[
                     styles.btnValider,
@@ -1237,6 +1437,53 @@ const styles = StyleSheet.create({
   envBarFill: { height: "100%", borderRadius: 3 },
   txListe: { marginTop: 14, paddingTop: 14, borderTopWidth: 0.5 },
   txVide: { fontSize: 13, textAlign: "center", paddingVertical: 10 },
+  modelesRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 10,
+  },
+  modeleChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+  },
+  modeleChipAjouter: {
+    borderWidth: 1,
+    borderStyle: "dashed",
+  },
+  modeleChipTexte: { fontSize: 12, fontWeight: "600" },
+  modeleFormRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 10,
+  },
+  modeleInput: {
+    flex: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 13,
+  },
+  modeleInputMontant: {
+    width: 70,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 9,
+    fontSize: 13,
+    textAlign: "center",
+  },
+  modeleBtnAction: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   txLigne: {
     flexDirection: "row",
     alignItems: "center",

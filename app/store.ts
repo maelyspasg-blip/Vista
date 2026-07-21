@@ -66,6 +66,13 @@ export type Transaction = {
   date: string;
 };
 
+export type ModeleDepense = {
+  id: string;
+  nom: string;
+  montant: number | null;
+  enveloppeId: string;
+};
+
 export type SnapshotEnveloppe = {
   id: string;
   nom: string;
@@ -109,6 +116,7 @@ type EtatStore = {
   avatarUrl: string | null;
   notificationsActives: boolean;
   transactions: Transaction[];
+  modelesDepenses: ModeleDepense[];
   evenements: Evenement[];
   historiquePaiements: PaiementHistorique[];
   historiquesMois: SnapshotMois[];
@@ -129,6 +137,7 @@ let etat: EtatStore = {
   avatarUrl: null,
   notificationsActives: true,
   transactions: TRANSACTIONS_INIT,
+  modelesDepenses: [],
   evenements: EVENEMENTS_INIT,
   historiquePaiements: [],
   historiquesMois: [],
@@ -428,6 +437,31 @@ function transactionDepuisLigne(l: TransactionRow): Transaction {
     montant: l.montant,
     enveloppeId: l.enveloppe_id,
     date: l.date,
+  };
+}
+
+type ModeleDepenseRow = {
+  id: string;
+  user_id: string;
+  enveloppe_id: string;
+  nom: string;
+  montant: number | null;
+};
+
+function modeleDepenseDepuisLigne(l: ModeleDepenseRow): ModeleDepense {
+  return {
+    id: l.id,
+    nom: l.nom,
+    montant: l.montant,
+    enveloppeId: l.enveloppe_id,
+  };
+}
+
+function modeleDepenseVersColonnes(m: Omit<ModeleDepense, "id">) {
+  return {
+    enveloppe_id: m.enveloppeId,
+    nom: m.nom,
+    montant: m.montant,
   };
 }
 
@@ -1026,6 +1060,7 @@ export function useObjectifs() {
     avatarUrl: local.avatarUrl,
     notificationsActives: local.notificationsActives,
     transactions: local.transactions,
+    modelesDepenses: local.modelesDepenses,
     evenements: local.evenements,
     historiquePaiements: local.historiquePaiements,
     historiquesMois: local.historiquesMois,
@@ -1302,6 +1337,37 @@ export function useObjectifs() {
         console.error("Chargement des dépenses a échoué :", e);
         signalerErreurSync(
           "Impossible de charger tes dépenses : problème de connexion.",
+        );
+      }
+    },
+
+    chargerModelesDepenses: async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from("modeles_depenses")
+          .select("*")
+          .eq("user_id", user.id);
+
+        if (error) {
+          console.error("Supabase select modeles_depenses a échoué :", error);
+          signalerErreurSync(
+            `Impossible de charger tes raccourcis : ${error.message}`,
+          );
+          return;
+        }
+
+        setEtat({
+          modelesDepenses: (data ?? []).map(modeleDepenseDepuisLigne),
+        });
+      } catch (e) {
+        console.error("Chargement des raccourcis a échoué :", e);
+        signalerErreurSync(
+          "Impossible de charger tes raccourcis : problème de connexion.",
         );
       }
     },
@@ -1976,6 +2042,68 @@ export function useObjectifs() {
             console.error("Supabase delete transaction a échoué :", error);
             signalerErreurSync(
               `Impossible de supprimer la dépense : ${error.message}`,
+            );
+          }
+        });
+    },
+
+    ajouterModeleDepense: async (
+      nom: string,
+      montant: number | null,
+      enveloppeId: string,
+    ): Promise<ModeleDepense | null> => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          signalerErreurSync("Tu dois être connecté pour créer un raccourci.");
+          return null;
+        }
+
+        const champs: Omit<ModeleDepense, "id"> = { nom, montant, enveloppeId };
+
+        const { data, error } = await supabase
+          .from("modeles_depenses")
+          .insert({ ...modeleDepenseVersColonnes(champs), user_id: user.id })
+          .select()
+          .single();
+
+        if (error || !data) {
+          console.error("Supabase insert modele_depense a échoué :", error);
+          signalerErreurSync(
+            error
+              ? `Impossible de créer le raccourci : ${error.message}`
+              : "Impossible de créer le raccourci : réponse vide de Supabase.",
+          );
+          return null;
+        }
+
+        const nouveau = modeleDepenseDepuisLigne(data);
+        setEtat({ modelesDepenses: [...etat.modelesDepenses, nouveau] });
+        return nouveau;
+      } catch (e) {
+        console.error("Création de raccourci a échoué :", e);
+        signalerErreurSync(
+          "Impossible de créer le raccourci : problème de connexion.",
+        );
+        return null;
+      }
+    },
+
+    supprimerModeleDepense: (id: string) => {
+      setEtat({
+        modelesDepenses: etat.modelesDepenses.filter((m) => m.id !== id),
+      });
+      supabase
+        .from("modeles_depenses")
+        .delete()
+        .eq("id", id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Supabase delete modele_depense a échoué :", error);
+            signalerErreurSync(
+              `Impossible de supprimer le raccourci : ${error.message}`,
             );
           }
         });

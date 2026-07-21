@@ -528,6 +528,14 @@ export default function Planning() {
     setModalCreationVisible(false);
   };
 
+  const dupliquerEvenement = () => {
+    setEvenementEnEditionId(null);
+    setDateEvent(dateActuelle);
+    setMultiJoursEvent(false);
+    setDateFinEvent(dateActuelle);
+    setCalendrierOuvert("aucun");
+  };
+
   const gererClicEvenement = (ev: EvenementUnifie) => {
     if (!ev.modifiable) {
       router.push("/");
@@ -1885,6 +1893,25 @@ export default function Planning() {
                     </TouchableOpacity>
                     {evenementEnEditionId !== null && (
                       <TouchableOpacity
+                        style={[
+                          styles.btnDupliquer,
+                          { backgroundColor: C.fondSecondaire },
+                        ]}
+                        onPress={dupliquerEvenement}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name="copy-outline"
+                          size={16}
+                          color={C.texte}
+                        />
+                        <Text style={[styles.btnDupliquerTexte, { color: C.texte }]}>
+                          Dupliquer
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                    {evenementEnEditionId !== null && (
+                      <TouchableOpacity
                         style={styles.btnSupprimerTexte}
                         onPress={supprimerEvenementEnEdition}
                         activeOpacity={0.7}
@@ -2183,6 +2210,16 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   btnAnnulerTexte: { fontSize: 15, fontWeight: "600" },
+  btnDupliquer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 10,
+  },
+  btnDupliquerTexte: { fontSize: 15, fontWeight: "600" },
   btnSupprimerTexte: {
     padding: 14,
     alignItems: "center",

@@ -1134,6 +1134,21 @@ export default function Dashboard() {
               activeOpacity={0.7}
               onPress={() => ouvrirEditionEnveloppe(env)}
             >
+              <View
+                style={[
+                  styles.typePastille,
+                  {
+                    backgroundColor:
+                      env.type === "Entrée" ? C.accentLight : C.peachLight,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={env.type === "Entrée" ? "add" : "remove"}
+                  size={13}
+                  color={env.type === "Entrée" ? C.accentText : C.peachText}
+                />
+              </View>
               <View style={styles.envRow}>
                 <View style={styles.envNomRow}>
                   <Text style={[styles.envNom, { color: C.texte }]}>
@@ -1759,6 +1774,7 @@ export default function Dashboard() {
                     style={[
                       styles.typeChip,
                       styles.typeChipAvecInfo,
+                      styles.typeChipEntree,
                       { backgroundColor: C.fondSecondaire },
                       nouveauType === "Entrée" && { backgroundColor: C.vert },
                     ]}
@@ -1771,12 +1787,15 @@ export default function Dashboard() {
                         { color: C.texteMuted },
                         nouveauType === "Entrée" && styles.typeChipTexteActif,
                       ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
                     >
                       Entrée d&apos;argent
                     </Text>
                     <InfoBulle
                       titre="Entrée d'argent"
                       texte="Une catégorie de type Entrée d'argent s'additionne à ton Disponible au lieu de s'en soustraire, contrairement à une catégorie de dépense classique."
+                      taille={13}
                       couleur={
                         nouveauType === "Entrée" ? "#FFFFFF" : C.texteMuted
                       }
@@ -2710,12 +2729,28 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   btnAjoutTexte: { fontSize: 13, fontWeight: "700" },
-  envCard: { borderRadius: 16, padding: 18, marginBottom: 10 },
+  envCard: {
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 10,
+    position: "relative",
+  },
   envRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 11,
+    paddingRight: 26,
+  },
+  typePastille: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
   },
   envNomRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   badgesRow: { flexDirection: "row", gap: 4 },
@@ -2815,15 +2850,17 @@ const styles = StyleSheet.create({
   typeChip: {
     flex: 1,
     paddingVertical: 11,
+    paddingHorizontal: 4,
     borderRadius: 12,
     alignItems: "center",
   },
   typeChipTexte: { fontSize: 14, fontWeight: "600" },
   typeChipTexteActif: { color: "#FFFFFF" },
+  typeChipEntree: { flex: 2 },
   typeChipAvecInfo: {
     flexDirection: "row",
     justifyContent: "center",
-    gap: 4,
+    gap: 3,
   },
   calendarWrap: {
     borderRadius: 14,

@@ -26,6 +26,7 @@ export default function TabLayout() {
         objStore.chargerObjectifs(),
         objStore.chargerEvenements(),
         objStore.chargerTransactions(),
+        objStore.chargerModelesDepenses(),
         objStore.chargerHistoriquePaiements(),
         objStore.chargerHistoriquesMois(),
       ]);

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Dimensions,
   Modal,
@@ -16,6 +16,7 @@ import Svg, { Circle, Line, Path, Text as SvgText } from "react-native-svg";
 import { useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { calculerSeries, TypeSerie } from "../../utils/series";
+import { calculerScoreSante, MotCleScore } from "../../utils/score";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { InfoBulle } from "../InfoBulle";
 
@@ -40,8 +41,32 @@ const { width: SCREEN_W } = Dimensions.get("window");
 const CHART_W = SCREEN_W - 80;
 const CHART_H = 160;
 const PADDING_X = 16;
+const PADDING_LEFT = 34;
 
 type Vue = "global" | "categorie";
+
+function calculerStepLisible(brut: number): number {
+  const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(brut, 1))));
+  const normalise = brut / magnitude;
+  let step: number;
+  if (normalise <= 1) step = 1;
+  else if (normalise <= 2) step = 2;
+  else if (normalise <= 5) step = 5;
+  else step = 10;
+  return Math.max(1, Math.round(step * magnitude));
+}
+
+function calculerTicksY(maxBrut: number, nbTicks = 4): number[] {
+  const step = calculerStepLisible(maxBrut / nbTicks);
+  const ticks: number[] = [];
+  let v = 0;
+  while (v < maxBrut) {
+    ticks.push(v);
+    v += step;
+  }
+  ticks.push(v);
+  return ticks;
+}
 
 function formaterPeriode(nbMois: number): string {
   if (nbMois >= 12 && nbMois % 12 === 0) {
@@ -89,17 +114,19 @@ function GraphiqueLignes({
   couleurs: typeof COULEURS.clair;
 }) {
   const toutes = [...donneesReelles, ...donneesPrevisionnelles];
-  const max = Math.max(...toutes, 1);
+  const maxBrut = Math.max(...toutes, 1);
+  const ticks = calculerTicksY(maxBrut);
+  const max = ticks[ticks.length - 1];
   const n = labels.length;
-  const largeurUtile = CHART_W - PADDING_X * 2;
+  const largeurUtile = CHART_W - PADDING_LEFT - PADDING_X;
   const espacement = n > 1 ? largeurUtile / (n - 1) : largeurUtile;
 
   const pointsReels = donneesReelles.map((v, i) => ({
-    x: PADDING_X + i * espacement,
+    x: PADDING_LEFT + i * espacement,
     y: CHART_H - (v / max) * (CHART_H - 10) + 5,
   }));
   const pointsPrevus = donneesPrevisionnelles.map((v, i) => ({
-    x: PADDING_X + i * espacement,
+    x: PADDING_LEFT + i * espacement,
     y: CHART_H - (v / max) * (CHART_H - 10) + 5,
   }));
 
@@ -112,17 +139,30 @@ function GraphiqueLignes({
 
   return (
     <Svg width={CHART_W} height={CHART_H + 24}>
-      {[0.25, 0.5, 0.75, 1].map((f) => (
-        <Line
-          key={f}
-          x1={PADDING_X}
-          y1={CHART_H - f * (CHART_H - 10) + 5}
-          x2={CHART_W - PADDING_X}
-          y2={CHART_H - f * (CHART_H - 10) + 5}
-          stroke={C.separateur}
-          strokeWidth={1}
-        />
-      ))}
+      {ticks.map((t) => {
+        const y = CHART_H - (t / max) * (CHART_H - 10) + 5;
+        return (
+          <Fragment key={t}>
+            <Line
+              x1={PADDING_LEFT}
+              y1={y}
+              x2={CHART_W - PADDING_X}
+              y2={y}
+              stroke={C.separateur}
+              strokeWidth={1}
+            />
+            <SvgText
+              x={PADDING_LEFT - 6}
+              y={y + 3}
+              fontSize={9}
+              fill={C.texteMuted}
+              textAnchor="end"
+            >
+              {t}€
+            </SvgText>
+          </Fragment>
+        );
+      })}
       <Path
         d={pathReels}
         stroke={C.accent}
@@ -147,7 +187,7 @@ function GraphiqueLignes({
       {labels.map((lbl, i) => (
         <SvgText
           key={`l${i}`}
-          x={PADDING_X + i * espacement}
+          x={PADDING_LEFT + i * espacement}
           y={CHART_H + 18}
           fontSize={10}
           fill={C.texteMuted}
@@ -157,6 +197,183 @@ function GraphiqueLignes({
         </SvgText>
       ))}
     </Svg>
+  );
+}
+
+type SerieEvolution = {
+  cle: string;
+  label: string;
+  couleur: string;
+  donnees: number[];
+};
+
+function GraphiqueEvolutionMulti({
+  series,
+  labels,
+  couleurs: C,
+}: {
+  series: SerieEvolution[];
+  labels: string[];
+  couleurs: typeof COULEURS.clair;
+}) {
+  const [selection, setSelection] = useState<number | null>(null);
+  const toutes = series.flatMap((s) => s.donnees);
+  const maxBrut = Math.max(...toutes, 1);
+  const ticks = calculerTicksY(maxBrut);
+  const max = ticks[ticks.length - 1];
+  const n = labels.length;
+  const largeurUtile = CHART_W - PADDING_LEFT - PADDING_X;
+  const espacement = n > 1 ? largeurUtile / (n - 1) : largeurUtile;
+
+  const pointsParSerie = series.map((s) => ({
+    ...s,
+    points: s.donnees.map((v, i) => ({
+      x: PADDING_LEFT + i * espacement,
+      y: CHART_H - (v / max) * (CHART_H - 10) + 5,
+    })),
+  }));
+
+  return (
+    <View>
+      <View style={{ position: "relative" }}>
+        <Svg width={CHART_W} height={CHART_H + 24}>
+          {ticks.map((t) => {
+            const y = CHART_H - (t / max) * (CHART_H - 10) + 5;
+            return (
+              <Fragment key={t}>
+                <Line
+                  x1={PADDING_LEFT}
+                  y1={y}
+                  x2={CHART_W - PADDING_X}
+                  y2={y}
+                  stroke={C.separateur}
+                  strokeWidth={1}
+                />
+                <SvgText
+                  x={PADDING_LEFT - 6}
+                  y={y + 3}
+                  fontSize={9}
+                  fill={C.texteMuted}
+                  textAnchor="end"
+                >
+                  {t}€
+                </SvgText>
+              </Fragment>
+            );
+          })}
+          {selection !== null && (
+            <Line
+              x1={PADDING_LEFT + selection * espacement}
+              y1={5}
+              x2={PADDING_LEFT + selection * espacement}
+              y2={CHART_H + 5}
+              stroke={C.separateur}
+              strokeWidth={1}
+              strokeDasharray="4,3"
+            />
+          )}
+          {pointsParSerie.map((s) => {
+            const chemin = s.points
+              .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+              .join(" ");
+            return (
+              <Fragment key={s.cle}>
+                <Path
+                  d={chemin}
+                  stroke={s.couleur}
+                  strokeWidth={2.5}
+                  fill="none"
+                  strokeLinejoin="round"
+                />
+                {s.points.map((p, i) => (
+                  <Circle
+                    key={i}
+                    cx={p.x}
+                    cy={p.y}
+                    r={selection === i ? 5 : 3.5}
+                    fill={s.couleur}
+                  />
+                ))}
+              </Fragment>
+            );
+          })}
+          {labels.map((lbl, i) => (
+            <SvgText
+              key={`l${i}`}
+              x={PADDING_LEFT + i * espacement}
+              y={CHART_H + 18}
+              fontSize={10}
+              fontWeight={selection === i ? "700" : "400"}
+              fill={selection === i ? C.texte : C.texteMuted}
+              textAnchor="middle"
+            >
+              {lbl}
+            </SvgText>
+          ))}
+        </Svg>
+        <View
+          style={[
+            styles.evolutionTapZones,
+            { width: CHART_W, height: CHART_H + 24 },
+          ]}
+          pointerEvents="box-none"
+        >
+          {labels.map((_, i) => (
+            <TouchableOpacity
+              key={i}
+              style={[
+                styles.evolutionTapZone,
+                {
+                  left: PADDING_LEFT + i * espacement - 16,
+                  height: CHART_H + 24,
+                },
+              ]}
+              activeOpacity={1}
+              onPress={() => setSelection(selection === i ? null : i)}
+            />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.legendeRow}>
+        {series.map((s) => (
+          <View key={s.cle} style={styles.legendeItem}>
+            <View style={[styles.legendeDot, { backgroundColor: s.couleur }]} />
+            <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
+              {s.label}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      {selection !== null && (
+        <View
+          style={[
+            styles.evolutionInfoPanel,
+            { backgroundColor: C.fondSecondaire },
+          ]}
+        >
+          <Text style={[styles.evolutionInfoMois, { color: C.texte }]}>
+            {labels[selection]}
+          </Text>
+          {series.map((s) => (
+            <View key={s.cle} style={styles.evolutionInfoLigne}>
+              <View
+                style={[styles.legendeDot, { backgroundColor: s.couleur }]}
+              />
+              <Text
+                style={[styles.evolutionInfoLabel, { color: C.texteMuted }]}
+              >
+                {s.label}
+              </Text>
+              <Text style={[styles.evolutionInfoValeur, { color: C.texte }]}>
+                {s.donnees[selection]} €
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -211,6 +428,9 @@ export default function Analytics() {
     string[]
   >([]);
   const [modalSeriesVisible, setModalSeriesVisible] = useState(false);
+  const [vueModalStats, setVueModalStats] = useState<"score" | "series">(
+    "score",
+  );
   const [historiqueOuvert, setHistoriqueOuvert] = useState<
     Partial<Record<TypeSerie, boolean>>
   >({});
@@ -222,6 +442,14 @@ export default function Analytics() {
     epargneMois: objStore.epargneMois,
     historiquesMois: objStore.historiquesMois,
     seuilEpargneConstante: objStore.seuilEpargneConstante,
+  });
+
+  const scoreSante = calculerScoreSante({
+    enveloppes: objStore.enveloppes,
+    epargneMois: objStore.epargneMois,
+    historiquesMois: objStore.historiquesMois,
+    seuilEpargneConstante: objStore.seuilEpargneConstante,
+    objectifs: objStore.objectifs,
   });
 
   const ouvrirEditionSeuil = () => {
@@ -310,6 +538,39 @@ export default function Analytics() {
     return snap ? snap.epargne : null;
   };
 
+  const getDisponibleMois = (mois: number, annee: number) => {
+    if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
+      const enveloppesEntree = objStore.enveloppes.filter(
+        (e) => e.type === "Entrée",
+      );
+      const totalEntreeRecue = enveloppesEntree.reduce(
+        (acc, e) => acc + e.depense,
+        0,
+      );
+      const totalEntreePrevue = enveloppesEntree.reduce(
+        (acc, e) => acc + Math.max(0, e.budget - e.depense),
+        0,
+      );
+      return objStore.argentDisponible + totalEntreeRecue + totalEntreePrevue;
+    }
+    const snap = objStore.historiquesMois.find(
+      (s) => s.mois === mois && s.annee === annee,
+    );
+    if (!snap) return null;
+    const enveloppesEntree = snap.enveloppes.filter(
+      (e) => e.type === "Entrée",
+    );
+    const totalEntreeRecue = enveloppesEntree.reduce(
+      (acc, e) => acc + e.depense,
+      0,
+    );
+    const totalEntreePrevue = enveloppesEntree.reduce(
+      (acc, e) => acc + Math.max(0, e.budget - e.depense),
+      0,
+    );
+    return snap.disponible + totalEntreeRecue + totalEntreePrevue;
+  };
+
   const enveloppesFiltrees =
     categoriesSelectionnees.length > 0 ? categoriesSelectionnees : undefined;
 
@@ -321,6 +582,9 @@ export default function Analytics() {
   );
   const donneesEpargne = moisAffiches.map(
     ({ mois, annee }) => getEpargneMois(mois, annee) ?? 0,
+  );
+  const donneesDisponible = moisAffiches.map(
+    ({ mois, annee }) => getDisponibleMois(mois, annee) ?? 0,
   );
   const labels = moisAffiches.map(({ mois }) => MOIS_LABELS[mois]);
 
@@ -790,6 +1054,142 @@ export default function Analytics() {
           </View>
         </View>
 
+        <View style={[styles.sectionLabelRow, { marginTop: 8 }]}>
+          <Ionicons name="trending-up" size={13} color={C.texteMuted} />
+          <Text
+            style={[
+              styles.sectionLabel,
+              { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+            ]}
+          >
+            Évolution
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.chartCard,
+            {
+              backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+              borderColor: C.carteBorder,
+            },
+          ]}
+        >
+          <GraphiqueEvolutionMulti
+            key={nbMoisSelectionne}
+            series={[
+              {
+                cle: "disponible",
+                label: "Disponible",
+                couleur: C.purple,
+                donnees: donneesDisponible,
+              },
+              {
+                cle: "epargne",
+                label: "Épargne",
+                couleur: C.bleuGris,
+                donnees: donneesEpargne,
+              },
+              {
+                cle: "depenses",
+                label: "Dépenses",
+                couleur: C.accent,
+                donnees: donneesReelles,
+              },
+            ]}
+            labels={labels}
+            couleurs={C}
+          />
+        </View>
+
+        <Text
+          style={[
+            styles.sectionLabel,
+            { color: C.texteMuted, marginTop: 8 },
+          ]}
+        >
+          Épargne dans le temps
+        </Text>
+        <View
+          style={[
+            styles.chartCard,
+            {
+              backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+              borderColor: C.carteBorder,
+            },
+          ]}
+        >
+          <View style={styles.barresEpargne}>
+            {donneesEpargne.map((val, i) => {
+              const maxE = Math.max(...donneesEpargne, 1);
+              const h = Math.round((val / maxE) * 90);
+              return (
+                <View key={i} style={styles.barreEpargneCol}>
+                  <Text
+                    style={[styles.barreEpargneVal, { color: C.bleuGris }]}
+                  >
+                    {val > 0 ? `${val}€` : ""}
+                  </Text>
+                  <View
+                    style={[
+                      styles.barreEpargneTrack,
+                      { backgroundColor: C.separateur },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.barreEpargneRemplissage,
+                        { height: h, backgroundColor: C.bleuGris },
+                      ]}
+                    />
+                  </View>
+                  <Text
+                    style={[styles.barreEpargneLabel, { color: C.texteMuted }]}
+                  >
+                    {labels[i]}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        <Text
+          style={[
+            styles.sectionLabel,
+            { color: C.texteMuted, marginTop: 8 },
+          ]}
+        >
+          Ce qu'il faut retenir
+        </Text>
+        <View
+          style={[
+            styles.insightCard,
+            {
+              backgroundColor: theme === "sombre" ? C.carte : C.purpleLight,
+              borderWidth: theme === "sombre" ? 0.5 : 0,
+              borderColor: C.carteBorder,
+            },
+          ]}
+        >
+          {insights.map((txt, i) => (
+            <View
+              key={i}
+              style={[
+                styles.insightItem,
+                i > 0 && [
+                  styles.insightItemBorder,
+                  { borderTopColor: C.separateur },
+                ],
+              ]}
+            >
+              <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
+              <Text style={[styles.insightTexte, { color: C.purpleText }]}>
+                {txt}
+              </Text>
+            </View>
+          ))}
+        </View>
+
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           Dépensé vs dépenses prévues
         </Text>
@@ -890,85 +1290,6 @@ export default function Analytics() {
           )}
         </View>
 
-        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-          Épargne dans le temps
-        </Text>
-        <View
-          style={[
-            styles.chartCard,
-            {
-              backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-              borderColor: C.carteBorder,
-            },
-          ]}
-        >
-          <View style={styles.barresEpargne}>
-            {donneesEpargne.map((val, i) => {
-              const maxE = Math.max(...donneesEpargne, 1);
-              const h = Math.round((val / maxE) * 90);
-              return (
-                <View key={i} style={styles.barreEpargneCol}>
-                  <Text
-                    style={[styles.barreEpargneVal, { color: C.bleuGris }]}
-                  >
-                    {val > 0 ? `${val}€` : ""}
-                  </Text>
-                  <View
-                    style={[
-                      styles.barreEpargneTrack,
-                      { backgroundColor: C.separateur },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.barreEpargneRemplissage,
-                        { height: h, backgroundColor: C.bleuGris },
-                      ]}
-                    />
-                  </View>
-                  <Text
-                    style={[styles.barreEpargneLabel, { color: C.texteMuted }]}
-                  >
-                    {labels[i]}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-
-        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-          Ce qu'il faut retenir
-        </Text>
-        <View
-          style={[
-            styles.insightCard,
-            {
-              backgroundColor: theme === "sombre" ? C.carte : C.purpleLight,
-              borderWidth: theme === "sombre" ? 0.5 : 0,
-              borderColor: C.carteBorder,
-            },
-          ]}
-        >
-          {insights.map((txt, i) => (
-            <View
-              key={i}
-              style={[
-                styles.insightItem,
-                i > 0 && [
-                  styles.insightItemBorder,
-                  { borderTopColor: C.separateur },
-                ],
-              ]}
-            >
-              <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
-              <Text style={[styles.insightTexte, { color: C.purpleText }]}>
-                {txt}
-              </Text>
-            </View>
-          ))}
-        </View>
-
         {objectifsAvecDelta.length > 0 && (
           <>
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
@@ -1024,9 +1345,57 @@ export default function Analytics() {
           </>
         )}
 
-        {topDepensesTri.length > 0 && (
+        {repartitionDepenses.length > 0 && (
           <>
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+              Répartition des dépenses
+            </Text>
+            <View
+              style={[
+                styles.chartCard,
+                {
+                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                  borderColor: C.carteBorder,
+                },
+              ]}
+            >
+              <JaugeRepartition segments={repartitionDepenses} couleurs={C} />
+            </View>
+          </>
+        )}
+
+        {repartitionEntrees.length > 0 && (
+          <>
+            <Text
+              style={[
+                styles.sectionLabel,
+                { color: C.texteMuted, marginTop: 8 },
+              ]}
+            >
+              Entrées d&apos;argent
+            </Text>
+            <View
+              style={[
+                styles.chartCard,
+                {
+                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                  borderColor: C.vertLight,
+                },
+              ]}
+            >
+              <JaugeRepartition segments={repartitionEntrees} couleurs={C} />
+            </View>
+          </>
+        )}
+
+        {topDepensesTri.length > 0 && (
+          <>
+            <Text
+              style={[
+                styles.sectionLabel,
+                { color: C.texteMuted, marginTop: 8 },
+              ]}
+            >
               Top dépenses — {nbMois} derniers mois
             </Text>
             {topDepensesTri.map((dep, i) => (
@@ -1053,44 +1422,6 @@ export default function Analytics() {
           </>
         )}
 
-        {repartitionDepenses.length > 0 && (
-          <>
-            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-              Répartition des dépenses
-            </Text>
-            <View
-              style={[
-                styles.chartCard,
-                {
-                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-                  borderColor: C.carteBorder,
-                },
-              ]}
-            >
-              <JaugeRepartition segments={repartitionDepenses} couleurs={C} />
-            </View>
-          </>
-        )}
-
-        {repartitionEntrees.length > 0 && (
-          <>
-            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-              Entrées d&apos;argent
-            </Text>
-            <View
-              style={[
-                styles.chartCard,
-                {
-                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-                  borderColor: C.vertLight,
-                },
-              ]}
-            >
-              <JaugeRepartition segments={repartitionEntrees} couleurs={C} />
-            </View>
-          </>
-        )}
-
         <View style={{ height: 40 }} />
       </ScrollView>
 
@@ -1105,10 +1436,12 @@ export default function Analytics() {
             <View style={styles.modalHeader}>
               <View>
                 <Text style={[styles.modalTitre, { color: C.texte }]}>
-                  Séries
+                  {vueModalStats === "score" ? "Santé financière" : "Séries"}
                 </Text>
                 <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
-                  Régularité mois après mois
+                  {vueModalStats === "score"
+                    ? "Vue d'ensemble de ta situation"
+                    : "Régularité mois après mois"}
                 </Text>
               </View>
               <TouchableOpacity
@@ -1121,8 +1454,150 @@ export default function Analytics() {
               </TouchableOpacity>
             </View>
 
+            <View style={styles.chipRow}>
+              {(["score", "series"] as const).map((v) => (
+                <TouchableOpacity
+                  key={v}
+                  style={[
+                    styles.chip,
+                    { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                    vueModalStats === v && {
+                      backgroundColor: C.purple,
+                      borderColor: C.purple,
+                    },
+                  ]}
+                  onPress={() => setVueModalStats(v)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.chipTexte,
+                      { color: C.texteMuted },
+                      vueModalStats === v && styles.chipTexteActif,
+                    ]}
+                  >
+                    {v === "score" ? "Score" : "Séries"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <ScrollView showsVerticalScrollIndicator={false}>
-              {series.map((serie) => {
+              {vueModalStats === "score" && (
+                <View
+                  style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
+                >
+                  <View style={styles.serieEnTete}>
+                    <View
+                      style={[
+                        styles.serieIconeFond,
+                        { backgroundColor: couleurScoreTeinte(scoreSante.mot, C) },
+                      ]}
+                    >
+                      <Ionicons
+                        name="pulse"
+                        size={18}
+                        color={couleurScoreForte(scoreSante.mot, C)}
+                      />
+                    </View>
+                    <Text style={[styles.serieTitre, { color: C.texte }]}>
+                      Santé financière
+                    </Text>
+                    <InfoBulle
+                      titre="Comment ce score est calculé"
+                      texte={`Ton score combine 3 signaux, pondérés puis ramenés sur 100 :\n\n• Budget du mois (40%) : dépenses réelles vs budget total de tes catégories.\n• Tendance d'épargne (30%) : le streak "Épargne croissante" des Séries — jusqu'à 6 mois consécutifs pour le score maximum.\n• Objectifs actifs (30%) : ta progression moyenne vers tes objectifs d'épargne en cours.\n\nSi un signal n'est pas disponible (pas de budget défini, aucun objectif actif...), son poids est redistribué sur les autres.`}
+                    />
+                  </View>
+
+                  <View style={styles.scoreNombreLigne}>
+                    <Text style={[styles.scoreNombre, { color: C.texte }]}>
+                      {scoreSante.score}
+                    </Text>
+                    <Text
+                      style={[styles.scoreSur100, { color: C.texteMuted }]}
+                    >
+                      /100
+                    </Text>
+                    <View
+                      style={[
+                        styles.scoreMotPill,
+                        {
+                          backgroundColor: couleurScoreTeinte(
+                            scoreSante.mot,
+                            C,
+                          ),
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.scoreMotTexte,
+                          { color: couleurScoreForte(scoreSante.mot, C) },
+                        ]}
+                      >
+                        {scoreSante.mot}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.scoreDetailsBloc}>
+                    <View style={styles.scoreDetailLigne}>
+                      <Text
+                        style={[
+                          styles.scoreDetailLabel,
+                          { color: C.texteMuted },
+                        ]}
+                      >
+                        Budget du mois
+                      </Text>
+                      <Text
+                        style={[styles.scoreDetailValeur, { color: C.texte }]}
+                      >
+                        {scoreSante.details.budget !== null
+                          ? `${Math.round(scoreSante.details.budget)}/100`
+                          : "Non disponible"}
+                      </Text>
+                    </View>
+                    <View style={styles.scoreDetailLigne}>
+                      <Text
+                        style={[
+                          styles.scoreDetailLabel,
+                          { color: C.texteMuted },
+                        ]}
+                      >
+                        Tendance d&apos;épargne
+                      </Text>
+                      <Text
+                        style={[styles.scoreDetailValeur, { color: C.texte }]}
+                      >
+                        {scoreSante.details.tendanceEpargne !== null
+                          ? `${Math.round(scoreSante.details.tendanceEpargne)}/100`
+                          : "Non disponible"}
+                      </Text>
+                    </View>
+                    <View style={styles.scoreDetailLigne}>
+                      <Text
+                        style={[
+                          styles.scoreDetailLabel,
+                          { color: C.texteMuted },
+                        ]}
+                      >
+                        Objectifs actifs
+                      </Text>
+                      <Text
+                        style={[styles.scoreDetailValeur, { color: C.texte }]}
+                      >
+                        {scoreSante.details.objectifs !== null
+                          ? `${Math.round(scoreSante.details.objectifs)}/100`
+                          : "Non disponible"}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {vueModalStats === "series" &&
+                series.map((serie) => {
                 const config = CONFIG_SERIE[serie.type];
                 const active = serie.enCours > 0;
                 const seuilManquant =
@@ -1410,6 +1885,24 @@ const CONFIG_SERIE: Record<
   },
 };
 
+function couleurScoreTeinte(
+  mot: MotCleScore,
+  c: typeof COULEURS.clair,
+): string {
+  if (mot === "Solide") return c.vertLight;
+  if (mot === "À surveiller") return c.peachLight;
+  return c.peachText;
+}
+
+function couleurScoreForte(
+  mot: MotCleScore,
+  c: typeof COULEURS.clair,
+): string {
+  if (mot === "Solide") return c.vertText;
+  if (mot === "À surveiller") return c.peachText;
+  return "#FFFFFF";
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 20 },
   header: { marginTop: 60, marginBottom: 16 },
@@ -1514,6 +2007,28 @@ const styles = StyleSheet.create({
   },
   serieNombre: { fontSize: 32, fontWeight: "700" },
   serieNombreLabel: { fontSize: 13, fontWeight: "500" },
+  scoreNombreLigne: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 6,
+    marginBottom: 14,
+  },
+  scoreNombre: { fontSize: 32, fontWeight: "700" },
+  scoreSur100: { fontSize: 14, fontWeight: "500", marginRight: 6 },
+  scoreMotPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  scoreMotTexte: { fontSize: 13, fontWeight: "700" },
+  scoreDetailsBloc: { gap: 8 },
+  scoreDetailLigne: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  scoreDetailLabel: { fontSize: 13 },
+  scoreDetailValeur: { fontSize: 13, fontWeight: "700" },
   serieDots: {
     flexDirection: "row",
     gap: 6,
@@ -1596,6 +2111,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   banniereInfoTexte: { fontSize: 13, color: "#26215C", lineHeight: 19 },
+  sectionLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 20,
+    marginBottom: 10,
+  },
   sectionLabel: {
     fontSize: 11,
     fontWeight: "700",
@@ -1632,6 +2154,22 @@ const styles = StyleSheet.create({
   legendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   legendeDot: { width: 9, height: 9, borderRadius: 2 },
   legendeTexte: { fontSize: 11, color: "#999", fontWeight: "500" },
+  evolutionTapZones: { position: "absolute", top: 0, left: 0 },
+  evolutionTapZone: { position: "absolute", top: 0, width: 32 },
+  evolutionInfoPanel: {
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+  },
+  evolutionInfoMois: { fontSize: 13, fontWeight: "700", marginBottom: 6 },
+  evolutionInfoLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+  },
+  evolutionInfoLabel: { fontSize: 12, flex: 1 },
+  evolutionInfoValeur: { fontSize: 12, fontWeight: "700" },
   jaugeBarre: {
     flexDirection: "row",
     height: 16,
