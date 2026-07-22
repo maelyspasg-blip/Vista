@@ -3,6 +3,7 @@ import { Tabs } from "expo-router";
 import { useEffect } from "react";
 import { AppState, View } from "react-native";
 import { useAccessibilite } from "../AccessibiliteContext";
+import { RecurrenceSuggestionBanner } from "../RecurrenceSuggestionBanner";
 import { SyncErrorBanner } from "../SyncErrorBanner";
 import { useObjectifs } from "../store";
 import { useTheme } from "../ThemeContext";
@@ -20,6 +21,7 @@ export default function TabLayout() {
       objStore.verifierVersementsObjectifs();
       objStore.verifierEvenementsFinanciers();
       objStore.verifierArchivageMois();
+      objStore.verifierMotifsRecurrents();
     };
 
     (async () => {
@@ -49,6 +51,7 @@ export default function TabLayout() {
   return (
     <View style={{ flex: 1 }}>
       <SyncErrorBanner />
+      <RecurrenceSuggestionBanner />
       <Tabs
         screenOptions={{
           headerShown: false,

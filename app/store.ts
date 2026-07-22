@@ -103,6 +103,13 @@ export type SnapshotMois = {
 const EVENEMENTS_INIT: Evenement[] = [];
 const TRANSACTIONS_INIT: Transaction[] = [];
 
+export type SuggestionRecurrence = {
+  enveloppeId: string;
+  nom: string;
+  couleur: string;
+  montantMoyen: number;
+};
+
 type EtatStore = {
   objectifs: Objectif[];
   epargneMois: number;
@@ -122,6 +129,8 @@ type EtatStore = {
   historiquesMois: SnapshotMois[];
   dernierMoisArchive: { mois: number; annee: number } | null;
   erreurSync: string | null;
+  suggestionsIgnorees: string[];
+  suggestionRecurrence: SuggestionRecurrence | null;
 };
 
 let etat: EtatStore = {
@@ -143,6 +152,8 @@ let etat: EtatStore = {
   historiquesMois: [],
   dernierMoisArchive: null,
   erreurSync: null,
+  suggestionsIgnorees: [],
+  suggestionRecurrence: null,
 };
 
 type Ecouteur = (etat: EtatStore) => void;
@@ -801,6 +812,81 @@ function verifierArchivageMoisInterne() {
   }
 }
 
+const TOLERANCE_MOTIF_RECURRENT = 0.2; // ±20%
+const MOIS_REQUIS_MOTIF_RECURRENT = 3;
+
+function detecterMotifRecurrent(
+  enveloppes: Enveloppe[],
+  historiquesMois: SnapshotMois[],
+  suggestionsIgnorees: string[],
+): SuggestionRecurrence | null {
+  const ignorees = new Set(suggestionsIgnorees);
+  const candidates = enveloppes.filter(
+    (e) => e.type === "Variable" && !e.recurrente && !ignorees.has(e.id),
+  );
+
+  for (const env of candidates) {
+    const historique = historiquesMois
+      .map((s) => s.enveloppes.find((se) => se.id === env.id))
+      .filter((se): se is SnapshotEnveloppe => !!se)
+      .slice(-MOIS_REQUIS_MOTIF_RECURRENT);
+
+    if (historique.length < MOIS_REQUIS_MOTIF_RECURRENT) continue;
+
+    const montants = historique.map((se) => se.depense);
+    if (montants.some((m) => m <= 0)) continue;
+
+    const moyenne =
+      montants.reduce((a, b) => a + b, 0) / MOIS_REQUIS_MOTIF_RECURRENT;
+    const proches = montants.every(
+      (m) => Math.abs(m - moyenne) <= moyenne * TOLERANCE_MOTIF_RECURRENT,
+    );
+
+    if (proches) {
+      return {
+        enveloppeId: env.id,
+        nom: env.nom,
+        couleur: env.couleur,
+        montantMoyen: Math.round(moyenne),
+      };
+    }
+  }
+
+  return null;
+}
+
+function verifierMotifsRecurrentsInterne() {
+  const suggestion = detecterMotifRecurrent(
+    etat.enveloppes,
+    etat.historiquesMois,
+    etat.suggestionsIgnorees,
+  );
+
+  if (suggestion?.enveloppeId === etat.suggestionRecurrence?.enveloppeId) {
+    return;
+  }
+
+  setEtat({ suggestionRecurrence: suggestion });
+}
+
+function majSuggestionIgnoreeSupabase(enveloppeId: string, ignoree: boolean) {
+  supabase
+    .from("enveloppes")
+    .update({ suggestion_recurrence_ignoree: ignoree })
+    .eq("id", enveloppeId)
+    .then(({ error }) => {
+      if (error) {
+        console.error(
+          "Supabase update suggestion_recurrence_ignoree a échoué :",
+          error,
+        );
+        signalerErreurSync(
+          `Impossible d'enregistrer ton choix : ${error.message}`,
+        );
+      }
+    });
+}
+
 function verifierEvenementsFinanciersInterne() {
   const aujourdhui = new Date();
   aujourdhui.setHours(0, 0, 0, 0);
@@ -1066,6 +1152,7 @@ export function useObjectifs() {
     historiquesMois: local.historiquesMois,
     dernierMoisArchive: local.dernierMoisArchive,
     erreurSync: local.erreurSync,
+    suggestionRecurrence: local.suggestionRecurrence,
 
     effacerErreurSync: () => {
       if (minuteurErreurSync) clearTimeout(minuteurErreurSync);
@@ -1092,7 +1179,13 @@ export function useObjectifs() {
           return;
         }
 
-        setEtat({ enveloppes: (data ?? []).map(enveloppeDepuisLigne) });
+        const lignes = data ?? [];
+        setEtat({
+          enveloppes: lignes.map(enveloppeDepuisLigne),
+          suggestionsIgnorees: lignes
+            .filter((l) => l.suggestion_recurrence_ignoree)
+            .map((l) => l.id),
+        });
       } catch (e) {
         console.error("Chargement des enveloppes a échoué :", e);
         signalerErreurSync(
@@ -1811,6 +1904,35 @@ export function useObjectifs() {
 
     verifierEcheancesFixes: () => {
       verifierEcheancesFixesInterne();
+    },
+
+    verifierMotifsRecurrents: () => {
+      verifierMotifsRecurrentsInterne();
+    },
+
+    accepterSuggestionRecurrence: () => {
+      const suggestion = etat.suggestionRecurrence;
+      if (!suggestion) return;
+      const nouvellesEnveloppes = etat.enveloppes.map((env) =>
+        env.id === suggestion.enveloppeId
+          ? { ...env, recurrente: true, budget: suggestion.montantMoyen }
+          : env,
+      );
+      appliquerEnveloppes(nouvellesEnveloppes);
+      setEtat({ suggestionRecurrence: null });
+    },
+
+    ignorerSuggestionRecurrence: () => {
+      const suggestion = etat.suggestionRecurrence;
+      if (!suggestion) return;
+      majSuggestionIgnoreeSupabase(suggestion.enveloppeId, true);
+      setEtat({
+        suggestionsIgnorees: [
+          ...etat.suggestionsIgnorees,
+          suggestion.enveloppeId,
+        ],
+        suggestionRecurrence: null,
+      });
     },
 
     ajouterEvenement: async (
