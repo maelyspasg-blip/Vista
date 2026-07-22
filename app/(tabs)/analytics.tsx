@@ -44,6 +44,65 @@ const CHART_W = SCREEN_W - 80;
 const CHART_H = 160;
 const PADDING_X = 16;
 const PADDING_LEFT = 34;
+// Marge en haut du graphique pour laisser la place à la valeur affichée en
+// permanence au-dessus du dernier point de chaque courbe (jamais coupée,
+// même quand ce point touche le maximum de l'échelle).
+const PADDING_HAUT = 20;
+
+// Étale verticalement les libellés de "dernier point" pour éviter qu'ils se
+// chevauchent quand plusieurs courbes ont des valeurs proches à la fin de
+// la période affichée.
+function positionsLabelsSansChevauchement<T extends { y: number }>(
+  items: T[],
+  ecartMin = 12,
+): (T & { yLabel: number })[] {
+  const tries = items
+    .map((item, index) => ({ item, index, naturel: item.y - 10 }))
+    .sort((a, b) => a.naturel - b.naturel);
+
+  let precedent = -Infinity;
+  const positionnes = tries.map(({ item, index, naturel }) => {
+    const yLabel = Math.max(naturel, precedent + ecartMin);
+    precedent = yLabel;
+    return { item, index, yLabel };
+  });
+
+  const resultat: (T & { yLabel: number })[] = new Array(items.length);
+  positionnes.forEach(({ item, index, yLabel }) => {
+    resultat[index] = { ...item, yLabel };
+  });
+  return resultat;
+}
+
+// Largeur minimale (px) pour qu'un libellé de valeur reste lisible sans
+// chevaucher son voisin horizontal.
+const LARGEUR_MIN_LABEL_POINT = 34;
+
+// Affiche la valeur de tous les points quand la période est courte (le cas
+// courant), mais s'éclaircit automatiquement sur les longues périodes
+// (jusqu'à 10 ans) pour ne jamais produire un amas illisible — toujours en
+// gardant le premier et le dernier point.
+function indicesLabelsAffiches(n: number, espacement: number): number[] {
+  if (n <= 0) return [];
+  if (n === 1) return [0];
+
+  const largeurDisponible = (n - 1) * espacement;
+  const maxLabels = Math.max(
+    2,
+    Math.floor(largeurDisponible / LARGEUR_MIN_LABEL_POINT) + 1,
+  );
+  if (maxLabels >= n) {
+    return Array.from({ length: n }, (_, i) => i);
+  }
+
+  const pas = (n - 1) / (maxLabels - 1);
+  const indices = new Set<number>();
+  for (let k = 0; k < maxLabels; k++) {
+    indices.add(Math.round(k * pas));
+  }
+  indices.add(n - 1);
+  return [...indices].sort((a, b) => a - b);
+}
 
 type Vue = "global" | "categorie";
 
@@ -125,11 +184,11 @@ function GraphiqueLignes({
 
   const pointsReels = donneesReelles.map((v, i) => ({
     x: PADDING_LEFT + i * espacement,
-    y: CHART_H - (v / max) * (CHART_H - 10) + 5,
+    y: PADDING_HAUT + CHART_H - (v / max) * (CHART_H - 10) + 5,
   }));
   const pointsPrevus = donneesPrevisionnelles.map((v, i) => ({
     x: PADDING_LEFT + i * espacement,
-    y: CHART_H - (v / max) * (CHART_H - 10) + 5,
+    y: PADDING_HAUT + CHART_H - (v / max) * (CHART_H - 10) + 5,
   }));
 
   const pathReels = pointsReels
@@ -139,10 +198,22 @@ function GraphiqueLignes({
     .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
     .join(" ");
 
+  const dernier = n - 1;
+  const indicesAffiches = indicesLabelsAffiches(n, espacement);
+  const labelsParPoint = indicesAffiches.map((i) => ({
+    i,
+    estPremier: i === 0,
+    estDernier: i === dernier,
+    items: positionsLabelsSansChevauchement([
+      { y: pointsReels[i].y, x: pointsReels[i].x, valeur: donneesReelles[i], couleur: C.accent },
+      { y: pointsPrevus[i].y, x: pointsPrevus[i].x, valeur: donneesPrevisionnelles[i], couleur: C.peach },
+    ]),
+  }));
+
   return (
-    <Svg width={CHART_W} height={CHART_H + 24}>
+    <Svg width={CHART_W} height={CHART_H + 24 + PADDING_HAUT}>
       {ticks.map((t) => {
-        const y = CHART_H - (t / max) * (CHART_H - 10) + 5;
+        const y = PADDING_HAUT + CHART_H - (t / max) * (CHART_H - 10) + 5;
         return (
           <Fragment key={t}>
             <Line
@@ -186,11 +257,26 @@ function GraphiqueLignes({
       {pointsPrevus.map((p, i) => (
         <Circle key={`p${i}`} cx={p.x} cy={p.y} r={3} fill={C.peach} />
       ))}
+      {labelsParPoint.map(({ i, estPremier, estDernier, items }) =>
+        items.map((l, j) => (
+          <SvgText
+            key={`dp${i}-${j}`}
+            x={estDernier ? l.x + 2 : estPremier ? l.x - 2 : l.x}
+            y={l.yLabel}
+            fontSize={estDernier ? 11 : 9}
+            fontWeight={estDernier ? "700" : "500"}
+            fill={l.couleur}
+            textAnchor={estDernier ? "end" : estPremier ? "start" : "middle"}
+          >
+            {Math.round(l.valeur)}€
+          </SvgText>
+        )),
+      )}
       {labels.map((lbl, i) => (
         <SvgText
           key={`l${i}`}
           x={PADDING_LEFT + i * espacement}
-          y={CHART_H + 18}
+          y={PADDING_HAUT + CHART_H + 18}
           fontSize={10}
           fill={C.texteMuted}
           textAnchor="middle"
@@ -231,16 +317,32 @@ function GraphiqueEvolutionMulti({
     ...s,
     points: s.donnees.map((v, i) => ({
       x: PADDING_LEFT + i * espacement,
-      y: CHART_H - (v / max) * (CHART_H - 10) + 5,
+      y: PADDING_HAUT + CHART_H - (v / max) * (CHART_H - 10) + 5,
     })),
+  }));
+
+  const dernier = n - 1;
+  const indicesAffiches = indicesLabelsAffiches(n, espacement);
+  const labelsParPoint = indicesAffiches.map((i) => ({
+    i,
+    estPremier: i === 0,
+    estDernier: i === dernier,
+    items: positionsLabelsSansChevauchement(
+      pointsParSerie.map((s) => ({
+        y: s.points[i].y,
+        x: s.points[i].x,
+        valeur: s.donnees[i],
+        couleur: s.couleur,
+      })),
+    ),
   }));
 
   return (
     <View>
       <View style={{ position: "relative" }}>
-        <Svg width={CHART_W} height={CHART_H + 24}>
+        <Svg width={CHART_W} height={CHART_H + 24 + PADDING_HAUT}>
           {ticks.map((t) => {
-            const y = CHART_H - (t / max) * (CHART_H - 10) + 5;
+            const y = PADDING_HAUT + CHART_H - (t / max) * (CHART_H - 10) + 5;
             return (
               <Fragment key={t}>
                 <Line
@@ -266,9 +368,9 @@ function GraphiqueEvolutionMulti({
           {selection !== null && (
             <Line
               x1={PADDING_LEFT + selection * espacement}
-              y1={5}
+              y1={PADDING_HAUT + 5}
               x2={PADDING_LEFT + selection * espacement}
-              y2={CHART_H + 5}
+              y2={PADDING_HAUT + CHART_H + 5}
               stroke={C.separateur}
               strokeWidth={1}
               strokeDasharray="4,3"
@@ -299,11 +401,26 @@ function GraphiqueEvolutionMulti({
               </Fragment>
             );
           })}
+          {labelsParPoint.map(({ i, estPremier, estDernier, items }) =>
+            items.map((l, j) => (
+              <SvgText
+                key={`dp${i}-${j}`}
+                x={estDernier ? l.x + 2 : estPremier ? l.x - 2 : l.x}
+                y={l.yLabel}
+                fontSize={estDernier ? 11 : 9}
+                fontWeight={estDernier ? "700" : "500"}
+                fill={l.couleur}
+                textAnchor={estDernier ? "end" : estPremier ? "start" : "middle"}
+              >
+                {Math.round(l.valeur)}€
+              </SvgText>
+            )),
+          )}
           {labels.map((lbl, i) => (
             <SvgText
               key={`l${i}`}
               x={PADDING_LEFT + i * espacement}
-              y={CHART_H + 18}
+              y={PADDING_HAUT + CHART_H + 18}
               fontSize={10}
               fontWeight={selection === i ? "700" : "400"}
               fill={selection === i ? C.texte : C.texteMuted}
@@ -316,7 +433,7 @@ function GraphiqueEvolutionMulti({
         <View
           style={[
             styles.evolutionTapZones,
-            { width: CHART_W, height: CHART_H + 24 },
+            { width: CHART_W, height: CHART_H + 24 + PADDING_HAUT },
           ]}
           pointerEvents="box-none"
         >
@@ -327,7 +444,7 @@ function GraphiqueEvolutionMulti({
                 styles.evolutionTapZone,
                 {
                   left: PADDING_LEFT + i * espacement - 16,
-                  height: CHART_H + 24,
+                  height: CHART_H + 24 + PADDING_HAUT,
                 },
               ]}
               activeOpacity={1}

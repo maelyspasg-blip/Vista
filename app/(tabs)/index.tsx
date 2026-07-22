@@ -2,11 +2,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { getInitiales } from "../../utils/initiales";
+import {
+  depenseCumuleeAuJour,
+  joursDansMois,
+  MOIS_LABELS,
+  moisPrecedent,
+  totalParType,
+} from "../../utils/exportExcel";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -20,6 +28,8 @@ import {
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import Svg, { Circle } from "react-native-svg";
+import { useLargeurAnimee } from "../BarreProgression";
+import { NombreAnime } from "../NombreAnime";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { Enveloppe, Objectif, useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
@@ -159,6 +169,7 @@ export default function Dashboard() {
     objStore.modifierArgentDisponible(parseMontant(val) || 0, recurrent, reportAuto);
   };
   const [editionDisponible, setEditionDisponible] = useState(false);
+  const [historiqueDepenseOuvert, setHistoriqueDepenseOuvert] = useState(false);
   const [disponibleRecurrentTemp, setDisponibleRecurrentTemp] = useState(
     objStore.argentDisponibleRecurrent,
   );
@@ -280,6 +291,7 @@ export default function Dashboard() {
     disponibleEffectif > 0
       ? Math.min((totalDepenseEnveloppes / disponibleEffectif) * 100, 100)
       : 0;
+  const largeurBarFillAnimee = useLargeurAnimee(pctUtilise);
   const pctEpargne =
     disponibleEffectif > 0
       ? Math.min((objStore.epargneMois / disponibleEffectif) * 100, 100)
@@ -300,6 +312,7 @@ export default function Dashboard() {
     disponibleReel > 0
       ? Math.min((totalDepenseEnveloppes / disponibleReel) * 100, 100)
       : 0;
+  const largeurBarSegmentAnimee = useLargeurAnimee(pctDepenseEstime);
   const pctEpargneEstime =
     disponibleReel > 0
       ? Math.min(
@@ -314,6 +327,65 @@ export default function Dashboard() {
           100 - pctDepenseEstime - pctEpargneEstime,
         )
       : 0;
+
+  // Comparaison "vs mois dernier" des deux cartes hero, à partir du dernier
+  // mois archivé — même logique que "Reste estimé" ci-dessus, rejouée sur
+  // les valeurs figées du snapshot au lieu de l'état courant.
+  const { mois: moisPrec, annee: anneePrec } = moisPrecedent(
+    maintenant.getMonth(),
+    maintenant.getFullYear(),
+  );
+  const snapshotMoisPrecedent = objStore.historiquesMois.find(
+    (s) => s.mois === moisPrec && s.annee === anneePrec,
+  );
+  // La partie "dépenses" se compare au même jour le mois dernier (cumul
+  // reconstruit depuis les transactions/paiements, jamais purgés) — pour ne
+  // pas comparer un mois en cours forcément partiel à un mois dernier entier.
+  // L'épargne n'a pas cette granularité par jour, elle reste comparée en
+  // mois complet ci-dessous.
+  const jourActuel = maintenant.getDate();
+  const jourMaxPrecedent = Math.min(
+    jourActuel,
+    joursDansMois(moisPrec, anneePrec),
+  );
+  const totalDepensePrecedent = snapshotMoisPrecedent
+    ? depenseCumuleeAuJour(
+        objStore.transactions,
+        objStore.historiquePaiements,
+        moisPrec,
+        anneePrec,
+        jourMaxPrecedent,
+      )
+    : null;
+  const deltaDepense =
+    totalDepensePrecedent !== null
+      ? totalDepenseEnveloppes - totalDepensePrecedent
+      : null;
+  const HISTORIQUE_MOIS_MAX = 6;
+  const historiqueDepenseCumulee = snapshotMoisPrecedent
+    ? objStore.historiquesMois
+        .slice(-HISTORIQUE_MOIS_MAX)
+        .map((s) => ({
+          mois: s.mois,
+          annee: s.annee,
+          montant: depenseCumuleeAuJour(
+            objStore.transactions,
+            objStore.historiquePaiements,
+            s.mois,
+            s.annee,
+            Math.min(jourActuel, joursDansMois(s.mois, s.annee)),
+          ),
+        }))
+        .reverse()
+    : [];
+  const resteEstimePrecedent = snapshotMoisPrecedent
+    ? snapshotMoisPrecedent.disponible +
+      totalParType(snapshotMoisPrecedent.enveloppes, true) -
+      totalParType(snapshotMoisPrecedent.enveloppes, false) -
+      snapshotMoisPrecedent.epargne
+    : null;
+  const deltaReste =
+    resteEstimePrecedent !== null ? resteEstime - resteEstimePrecedent : null;
 
   const objectifsActifs = objStore.objectifs.filter((o) => !o.ferme);
   const objectifsClotures = objStore.objectifs.filter((o) => o.ferme);
@@ -652,22 +724,89 @@ export default function Dashboard() {
                 },
           ]}
         >
-          <Text
-            style={[
-              styles.heroLabel,
-              { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
-            ]}
-          >
-            DÉPENSÉ CE MOIS
-          </Text>
-          <Text
+          <View style={styles.switchLabelLigne}>
+            <Text
+              style={[
+                styles.heroLabel,
+                { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
+              ]}
+            >
+              DÉPENSES ET ARGENT IMMOBILISÉ
+            </Text>
+            <InfoBulle
+              titre="Dépenses et argent immobilisé"
+              texte="Inclut tes dépenses réelles ainsi que l'argent mis de côté (épargne et objectifs), qui reste à toi mais n'est plus disponible immédiatement."
+              couleur={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
+            />
+          </View>
+          <NombreAnime
+            valeur={totalDepense}
             style={[
               styles.heroAmount,
               { color: theme === "sombre" ? "#FFFFFF" : C.texte },
             ]}
-          >
-            {totalDepense} €
-          </Text>
+          />
+          {deltaDepense !== null && (
+            <>
+              <View style={styles.heroDeltaRow}>
+                <Ionicons
+                  name={deltaDepense > 0 ? "arrow-up" : "arrow-down"}
+                  size={11}
+                  color={deltaDepense <= 0 ? C.accentText : C.peachText}
+                />
+                <Text
+                  style={[
+                    styles.heroDeltaTexte,
+                    { color: deltaDepense <= 0 ? C.accentText : C.peachText },
+                  ]}
+                >
+                  {deltaDepense > 0 ? "+" : ""}
+                  {deltaDepense} € vs mois dernier (au {jourMaxPrecedent})
+                </Text>
+                <InfoBulle
+                  titre="Comparaison au même jour"
+                  texte={`Comparé aux dépenses cumulées au même jour le mois dernier (du 1er au ${jourMaxPrecedent}), pas au mois complet — pour une comparaison à période équivalente.`}
+                  couleur={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
+                />
+              </View>
+              {historiqueDepenseCumulee.length > 0 && (
+                <TouchableOpacity
+                  style={styles.heroHistoriqueBouton}
+                  onPress={() => setHistoriqueDepenseOuvert((v) => !v)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.heroHistoriqueTexte,
+                      { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
+                    ]}
+                  >
+                    {historiqueDepenseOuvert ? "Masquer l'historique" : "Voir l'historique"}
+                  </Text>
+                  <Ionicons
+                    name={historiqueDepenseOuvert ? "chevron-up" : "chevron-down"}
+                    size={11}
+                    color={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
+                  />
+                </TouchableOpacity>
+              )}
+              {historiqueDepenseOuvert && (
+                <View style={styles.heroHistoriqueListe}>
+                  {historiqueDepenseCumulee.map((h) => (
+                    <Text
+                      key={`${h.annee}-${h.mois}`}
+                      style={[
+                        styles.heroHistoriqueLigne,
+                        { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
+                      ]}
+                    >
+                      {MOIS_LABELS[h.mois]} {h.annee} : {h.montant} €
+                    </Text>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
           <View
             style={[
               styles.barBg,
@@ -677,10 +816,10 @@ export default function Dashboard() {
               },
             ]}
           >
-            <View
+            <Animated.View
               style={[
                 styles.barFill,
-                { width: `${pctUtilise}%`, backgroundColor: C.accent },
+                { width: largeurBarFillAnimee, backgroundColor: C.accent },
               ]}
             />
             {segmentsEpargnePositionnes.map((s) => (
@@ -793,16 +932,33 @@ export default function Dashboard() {
           >
             RESTE ESTIMÉ CE MOIS
           </Text>
-          <Text
+          <NombreAnime
+            valeur={resteEstime}
             style={[
               styles.heroAmount,
               theme === "sombre"
                 ? { color: resteEstime < 0 ? "#FFD2D2" : "#FFFFFF" }
                 : { color: resteEstime < 0 ? C.peachText : C.texte },
             ]}
-          >
-            {resteEstime} €
-          </Text>
+          />
+          {deltaReste !== null && (
+            <View style={styles.heroDeltaRow}>
+              <Ionicons
+                name={deltaReste >= 0 ? "arrow-up" : "arrow-down"}
+                size={11}
+                color={deltaReste >= 0 ? C.accentText : C.peachText}
+              />
+              <Text
+                style={[
+                  styles.heroDeltaTexte,
+                  { color: deltaReste >= 0 ? C.accentText : C.peachText },
+                ]}
+              >
+                {deltaReste > 0 ? "+" : ""}
+                {deltaReste} € vs mois dernier
+              </Text>
+            </View>
+          )}
           <View
             style={[
               styles.barBg,
@@ -812,10 +968,10 @@ export default function Dashboard() {
               },
             ]}
           >
-            <View
+            <Animated.View
               style={[
                 styles.barSegment,
-                { width: `${pctDepenseEstime}%`, backgroundColor: C.accent },
+                { width: largeurBarSegmentAnimee, backgroundColor: C.accent },
               ]}
             />
             {segmentsEpargne.map((s) => {
@@ -2635,6 +2791,24 @@ const styles = StyleSheet.create({
   heroLegendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   heroLegendeDot: { width: 7, height: 7, borderRadius: 4 },
   heroSub: { fontSize: 14, color: "rgba(255,255,255,0.7)" },
+  heroDeltaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: -12,
+    marginBottom: 12,
+  },
+  heroDeltaTexte: { fontSize: 12, fontWeight: "600", flexShrink: 1 },
+  heroHistoriqueBouton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 6,
+    alignSelf: "flex-start",
+  },
+  heroHistoriqueTexte: { fontSize: 11, fontWeight: "600" },
+  heroHistoriqueListe: { marginTop: 6, gap: 3 },
+  heroHistoriqueLigne: { fontSize: 11 },
   barSegment: { height: "100%" },
   lectureBanner: { borderRadius: 12, padding: 12, marginTop: 6 },
   lectureTexte: { fontSize: 14, fontWeight: "700", textAlign: "center" },

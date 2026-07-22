@@ -23,9 +23,9 @@ export const CALCULS_DOC: PageCalculs[] = [
           "Sous-ligne dépliable sous DISPONIBLE. Additionne le montant prévu (\"budget\") de chaque catégorie \"Entrée d'argent\" marquée comme reçue, dont la date est bien ce mois-ci.",
       },
       {
-        titre: "DÉPENSÉ CE MOIS",
+        titre: "Dépenses et argent immobilisé",
         explication:
-          "Somme des dépenses réelles de tes catégories (hors catégories \"Entrée d'argent\"), plus l'épargne que tu as mise de côté ce mois-ci.",
+          "Somme des dépenses réelles de tes catégories (hors catégories \"Entrée d'argent\"), plus l'argent immobilisé — l'épargne et les objectifs — que tu as mis de côté ce mois-ci. Cet argent reste à toi, mais n'est plus disponible immédiatement.",
       },
       {
         titre: "RESTE ESTIMÉ CE MOIS",
@@ -70,7 +70,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "TOTAL DÉPENSÉ",
         explication:
-          "Somme des dépenses réelles de tes catégories (hors Entrée d'argent), plus l'épargne mise de côté ce mois-ci.",
+          "Somme des dépenses réelles de tes catégories Fixe et Variable (hors Entrée d'argent) uniquement — contrairement à \"Dépenses et argent immobilisé\" sur Aperçu, ce total n'inclut pas l'épargne ni les objectifs : ici, seules les vraies dépenses comptent.",
       },
       {
         titre: "/ {X}€ budget mensuel",

@@ -4,10 +4,11 @@ import {
   useLocalSearchParams,
   useRouter,
 } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -19,12 +20,22 @@ import {
   View,
 } from "react-native";
 import { useTheme } from "../ThemeContext";
-import { useAccessibilite } from "../AccessibiliteContext";
+import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
+import {
+  depenseCumuleeAuJour,
+  depenseEnveloppeDansSnapshot,
+  estDansMois,
+  joursDansMois,
+  MOIS_LABELS,
+  moisPrecedent,
+} from "../../utils/exportExcel";
 import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
+import { VueMoisArchive } from "../VueMoisArchive";
+import { BarreProgression } from "../BarreProgression";
 
 const ACCESSORY_ID = "numericDone";
 
@@ -78,6 +89,26 @@ export default function Budget() {
   const [enveloppeTx, setEnveloppeTx] = useState<string | null>(null);
   const [ajoutTransactionEnCours, setAjoutTransactionEnCours] =
     useState(false);
+  const [carteEnFlash, setCarteEnFlash] = useState<string | null>(null);
+  const [historiqueOuvertPour, setHistoriqueOuvertPour] = useState<
+    Record<string, boolean>
+  >({});
+  const animsFlash = useRef<Map<string, Animated.Value>>(new Map()).current;
+  const getAnimFlash = (id: string) => {
+    if (!animsFlash.has(id)) animsFlash.set(id, new Animated.Value(0));
+    return animsFlash.get(id)!;
+  };
+
+  useEffect(() => {
+    if (!carteEnFlash) return;
+    const anim = getAnimFlash(carteEnFlash);
+    anim.setValue(1);
+    Animated.timing(anim, {
+      toValue: 0,
+      duration: dureeAnimation(reduireAnimations, 700),
+      useNativeDriver: false,
+    }).start(() => setCarteEnFlash(null));
+  }, [carteEnFlash, reduireAnimations]);
   const [creationModeleOuvertPour, setCreationModeleOuvertPour] = useState<
     string | null
   >(null);
@@ -106,6 +137,18 @@ export default function Budget() {
 
   const MOIS_ACTUEL = new Date().getMonth();
   const ANNEE_ACTUELLE = new Date().getFullYear();
+
+  const moisDisponibles = [
+    ...objStore.historiquesMois.map((s) => ({
+      mois: s.mois,
+      annee: s.annee,
+      estActuel: false,
+    })),
+    { mois: MOIS_ACTUEL, annee: ANNEE_ACTUELLE, estActuel: true },
+  ].sort((a, b) => a.annee * 12 + a.mois - (b.annee * 12 + b.mois));
+  const [indexMois, setIndexMois] = useState(moisDisponibles.length - 1);
+  const [modalMoisVisible, setModalMoisVisible] = useState(false);
+  const moisAffiche = moisDisponibles[indexMois] ?? moisDisponibles[moisDisponibles.length - 1];
 
   const enveloppesParId = new Map(objStore.enveloppes.map((e) => [e.id, e]));
 
@@ -250,7 +293,6 @@ export default function Budget() {
     0,
   );
   const totalEpargne = objStore.epargneMois;
-  const totalReel = totalDepenses + totalEpargne;
   const budgetTotal =
     objStore.argentDisponible + totalEntreeRecue + totalEntreePrevue;
   const pctDepenses =
@@ -331,6 +373,7 @@ export default function Budget() {
     setAjoutTransactionEnCours(false);
     if (!nouvelle) return;
     setModalAjoutVisible(false);
+    setCarteEnFlash(enveloppeTx);
   };
 
   const confirmerSuppressionTransaction = (nom: string, montant: number, id: string) => {
@@ -389,9 +432,61 @@ export default function Budget() {
     const pct = Math.min((env.depense / env.budget) * 100, 100);
     const estOuverte = enveloppeOuverte === env.id;
 
+    const { mois: moisPrec, annee: anneePrec } = moisPrecedent(
+      MOIS_ACTUEL,
+      ANNEE_ACTUELLE,
+    );
+    const jourActuel = new Date().getDate();
+    const existeMoisPrecedent =
+      depenseEnveloppeDansSnapshot(
+        objStore.historiquesMois,
+        env.id,
+        moisPrec,
+        anneePrec,
+      ) !== null;
+    const jourMaxPrecedent = Math.min(
+      jourActuel,
+      joursDansMois(moisPrec, anneePrec),
+    );
+    const montantMoisPrecedent = existeMoisPrecedent
+      ? depenseCumuleeAuJour(
+          objStore.transactions,
+          objStore.historiquePaiements,
+          moisPrec,
+          anneePrec,
+          jourMaxPrecedent,
+          env.id,
+        )
+      : null;
+    const deltaMoisPrecedent =
+      montantMoisPrecedent !== null ? env.depense - montantMoisPrecedent : null;
+
+    const HISTORIQUE_MOIS_MAX = 6;
+    const historiqueComparaison = existeMoisPrecedent
+      ? objStore.historiquesMois
+          .slice(-HISTORIQUE_MOIS_MAX)
+          .map((s) => ({
+            mois: s.mois,
+            annee: s.annee,
+            montant: depenseCumuleeAuJour(
+              objStore.transactions,
+              objStore.historiquePaiements,
+              s.mois,
+              s.annee,
+              Math.min(jourActuel, joursDansMois(s.mois, s.annee)),
+              env.id,
+            ),
+          }))
+          .reverse()
+      : [];
+    const historiqueOuvert = !!historiqueOuvertPour[env.id];
+
     const lignesDepense: LigneDepense[] = [
       ...objStore.transactions
-        .filter((t) => t.enveloppeId === env.id)
+        .filter(
+          (t) =>
+            t.enveloppeId === env.id && estDansMois(t.date, MOIS_ACTUEL, ANNEE_ACTUELLE),
+        )
         .map((t) => ({
           id: t.id,
           nom: t.nom,
@@ -432,10 +527,21 @@ export default function Budget() {
       }))
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
+    const animFlash = getAnimFlash(env.id);
+
     return (
-      <View
+      <Animated.View
         key={env.id}
-        style={[styles.envCard, { backgroundColor: env.couleur + "22" }]}
+        style={[
+          styles.envCard,
+          {
+            backgroundColor: env.couleur + "22",
+            borderColor: animFlash.interpolate({
+              inputRange: [0, 1],
+              outputRange: ["transparent", env.couleur],
+            }),
+          },
+        ]}
       >
         <TouchableOpacity
           activeOpacity={0.7}
@@ -457,14 +563,66 @@ export default function Budget() {
               </Text>
             </View>
           </View>
-          <View style={[styles.envBarBg, { backgroundColor: C.separateur }]}>
-            <View
-              style={[
-                styles.envBarFill,
-                { width: `${pct}%`, backgroundColor: env.couleur },
-              ]}
-            />
-          </View>
+          <BarreProgression
+            pourcentage={pct}
+            couleur={env.couleur}
+            couleurFond={C.separateur}
+            hauteur={6}
+          />
+          {montantMoisPrecedent !== null && deltaMoisPrecedent !== null && (
+            <View style={styles.envDeltaRow}>
+              <Text style={[styles.envDeltaTexte, { color: C.texteMuted }]}>
+                Mois dernier (au {jourMaxPrecedent}) : {montantMoisPrecedent} €{" "}
+                <Text
+                  style={{
+                    color: deltaMoisPrecedent <= 0 ? C.accentText : C.peachText,
+                    fontWeight: "700",
+                  }}
+                >
+                  ({deltaMoisPrecedent > 0 ? "+" : ""}
+                  {deltaMoisPrecedent} €)
+                </Text>
+              </Text>
+              <InfoBulle
+                titre="Comparaison au même jour"
+                texte={`Comparé aux dépenses cumulées au même jour le mois dernier (du 1er au ${jourMaxPrecedent}), pas au mois complet — pour une comparaison à période équivalente.`}
+                couleur={C.texteMuted}
+              />
+            </View>
+          )}
+          {historiqueComparaison.length > 0 && (
+            <TouchableOpacity
+              style={styles.envHistoriqueBouton}
+              onPress={() =>
+                setHistoriqueOuvertPour((prev) => ({
+                  ...prev,
+                  [env.id]: !prev[env.id],
+                }))
+              }
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.envHistoriqueTexte, { color: C.texteMuted }]}>
+                {historiqueOuvert ? "Masquer l'historique" : "Voir l'historique"}
+              </Text>
+              <Ionicons
+                name={historiqueOuvert ? "chevron-up" : "chevron-down"}
+                size={12}
+                color={C.texteMuted}
+              />
+            </TouchableOpacity>
+          )}
+          {historiqueOuvert && (
+            <View style={styles.envHistoriqueListe}>
+              {historiqueComparaison.map((h) => (
+                <Text
+                  key={`${h.annee}-${h.mois}`}
+                  style={[styles.envHistoriqueLigne, { color: C.texteMuted }]}
+                >
+                  {MOIS_LABELS[h.mois]} {h.annee} : {h.montant} €
+                </Text>
+              ))}
+            </View>
+          )}
         </TouchableOpacity>
 
         {estOuverte && (
@@ -717,7 +875,7 @@ export default function Budget() {
             )}
           </View>
         )}
-      </View>
+      </Animated.View>
     );
   };
 
@@ -726,15 +884,56 @@ export default function Budget() {
       <View style={[styles.header, { backgroundColor: C.fondPage }]}>
         <View>
           <Text style={[styles.titre, { color: C.texte }]}>Budget</Text>
-          <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
-            {new Date().toLocaleDateString("fr-FR", {
-              month: "long",
-              year: "numeric",
-            })}
-          </Text>
+          <View style={styles.selecteurMoisRow}>
+            <TouchableOpacity
+              onPress={() => setIndexMois((i) => Math.max(0, i - 1))}
+              disabled={indexMois === 0}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Mois précédent"
+            >
+              <Ionicons
+                name="chevron-back"
+                size={16}
+                color={indexMois === 0 ? C.separateur : C.texteMuted}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setModalMoisVisible(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
+                {MOIS_LABELS[moisAffiche.mois]} {moisAffiche.annee} ▾
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() =>
+                setIndexMois((i) => Math.min(moisDisponibles.length - 1, i + 1))
+              }
+              disabled={indexMois === moisDisponibles.length - 1}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Mois suivant"
+            >
+              <Ionicons
+                name="chevron-forward"
+                size={16}
+                color={
+                  indexMois === moisDisponibles.length - 1
+                    ? C.separateur
+                    : C.texteMuted
+                }
+              />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
+      {!moisAffiche.estActuel ? (
+        <ScrollView showsVerticalScrollIndicator={false}>
+          <VueMoisArchive mois={moisAffiche.mois} annee={moisAffiche.annee} />
+        </ScrollView>
+      ) : (
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <View
           style={[
@@ -763,7 +962,7 @@ export default function Budget() {
             TOTAL DÉPENSÉ
           </Text>
           <Text style={[styles.heroAmount, { color: C.texte }]}>
-            {totalReel} €
+            {totalDepenses} €
           </Text>
           <Text style={[styles.heroSub, { color: C.texteMuted }]}>
             / {budgetTotal} € budget mensuel
@@ -1105,6 +1304,7 @@ export default function Budget() {
 
         <View style={{ height: 30 }} />
       </ScrollView>
+      )}
 
       {Platform.OS === "ios" && (
         <InputAccessoryView nativeID={ACCESSORY_ID}>
@@ -1358,6 +1558,64 @@ export default function Budget() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={modalMoisVisible}
+        transparent
+        animationType={reduireAnimations ? "none" : "slide"}
+        onRequestClose={() => setModalMoisVisible(false)}
+      >
+        <View style={styles.modalOverlayTouch}>
+          <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+            <Text style={[styles.modalTitre, { color: C.texte }]}>
+              Choisir un mois
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {[...moisDisponibles]
+                .reverse()
+                .map((m) => {
+                  const selectionne =
+                    m.mois === moisAffiche.mois && m.annee === moisAffiche.annee;
+                  return (
+                    <TouchableOpacity
+                      key={`${m.annee}-${m.mois}`}
+                      style={[
+                        styles.moisOption,
+                        { borderBottomColor: C.separateur },
+                      ]}
+                      onPress={() => {
+                        setIndexMois(
+                          moisDisponibles.findIndex(
+                            (d) => d.mois === m.mois && d.annee === m.annee,
+                          ),
+                        );
+                        setModalMoisVisible(false);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.moisOptionTexte, { color: C.texte }]}>
+                        {MOIS_LABELS[m.mois]} {m.annee}
+                        {m.estActuel ? " (en cours)" : ""}
+                      </Text>
+                      {selectionne && (
+                        <Ionicons name="checkmark" size={18} color={C.purple} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.btnAnnuler}
+              onPress={() => setModalMoisVisible(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                Fermer
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1373,6 +1631,12 @@ const styles = StyleSheet.create({
   },
   titre: { fontSize: 23, fontWeight: "700", letterSpacing: 1 },
   sousTitre: { fontSize: 14, marginTop: 2 },
+  selecteurMoisRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 2,
+  },
   heroCard: { borderRadius: 22, padding: 24, marginBottom: 16 },
   heroLabel: {
     fontSize: 11,
@@ -1430,7 +1694,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   btnAjouterTexte: { fontSize: 12, fontWeight: "700" },
-  envCard: { borderRadius: 16, padding: 18, marginBottom: 10 },
+  envCard: { borderRadius: 16, padding: 18, marginBottom: 10, borderWidth: 2 },
   envRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1445,6 +1709,23 @@ const styles = StyleSheet.create({
   chevron: { fontSize: 14, fontWeight: "700" },
   envBarBg: { height: 6, borderRadius: 3, overflow: "hidden" },
   envBarFill: { height: "100%", borderRadius: 3 },
+  envDeltaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 8,
+  },
+  envDeltaTexte: { fontSize: 11, fontWeight: "500", flexShrink: 1 },
+  envHistoriqueBouton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 6,
+    alignSelf: "flex-start",
+  },
+  envHistoriqueTexte: { fontSize: 11, fontWeight: "600" },
+  envHistoriqueListe: { marginTop: 6, gap: 3 },
+  envHistoriqueLigne: { fontSize: 11 },
   txListe: { marginTop: 14, paddingTop: 14, borderTopWidth: 0.5 },
   txVide: { fontSize: 13, textAlign: "center", paddingVertical: 10 },
   modelesRow: {
@@ -1599,6 +1880,14 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 6,
   },
+  moisOption: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 14,
+    borderBottomWidth: 0.5,
+  },
+  moisOptionTexte: { fontSize: 15, fontWeight: "600" },
   btnAnnulerTexte: { fontSize: 15, fontWeight: "600" },
   accessoryBar: {
     padding: 10,

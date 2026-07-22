@@ -35,23 +35,13 @@ import { TextInput } from "../TexteInput";
 type FrequenceEvenement = "jour" | "semaine" | "mois" | "an";
 
 const JOURS_SEMAINE = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
-const HEURES = [
-  "8h",
-  "9h",
-  "10h",
-  "11h",
-  "12h",
-  "13h",
-  "14h",
-  "15h",
-  "16h",
-  "17h",
-  "18h",
-  "19h",
-  "20h",
-];
-const HEURE_DEBUT = 8;
+const HEURES = Array.from({ length: 24 }, (_, i) => `${i}h`);
+const HEURE_DEBUT = 0;
 const HAUTEUR_HEURE = 56;
+// Décalage de défilement initial pour ouvrir la grille sur les heures de
+// la journée plutôt qu'à minuit — la grille reste entièrement scrollable
+// vers 0h-8h et 20h-23h59.
+const HEURE_SCROLL_INITIAL = 8;
 
 const ACCESSORY_ID = "numericDone";
 const AUJOURDHUI = new Date();
@@ -838,6 +828,7 @@ export default function Planning() {
               <ScrollView
                 style={styles.timeline}
                 showsVerticalScrollIndicator={false}
+                contentOffset={{ x: 0, y: HEURE_SCROLL_INITIAL * HAUTEUR_HEURE }}
               >
                 <View style={styles.timelineInner}>
                   <View style={styles.heuresCol}>
@@ -923,10 +914,7 @@ export default function Planning() {
           )}
 
           {vue === "semaine" && (
-            <ScrollView
-              style={styles.timeline}
-              showsVerticalScrollIndicator={false}
-            >
+            <>
               <View style={styles.weekHeadRow}>
                 <View style={{ width: 32 }} />
                 {joursSemaineVue.map(({ jourDate, estAujourdhui }, i) => (
@@ -991,6 +979,11 @@ export default function Planning() {
                 </View>
               )}
 
+              <ScrollView
+                style={styles.timeline}
+                showsVerticalScrollIndicator={false}
+                contentOffset={{ x: 0, y: HEURE_SCROLL_INITIAL * HAUTEUR_HEURE }}
+              >
               <View
                 style={[
                   styles.timelineInner,
@@ -1081,6 +1074,7 @@ export default function Planning() {
               </View>
               <View style={{ height: 40 }} />
             </ScrollView>
+            </>
           )}
 
           {vue === "mois" && (

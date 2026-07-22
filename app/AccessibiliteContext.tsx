@@ -11,6 +11,17 @@ export const ECHELLES_TEXTE: Record<TailleTexte, number> = {
   tres_grand: 1.3,
 };
 
+// Point de passage unique pour toutes les micro-interactions animées de
+// l'app : si `reduireAnimations` est actif, la transition devient instantanée
+// (durée 0) au lieu d'être simplement raccourcie, pour rester cohérent avec
+// le traitement déjà appliqué aux modales et au Stack de navigation.
+export function dureeAnimation(
+  reduireAnimations: boolean,
+  dureeNormale: number,
+): number {
+  return reduireAnimations ? 0 : dureeNormale;
+}
+
 type AccessibiliteInitial = {
   tailleTexte?: TailleTexte;
   contrasteRenforce?: boolean;

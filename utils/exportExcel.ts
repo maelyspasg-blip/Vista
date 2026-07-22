@@ -59,6 +59,70 @@ function estMoisActuel(mois: number, annee: number): boolean {
   return mois === d.getMonth() && annee === d.getFullYear();
 }
 
+export function estDansMois(dateISO: string, mois: number, annee: number): boolean {
+  const d = new Date(dateISO);
+  return d.getMonth() === mois && d.getFullYear() === annee;
+}
+
+export function moisPrecedent(
+  mois: number,
+  annee: number,
+): { mois: number; annee: number } {
+  return mois === 0 ? { mois: 11, annee: annee - 1 } : { mois: mois - 1, annee };
+}
+
+export function joursDansMois(mois: number, annee: number): number {
+  return new Date(annee, mois + 1, 0).getDate();
+}
+
+// Dépenses cumulées du 1er au jour `jourMax` d'un mois donné, reconstruites
+// à partir des transactions/paiements individuels (jamais purgés, contrairement
+// aux snapshots mensuels qui ne conservent qu'un total de fin de mois) — pour
+// une comparaison "au même jour" honnête avec un mois en cours encore partiel.
+// Filtre par `enveloppeId` si fourni, sinon somme toutes les catégories.
+export function depenseCumuleeAuJour(
+  transactions: { enveloppeId: string; montant: number; date: string }[],
+  historiquePaiements: { enveloppeId: string; montant: number; date: string }[],
+  mois: number,
+  annee: number,
+  jourMax: number,
+  enveloppeId?: string,
+): number {
+  const dansPlage = (dateISO: string) => {
+    const d = new Date(dateISO);
+    return (
+      d.getFullYear() === annee && d.getMonth() === mois && d.getDate() <= jourMax
+    );
+  };
+  const correspond = (x: { enveloppeId: string }) =>
+    enveloppeId === undefined || x.enveloppeId === enveloppeId;
+
+  return (
+    transactions
+      .filter((t) => correspond(t) && dansPlage(t.date))
+      .reduce((acc, t) => acc + t.montant, 0) +
+    historiquePaiements
+      .filter((p) => correspond(p) && dansPlage(p.date))
+      .reduce((acc, p) => acc + p.montant, 0)
+  );
+}
+
+// Montant dépensé par une enveloppe donnée sur un mois archivé (via
+// historiquesMois) — utilisé pour les comparaisons entre deux mois entièrement
+// clos (VueMoisArchive), où le "mois complet" est déjà une comparaison honnête.
+// Retourne `null` si ce mois n'a pas été archivé ou si cette catégorie
+// n'existait pas encore à cette date.
+export function depenseEnveloppeDansSnapshot(
+  historiquesMois: SnapshotExport[],
+  enveloppeId: string,
+  mois: number,
+  annee: number,
+): number | null {
+  const snap = historiquesMois.find((s) => s.mois === mois && s.annee === annee);
+  const env = snap?.enveloppes.find((e) => e.id === enveloppeId);
+  return env ? env.depense : null;
+}
+
 export function listeMois({ moisDebut, anneeDebut, moisFin, anneeFin }: PeriodeExport) {
   const debut = anneeDebut * 12 + moisDebut;
   const fin = anneeFin * 12 + moisFin;

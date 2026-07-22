@@ -1085,7 +1085,7 @@ export default function Profil() {
             style={[styles.modalCardCalculs, { backgroundColor: C.carte }]}
           >
             <View style={styles.modalHeaderCalculs}>
-              <View>
+              <View style={styles.modalHeaderCalculsTitreBloc}>
                 <Text style={[styles.modalTitre, { color: C.texte, marginBottom: 2 }]}>
                   Détail des calculs
                 </Text>
@@ -1096,6 +1096,7 @@ export default function Profil() {
               <TouchableOpacity
                 onPress={() => setModalCalculsVisible(false)}
                 activeOpacity={0.6}
+                style={styles.modalTermineBouton}
               >
                 <Text style={[styles.modalTermine, { color: C.purple }]}>
                   Terminé
@@ -1230,8 +1231,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     paddingVertical: 13,
+    paddingHorizontal: 10,
   },
-  btnSecondaireTexte: { fontSize: 14, fontWeight: "600" },
+  btnSecondaireTexte: {
+    fontSize: 14,
+    fontWeight: "600",
+    flexShrink: 1,
+    textAlign: "center",
+  },
   calculsIntro: { fontSize: 13, lineHeight: 18, marginBottom: 14 },
   modalCardCalculs: {
     borderTopLeftRadius: 24,
@@ -1245,8 +1252,15 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     marginBottom: 16,
   },
+  modalHeaderCalculsTitreBloc: { flex: 1, marginRight: 12 },
+  modalTermineBouton: { flexShrink: 0 },
   modalTermine: { fontSize: 16, fontWeight: "600" },
-  chipRowCalculs: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  chipRowCalculs: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 14,
+  },
   apercuRapport: { alignItems: "center", marginTop: 18 },
   chipCalculs: {
     paddingHorizontal: 16,
@@ -1262,7 +1276,12 @@ const styles = StyleSheet.create({
   },
   switchLabel: { fontSize: 15, fontWeight: "600" },
   switchSub: { fontSize: 12, marginTop: 2 },
-  chipRowTailleTexte: { flexDirection: "row", gap: 8, marginTop: 12 },
+  chipRowTailleTexte: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
   chipTailleTexte: {
     paddingHorizontal: 14,
     paddingVertical: 8,
