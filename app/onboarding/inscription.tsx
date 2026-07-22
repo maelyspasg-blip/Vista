@@ -1,17 +1,17 @@
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
-    Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from "react-native";
 import { messageErreurAuth } from "../authErrors";
 import { supabase } from "../../supabaseClient";
+import { Text } from "../Texte";
+import { TextInput } from "../TexteInput";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
@@ -25,6 +25,13 @@ export default function Inscription() {
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState("");
   const [confirmationRequise, setConfirmationRequise] = useState(false);
+  const [conversionEssai, setConversionEssai] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user?.is_anonymous) setConversionEssai(true);
+    });
+  }, []);
 
   const emailValide = EMAIL_REGEX.test(email.trim());
   const formulaireValide = emailValide && motDePasse.length >= 8;
@@ -33,6 +40,23 @@ export default function Inscription() {
     if (!formulaireValide || chargement) return;
     setErreur("");
     setChargement(true);
+
+    // En conversion d'essai, updateUser garde le même auth.uid() (donc
+    // toutes les données créées pendant l'essai) au lieu de créer un
+    // nouveau compte vide via signUp.
+    if (conversionEssai) {
+      const { error } = await supabase.auth.updateUser({
+        email: email.trim(),
+        password: motDePasse,
+      });
+      setChargement(false);
+      if (error) {
+        setErreur(messageErreurAuth(error.message));
+        return;
+      }
+      setConfirmationRequise(true);
+      return;
+    }
 
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
@@ -60,26 +84,37 @@ export default function Inscription() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <View style={styles.header}>
-        <Text style={styles.titre}>Créer mon compte</Text>
+        <Text style={styles.titre}>
+          {conversionEssai ? "Garder mes données" : "Créer mon compte"}
+        </Text>
         <Text style={styles.sousTitre}>
-          Rejoins Vista et prends le contrôle de tes finances
+          {conversionEssai
+            ? "Ajoute un email et un mot de passe pour transformer ton essai en vrai compte."
+            : "Rejoins Vista et prends le contrôle de tes finances"}
         </Text>
       </View>
 
       <View style={styles.form}>
         {confirmationRequise ? (
           <View style={styles.confirmationBox}>
-            <Text style={styles.confirmationTitre}>Compte créé !</Text>
+            <Text style={styles.confirmationTitre}>
+              {conversionEssai ? "Presque terminé !" : "Compte créé !"}
+            </Text>
             <Text style={styles.confirmationTexte}>
-              Vérifie ta boîte mail ({email.trim()}) et confirme ton adresse
-              avant de te connecter.
+              {conversionEssai
+                ? `Vérifie ta boîte mail (${email.trim()}) et confirme ton adresse pour finaliser la conversion de ton essai. Tes données sont conservées.`
+                : `Vérifie ta boîte mail (${email.trim()}) et confirme ton adresse avant de te connecter.`}
             </Text>
             <TouchableOpacity
               style={styles.btnPrincipal}
-              onPress={() => router.push("/onboarding/connexion")}
+              onPress={() =>
+                router.push(conversionEssai ? "/(tabs)" : "/onboarding/connexion")
+              }
               activeOpacity={0.8}
             >
-              <Text style={styles.btnTexte}>Aller à la connexion</Text>
+              <Text style={styles.btnTexte}>
+                {conversionEssai ? "Continuer l'essai" : "Aller à la connexion"}
+              </Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -135,7 +170,7 @@ export default function Inscription() {
         )}
       </View>
 
-      {!confirmationRequise && (
+      {!confirmationRequise && !conversionEssai && (
         <View style={styles.footer}>
           <Text style={styles.footerTexte}>Déjà un compte ? </Text>
           <TouchableOpacity

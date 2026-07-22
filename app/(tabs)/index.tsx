@@ -15,8 +15,6 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -26,6 +24,9 @@ import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { Enveloppe, Objectif, useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { InfoBulle } from "../InfoBulle";
+import { Text } from "../Texte";
+import { TextInput } from "../TexteInput";
+import { useAccessibilite } from "../AccessibiliteContext";
 
 function bgClair(couleur: string) {
   return couleur + "22";
@@ -136,6 +137,7 @@ const ACCESSORY_ID = "numericDone";
 export default function Dashboard() {
   const objStore = useObjectifs();
   const { theme, couleurs, toggleTheme } = useTheme();
+  const { reduireAnimations } = useAccessibilite();
   const C = couleurs;
   const router = useRouter();
 
@@ -601,6 +603,8 @@ export default function Dashboard() {
               ]}
               onPress={toggleTheme}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Changer de thème"
             >
               <Ionicons
                 name={theme === "clair" ? "moon-outline" : "sunny-outline"}
@@ -1305,7 +1309,7 @@ export default function Dashboard() {
 
       <Modal
         visible={editionDisponible}
-        animationType="slide"
+        animationType={reduireAnimations ? "none" : "slide"}
         transparent
         onRequestClose={() => setEditionDisponible(false)}
       >
@@ -1408,7 +1412,7 @@ export default function Dashboard() {
 
       <Modal
         visible={modalEnveloppeVisible}
-        animationType="slide"
+        animationType={reduireAnimations ? "none" : "slide"}
         transparent
         onRequestClose={() => setModalEnveloppeVisible(false)}
       >
@@ -1681,7 +1685,7 @@ export default function Dashboard() {
 
       <Modal
         visible={modalAjoutVisible}
-        animationType="slide"
+        animationType={reduireAnimations ? "none" : "slide"}
         transparent
         onRequestClose={() => setModalAjoutVisible(false)}
       >
@@ -1990,7 +1994,7 @@ export default function Dashboard() {
 
       <Modal
         visible={modalEpargneVisible}
-        animationType="slide"
+        animationType={reduireAnimations ? "none" : "slide"}
         transparent
         onRequestClose={() => setModalEpargneVisible(false)}
       >
@@ -2009,6 +2013,8 @@ export default function Dashboard() {
                     <TouchableOpacity
                       onPress={() => setModalEpargneVisible(false)}
                       activeOpacity={0.6}
+                      accessibilityRole="button"
+                      accessibilityLabel="Fermer"
                     >
                       <Ionicons name="close" size={20} color={C.texteMuted} />
                     </TouchableOpacity>
@@ -2099,6 +2105,8 @@ export default function Dashboard() {
                             </View>
                             <TouchableOpacity
                               onPress={() => objStore.supprimerObjectif(obj.id)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Supprimer l'objectif ${obj.nom}`}
                             >
                               <Ionicons name="close" size={16} color={C.texteMuted} />
                             </TouchableOpacity>
@@ -2176,6 +2184,8 @@ export default function Dashboard() {
                                   </Text>
                                   <TouchableOpacity
                                     onPress={() => objStore.supprimerObjectif(obj.id)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Supprimer l'objectif ${obj.nom}`}
                                   >
                                     <Ionicons name="close" size={16} color={C.texteMuted} />
                                   </TouchableOpacity>
@@ -2230,6 +2240,8 @@ export default function Dashboard() {
                     <TouchableOpacity
                       onPress={() => setVueModal("liste")}
                       activeOpacity={0.6}
+                      accessibilityRole="button"
+                      accessibilityLabel="Fermer"
                     >
                       <Ionicons name="close" size={20} color={C.texteMuted} />
                     </TouchableOpacity>

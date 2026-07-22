@@ -52,6 +52,9 @@ export function ColorPicker({
           ]}
           onPress={() => onChange(c)}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Choisir la couleur ${c}`}
+          accessibilityState={{ selected: value === c }}
         />
       ))}
     </View>

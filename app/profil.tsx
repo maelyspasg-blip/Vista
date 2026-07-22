@@ -15,13 +15,13 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import * as XLSX from "xlsx";
 import { supabase } from "../supabaseClient";
+import { Text } from "./Texte";
+import { TextInput } from "./TexteInput";
 import {
   DonneesExport,
   genererClasseurExport,
@@ -35,8 +35,16 @@ import { messageErreurAuth } from "./authErrors";
 import { demanderPermissionNotifications } from "./notifications";
 import { AccordionItem } from "./AccordionItem";
 import { SyncErrorBanner } from "./SyncErrorBanner";
+import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { useObjectifs } from "./store";
 import { Theme, useTheme } from "./ThemeContext";
+
+const OPTIONS_TAILLE_TEXTE: { valeur: TailleTexte; label: string }[] = [
+  { valeur: "petit", label: "Petit" },
+  { valeur: "normal", label: "Normal" },
+  { valeur: "grand", label: "Grand" },
+  { valeur: "tres_grand", label: "Très grand" },
+];
 
 type OptionMoisExport = {
   valeur: string;
@@ -81,14 +89,18 @@ function construireOptionsMoisExport(
   return options;
 }
 
-function styleCarte(theme: Theme, couleurLiseret: string) {
+function styleCarte(
+  theme: Theme,
+  couleurLiseret: string,
+  contrasteRenforce: boolean,
+) {
   return theme === "sombre"
-    ? { borderLeftWidth: 3, borderLeftColor: couleurLiseret }
+    ? { borderLeftWidth: contrasteRenforce ? 4 : 3, borderLeftColor: couleurLiseret }
     : {
         backgroundColor: "#FFFFFF",
-        borderWidth: 0.5,
-        borderColor: "#E4E6EA",
-        borderLeftWidth: 3,
+        borderWidth: contrasteRenforce ? 1.5 : 0.5,
+        borderColor: contrasteRenforce ? "#B8B8C0" : "#E4E6EA",
+        borderLeftWidth: contrasteRenforce ? 4 : 3,
         borderLeftColor: couleurLiseret,
       };
 }
@@ -96,6 +108,14 @@ function styleCarte(theme: Theme, couleurLiseret: string) {
 export default function Profil() {
   const router = useRouter();
   const { theme, couleurs: C, toggleTheme } = useTheme();
+  const {
+    tailleTexte,
+    contrasteRenforce,
+    reduireAnimations,
+    setTailleTexte,
+    setContrasteRenforce,
+    setReduireAnimations,
+  } = useAccessibilite();
   const objStore = useObjectifs();
 
   const [email, setEmail] = useState("");
@@ -362,6 +382,8 @@ export default function Profil() {
           onPress={() => router.back()}
           activeOpacity={0.7}
           style={[styles.btnRetour, { backgroundColor: C.iconeBoutonFond }]}
+          accessibilityRole="button"
+          accessibilityLabel="Retour"
         >
           <Ionicons name="arrow-back" size={20} color={C.iconeBouton} />
         </TouchableOpacity>
@@ -379,13 +401,15 @@ export default function Profil() {
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           INFORMATIONS
         </Text>
-        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.purple)]}>
+        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.purple, contrasteRenforce)]}>
           <View style={styles.avatarSection}>
             <TouchableOpacity
               style={[styles.avatarPreview, { backgroundColor: C.hero }]}
               onPress={changerPhotoProfil}
               activeOpacity={0.7}
               disabled={televersementEnCours}
+              accessibilityRole="button"
+              accessibilityLabel="Changer la photo de profil"
             >
               {televersementEnCours ? (
                 <ActivityIndicator color="#FFFFFF" />
@@ -469,7 +493,7 @@ export default function Profil() {
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           PARAMÈTRES DE L'APP
         </Text>
-        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.bleuGris)]}>
+        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.bleuGris, contrasteRenforce)]}>
           <View style={styles.switchRow}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.switchLabel, { color: C.texte }]}>
@@ -484,6 +508,7 @@ export default function Profil() {
               onValueChange={toggleTheme}
               trackColor={{ false: C.separateur, true: C.purpleLight }}
               thumbColor={theme === "sombre" ? C.purple : "#FFF"}
+              accessibilityLabel="Mode sombre"
             />
           </View>
 
@@ -501,6 +526,83 @@ export default function Profil() {
               onValueChange={toggleNotifications}
               trackColor={{ false: C.separateur, true: C.purpleLight }}
               thumbColor={objStore.notificationsActives ? C.purple : "#FFF"}
+              accessibilityLabel="Notifications"
+            />
+          </View>
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+          ACCESSIBILITÉ
+        </Text>
+        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.accent, contrasteRenforce)]}>
+          <Text style={[styles.switchLabel, { color: C.texte }]}>
+            Taille du texte
+          </Text>
+          <View style={styles.chipRowTailleTexte}>
+            {OPTIONS_TAILLE_TEXTE.map((option) => {
+              const actif = tailleTexte === option.valeur;
+              return (
+                <TouchableOpacity
+                  key={option.valeur}
+                  style={[
+                    styles.chipTailleTexte,
+                    {
+                      backgroundColor: actif ? C.purple : C.fondSecondaire,
+                      borderColor: actif ? C.purple : C.carteBorder,
+                    },
+                  ]}
+                  onPress={() => setTailleTexte(option.valeur)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Taille du texte : ${option.label}`}
+                  accessibilityState={{ selected: actif }}
+                >
+                  <Text
+                    style={[
+                      styles.chipTailleTexteTexte,
+                      { color: actif ? "#FFFFFF" : C.texteMuted },
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={[styles.switchRow, { marginTop: 20 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.switchLabel, { color: C.texte }]}>
+                Contraste renforcé
+              </Text>
+              <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                Textes et bordures plus marqués
+              </Text>
+            </View>
+            <Switch
+              value={contrasteRenforce}
+              onValueChange={setContrasteRenforce}
+              trackColor={{ false: C.separateur, true: C.purpleLight }}
+              thumbColor={contrasteRenforce ? C.purple : "#FFF"}
+              accessibilityLabel="Contraste renforcé"
+            />
+          </View>
+
+          <View style={[styles.switchRow, { marginTop: 18 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.switchLabel, { color: C.texte }]}>
+                Réduire les animations
+              </Text>
+              <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                Désactive les transitions et animations
+              </Text>
+            </View>
+            <Switch
+              value={reduireAnimations}
+              onValueChange={setReduireAnimations}
+              trackColor={{ false: C.separateur, true: C.purpleLight }}
+              thumbColor={reduireAnimations ? C.purple : "#FFF"}
+              accessibilityLabel="Réduire les animations"
             />
           </View>
         </View>
@@ -508,7 +610,7 @@ export default function Profil() {
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           DONNÉES
         </Text>
-        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.vert)]}>
+        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.vert, contrasteRenforce)]}>
           <TouchableOpacity
             style={[styles.btnSecondaire, { borderColor: C.separateur }]}
             onPress={() => setModalExportVisible(true)}
@@ -528,7 +630,7 @@ export default function Profil() {
           style={[
             styles.carte,
             { backgroundColor: C.carte, borderColor: C.carteBorder },
-            styleCarte(theme, C.lavande),
+            styleCarte(theme, C.lavande, contrasteRenforce),
           ]}
         >
           <Text style={[styles.calculsIntro, { color: C.texteMuted }]}>
@@ -550,7 +652,7 @@ export default function Profil() {
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           COMPTE
         </Text>
-        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.peach)]}>
+        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.peach, contrasteRenforce)]}>
           <TouchableOpacity
             style={[styles.btnSecondaire, { borderColor: C.separateur }]}
             onPress={seDeconnecter}
@@ -589,7 +691,7 @@ export default function Profil() {
 
       <Modal
         visible={modalMotDePasseVisible}
-        animationType="slide"
+        animationType={reduireAnimations ? "none" : "slide"}
         transparent
         onRequestClose={fermerModalMotDePasse}
       >
@@ -687,7 +789,7 @@ export default function Profil() {
       <Modal
         visible={modalExportVisible}
         transparent
-        animationType="slide"
+        animationType={reduireAnimations ? "none" : "slide"}
         onRequestClose={() => setModalExportVisible(false)}
       >
         <View style={styles.modalOverlayTouch}>
@@ -770,7 +872,7 @@ export default function Profil() {
       <Modal
         visible={modalCalculsVisible}
         transparent
-        animationType="slide"
+        animationType={reduireAnimations ? "none" : "slide"}
         onRequestClose={() => setModalCalculsVisible(false)}
       >
         <View style={styles.modalOverlayTouch}>
@@ -954,6 +1056,14 @@ const styles = StyleSheet.create({
   },
   switchLabel: { fontSize: 15, fontWeight: "600" },
   switchSub: { fontSize: 12, marginTop: 2 },
+  chipRowTailleTexte: { flexDirection: "row", gap: 8, marginTop: 12 },
+  chipTailleTexte: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 0.5,
+  },
+  chipTailleTexteTexte: { fontSize: 13, fontWeight: "600" },
   modalOverlay: {
     flex: 1,
     justifyContent: "flex-end",

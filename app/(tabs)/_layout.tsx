@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import { useEffect } from "react";
 import { AppState, View } from "react-native";
+import { useAccessibilite } from "../AccessibiliteContext";
 import { SyncErrorBanner } from "../SyncErrorBanner";
 import { useObjectifs } from "../store";
 import { useTheme } from "../ThemeContext";
@@ -10,6 +11,7 @@ const INTERVALLE_VERIFICATION_MS = 60000;
 
 export default function TabLayout() {
   const { couleurs: C } = useTheme();
+  const { echelleTexte } = useAccessibilite();
   const objStore = useObjectifs();
 
   useEffect(() => {
@@ -60,7 +62,7 @@ export default function TabLayout() {
           tabBarActiveTintColor: C.tabActif,
           tabBarInactiveTintColor: C.tabInactif,
           tabBarLabelStyle: {
-            fontSize: 10,
+            fontSize: 10 * echelleTexte,
             fontWeight: "500",
           },
         }}

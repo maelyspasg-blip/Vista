@@ -14,6 +14,9 @@ export function messageErreurAuth(message: string): string {
   if (m.includes("invalid login credentials")) {
     return "Email ou mot de passe incorrect.";
   }
+  if (m.includes("anonymous sign-ins are disabled")) {
+    return "Le mode essai n'est pas disponible pour le moment.";
+  }
   if (m.includes("email not confirmed")) {
     return "Confirme ton adresse email avant de te connecter (vérifie ta boîte mail).";
   }

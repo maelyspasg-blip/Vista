@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Modal, StyleSheet, TouchableOpacity } from "react-native";
+import { useAccessibilite } from "./AccessibiliteContext";
+import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
 
 export function InfoBulle({
@@ -15,6 +17,7 @@ export function InfoBulle({
   couleur?: string;
 }) {
   const { couleurs: C } = useTheme();
+  const { reduireAnimations } = useAccessibilite();
   const [visible, setVisible] = useState(false);
 
   return (
@@ -23,6 +26,8 @@ export function InfoBulle({
         onPress={() => setVisible(true)}
         activeOpacity={0.6}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        accessibilityRole="button"
+        accessibilityLabel={`Plus d'informations : ${titre}`}
       >
         <Ionicons
           name="information-circle-outline"
@@ -33,7 +38,7 @@ export function InfoBulle({
       <Modal
         visible={visible}
         transparent
-        animationType="fade"
+        animationType={reduireAnimations ? "none" : "fade"}
         onRequestClose={() => setVisible(false)}
       >
         <TouchableOpacity

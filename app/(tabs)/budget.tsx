@@ -15,15 +15,16 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { useTheme } from "../ThemeContext";
+import { useAccessibilite } from "../AccessibiliteContext";
 import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { InfoBulle } from "../InfoBulle";
+import { Text } from "../Texte";
+import { TextInput } from "../TexteInput";
 
 const ACCESSORY_ID = "numericDone";
 
@@ -66,6 +67,7 @@ function formaterDateLongue(dateISO: string): string {
 export default function Budget() {
   const objStore = useObjectifs();
   const { couleurs: C, theme } = useTheme();
+  const { reduireAnimations } = useAccessibilite();
   const params = useLocalSearchParams<{ section?: string }>();
   const router = useRouter();
 
@@ -96,10 +98,10 @@ export default function Budget() {
       if (params.section === "autres-depenses") {
         scrollRef.current?.scrollTo({
           y: positionAutresDepenses.current,
-          animated: true,
+          animated: !reduireAnimations,
         });
       }
-    }, [params.section]),
+    }, [params.section, reduireAnimations]),
   );
 
   const MOIS_ACTUEL = new Date().getMonth();
@@ -497,6 +499,8 @@ export default function Budget() {
                         <TouchableOpacity
                           onPress={() => objStore.supprimerModeleDepense(m.id)}
                           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Supprimer le modèle ${m.nom}`}
                         >
                           <Ionicons name="close" size={12} color={env.couleur} />
                         </TouchableOpacity>
@@ -564,6 +568,8 @@ export default function Budget() {
                       onPress={() => creerModele(env.id)}
                       activeOpacity={0.7}
                       disabled={creationModeleEnCours}
+                      accessibilityRole="button"
+                      accessibilityLabel="Créer le raccourci de dépense"
                     >
                       {creationModeleEnCours ? (
                         <ActivityIndicator color="#FFFFFF" size="small" />
@@ -578,6 +584,8 @@ export default function Budget() {
                       ]}
                       onPress={fermerCreationModele}
                       activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel="Annuler la création du raccourci"
                     >
                       <Ionicons name="close" size={16} color={C.texteMuted} />
                     </TouchableOpacity>
@@ -615,6 +623,8 @@ export default function Budget() {
                             )
                           }
                           style={styles.txSupprimer}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Supprimer ${ligne.nom}`}
                         >
                           <Ionicons name="close" size={14} color={C.texteMuted} />
                         </TouchableOpacity>
@@ -1112,7 +1122,7 @@ export default function Budget() {
 
       <Modal
         visible={modalAjoutVisible}
-        animationType="slide"
+        animationType={reduireAnimations ? "none" : "slide"}
         transparent
         onRequestClose={() => setModalAjoutVisible(false)}
       >
@@ -1284,7 +1294,7 @@ export default function Budget() {
       <Modal
         visible={gestionEvenement !== null}
         transparent
-        animationType="fade"
+        animationType={reduireAnimations ? "none" : "fade"}
         onRequestClose={() => setGestionEvenement(null)}
       >
         <View style={styles.modalOverlayTouch}>

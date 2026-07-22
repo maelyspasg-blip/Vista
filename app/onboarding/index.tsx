@@ -4,11 +4,11 @@ import React, { useState } from "react";
 import {
     Dimensions,
     StyleSheet,
-    Text,
     TouchableOpacity,
     View,
 } from "react-native";
 import { marquerOnboardingVu } from "../onboardingStorage";
+import { Text } from "../Texte";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";

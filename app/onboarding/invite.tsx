@@ -15,35 +15,40 @@ import { TextInput } from "../TexteInput";
 
 const PURPLE = "#8B6FE8";
 
-export default function Connexion() {
+export default function Invite() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [motDePasse, setMotDePasse] = useState("");
+  const [prenom, setPrenom] = useState("");
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState("");
 
-  const formulaireValide = !!email.trim() && motDePasse.length > 0;
+  const formulaireValide = !!prenom.trim();
 
-  const seConnecter = async () => {
+  const commencerEssai = async () => {
     if (!formulaireValide || chargement) return;
     setErreur("");
     setChargement(true);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password: motDePasse,
-    });
-
-    setChargement(false);
+    const { data, error } = await supabase.auth.signInAnonymously();
 
     if (error) {
+      setChargement(false);
       setErreur(messageErreurAuth(error.message));
       return;
     }
 
-    if (data.session) {
-      router.replace("/(tabs)");
+    if (data.user) {
+      const { error: erreurProfil } = await supabase
+        .from("profils")
+        .update({ prenom: prenom.trim() })
+        .eq("user_id", data.user.id);
+
+      if (erreurProfil) {
+        console.error("Supabase update prenom (invité) a échoué :", erreurProfil);
+      }
     }
+
+    setChargement(false);
+    router.replace("/(tabs)");
   };
 
   return (
@@ -52,36 +57,23 @@ export default function Connexion() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <View style={styles.header}>
-        <Text style={styles.titre}>Content de te revoir</Text>
-        <Text style={styles.sousTitre}>Connecte-toi à ton compte Vista</Text>
+        <Text style={styles.titre}>Essayer Vista</Text>
+        <Text style={styles.sousTitre}>
+          Découvre l'app avec des données de démonstration, sans créer de
+          compte. Ton essai dure 7 jours.
+        </Text>
       </View>
 
       <View style={styles.form}>
-        <Text style={styles.label}>Email</Text>
+        <Text style={styles.label}>Prénom</Text>
         <TextInput
           style={styles.input}
-          placeholder="ton@email.com"
+          placeholder="Ton prénom"
           placeholderTextColor="#CCC"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoCorrect={false}
-          value={email}
+          autoCapitalize="words"
+          value={prenom}
           onChangeText={(v) => {
-            setEmail(v);
-            setErreur("");
-          }}
-          editable={!chargement}
-        />
-
-        <Text style={styles.label}>Mot de passe</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Ton mot de passe"
-          placeholderTextColor="#CCC"
-          secureTextEntry
-          value={motDePasse}
-          onChangeText={(v) => {
-            setMotDePasse(v);
+            setPrenom(v);
             setErreur("");
           }}
           editable={!chargement}
@@ -94,37 +86,17 @@ export default function Connexion() {
             styles.btnPrincipal,
             { opacity: formulaireValide && !chargement ? 1 : 0.5 },
           ]}
-          onPress={seConnecter}
+          onPress={commencerEssai}
           activeOpacity={0.8}
           disabled={!formulaireValide || chargement}
         >
           {chargement ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={styles.btnTexte}>Se connecter</Text>
+            <Text style={styles.btnTexte}>Commencer</Text>
           )}
         </TouchableOpacity>
       </View>
-
-      <View style={styles.footer}>
-        <Text style={styles.footerTexte}>Pas encore de compte ? </Text>
-        <TouchableOpacity
-          onPress={() => router.push("/onboarding/inscription")}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.footerLien, { color: PURPLE }]}>
-            Créer un compte
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <TouchableOpacity
-        style={styles.essaiLien}
-        onPress={() => router.push("/onboarding/invite")}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.essaiTexte}>Essayer sans compte</Text>
-      </TouchableOpacity>
     </KeyboardAvoidingView>
   );
 }
@@ -186,28 +158,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#FFFFFF",
-  },
-  footer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  footerTexte: {
-    fontSize: 14,
-    color: "#888",
-  },
-  footerLien: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  essaiLien: {
-    alignItems: "center",
-    marginTop: 16,
-  },
-  essaiTexte: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#888",
-    textDecorationLine: "underline",
   },
 });

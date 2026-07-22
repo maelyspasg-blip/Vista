@@ -1,16 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-
-const TABLES_UTILISATEUR = [
-  "transactions",
-  "evenements",
-  "historique_paiements",
-  "snapshot_enveloppes",
-  "snapshot_objectifs",
-  "snapshots_mois",
-  "objectifs",
-  "enveloppes",
-  "profils",
-];
+import { TABLES_UTILISATEUR } from "../_shared/tables.ts";
 
 Deno.serve(async (req) => {
   const authHeader = req.headers.get("Authorization");

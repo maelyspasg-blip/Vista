@@ -7,14 +7,14 @@ import {
     Platform,
     ScrollView,
     StyleSheet,
-    Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from "react-native";
 import { supabase } from "../../supabaseClient";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { messageErreurAuth } from "../authErrors";
+import { Text } from "../Texte";
+import { TextInput } from "../TexteInput";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";

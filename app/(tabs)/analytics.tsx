@@ -1,14 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
-import { Fragment, useState } from "react";
+import Slider from "@react-native-community/slider";
+import { Fragment, useEffect, useState } from "react";
 import {
   Dimensions,
   Modal,
   Platform,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -19,6 +18,9 @@ import { calculerSeries, TypeSerie } from "../../utils/series";
 import { calculerScoreSante, MotCleScore } from "../../utils/score";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { InfoBulle } from "../InfoBulle";
+import { Text } from "../Texte";
+import { TextInput } from "../TexteInput";
+import { useAccessibilite } from "../AccessibiliteContext";
 
 const MOIS_LABELS = [
   "Jan",
@@ -420,6 +422,7 @@ function JaugeRepartition({
 export default function Analytics() {
   const objStore = useObjectifs();
   const { theme, couleurs: C } = useTheme();
+  const { reduireAnimations } = useAccessibilite();
   const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
   const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
   const [vue, setVue] = useState<Vue>("global");
@@ -428,14 +431,29 @@ export default function Analytics() {
     string[]
   >([]);
   const [modalSeriesVisible, setModalSeriesVisible] = useState(false);
-  const [vueModalStats, setVueModalStats] = useState<"score" | "series">(
-    "score",
-  );
+  const [vueModalStats, setVueModalStats] = useState<
+    "score" | "series" | "simulateur"
+  >("score");
   const [historiqueOuvert, setHistoriqueOuvert] = useState<
     Partial<Record<TypeSerie, boolean>>
   >({});
   const [editionSeuilOuverte, setEditionSeuilOuverte] = useState(false);
   const [seuilEpargneTemp, setSeuilEpargneTemp] = useState("");
+
+  const [categorieSimulee, setCategorieSimulee] = useState<string | null>(
+    null,
+  );
+  const [budgetSimule, setBudgetSimule] = useState(0);
+  const [tiroirSimulateurOuvert, setTiroirSimulateurOuvert] = useState(false);
+  const categoriesSimulables = objStore.enveloppes.filter(
+    (e) => e.type !== "Entrée",
+  );
+  const enveloppeSimulee =
+    categoriesSimulables.find((e) => e.id === categorieSimulee) ?? null;
+
+  useEffect(() => {
+    if (enveloppeSimulee) setBudgetSimule(enveloppeSimulee.budget);
+  }, [categorieSimulee]);
 
   const series = calculerSeries({
     enveloppes: objStore.enveloppes,
@@ -451,6 +469,31 @@ export default function Analytics() {
     seuilEpargneConstante: objStore.seuilEpargneConstante,
     objectifs: objStore.objectifs,
   });
+
+  const NB_MOIS_PROJECTION = 6;
+  const budgetActuelSimule = enveloppeSimulee?.budget ?? 0;
+  const ecartMensuelSimule = budgetActuelSimule - budgetSimule;
+  const pointsRecentsEpargne = [
+    ...objStore.historiquesMois.slice(-5).map((s) => s.epargne),
+    objStore.epargneMois,
+  ];
+  const epargneMoyenneMensuelle =
+    pointsRecentsEpargne.reduce((a, b) => a + b, 0) /
+    pointsRecentsEpargne.length;
+  const labelsSimulation = Array.from(
+    { length: NB_MOIS_PROJECTION },
+    (_, i) => MOIS_LABELS[(MOIS_ACTUEL + i + 1) % 12],
+  );
+  const donneesReellesSimulation = Array.from(
+    { length: NB_MOIS_PROJECTION },
+    (_, i) => Math.round(epargneMoyenneMensuelle * (i + 1)),
+  );
+  const donneesPrevisionnellesSimulation = donneesReellesSimulation.map(
+    (v, i) => Math.round(v + ecartMensuelSimule * (i + 1)),
+  );
+  const impactTotal6MoisSimulation = Math.round(
+    ecartMensuelSimule * NB_MOIS_PROJECTION,
+  );
 
   const ouvrirEditionSeuil = () => {
     setSeuilEpargneTemp(
@@ -750,6 +793,8 @@ export default function Analytics() {
             ]}
             onPress={() => setModalSeriesVisible(true)}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Voir la santé financière et les séries"
           >
             <Ionicons name="ellipsis-horizontal" size={18} color={C.texte} />
           </TouchableOpacity>
@@ -880,7 +925,7 @@ export default function Analytics() {
         <Modal
           visible={periodePickerVisible}
           transparent
-          animationType="slide"
+          animationType={reduireAnimations ? "none" : "slide"}
           onRequestClose={() => setPeriodePickerVisible(false)}
         >
           <View style={styles.modalOverlayTouch}>
@@ -1428,7 +1473,7 @@ export default function Analytics() {
       <Modal
         visible={modalSeriesVisible}
         transparent
-        animationType="slide"
+        animationType={reduireAnimations ? "none" : "slide"}
         onRequestClose={() => setModalSeriesVisible(false)}
       >
         <View style={styles.modalOverlayTouch}>
@@ -1436,12 +1481,18 @@ export default function Analytics() {
             <View style={styles.modalHeader}>
               <View>
                 <Text style={[styles.modalTitre, { color: C.texte }]}>
-                  {vueModalStats === "score" ? "Santé financière" : "Séries"}
+                  {vueModalStats === "score"
+                    ? "Santé financière"
+                    : vueModalStats === "series"
+                      ? "Séries"
+                      : "Simulateur"}
                 </Text>
                 <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
                   {vueModalStats === "score"
                     ? "Vue d'ensemble de ta situation"
-                    : "Régularité mois après mois"}
+                    : vueModalStats === "series"
+                      ? "Régularité mois après mois"
+                      : "Et si tu ajustais un budget ?"}
                 </Text>
               </View>
               <TouchableOpacity
@@ -1455,7 +1506,7 @@ export default function Analytics() {
             </View>
 
             <View style={styles.chipRow}>
-              {(["score", "series"] as const).map((v) => (
+              {(["score", "series", "simulateur"] as const).map((v) => (
                 <TouchableOpacity
                   key={v}
                   style={[
@@ -1476,7 +1527,11 @@ export default function Analytics() {
                       vueModalStats === v && styles.chipTexteActif,
                     ]}
                   >
-                    {v === "score" ? "Score" : "Séries"}
+                    {v === "score"
+                      ? "Score"
+                      : v === "series"
+                        ? "Séries"
+                        : "Simulateur"}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1702,6 +1757,8 @@ export default function Analytics() {
                             ]}
                             onPress={validerSeuilEpargne}
                             activeOpacity={0.7}
+                            accessibilityRole="button"
+                            accessibilityLabel="Valider le seuil d'épargne"
                           >
                             <Ionicons
                               name="checkmark"
@@ -1717,6 +1774,8 @@ export default function Analytics() {
                               ]}
                               onPress={() => setEditionSeuilOuverte(false)}
                               activeOpacity={0.7}
+                              accessibilityRole="button"
+                              accessibilityLabel="Annuler la modification du seuil"
                             >
                               <Ionicons
                                 name="close"
@@ -1847,6 +1906,229 @@ export default function Analytics() {
                   </View>
                 );
               })}
+
+              {vueModalStats === "simulateur" && (
+                <View
+                  style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
+                >
+                  <View style={styles.serieEnTete}>
+                    <View
+                      style={[styles.serieIconeFond, { backgroundColor: C.purpleLight }]}
+                    >
+                      <Ionicons name="flask-outline" size={18} color={C.purple} />
+                    </View>
+                    <Text style={[styles.serieTitre, { color: C.texte }]}>
+                      Et si...
+                    </Text>
+                    <InfoBulle
+                      titre="Comment ce simulateur fonctionne"
+                      texte={`Choisis une catégorie et ajuste son budget hypothétique avec le curseur. La courbe compare ta trajectoire d'épargne actuelle (moyenne de tes derniers mois) à ce qu'elle serait sur ${NB_MOIS_PROJECTION} mois avec ce budget ajusté. C'est purement indicatif : rien n'est enregistré ni modifié dans tes vraies données.`}
+                    />
+                  </View>
+
+                  {categoriesSimulables.length === 0 ? (
+                    <Text
+                      style={[styles.serieDescription, { color: C.texteMuted }]}
+                    >
+                      Crée d&apos;abord une catégorie Fixe ou Variable pour
+                      utiliser le simulateur.
+                    </Text>
+                  ) : (
+                    <>
+                      <TouchableOpacity
+                        style={[
+                          styles.tiroirBouton,
+                          { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                        ]}
+                        onPress={() =>
+                          setTiroirSimulateurOuvert(!tiroirSimulateurOuvert)
+                        }
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.tiroirBoutonTexte, { color: C.texte }]}>
+                          {enveloppeSimulee
+                            ? enveloppeSimulee.nom
+                            : "Choisir une catégorie"}
+                        </Text>
+                        <Text style={[styles.tiroirChevron, { color: C.texteMuted }]}>
+                          {tiroirSimulateurOuvert ? "▾" : "▸"}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {tiroirSimulateurOuvert && (
+                        <View
+                          style={[
+                            styles.tiroirContenu,
+                            {
+                              backgroundColor:
+                                theme === "sombre" ? C.carte : "#FAFAFA",
+                              borderColor: C.carteBorder,
+                            },
+                          ]}
+                        >
+                          {categoriesSimulables.map((env) => {
+                            const sel = env.id === categorieSimulee;
+                            return (
+                              <TouchableOpacity
+                                key={env.id}
+                                style={[
+                                  styles.tiroirItem,
+                                  { borderBottomColor: C.separateur },
+                                  sel && { backgroundColor: env.couleur + "22" },
+                                ]}
+                                onPress={() => {
+                                  setCategorieSimulee(env.id);
+                                  setTiroirSimulateurOuvert(false);
+                                }}
+                                activeOpacity={0.7}
+                              >
+                                <View
+                                  style={[
+                                    styles.tiroirRond,
+                                    { backgroundColor: env.couleur },
+                                  ]}
+                                />
+                                <Text style={[styles.tiroirNom, { color: C.texte }]}>
+                                  {env.nom}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.simulateurBudgetActuelTexte,
+                                    { color: C.texteMuted },
+                                  ]}
+                                >
+                                  {env.budget} €
+                                </Text>
+                                {sel && (
+                                  <Ionicons
+                                    name="checkmark"
+                                    size={16}
+                                    color={env.couleur}
+                                  />
+                                )}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      )}
+
+                      {enveloppeSimulee && (
+                        <>
+                          <View style={styles.simulateurBudgetLigne}>
+                            <Text
+                              style={[
+                                styles.simulateurBudgetTexte,
+                                { color: C.texte },
+                              ]}
+                            >
+                              Budget simulé : {Math.round(budgetSimule)} €
+                            </Text>
+                            <Text
+                              style={[
+                                styles.simulateurDeltaTexte,
+                                {
+                                  color:
+                                    budgetSimule === budgetActuelSimule
+                                      ? C.texteMuted
+                                      : budgetSimule > budgetActuelSimule
+                                        ? C.peachText
+                                        : C.vertText,
+                                },
+                              ]}
+                            >
+                              {budgetSimule === budgetActuelSimule
+                                ? "= budget actuel"
+                                : `${budgetSimule > budgetActuelSimule ? "+" : ""}${Math.round(budgetSimule - budgetActuelSimule)} € vs actuel`}
+                            </Text>
+                          </View>
+                          <Slider
+                            value={budgetSimule}
+                            minimumValue={0}
+                            maximumValue={Math.max(budgetActuelSimule * 2, 100)}
+                            step={5}
+                            onValueChange={setBudgetSimule}
+                            minimumTrackTintColor={C.purple}
+                            maximumTrackTintColor={C.separateur}
+                            thumbTintColor={C.purple}
+                            accessibilityLabel={`Budget simulé pour ${enveloppeSimulee.nom}`}
+                            style={styles.simulateurSlider}
+                          />
+
+                          <View
+                            style={[
+                              styles.simulateurImpactBloc,
+                              {
+                                backgroundColor:
+                                  impactTotal6MoisSimulation >= 0
+                                    ? C.vertLight
+                                    : C.peachLight,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.simulateurImpactTexte,
+                                {
+                                  color:
+                                    impactTotal6MoisSimulation >= 0
+                                      ? C.vertText
+                                      : C.peachText,
+                                },
+                              ]}
+                            >
+                              {impactTotal6MoisSimulation >= 0 ? "+" : ""}
+                              {impactTotal6MoisSimulation} € d&apos;épargne
+                              projetée sur {NB_MOIS_PROJECTION} mois
+                            </Text>
+                          </View>
+
+                          <GraphiqueLignes
+                            donneesReelles={donneesReellesSimulation}
+                            donneesPrevisionnelles={donneesPrevisionnellesSimulation}
+                            labels={labelsSimulation}
+                            couleurs={C}
+                          />
+                          <View style={styles.simulateurLegende}>
+                            <View style={styles.simulateurLegendeItem}>
+                              <View
+                                style={[
+                                  styles.simulateurLegendePastille,
+                                  { backgroundColor: C.accent },
+                                ]}
+                              />
+                              <Text
+                                style={[
+                                  styles.simulateurLegendeTexte,
+                                  { color: C.texteMuted },
+                                ]}
+                              >
+                                Trajectoire actuelle
+                              </Text>
+                            </View>
+                            <View style={styles.simulateurLegendeItem}>
+                              <View
+                                style={[
+                                  styles.simulateurLegendePastille,
+                                  { backgroundColor: C.peach },
+                                ]}
+                              />
+                              <Text
+                                style={[
+                                  styles.simulateurLegendeTexte,
+                                  { color: C.texteMuted },
+                                ]}
+                              >
+                                Trajectoire simulée
+                              </Text>
+                            </View>
+                          </View>
+                        </>
+                      )}
+                    </>
+                  )}
+                </View>
+              )}
+
               <View style={{ height: 20 }} />
             </ScrollView>
           </View>
@@ -2104,6 +2386,31 @@ const styles = StyleSheet.create({
   tiroirNom: { flex: 1, fontSize: 14, color: "#1A1A1A", fontWeight: "500" },
   tiroirReset: { padding: 14, alignItems: "center" },
   tiroirResetTexte: { fontSize: 13, color: "#999", fontWeight: "600" },
+  simulateurBudgetActuelTexte: { fontSize: 12, fontWeight: "500" },
+  simulateurBudgetLigne: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    marginBottom: 4,
+  },
+  simulateurBudgetTexte: { fontSize: 15, fontWeight: "700" },
+  simulateurDeltaTexte: { fontSize: 13, fontWeight: "600" },
+  simulateurSlider: { width: "100%", height: 40, marginBottom: 4 },
+  simulateurImpactBloc: {
+    borderRadius: 13,
+    padding: 14,
+    marginVertical: 14,
+  },
+  simulateurImpactTexte: { fontSize: 14, fontWeight: "700", lineHeight: 20 },
+  simulateurLegende: {
+    flexDirection: "row",
+    gap: 16,
+    marginTop: 10,
+    justifyContent: "center",
+  },
+  simulateurLegendeItem: { flexDirection: "row", alignItems: "center", gap: 6 },
+  simulateurLegendePastille: { width: 10, height: 10, borderRadius: 5 },
+  simulateurLegendeTexte: { fontSize: 12, fontWeight: "500" },
   banniereInfo: {
     backgroundColor: "#F0EEFF",
     borderRadius: 13,

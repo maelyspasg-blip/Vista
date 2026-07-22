@@ -16,8 +16,6 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -30,6 +28,9 @@ import {
 } from "../notifications";
 import { Evenement, useObjectifs } from "../store";
 import { useTheme } from "../ThemeContext";
+import { useAccessibilite } from "../AccessibiliteContext";
+import { Text } from "../Texte";
+import { TextInput } from "../TexteInput";
 
 type FrequenceEvenement = "jour" | "semaine" | "mois" | "an";
 
@@ -198,6 +199,7 @@ type EvenementUnifie = {
 export default function Planning() {
   const objStore = useObjectifs();
   const { theme, couleurs: C } = useTheme();
+  const { reduireAnimations } = useAccessibilite();
   const router = useRouter();
   const params = useLocalSearchParams<{ editEventId?: string }>();
 
@@ -1190,7 +1192,7 @@ export default function Planning() {
 
       <Modal
         visible={modalCreationVisible}
-        animationType="slide"
+        animationType={reduireAnimations ? "none" : "slide"}
         transparent
         onRequestClose={() => setModalCreationVisible(false)}
       >
@@ -1210,6 +1212,8 @@ export default function Planning() {
                     <TouchableOpacity
                       onPress={() => setModalCreationVisible(false)}
                       activeOpacity={0.6}
+                      accessibilityRole="button"
+                      accessibilityLabel="Fermer"
                     >
                       <Ionicons name="close" size={20} color={C.texteMuted} />
                     </TouchableOpacity>
@@ -1748,6 +1752,8 @@ export default function Planning() {
                                 !nomNouvelleCategorie.trim() ||
                                 creationCategorieEnCours
                               }
+                              accessibilityRole="button"
+                              accessibilityLabel="Valider la nouvelle catégorie"
                             >
                               {creationCategorieEnCours ? (
                                 <ActivityIndicator color="#FFFFFF" size="small" />
@@ -1769,6 +1775,8 @@ export default function Planning() {
                                 setNomNouvelleCategorie("");
                               }}
                               activeOpacity={0.7}
+                              accessibilityRole="button"
+                              accessibilityLabel="Annuler la nouvelle catégorie"
                             >
                               <Ionicons name="close" size={20} color={C.texteMuted} />
                             </TouchableOpacity>

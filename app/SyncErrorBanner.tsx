@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { Text } from "./Texte";
 import { useObjectifs } from "./store";
 
 export function SyncErrorBanner() {

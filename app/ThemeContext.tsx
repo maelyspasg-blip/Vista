@@ -1,5 +1,6 @@
 import { createContext, useContext, useState } from "react";
 import { supabase } from "../supabaseClient";
+import { useAccessibilite } from "./AccessibiliteContext";
 import { signalerErreurSync } from "./store";
 
 export type Theme = "clair" | "sombre";
@@ -73,15 +74,33 @@ export const COULEURS = {
   },
 };
 
+// Contraste renforcé : assombrit le texte secondaire et les bordures/
+// séparateurs (trop clairs par défaut pour bien ressortir) sans dupliquer
+// toute la palette — seuls ces tokens changent.
+const CONTRASTE_OVERRIDES: Record<Theme, Partial<typeof COULEURS.clair>> = {
+  clair: {
+    texteMuted: "#5C5C5C",
+    carteBorder: "#B8B8C0",
+    separateur: "#B8B8C0",
+  },
+  sombre: {
+    texteMuted: "#4A6478",
+    carteBorder: "rgba(196,201,232,0.35)",
+    separateur: "rgba(196,201,232,0.35)",
+  },
+};
+
 type ThemeContextType = {
   theme: Theme;
   couleurs: typeof COULEURS.clair;
+  contrasteRenforce: boolean;
   toggleTheme: () => void;
 };
 
 const ThemeContext = createContext<ThemeContextType>({
   theme: "clair",
   couleurs: COULEURS.clair,
+  contrasteRenforce: false,
   toggleTheme: () => {},
 });
 
@@ -111,6 +130,7 @@ export function ThemeProvider({
   themeInitial?: Theme;
 }) {
   const [theme, setTheme] = useState<Theme>(themeInitial ?? "clair");
+  const { contrasteRenforce } = useAccessibilite();
 
   const toggleTheme = () => {
     setTheme((t) => {
@@ -120,9 +140,13 @@ export function ThemeProvider({
     });
   };
 
+  const couleurs = contrasteRenforce
+    ? { ...COULEURS[theme], ...CONTRASTE_OVERRIDES[theme] }
+    : COULEURS[theme];
+
   return (
     <ThemeContext.Provider
-      value={{ theme, couleurs: COULEURS[theme], toggleTheme }}
+      value={{ theme, couleurs, contrasteRenforce, toggleTheme }}
     >
       {children}
     </ThemeContext.Provider>
