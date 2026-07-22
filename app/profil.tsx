@@ -5,7 +5,7 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,6 +19,7 @@ import {
   View,
 } from "react-native";
 import * as XLSX from "xlsx";
+import { captureRef } from "react-native-view-shot";
 import { supabase } from "../supabaseClient";
 import { Text } from "./Texte";
 import { TextInput } from "./TexteInput";
@@ -29,11 +30,14 @@ import {
   nomFichierExport,
   PeriodeExport,
 } from "../utils/exportExcel";
+import { calculerResumeVisuel, libellePeriode } from "../utils/rapportVisuel";
+import { calculerScoreSante, ScoreSante } from "../utils/score";
 import { getInitiales } from "../utils/initiales";
 import { CALCULS_DOC } from "../utils/calculsDoc";
 import { messageErreurAuth } from "./authErrors";
 import { demanderPermissionNotifications } from "./notifications";
 import { AccordionItem } from "./AccordionItem";
+import { RapportVisuelCarte } from "./RapportVisuelCarte";
 import { SyncErrorBanner } from "./SyncErrorBanner";
 import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { useObjectifs } from "./store";
@@ -269,6 +273,90 @@ export default function Profil() {
       );
     } finally {
       setExportEnCours(false);
+    }
+  };
+
+  const [modalRapportVisible, setModalRapportVisible] = useState(false);
+  const [partageRapportEnCours, setPartageRapportEnCours] = useState(false);
+  const [moisDebutRapport, setMoisDebutRapport] = useState(
+    () =>
+      optionsMoisExport[Math.max(0, optionsMoisExport.length - 6)]?.valeur ??
+      optionsMoisExport[0]?.valeur,
+  );
+  const [moisFinRapport, setMoisFinRapport] = useState(
+    () => optionsMoisExport[optionsMoisExport.length - 1]?.valeur,
+  );
+  const rapportCarteRef = useRef<View>(null);
+
+  const optionDebutRapport = optionsMoisExport.find(
+    (o) => o.valeur === moisDebutRapport,
+  );
+  const optionFinRapport = optionsMoisExport.find(
+    (o) => o.valeur === moisFinRapport,
+  );
+  const periodeRapport: PeriodeExport | null =
+    optionDebutRapport && optionFinRapport && moisDebutRapport <= moisFinRapport
+      ? {
+          moisDebut: optionDebutRapport.mois,
+          anneeDebut: optionDebutRapport.annee,
+          moisFin: optionFinRapport.mois,
+          anneeFin: optionFinRapport.annee,
+        }
+      : null;
+  const donneesRapport: DonneesExport = {
+    enveloppes: objStore.enveloppes,
+    transactions: objStore.transactions,
+    historiquesMois: objStore.historiquesMois,
+    epargneMois: objStore.epargneMois,
+    argentDisponible: objStore.argentDisponible,
+  };
+  const resumeRapport = periodeRapport
+    ? calculerResumeVisuel(donneesRapport, periodeRapport)
+    : null;
+  const scoreRapport: ScoreSante | null =
+    resumeRapport?.periodeInclutMoisActuel
+      ? calculerScoreSante({
+          enveloppes: objStore.enveloppes,
+          epargneMois: objStore.epargneMois,
+          historiquesMois: objStore.historiquesMois,
+          seuilEpargneConstante: objStore.seuilEpargneConstante,
+          objectifs: objStore.objectifs,
+        })
+      : null;
+
+  const partagerResumeVisuel = async () => {
+    if (partageRapportEnCours || !rapportCarteRef.current) return;
+    setPartageRapportEnCours(true);
+    try {
+      const uri = await captureRef(rapportCarteRef, {
+        format: "png",
+        quality: 1,
+        result: "tmpfile",
+      });
+      const uriPartage = uri.startsWith("file://") ? uri : `file://${uri}`;
+
+      const partageDisponible = await Sharing.isAvailableAsync();
+      if (!partageDisponible) {
+        Alert.alert(
+          "Erreur",
+          "Le partage de fichiers n'est pas disponible sur cet appareil.",
+        );
+        return;
+      }
+
+      await Sharing.shareAsync(uriPartage, {
+        mimeType: "image/png",
+        dialogTitle: "Partager le résumé Vista",
+      });
+      setModalRapportVisible(false);
+    } catch (e) {
+      console.error("Génération du résumé visuel a échoué :", e);
+      Alert.alert(
+        "Erreur",
+        "Impossible de générer le résumé visuel pour le moment.",
+      );
+    } finally {
+      setPartageRapportEnCours(false);
     }
   };
 
@@ -621,6 +709,20 @@ export default function Profil() {
               Exporter mes données (Excel)
             </Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.btnSecondaire,
+              { borderColor: C.separateur, marginTop: 12 },
+            ]}
+            onPress={() => setModalRapportVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="image-outline" size={16} color={C.texte} />
+            <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+              Exporter un résumé visuel
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
@@ -870,6 +972,109 @@ export default function Profil() {
       </Modal>
 
       <Modal
+        visible={modalRapportVisible}
+        transparent
+        animationType={reduireAnimations ? "none" : "slide"}
+        onRequestClose={() => setModalRapportVisible(false)}
+      >
+        <View style={styles.modalOverlayTouch}>
+          <View style={[styles.modalCardCalculs, { backgroundColor: C.carte }]}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={[styles.modalTitre, { color: C.texte }]}>
+                Exporter un résumé visuel
+              </Text>
+              <Text style={[styles.exportSousTitre, { color: C.texteMuted }]}>
+                Une image unique et lisible d&apos;un coup d&apos;œil, à
+                partager facilement — pas un fichier à analyser.
+              </Text>
+
+              <Text
+                style={[styles.champLabel, { color: C.texteMuted, marginTop: 8 }]}
+              >
+                Du
+              </Text>
+              <Picker
+                selectedValue={moisDebutRapport}
+                onValueChange={(valeur) => setMoisDebutRapport(String(valeur))}
+                itemStyle={{ color: C.texte }}
+              >
+                {optionsMoisExport.map((o) => (
+                  <Picker.Item key={o.valeur} label={o.label} value={o.valeur} />
+                ))}
+              </Picker>
+
+              <Text
+                style={[styles.champLabel, { color: C.texteMuted, marginTop: 8 }]}
+              >
+                Au
+              </Text>
+              <Picker
+                selectedValue={moisFinRapport}
+                onValueChange={(valeur) => setMoisFinRapport(String(valeur))}
+                itemStyle={{ color: C.texte }}
+              >
+                {optionsMoisExport.map((o) => (
+                  <Picker.Item key={o.valeur} label={o.label} value={o.valeur} />
+                ))}
+              </Picker>
+
+              {periodeRapport && resumeRapport ? (
+                <View style={styles.apercuRapport}>
+                  <RapportVisuelCarte
+                    ref={rapportCarteRef}
+                    periodeLabel={libellePeriode(periodeRapport)}
+                    resume={resumeRapport}
+                    score={scoreRapport}
+                  />
+                </View>
+              ) : (
+                <Text
+                  style={[
+                    styles.champLabel,
+                    { color: C.texteMuted, marginTop: 18, fontWeight: "400" },
+                  ]}
+                >
+                  Le mois de début doit être avant (ou égal à) le mois de fin.
+                </Text>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.btnPrincipal,
+                  {
+                    backgroundColor: C.purple,
+                    opacity: partageRapportEnCours || !periodeRapport ? 0.6 : 1,
+                    marginTop: 18,
+                  },
+                ]}
+                onPress={partagerResumeVisuel}
+                activeOpacity={0.7}
+                disabled={partageRapportEnCours || !periodeRapport}
+              >
+                {partageRapportEnCours ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.btnPrincipalTexte}>Partager</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.btnAnnuler}
+                onPress={() => setModalRapportVisible(false)}
+                activeOpacity={0.7}
+                disabled={partageRapportEnCours}
+              >
+                <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                  Annuler
+                </Text>
+              </TouchableOpacity>
+              <View style={{ height: 20 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={modalCalculsVisible}
         transparent
         animationType={reduireAnimations ? "none" : "slide"}
@@ -1042,6 +1247,7 @@ const styles = StyleSheet.create({
   },
   modalTermine: { fontSize: 16, fontWeight: "600" },
   chipRowCalculs: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  apercuRapport: { alignItems: "center", marginTop: 18 },
   chipCalculs: {
     paddingHorizontal: 16,
     paddingVertical: 8,

@@ -59,7 +59,7 @@ function estMoisActuel(mois: number, annee: number): boolean {
   return mois === d.getMonth() && annee === d.getFullYear();
 }
 
-function listeMois({ moisDebut, anneeDebut, moisFin, anneeFin }: PeriodeExport) {
+export function listeMois({ moisDebut, anneeDebut, moisFin, anneeFin }: PeriodeExport) {
   const debut = anneeDebut * 12 + moisDebut;
   const fin = anneeFin * 12 + moisFin;
   const mois: { mois: number; annee: number }[] = [];
@@ -69,7 +69,7 @@ function listeMois({ moisDebut, anneeDebut, moisFin, anneeFin }: PeriodeExport) 
   return mois;
 }
 
-function categoriesDuMois(
+export function categoriesDuMois(
   donnees: DonneesExport,
   mois: number,
   annee: number,
@@ -81,7 +81,7 @@ function categoriesDuMois(
   return snap ? snap.enveloppes : null;
 }
 
-function epargneDuMois(
+export function epargneDuMois(
   donnees: DonneesExport,
   mois: number,
   annee: number,
@@ -93,7 +93,7 @@ function epargneDuMois(
   return snap ? snap.epargne : null;
 }
 
-function disponibleDuMois(
+export function disponibleDuMois(
   donnees: DonneesExport,
   mois: number,
   annee: number,
@@ -105,7 +105,7 @@ function disponibleDuMois(
   return snap ? snap.disponible : null;
 }
 
-function totalParType(envs: CategorieExport[], estEntree: boolean): number {
+export function totalParType(envs: CategorieExport[], estEntree: boolean): number {
   return envs
     .filter((e) => (e.type === "Entrée") === estEntree)
     .reduce((acc, e) => acc + e.depense, 0);
