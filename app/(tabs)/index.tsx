@@ -2,11 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { getInitiales } from "../../utils/initiales";
-import {
-  joursDansMois,
-  moisPrecedent,
-  totalParType,
-} from "../../utils/exportExcel";
+import { moisPrecedent, totalParType } from "../../utils/exportExcel";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -28,6 +24,7 @@ import { Calendar } from "react-native-calendars";
 import Svg, { Circle } from "react-native-svg";
 import { useLargeurAnimee } from "../BarreProgression";
 import { NombreAnime } from "../NombreAnime";
+import { SegmentHachure } from "../SegmentHachure";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { Enveloppe, Objectif, useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
@@ -297,31 +294,83 @@ export default function Dashboard() {
 
   const disponibleNum = parseMontant(argentDisponible) || 0;
   const disponibleEffectif = disponibleNum + totalEntreeRecue + totalEntreePrevue;
-
-  // "Reste estimé" doit correspondre exactement à ce qui sera reporté au
-  // mois suivant (voir archiverMoisActuelInterne dans store.ts), qui ne
-  // compte que les flux réellement réalisés — pas les entrées encore
-  // attendues ni les dépenses encore seulement prévues.
-  const disponibleReel = disponibleNum + totalEntreeRecue;
+  // Montant encore budgété mais non dépensé dans chaque catégorie de
+  // dépense — le "forecast" restant. Avec totalDepenseEnveloppes, couvre le
+  // budget complet de chaque catégorie (dépensé + à venir), sans jamais
+  // sous-compter un dépassement : une catégorie déjà en dépassement (depense
+  // > budget) contribue 0 ici, mais son dépassement réel reste compté dans
+  // totalDepenseEnveloppes.
+  const totalDepensePrevue = enveloppesSansEntree.reduce(
+    (acc, e) => acc + Math.max(0, e.budget - e.depense),
+    0,
+  );
+  // "Reste estimé en fin de mois" : une vraie projection de fin de mois —
+  // Budget (disponible saisi + entrées reçues + entrées encore attendues)
+  // moins tout ce qui est prévu d'être dépensé ce mois-ci (déjà dépensé +
+  // encore budgété dans chaque catégorie) moins l'argent immobilisé
+  // (épargne + objectifs). Ce chiffre ne correspond donc plus exactement au
+  // montant reporté au mois suivant via "Reporter le reste non dépensé au
+  // mois prochain" (qui ne reporte que les flux déjà réalisés, voir
+  // archiverMoisActuelInterne dans store.ts) — voir "Détail des calculs".
   const resteEstime =
-    disponibleReel - totalDepenseEnveloppes - objStore.epargneMois;
+    disponibleEffectif -
+    totalDepenseEnveloppes -
+    totalDepensePrevue -
+    objStore.epargneMois;
   const pctDepenseEstime =
-    disponibleReel > 0
-      ? Math.min((totalDepenseEnveloppes / disponibleReel) * 100, 100)
+    disponibleEffectif > 0
+      ? Math.min((totalDepenseEnveloppes / disponibleEffectif) * 100, 100)
       : 0;
   const largeurBarSegmentAnimee = useLargeurAnimee(pctDepenseEstime);
-  const pctEpargneEstime =
-    disponibleReel > 0
+  const pctPrevuEstime =
+    disponibleEffectif > 0
       ? Math.min(
-          (objStore.epargneMois / disponibleReel) * 100,
+          (totalDepensePrevue / disponibleEffectif) * 100,
           100 - pctDepenseEstime,
         )
       : 0;
-  const pctEntreeRecueEstime =
-    disponibleReel > 0
+  const pctEpargneEstime =
+    disponibleEffectif > 0
       ? Math.min(
-          (totalEntreeRecue / disponibleReel) * 100,
-          100 - pctDepenseEstime - pctEpargneEstime,
+          (objStore.epargneMois / disponibleEffectif) * 100,
+          100 - pctDepenseEstime - pctPrevuEstime,
+        )
+      : 0;
+  const pctEntreeRecueEstime =
+    disponibleEffectif > 0
+      ? Math.min(
+          (totalEntreeRecue / disponibleEffectif) * 100,
+          100 - pctDepenseEstime - pctPrevuEstime - pctEpargneEstime,
+        )
+      : 0;
+  // Argent encore non affecté : la part du montant saisi manuellement qui
+  // n'est ni dépensée, ni prévue dans une catégorie, ni immobilisée —
+  // distinct des entrées d'argent, réelles ou attendues.
+  const argentLibre = Math.max(
+    0,
+    disponibleNum - totalDepenseEnveloppes - totalDepensePrevue - objStore.epargneMois,
+  );
+  const pctEntreePrevueEstime =
+    disponibleEffectif > 0
+      ? Math.min(
+          (totalEntreePrevue / disponibleEffectif) * 100,
+          100 -
+            pctDepenseEstime -
+            pctPrevuEstime -
+            pctEpargneEstime -
+            pctEntreeRecueEstime,
+        )
+      : 0;
+  const pctLibreEstime =
+    disponibleEffectif > 0
+      ? Math.min(
+          (argentLibre / disponibleEffectif) * 100,
+          100 -
+            pctDepenseEstime -
+            pctPrevuEstime -
+            pctEpargneEstime -
+            pctEntreeRecueEstime -
+            pctEntreePrevueEstime,
         )
       : 0;
 
@@ -335,10 +384,18 @@ export default function Dashboard() {
   const snapshotMoisPrecedent = objStore.historiquesMois.find(
     (s) => s.mois === moisPrec && s.annee === anneePrec,
   );
+  // Même logique "Dépensé + Prévues" que ci-dessus, rejouée sur le snapshot
+  // du mois précédent pour une comparaison à formule identique.
+  const totalPrevuPrecedent = snapshotMoisPrecedent
+    ? snapshotMoisPrecedent.enveloppes
+        .filter((e) => e.type !== "Entrée")
+        .reduce((acc, e) => acc + Math.max(0, e.budget - e.depense), 0)
+    : 0;
   const resteEstimePrecedent = snapshotMoisPrecedent
     ? snapshotMoisPrecedent.disponible +
       totalParType(snapshotMoisPrecedent.enveloppes, true) -
       totalParType(snapshotMoisPrecedent.enveloppes, false) -
+      totalPrevuPrecedent -
       snapshotMoisPrecedent.epargne
     : null;
   const deltaReste =
@@ -354,7 +411,7 @@ export default function Dashboard() {
   const etatReste: "positif" | "procheLimite" | "negatif" =
     resteEstime < 0
       ? "negatif"
-      : resteEstime < disponibleReel * 0.15
+      : resteEstime < disponibleEffectif * 0.15
         ? "procheLimite"
         : "positif";
   const heroResteLabel =
@@ -398,30 +455,19 @@ export default function Dashboard() {
     objStore.epargneMois > 0
       ? (contributionObjectifsTotal / objStore.epargneMois) * pctEpargneEstime
       : 0;
-  // Bandeau sous le hero "Reste estimé" : projection à rythme constant,
-  // distincte du "Reste estimé" affiché au-dessus. resteEstime reste un
-  // montant réalisé (voir commentaire plus haut) ; ici on extrapole la
-  // dépense quotidienne moyenne du mois en cours jusqu'à sa fin, pour donner
-  // une vraie prévision chiffrée plutôt qu'une simple relecture du chiffre
-  // du dessus. Le disponible et l'épargne, eux, ne sont pas extrapolés : ce
-  // sont des montants déjà fixés pour le mois, pas un rythme qui s'accumule
-  // jour après jour comme les dépenses.
-  const jourActuelMois = maintenant.getDate();
-  const joursDansMoisActuel = joursDansMois(
-    maintenant.getMonth(),
-    maintenant.getFullYear(),
-  );
-  const depenseMoyenneParJour = totalDepenseEnveloppes / jourActuelMois;
-  const depenseProjetee = depenseMoyenneParJour * joursDansMoisActuel;
-  const resteProjete = disponibleReel - depenseProjetee - objStore.epargneMois;
+  // Bandeau sous le hero "Reste estimé" : reflète directement heroResteValeur,
+  // le même montant que le chiffre affiché en gros au-dessus — une seule
+  // vérité pour toute la carte (chiffre principal, phrase et delta vs mois
+  // dernier découlent tous de resteEstime), jamais une estimation parallèle
+  // (ex. extrapolation du rythme de dépense) qui pourrait diverger.
   const lecture =
-    resteProjete >= 0
+    etatReste !== "negatif"
       ? {
-          texte: `Il te restera environ ${Math.round(resteProjete)}€ à la fin du mois si tu continues comme ça.`,
+          texte: `Il te restera environ ${Math.round(heroResteValeur)}€ à la fin du mois si tu continues comme ça.`,
           couleurTexte: "#D2F5E5",
         }
       : {
-          texte: `Si tu continues comme ça, tu risques d'être à environ ${Math.round(Math.abs(resteProjete))}€ de dépassement en fin de mois.`,
+          texte: `Si tu continues comme ça, tu risques d'être à environ ${Math.round(heroResteValeur)}€ de dépassement en fin de mois.`,
           couleurTexte: "#FFD2D2",
         };
 
@@ -757,6 +803,12 @@ export default function Dashboard() {
                 { width: largeurBarSegmentAnimee, backgroundColor: C.accent },
               ]}
             />
+            {totalDepensePrevue > 0 && (
+              <SegmentHachure
+                style={[styles.barSegment, { width: `${pctPrevuEstime}%` }]}
+                couleur={C.peach}
+              />
+            )}
             {argentImmobiliseOuvert ? (
               <>
                 {epargneGenerique > 0 && (
@@ -794,6 +846,18 @@ export default function Dashboard() {
                 ]}
               />
             )}
+            {totalEntreePrevue > 0 && (
+              <SegmentHachure
+                style={[styles.barSegment, { width: `${pctEntreePrevueEstime}%` }]}
+                couleur={C.vert}
+              />
+            )}
+            {argentLibre > 0 && (
+              <SegmentHachure
+                style={[styles.barSegment, { width: `${pctLibreEstime}%` }]}
+                couleur={C.texteMuted}
+              />
+            )}
           </View>
           <View style={styles.heroLegende}>
             <View style={styles.heroLegendeItem}>
@@ -812,6 +876,22 @@ export default function Dashboard() {
                 Dépensé {totalDepenseEnveloppes}€
               </Text>
             </View>
+            {totalDepensePrevue > 0 && (
+              <View style={styles.heroLegendeItem}>
+                <SegmentHachure style={styles.heroLegendeDot} couleur={C.peach} />
+                <Text
+                  style={[
+                    styles.heroSub,
+                    {
+                      color:
+                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                    },
+                  ]}
+                >
+                  Dépense prévue {totalDepensePrevue}€
+                </Text>
+              </View>
+            )}
             {objStore.epargneMois > 0 && (
               <TouchableOpacity
                 style={styles.heroLegendeItem}
@@ -889,7 +969,39 @@ export default function Dashboard() {
                     },
                   ]}
                 >
-                  Entrée d&apos;argent {totalEntreeRecue}€
+                  Entrée reçue {totalEntreeRecue}€
+                </Text>
+              </View>
+            )}
+            {totalEntreePrevue > 0 && (
+              <View style={styles.heroLegendeItem}>
+                <SegmentHachure style={styles.heroLegendeDot} couleur={C.vert} />
+                <Text
+                  style={[
+                    styles.heroSub,
+                    {
+                      color:
+                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                    },
+                  ]}
+                >
+                  Entrée prévue {totalEntreePrevue}€
+                </Text>
+              </View>
+            )}
+            {argentLibre > 0 && (
+              <View style={styles.heroLegendeItem}>
+                <SegmentHachure style={styles.heroLegendeDot} couleur={C.texteMuted} />
+                <Text
+                  style={[
+                    styles.heroSub,
+                    {
+                      color:
+                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                    },
+                  ]}
+                >
+                  Libre {argentLibre}€
                 </Text>
               </View>
             )}

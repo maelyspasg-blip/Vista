@@ -25,22 +25,27 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "RESTE ESTIMÉ EN FIN DE MOIS",
         explication:
-          "Le montant que tu as saisi manuellement, plus les entrées d'argent déjà reçues ce mois-ci, moins les dépenses déjà faites et l'épargne déjà mise de côté. Ce calcul ne compte que de l'argent réellement encaissé et dépensé — pas les entrées d'argent encore attendues, ni les dépenses encore seulement prévues — pour correspondre exactement au montant qui sera réellement reporté au mois suivant (voir \"Reporter le reste non dépensé au mois prochain\" ci-dessous) : si le mois s'arrêtait maintenant, ce chiffre est précisément ce qui serait reporté. Le libellé et la couleur changent selon ce même seuil : \"RESTE ESTIMÉ EN FIN DE MOIS\" si le reste dépasse 15% de ce total réalisé, \"RESTE ESTIMÉ — BUDGET SERRÉ\" en dessous de ce seuil, \"DÉPASSEMENT ESTIMÉ EN FIN DE MOIS\" si le reste est négatif (le montant affiché devient alors la valeur absolue du dépassement).",
+          "Une projection de fin de mois, pas un solde déjà réalisé : BUDGET (voir ci-dessus, disponible saisi + entrées reçues + entrées encore attendues) moins tout ce qui est prévu d'être dépensé ce mois-ci (Dépensé + Dépense prévue, soit le budget complet de chaque catégorie de dépense, qu'il soit déjà consommé ou non — une catégorie déjà en dépassement contribue son dépassement réel, jamais moins que ça) moins l'argent immobilisé (épargne + objectifs mis de côté ce mois-ci). Le libellé et la couleur changent selon un seuil sur ce même total : \"RESTE ESTIMÉ EN FIN DE MOIS\" si le reste dépasse 15% du BUDGET, \"RESTE ESTIMÉ — BUDGET SERRÉ\" en dessous de ce seuil, \"DÉPASSEMENT ESTIMÉ EN FIN DE MOIS\" si le reste est négatif (le montant affiché devient alors la valeur absolue du dépassement). Important : comme ce chiffre compte les dépenses encore seulement prévues, il ne correspond plus exactement au montant réellement reporté au mois suivant — voir \"Reporter le reste non dépensé au mois prochain\" plus bas, qui lui ne reporte que les flux déjà réalisés.",
       },
       {
         titre: "Bandeau de projection (\"Il te restera environ...\")",
         explication:
-          "Distinct du \"RESTE ESTIMÉ EN FIN DE MOIS\" ci-dessus, qui ne compte que ce qui est déjà réalisé : ce bandeau extrapole plutôt la dépense quotidienne moyenne du mois en cours (dépenses réelles ÷ jour actuel du mois) sur le nombre total de jours du mois, pour obtenir une dépense projetée de fin de mois. Le reste projeté = Budget saisi manuellement + entrées d'argent déjà reçues − dépense projetée − épargne déjà mise de côté (le budget et l'épargne ne sont eux-mêmes pas extrapolés, ce sont des montants déjà fixés pour le mois). Si ce reste projeté est positif ou nul : \"Il te restera environ [X]€ à la fin du mois si tu continues comme ça.\" S'il est négatif : \"Si tu continues comme ça, tu risques d'être à environ [X]€ de dépassement en fin de mois.\"",
+          "N'est pas un deuxième calcul : ce bandeau met en phrase exactement le même montant que \"RESTE ESTIMÉ EN FIN DE MOIS\" ci-dessus (aucune extrapolation séparée du rythme de dépense) — chiffre principal, phrase et delta vs mois dernier découlent tous de la même valeur, pour ne jamais afficher deux estimations qui pourraient se contredire. Si ce montant est positif ou nul : \"Il te restera environ [X]€ à la fin du mois si tu continues comme ça.\" S'il est négatif : \"Si tu continues comme ça, tu risques d'être à environ [X]€ de dépassement en fin de mois.\"",
       },
       {
         titre: "+X € / +X % vs mois dernier",
         explication:
-          "Écart entre le Reste estimé de ce mois et celui du mois dernier archivé (même formule, rejouée sur les valeurs figées du snapshot), comparé mois complet à mois complet. Un tap sur la valeur bascule l'affichage entre euros et pourcentage (pourcentage non disponible si le reste du mois dernier était nul).",
+          "Écart entre le Reste estimé de ce mois et celui du mois dernier archivé, rejoué avec la même formule (Dépensé + Dépense prévue du snapshot archivé) sur les valeurs figées du mois précédent — comparé mois complet à mois complet. Un tap sur la valeur bascule l'affichage entre euros et pourcentage (pourcentage non disponible si le reste du mois dernier était nul).",
       },
       {
         titre: "Légende « Argent immobilisé »",
         explication:
-          "Sous la barre de progression, l'épargne générique et les versements aux objectifs sont regroupés sous une seule pastille \"Argent immobilisé\" (total combiné). Un tap la déplie en deux pastilles : \"Épargne\" (versements hors objectif) et \"Objectifs\" (somme des versements à tes objectifs actifs). La barre de progression elle-même garde ses couleurs détaillées par objectif — seule cette légende textuelle est regroupée.",
+          "Sous la barre de progression, l'épargne générique et les versements aux objectifs sont regroupés sous une seule pastille \"Argent immobilisé\" (total combiné) — la barre de progression fusionne alors aussi ses deux segments en un seul, de la même couleur que la pastille. Un tap la déplie en deux pastilles, \"Épargne\" (versements hors objectif) et \"Objectifs\" (somme des versements à tes objectifs actifs) ; la barre se redécompose alors en deux segments correspondants. \"Dépense prévue\" (montant encore budgété mais non dépensé dans les catégories de dépense) reste affiché en permanence, à part, non concerné par ce dépli.",
+      },
+      {
+        titre: "Rayures diagonales sur la barre de progression",
+        explication:
+          "Distingue visuellement ce qui est déjà réalisé/engagé (couleur pleine) de ce qui reste une prévision (rayures diagonales légères, y compris sur la petite pastille de légende correspondante). En rayures : \"Dépense prévue\" (budget de catégorie pas encore dépensé), \"Entrée prévue\" (entrées d'argent encore attendues ce mois-ci, catégories \"Entrée d'argent\" non reçues) et \"Libre\" (la part du montant saisi manuellement qui n'est ni dépensée, ni prévue dans une catégorie, ni immobilisée — de l'argent non encore affecté). En couleur pleine : \"Dépensé\", \"Entrée reçue\" et \"Argent immobilisé\", qui sont soit déjà arrivés/sortis, soit déjà mis de côté — jamais une prévision incertaine.",
       },
       {
         titre: "Mis de côté ce mois",
@@ -70,7 +75,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Reporter le reste non dépensé au mois prochain",
         explication:
-          "Ce switch (dans la fenêtre d'édition de BUDGET) détermine ce qui alimente le Budget du mois suivant. À la clôture du mois, le reste reporté est calculé exactement comme \"RESTE ESTIMÉ EN FIN DE MOIS\" ci-dessus : Budget saisi manuellement + entrées d'argent réellement reçues − dépenses réelles − épargne mise de côté. Si le switch est activé, ce reste est reporté sur le mois suivant. Séparément, si \"Répéter ce montant chaque mois\" est activé, le montant saisi est aussi reconduit — les deux s'additionnent, ils ne s'excluent pas. Les deux formules étant identiques, le montant reporté en fin de mois correspond toujours exactement à ce que le hero Reste estimé affichait juste avant la clôture (positif ou en dépassement).",
+          "Ce switch (dans la fenêtre d'édition de BUDGET) détermine ce qui alimente le Budget du mois suivant. À la clôture du mois, le reste reporté n'est pas calculé comme \"RESTE ESTIMÉ EN FIN DE MOIS\" ci-dessus, mais uniquement à partir de ce qui a été réellement réalisé, jamais des dépenses encore prévues : montant saisi manuellement + entrées d'argent réellement reçues − dépenses réelles − épargne mise de côté. Si le switch est activé, ce reste réalisé est reporté sur le mois suivant. Séparément, si \"Répéter ce montant chaque mois\" est activé, le montant saisi est aussi reconduit — les deux s'additionnent, ils ne s'excluent pas. Ce montant reporté est donc généralement différent (plus élevé) de ce qu'affichait \"RESTE ESTIMÉ EN FIN DE MOIS\" juste avant la clôture, puisque celui-ci avait déjà déduit les dépenses encore seulement prévues.",
       },
     ],
   },
@@ -90,7 +95,12 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Légende « Argent immobilisé »",
         explication:
-          "Sous la barre de progression, l'épargne générique et les versements aux objectifs sont regroupés sous une seule pastille \"Argent immobilisé\" (total combiné). Un tap la déplie en deux pastilles : \"Épargne\" (versements hors objectif) et \"Objectifs\" (somme des versements à tes objectifs actifs). La barre de progression elle-même garde ses couleurs détaillées par objectif — seule cette légende textuelle est regroupée.",
+          "Sous la barre de progression, l'épargne générique et les versements aux objectifs sont regroupés sous une seule pastille \"Argent immobilisé\" (total combiné) — la barre de progression fusionne alors aussi ses deux segments en un seul, de la même couleur que la pastille. Un tap la déplie en deux pastilles, \"Épargne\" (versements hors objectif) et \"Objectifs\" (somme des versements à tes objectifs actifs) ; la barre se redécompose alors en deux segments correspondants.",
+      },
+      {
+        titre: "Rayures diagonales sur la barre de progression",
+        explication:
+          "Distingue visuellement ce qui est déjà réalisé/engagé (couleur pleine) de ce qui reste une prévision (rayures diagonales légères). En rayures : \"Entrée prévue\" (entrées d'argent encore attendues ce mois-ci, catégories \"Entrée d'argent\" non reçues) et \"Libre\" (la part du montant saisi manuellement qui n'est ni dépensée, ni immobilisée — de l'argent non encore affecté). En couleur pleine : \"Dépenses\", \"Entrée reçue\" et \"Argent immobilisé\", qui sont soit déjà arrivés/sortis, soit déjà mis de côté — jamais une prévision incertaine.",
       },
       {
         titre: "/ {X}€ budget mensuel",

@@ -33,6 +33,7 @@ import {
 } from "../../utils/exportExcel";
 import { InfoBulle } from "../InfoBulle";
 import { NombreAnime } from "../NombreAnime";
+import { SegmentHachure } from "../SegmentHachure";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { VueMoisArchive } from "../VueMoisArchive";
@@ -320,6 +321,13 @@ export default function Budget() {
   const pctEntreeRecue =
     budgetTotal > 0
       ? Math.min((totalEntreeRecue / budgetTotal) * 100, 100)
+      : 0;
+  const pctEntreePrevue =
+    budgetTotal > 0
+      ? Math.min(
+          (totalEntreePrevue / budgetTotal) * 100,
+          100 - pctDepenses - pctEpargne - pctEntreeRecue,
+        )
       : 0;
 
   // Comparaison "vs mois dernier" de la carte "Dépenses et argent immobilisé"
@@ -1146,8 +1154,22 @@ export default function Budget() {
                 ]}
               />
             )}
+            {totalEntreePrevue > 0 && (
+              <SegmentHachure
+                style={[
+                  styles.progressFillEpargne,
+                  {
+                    width: `${pctEntreePrevue}%`,
+                    left: `${pctDepenses + pctEpargne + pctEntreeRecue}%`,
+                  },
+                ]}
+                couleur={C.vert}
+              />
+            )}
           </View>
-          {(totalEpargne > 0 || totalEntreeRecue > 0) && (
+          {(totalEpargne > 0 ||
+            totalEntreeRecue > 0 ||
+            totalEntreePrevue > 0) && (
             <View style={styles.heroLegende}>
               <View style={styles.heroLegendeItem}>
                 <View
@@ -1230,7 +1252,20 @@ export default function Budget() {
                       { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
                     ]}
                   >
-                    Entrée d&apos;argent {totalEntreeRecue} €
+                    Entrée reçue {totalEntreeRecue} €
+                  </Text>
+                </View>
+              )}
+              {totalEntreePrevue > 0 && (
+                <View style={styles.heroLegendeItem}>
+                  <SegmentHachure style={styles.heroLegendeDot} couleur={C.vert} />
+                  <Text
+                    style={[
+                      styles.heroLegendeTexte,
+                      { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
+                    ]}
+                  >
+                    Entrée prévue {totalEntreePrevue} €
                   </Text>
                 </View>
               )}
