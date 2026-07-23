@@ -95,6 +95,14 @@ export default function Budget() {
     Record<string, boolean>
   >({});
   const [historiqueTotalOuvert, setHistoriqueTotalOuvert] = useState(false);
+  const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(false);
+  const [triCategories, setTriCategories] = useState<
+    "alpha" | "montantAsc" | "montantDesc"
+  >("alpha");
+  const cyclerTriCategories = () =>
+    setTriCategories((t) =>
+      t === "alpha" ? "montantAsc" : t === "montantAsc" ? "montantDesc" : "alpha",
+    );
   const animsFlash = useRef<Map<string, Animated.Value>>(new Map()).current;
   const getAnimFlash = (id: string) => {
     if (!animsFlash.has(id)) animsFlash.set(id, new Animated.Value(0));
@@ -178,6 +186,12 @@ export default function Budget() {
       (e.type !== "Entrée" &&
         objStore.evenements.some((ev) => ev.categorieLiee === e.nom)),
   );
+  const categoriesAffichesTriees = [...categoriesAffichees].sort((a, b) => {
+    if (triCategories === "alpha") return a.nom.localeCompare(b.nom, "fr");
+    return triCategories === "montantAsc"
+      ? a.depense - b.depense
+      : b.depense - a.depense;
+  });
 
   const enveloppesAVenir = objStore.enveloppes.filter((e) => {
     if (e.type !== "Fixe" || e.payee || !e.dateFixe) return false;
@@ -363,40 +377,13 @@ export default function Budget() {
     0,
   );
   const epargneGenerique = Math.max(0, totalEpargne - contributionObjectifsTotal);
-  const segmentsEpargne: {
-    cle: string;
-    label: string;
-    couleur: string;
-    montant: number;
-  }[] = [
-    ...objectifsAvecContribution.map((o) => ({
-      cle: o.id,
-      label: o.nom,
-      couleur: o.couleur,
-      montant: o.contributionMois,
-    })),
-    ...(epargneGenerique > 0
-      ? [
-          {
-            cle: "generique",
-            label: "Épargne",
-            couleur: C.purple,
-            montant: epargneGenerique,
-          },
-        ]
-      : []),
-  ];
-  const segmentsEpargnePositionnes = segmentsEpargne.reduce<
-    { cle: string; label: string; couleur: string; montant: number; pct: number; left: number }[]
-  >((acc, s) => {
-    const pct = totalEpargne > 0 ? (s.montant / totalEpargne) * pctEpargne : 0;
-    const left =
-      acc.length > 0
-        ? acc[acc.length - 1].left + acc[acc.length - 1].pct
-        : pctDepenses;
-    acc.push({ ...s, pct, left });
-    return acc;
-  }, []);
+  // Répartit pctEpargne (déjà le total épargne+objectifs) entre les deux
+  // sous-segments affichés quand la légende "Argent immobilisé" est
+  // dépliée — les deux se recombinent exactement en pctEpargne.
+  const pctEpargneGenerique =
+    totalEpargne > 0 ? (epargneGenerique / totalEpargne) * pctEpargne : 0;
+  const pctObjectifs =
+    totalEpargne > 0 ? (contributionObjectifsTotal / totalEpargne) * pctEpargne : 0;
 
   const depenseDominante = [...enveloppesCourantes].sort(
     (a, b) => b.depense - a.depense,
@@ -989,16 +976,18 @@ export default function Budget() {
             styles.heroCard,
             theme === "sombre"
               ? {
-                  backgroundColor: C.bleuGrisLight,
+                  backgroundColor: C.carte,
+                  borderWidth: 0.5,
+                  borderColor: C.carteBorder,
                   borderLeftWidth: 3,
-                  borderLeftColor: C.bleuGris,
+                  borderLeftColor: C.peach,
                 }
               : {
                   backgroundColor: "#FFFFFF",
                   borderWidth: 0.5,
                   borderColor: "#E4E6EA",
                   borderLeftWidth: 3,
-                  borderLeftColor: C.bleuGris,
+                  borderLeftColor: C.peach,
                 },
           ]}
         >
@@ -1006,7 +995,10 @@ export default function Budget() {
             <Text
               style={[
                 styles.heroLabel,
-                { color: theme === "sombre" ? C.bleuGris : C.texteMuted, marginBottom: 0 },
+                {
+                  color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted,
+                  marginBottom: 0,
+                },
               ]}
             >
               DÉPENSES ET ARGENT IMMOBILISÉ
@@ -1014,14 +1006,22 @@ export default function Budget() {
             <InfoBulle
               titre="Dépenses et argent immobilisé"
               texte="Inclut tes dépenses réelles ainsi que l'argent mis de côté (épargne et objectifs), qui reste à toi mais n'est plus disponible immédiatement."
-              couleur={theme === "sombre" ? C.bleuGris : C.texteMuted}
+              couleur={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
             />
           </View>
           <NombreAnime
             valeur={totalDepenses}
-            style={[styles.heroAmount, { color: C.texte }]}
+            style={[
+              styles.heroAmount,
+              { color: theme === "sombre" ? "#FFFFFF" : C.texte },
+            ]}
           />
-          <Text style={[styles.heroSub, { color: C.texteMuted }]}>
+          <Text
+            style={[
+              styles.heroSub,
+              { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
+            ]}
+          >
             / {budgetTotal} € budget mensuel
           </Text>
           {deltaDepensesTotal !== null && (
@@ -1032,7 +1032,12 @@ export default function Budget() {
                   size={11}
                   color={deltaDepensesTotal <= 0 ? C.accentText : C.peachText}
                 />
-                <Text style={[styles.envDeltaTexte, { color: C.texteMuted }]}>
+                <Text
+                  style={[
+                    styles.envDeltaTexte,
+                    { color: deltaDepensesTotal <= 0 ? C.accentText : C.peachText },
+                  ]}
+                >
                   {deltaDepensesTotal > 0 ? "+" : ""}
                   {deltaDepensesTotal} € vs mois dernier (au{" "}
                   {jourMaxPrecedentTotal})
@@ -1040,7 +1045,7 @@ export default function Budget() {
                 <InfoBulle
                   titre="Comparaison au même jour"
                   texte={`Comparé aux dépenses cumulées au même jour le mois dernier (du 1er au ${jourMaxPrecedentTotal}), pas au mois complet — pour une comparaison à période équivalente.`}
-                  couleur={C.texteMuted}
+                  couleur={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
                 />
               </View>
               {historiqueDepensesTotal.length > 0 && (
@@ -1049,13 +1054,18 @@ export default function Budget() {
                   onPress={() => setHistoriqueTotalOuvert((v) => !v)}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.envHistoriqueTexte, { color: C.texteMuted }]}>
+                  <Text
+                    style={[
+                      styles.envHistoriqueTexte,
+                      { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
+                    ]}
+                  >
                     {historiqueTotalOuvert ? "Masquer l'historique" : "Voir l'historique"}
                   </Text>
                   <Ionicons
                     name={historiqueTotalOuvert ? "chevron-up" : "chevron-down"}
                     size={12}
-                    color={C.texteMuted}
+                    color={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
                   />
                 </TouchableOpacity>
               )}
@@ -1064,7 +1074,10 @@ export default function Budget() {
                   {historiqueDepensesTotal.map((h) => (
                     <Text
                       key={`${h.annee}-${h.mois}`}
-                      style={[styles.envHistoriqueLigne, { color: C.texteMuted }]}
+                      style={[
+                        styles.envHistoriqueLigne,
+                        { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
+                      ]}
                     >
                       {MOIS_LABELS[h.mois]} {h.annee} : {h.montant} €
                     </Text>
@@ -1080,35 +1093,54 @@ export default function Budget() {
                 { width: `${pctDepenses}%`, backgroundColor: C.bleuGris },
               ]}
             />
-            {segmentsEpargnePositionnes.map((s) => (
-              <View
-                key={s.cle}
-                style={[
-                  styles.progressFillEpargne,
-                  {
-                    width: `${s.pct}%`,
-                    left: `${s.left}%`,
-                    backgroundColor: s.couleur,
-                  },
-                ]}
-              />
-            ))}
+            {argentImmobiliseOuvert ? (
+              <>
+                {epargneGenerique > 0 && (
+                  <View
+                    style={[
+                      styles.progressFillEpargne,
+                      {
+                        width: `${pctEpargneGenerique}%`,
+                        left: `${pctDepenses}%`,
+                        backgroundColor: C.purple,
+                      },
+                    ]}
+                  />
+                )}
+                {contributionObjectifsTotal > 0 && (
+                  <View
+                    style={[
+                      styles.progressFillEpargne,
+                      {
+                        width: `${pctObjectifs}%`,
+                        left: `${pctDepenses + pctEpargneGenerique}%`,
+                        backgroundColor: C.lavande,
+                      },
+                    ]}
+                  />
+                )}
+              </>
+            ) : (
+              totalEpargne > 0 && (
+                <View
+                  style={[
+                    styles.progressFillEpargne,
+                    {
+                      width: `${pctEpargne}%`,
+                      left: `${pctDepenses}%`,
+                      backgroundColor: C.purple,
+                    },
+                  ]}
+                />
+              )
+            )}
             {totalEntreeRecue > 0 && (
               <View
                 style={[
                   styles.progressFillEpargne,
                   {
                     width: `${pctEntreeRecue}%`,
-                    left: `${
-                      segmentsEpargnePositionnes.length > 0
-                        ? segmentsEpargnePositionnes[
-                            segmentsEpargnePositionnes.length - 1
-                          ].left +
-                          segmentsEpargnePositionnes[
-                            segmentsEpargnePositionnes.length - 1
-                          ].pct
-                        : pctDepenses
-                    }%`,
+                    left: `${pctDepenses + pctEpargne}%`,
                     backgroundColor: C.vert,
                   },
                 ]}
@@ -1124,27 +1156,81 @@ export default function Budget() {
                     { backgroundColor: C.bleuGris },
                   ]}
                 />
-                <Text style={[styles.heroLegendeTexte, { color: C.texteMuted }]}>
+                <Text
+                  style={[
+                    styles.heroLegendeTexte,
+                    { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
+                  ]}
+                >
                   Dépenses {totalDepenses} €
                 </Text>
               </View>
-              {segmentsEpargnePositionnes.map((s) => (
-                <View key={s.cle} style={styles.heroLegendeItem}>
+              {totalEpargne > 0 && (
+                <TouchableOpacity
+                  style={styles.heroLegendeItem}
+                  activeOpacity={0.7}
+                  onPress={() => setArgentImmobiliseOuvert((v) => !v)}
+                >
                   <View
-                    style={[styles.heroLegendeDot, { backgroundColor: s.couleur }]}
+                    style={[styles.heroLegendeDot, { backgroundColor: C.purple }]}
                   />
-                  <Text style={[styles.heroLegendeTexte, { color: C.texteMuted }]}>
-                    {s.label} {s.montant} €
+                  <Text
+                    style={[
+                      styles.heroLegendeTexte,
+                      { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
+                    ]}
+                  >
+                    Argent immobilisé {totalEpargne} €
+                  </Text>
+                  <Ionicons
+                    name={argentImmobiliseOuvert ? "chevron-up" : "chevron-down"}
+                    size={11}
+                    color={theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted}
+                  />
+                </TouchableOpacity>
+              )}
+              {argentImmobiliseOuvert && epargneGenerique > 0 && (
+                <View style={styles.heroLegendeItem}>
+                  <View
+                    style={[styles.heroLegendeDot, { backgroundColor: C.purple }]}
+                  />
+                  <Text
+                    style={[
+                      styles.heroLegendeTexte,
+                      { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
+                    ]}
+                  >
+                    Épargne {epargneGenerique} €
                   </Text>
                 </View>
-              ))}
+              )}
+              {argentImmobiliseOuvert && contributionObjectifsTotal > 0 && (
+                <View style={styles.heroLegendeItem}>
+                  <View
+                    style={[styles.heroLegendeDot, { backgroundColor: C.lavande }]}
+                  />
+                  <Text
+                    style={[
+                      styles.heroLegendeTexte,
+                      { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
+                    ]}
+                  >
+                    Objectifs {contributionObjectifsTotal} €
+                  </Text>
+                </View>
+              )}
               {totalEntreeRecue > 0 && (
                 <View style={styles.heroLegendeItem}>
                   <View
                     style={[styles.heroLegendeDot, { backgroundColor: C.vert }]}
                   />
-                  <Text style={[styles.heroLegendeTexte, { color: C.texteMuted }]}>
-                    Revenus {totalEntreeRecue} €
+                  <Text
+                    style={[
+                      styles.heroLegendeTexte,
+                      { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
+                    ]}
+                  >
+                    Entrée d&apos;argent {totalEntreeRecue} €
                   </Text>
                 </View>
               )}
@@ -1168,9 +1254,34 @@ export default function Budget() {
         )}
 
         <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: C.texteMuted }]}>
-            TES CATÉGORIES
-          </Text>
+          <View style={styles.sectionTitreEtTri}>
+            <Text
+              style={[
+                styles.sectionTitle,
+                { color: C.texteMuted, marginBottom: 0, marginTop: 0 },
+              ]}
+            >
+              TES CATÉGORIES
+            </Text>
+            <TouchableOpacity
+              style={styles.triBouton}
+              onPress={cyclerTriCategories}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={triCategories === "montantDesc" ? "arrow-down" : "arrow-up"}
+                size={12}
+                color={C.texteMuted}
+              />
+              <Text style={[styles.triTexte, { color: C.texteMuted }]}>
+                {triCategories === "alpha"
+                  ? "A → Z"
+                  : triCategories === "montantAsc"
+                    ? "Montant ↑"
+                    : "Montant ↓"}
+              </Text>
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity
             style={[styles.btnAjouter, { backgroundColor: C.accentLight }]}
             onPress={() => ouvrirAjout()}
@@ -1204,7 +1315,7 @@ export default function Budget() {
           </View>
         ))}
 
-        {categoriesAffichees.map(renderCarteCategorie)}
+        {categoriesAffichesTriees.map(renderCarteCategorie)}
 
         {entreesRecues.length > 0 && (
           <>
@@ -1219,7 +1330,7 @@ export default function Budget() {
               </Text>
               <InfoBulle
                 titre="Entrées d'argent"
-                texte="Une catégorie de type Entrée d'argent s'additionne à ton Disponible au lieu de s'en soustraire, contrairement à une catégorie de dépense classique."
+                texte="Une catégorie de type Entrée d'argent s'additionne à ton Budget au lieu de s'en soustraire, contrairement à une catégorie de dépense classique."
               />
             </View>
             {entreesRecues.map((env) => (
@@ -1792,6 +1903,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     marginTop: 4,
   },
+  sectionTitreEtTri: { flexDirection: "row", alignItems: "center", gap: 10 },
+  triBouton: { flexDirection: "row", alignItems: "center", gap: 3 },
+  triTexte: { fontSize: 11, fontWeight: "600" },
   btnAjouter: { borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },
   sectionTitleAvecInfo: {
     flexDirection: "row",

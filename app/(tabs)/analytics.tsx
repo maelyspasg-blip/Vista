@@ -1241,7 +1241,7 @@ export default function Analytics() {
             series={[
               {
                 cle: "disponible",
-                label: "Disponible",
+                label: "Budget",
                 couleur: C.purple,
                 donnees: donneesDisponible,
               },

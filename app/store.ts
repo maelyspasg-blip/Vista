@@ -2,6 +2,13 @@ import { useState } from "react";
 import { supabase } from "../supabaseClient";
 import { annulerToutesNotifications } from "./notifications";
 
+// Couleur de secours si une ligne existante a `couleur` vide/null en base
+// (donnée legacy, colonne nullable côté Supabase malgré le type non-null ici)
+// — sans ça, `couleur` vaut `undefined`/`null` à l'exécution et tout ce qui
+// en dérive une couleur de fond (ex: `couleur + "22"`) rend un carré noir ou
+// transparent au lieu de la pastille attendue.
+const COULEUR_PAR_DEFAUT = "#E63946";
+
 export type Objectif = {
   id: string;
   nom: string;
@@ -196,7 +203,7 @@ function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
     nom: l.nom,
     depense: l.depense,
     budget: l.budget,
-    couleur: l.couleur,
+    couleur: l.couleur || COULEUR_PAR_DEFAUT,
     recurrente: l.recurrente,
     frequenceJours: l.frequence_jours ?? undefined,
     type: l.type,
@@ -301,7 +308,7 @@ function objectifDepuisLigne(l: ObjectifRow): Objectif {
     nom: l.nom,
     cible: l.cible,
     actuel: l.actuel,
-    couleur: l.couleur,
+    couleur: l.couleur || COULEUR_PAR_DEFAUT,
     recurrent: l.recurrent ?? undefined,
     montantMensuel: l.montant_mensuel ?? undefined,
     jourDuMois: l.jour_du_mois ?? undefined,
@@ -386,7 +393,7 @@ function evenementDepuisLigne(l: EvenementRow): Evenement {
     dateFin: l.date_fin ?? undefined,
     heure: heureDepuisColonneSupabase(l.heure),
     duree: l.duree,
-    couleur: l.couleur,
+    couleur: l.couleur || COULEUR_PAR_DEFAUT,
     estFinancier: l.est_financier,
     montant: l.montant ?? undefined,
     categorieLiee: l.categorie_liee ?? undefined,
@@ -495,7 +502,7 @@ function paiementHistoriqueDepuisLigne(
     nom: l.nom,
     montant: l.montant,
     date: l.date,
-    couleur: l.couleur,
+    couleur: l.couleur || COULEUR_PAR_DEFAUT,
   };
 }
 
@@ -1580,7 +1587,7 @@ export function useObjectifs() {
               nom: e.nom,
               depense: e.depense,
               budget: e.budget,
-              couleur: e.couleur,
+              couleur: e.couleur || COULEUR_PAR_DEFAUT,
               type: e.type,
             })),
           objectifs: (objectifsRows ?? [])

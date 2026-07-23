@@ -2,7 +2,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { getInitiales } from "../../utils/initiales";
-import { moisPrecedent, totalParType } from "../../utils/exportExcel";
+import {
+  joursDansMois,
+  moisPrecedent,
+  totalParType,
+} from "../../utils/exportExcel";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -164,6 +168,14 @@ export default function Dashboard() {
   };
   const [editionDisponible, setEditionDisponible] = useState(false);
   const [deltaRestePourcentage, setDeltaRestePourcentage] = useState(false);
+  const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(false);
+  const [triCategories, setTriCategories] = useState<
+    "alpha" | "montantAsc" | "montantDesc"
+  >("alpha");
+  const cyclerTriCategories = () =>
+    setTriCategories((t) =>
+      t === "alpha" ? "montantAsc" : t === "montantAsc" ? "montantDesc" : "alpha",
+    );
   const [disponibleRecurrentTemp, setDisponibleRecurrentTemp] = useState(
     objStore.argentDisponibleRecurrent,
   );
@@ -229,6 +241,12 @@ export default function Dashboard() {
   const [entreesDisponibleOuvert, setEntreesDisponibleOuvert] =
     useState(false);
 
+  const enveloppesTriees = [...enveloppes].sort((a, b) => {
+    if (triCategories === "alpha") return a.nom.localeCompare(b.nom, "fr");
+    return triCategories === "montantAsc"
+      ? a.depense - b.depense
+      : b.depense - a.depense;
+  });
   const enveloppesSansEntree = enveloppes.filter((e) => e.type !== "Entrée");
   const enveloppesEntree = enveloppes.filter((e) => e.type === "Entrée");
   const totalDepenseEnveloppes = enveloppesSansEntree.reduce(
@@ -369,38 +387,43 @@ export default function Dashboard() {
     0,
     objStore.epargneMois - contributionObjectifsTotal,
   );
-  const segmentsEpargne: {
-    cle: string;
-    label: string;
-    couleur: string;
-    montant: number;
-  }[] = [
-    ...objectifsAvecContribution.map((o) => ({
-      cle: o.id,
-      label: o.nom,
-      couleur: o.couleur,
-      montant: o.contributionMois,
-    })),
-    ...(epargneGenerique > 0
-      ? [
-          {
-            cle: "generique",
-            label: "Épargne",
-            couleur: C.purple,
-            montant: epargneGenerique,
-          },
-        ]
-      : []),
-  ];
+  // Répartit pctEpargneEstime (déjà le total épargne+objectifs) entre les
+  // deux sous-segments affichés quand la légende "Argent immobilisé" est
+  // dépliée — les deux se recombinent exactement en pctEpargneEstime.
+  const pctEpargneGeneriqueEstime =
+    objStore.epargneMois > 0
+      ? (epargneGenerique / objStore.epargneMois) * pctEpargneEstime
+      : 0;
+  const pctObjectifsEstime =
+    objStore.epargneMois > 0
+      ? (contributionObjectifsTotal / objStore.epargneMois) * pctEpargneEstime
+      : 0;
+  // Bandeau sous le hero "Reste estimé" : projection à rythme constant,
+  // distincte du "Reste estimé" affiché au-dessus. resteEstime reste un
+  // montant réalisé (voir commentaire plus haut) ; ici on extrapole la
+  // dépense quotidienne moyenne du mois en cours jusqu'à sa fin, pour donner
+  // une vraie prévision chiffrée plutôt qu'une simple relecture du chiffre
+  // du dessus. Le disponible et l'épargne, eux, ne sont pas extrapolés : ce
+  // sont des montants déjà fixés pour le mois, pas un rythme qui s'accumule
+  // jour après jour comme les dépenses.
+  const jourActuelMois = maintenant.getDate();
+  const joursDansMoisActuel = joursDansMois(
+    maintenant.getMonth(),
+    maintenant.getFullYear(),
+  );
+  const depenseMoyenneParJour = totalDepenseEnveloppes / jourActuelMois;
+  const depenseProjetee = depenseMoyenneParJour * joursDansMoisActuel;
+  const resteProjete = disponibleReel - depenseProjetee - objStore.epargneMois;
   const lecture =
-    etatReste === "negatif"
-      ? { texte: "Risque de dépassement", couleurTexte: "#FFD2D2" }
-      : etatReste === "procheLimite"
-        ? { texte: "Tu es proche de la limite", couleurTexte: "#FFE0C2" }
-        : {
-            texte: "Tu devrais rester dans ton budget",
-            couleurTexte: "#D2F5E5",
-          };
+    resteProjete >= 0
+      ? {
+          texte: `Il te restera environ ${Math.round(resteProjete)}€ à la fin du mois si tu continues comme ça.`,
+          couleurTexte: "#D2F5E5",
+        }
+      : {
+          texte: `Si tu continues comme ça, tu risques d'être à environ ${Math.round(Math.abs(resteProjete))}€ de dépassement en fin de mois.`,
+          couleurTexte: "#FFD2D2",
+        };
 
   const ouvrirEditionEnveloppe = (env: Enveloppe) => {
     setEnveloppeEnEdition(env);
@@ -701,8 +724,8 @@ export default function Dashboard() {
                 color={deltaReste >= 0 ? C.accentText : C.peachText}
               />
               <TouchableOpacity
-                activeOpacity={pctDeltaReste !== null ? 0.6 : 1}
-                disabled={pctDeltaReste === null}
+                activeOpacity={0.6}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 onPress={() => setDeltaRestePourcentage((v) => !v)}
               >
                 <Text
@@ -734,24 +757,35 @@ export default function Dashboard() {
                 { width: largeurBarSegmentAnimee, backgroundColor: C.accent },
               ]}
             />
-            {segmentsEpargne.map((s) => {
-              const pct =
-                objStore.epargneMois > 0
-                  ? (s.montant / objStore.epargneMois) * pctEpargneEstime
-                  : 0;
-              return (
+            {argentImmobiliseOuvert ? (
+              <>
+                {epargneGenerique > 0 && (
+                  <View
+                    style={[
+                      styles.barSegment,
+                      { width: `${pctEpargneGeneriqueEstime}%`, backgroundColor: C.purple },
+                    ]}
+                  />
+                )}
+                {contributionObjectifsTotal > 0 && (
+                  <View
+                    style={[
+                      styles.barSegment,
+                      { width: `${pctObjectifsEstime}%`, backgroundColor: C.lavande },
+                    ]}
+                  />
+                )}
+              </>
+            ) : (
+              objStore.epargneMois > 0 && (
                 <View
-                  key={s.cle}
                   style={[
                     styles.barSegment,
-                    {
-                      width: `${pct}%`,
-                      backgroundColor: s.couleur,
-                    },
+                    { width: `${pctEpargneEstime}%`, backgroundColor: C.purple },
                   ]}
                 />
-              );
-            })}
+              )
+            )}
             {totalEntreeRecue > 0 && (
               <View
                 style={[
@@ -778,10 +812,14 @@ export default function Dashboard() {
                 Dépensé {totalDepenseEnveloppes}€
               </Text>
             </View>
-            {segmentsEpargne.map((s) => (
-              <View key={s.cle} style={styles.heroLegendeItem}>
+            {objStore.epargneMois > 0 && (
+              <TouchableOpacity
+                style={styles.heroLegendeItem}
+                activeOpacity={0.7}
+                onPress={() => setArgentImmobiliseOuvert((v) => !v)}
+              >
                 <View
-                  style={[styles.heroLegendeDot, { backgroundColor: s.couleur }]}
+                  style={[styles.heroLegendeDot, { backgroundColor: C.purple }]}
                 />
                 <Text
                   style={[
@@ -792,10 +830,51 @@ export default function Dashboard() {
                     },
                   ]}
                 >
-                  {s.label} {s.montant}€
+                  Argent immobilisé {objStore.epargneMois}€
+                </Text>
+                <Ionicons
+                  name={argentImmobiliseOuvert ? "chevron-up" : "chevron-down"}
+                  size={11}
+                  color={theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted}
+                />
+              </TouchableOpacity>
+            )}
+            {argentImmobiliseOuvert && epargneGenerique > 0 && (
+              <View style={styles.heroLegendeItem}>
+                <View
+                  style={[styles.heroLegendeDot, { backgroundColor: C.purple }]}
+                />
+                <Text
+                  style={[
+                    styles.heroSub,
+                    {
+                      color:
+                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                    },
+                  ]}
+                >
+                  Épargne {epargneGenerique}€
                 </Text>
               </View>
-            ))}
+            )}
+            {argentImmobiliseOuvert && contributionObjectifsTotal > 0 && (
+              <View style={styles.heroLegendeItem}>
+                <View
+                  style={[styles.heroLegendeDot, { backgroundColor: C.lavande }]}
+                />
+                <Text
+                  style={[
+                    styles.heroSub,
+                    {
+                      color:
+                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                    },
+                  ]}
+                >
+                  Objectifs {contributionObjectifsTotal}€
+                </Text>
+              </View>
+            )}
             {totalEntreeRecue > 0 && (
               <View style={styles.heroLegendeItem}>
                 <View
@@ -810,7 +889,7 @@ export default function Dashboard() {
                     },
                   ]}
                 >
-                  Revenus {totalEntreeRecue}€
+                  Entrée d&apos;argent {totalEntreeRecue}€
                 </Text>
               </View>
             )}
@@ -872,7 +951,7 @@ export default function Dashboard() {
                     { color: theme === "sombre" ? C.peach : C.texteMuted },
                   ]}
                 >
-                  DISPONIBLE
+                  BUDGET
                 </Text>
                 <Ionicons
                   name="pencil-outline"
@@ -1004,9 +1083,29 @@ export default function Dashboard() {
         )}
 
         <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: C.texteMuted }]}>
-            CATÉGORIES
-          </Text>
+          <View style={styles.sectionTitreEtTri}>
+            <Text style={[styles.sectionTitle, { color: C.texteMuted }]}>
+              CATÉGORIES
+            </Text>
+            <TouchableOpacity
+              style={styles.triBouton}
+              onPress={cyclerTriCategories}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={triCategories === "montantDesc" ? "arrow-down" : "arrow-up"}
+                size={12}
+                color={C.texteMuted}
+              />
+              <Text style={[styles.triTexte, { color: C.texteMuted }]}>
+                {triCategories === "alpha"
+                  ? "A → Z"
+                  : triCategories === "montantAsc"
+                    ? "Montant ↑"
+                    : "Montant ↓"}
+              </Text>
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity
             style={[
               styles.btnAjoutEnveloppe,
@@ -1024,7 +1123,7 @@ export default function Dashboard() {
           </TouchableOpacity>
         </View>
 
-        {enveloppes.map((env) => {
+        {enveloppesTriees.map((env) => {
           const pct = Math.min((env.depense / env.budget) * 100, 100);
           return (
             <TouchableOpacity
@@ -1236,7 +1335,7 @@ export default function Dashboard() {
           <View style={styles.modalOverlayTouch}>
             <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
               <Text style={[styles.modalTitre, { color: C.texte }]}>
-                Montant disponible
+                Montant du budget
               </Text>
               <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
                 Montant total pour ce mois
@@ -1286,12 +1385,12 @@ export default function Dashboard() {
                     </Text>
                     <InfoBulle
                       titre="Reporter le reste"
-                      texte="Le reste est calculé comme Disponible + entrées d'argent - dépenses réelles - épargne. Ce montant est ajouté au Disponible du mois suivant."
+                      texte="Le reste est calculé comme Budget + entrées d'argent - dépenses réelles - épargne. Ce montant est ajouté au Budget du mois suivant."
                     />
                   </View>
                   <Text style={[styles.switchSub, { color: C.texteMuted }]}>
                     Ce qu&apos;il reste une fois les dépenses et
-                    l&apos;épargne déduites s&apos;ajoute au Disponible du
+                    l&apos;épargne déduites s&apos;ajoute au Budget du
                     mois suivant, en plus du montant récurrent éventuel.
                   </Text>
                 </View>
@@ -1696,7 +1795,7 @@ export default function Dashboard() {
                     </Text>
                     <InfoBulle
                       titre="Entrée d'argent"
-                      texte="Une catégorie de type Entrée d'argent s'additionne à ton Disponible au lieu de s'en soustraire, contrairement à une catégorie de dépense classique."
+                      texte="Une catégorie de type Entrée d'argent s'additionne à ton Budget au lieu de s'en soustraire, contrairement à une catégorie de dépense classique."
                       taille={13}
                       couleur={
                         nouveauType === "Entrée" ? "#FFFFFF" : C.texteMuted
@@ -1709,7 +1808,7 @@ export default function Dashboard() {
                     ? "Une dépense courante comme Courses ou Loisirs"
                     : nouveauType === "Fixe"
                       ? "Une dépense payée à une date précise, ponctuelle ou chaque mois"
-                      : "Une entrée d'argent qui s'ajoute à ton Disponible, comme un salaire ou un remboursement"}
+                      : "Une entrée d'argent qui s'ajoute à ton Budget, comme un salaire ou un remboursement"}
                 </Text>
 
                 <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Budget mensuel</Text>
@@ -2651,6 +2750,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 1,
   },
+  sectionTitreEtTri: { flexDirection: "row", alignItems: "center", gap: 10 },
+  triBouton: { flexDirection: "row", alignItems: "center", gap: 3 },
+  triTexte: { fontSize: 11, fontWeight: "600" },
   btnAjoutEnveloppe: {
     borderRadius: 20,
     paddingHorizontal: 14,
