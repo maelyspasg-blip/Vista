@@ -100,7 +100,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Rayures diagonales sur la barre de progression",
         explication:
-          "Distingue visuellement ce qui est déjà réalisé/engagé (couleur pleine) de ce qui reste une prévision (rayures diagonales légères). En rayures : \"Entrée prévue\" (entrées d'argent encore attendues ce mois-ci, catégories \"Entrée d'argent\" non reçues) et \"Libre\" (la part du montant saisi manuellement qui n'est ni dépensée, ni immobilisée — de l'argent non encore affecté). En couleur pleine : \"Dépenses\", \"Entrée reçue\" et \"Argent immobilisé\", qui sont soit déjà arrivés/sortis, soit déjà mis de côté — jamais une prévision incertaine.",
+          "Distingue visuellement ce qui est déjà réalisé/engagé (couleur pleine) de ce qui reste une prévision (rayures diagonales légères, y compris sur la petite pastille de légende correspondante). En rayures : \"Entrée prévue\" (entrées d'argent encore attendues ce mois-ci, catégories \"Entrée d'argent\" non reçues). En couleur pleine : \"Dépenses\", \"Entrée reçue\" et \"Argent immobilisé\", qui sont soit déjà arrivés/sortis, soit déjà mis de côté — jamais une prévision incertaine.",
       },
       {
         titre: "/ {X}€ budget mensuel",
@@ -110,7 +110,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "\"X représente ta plus grosse dépense ce mois-ci\"",
         explication:
-          "Repère simplement la catégorie de type Variable qui a la dépense réelle la plus élevée du mois — affiché seulement si cette dépense est supérieure à 0.",
+          "Repère la catégorie de dépense (Fixe ou Variable, hors Entrée d'argent) qui a la dépense réelle la plus élevée du mois — affiché seulement si cette dépense est supérieure à 0. Recalculé à chaque rendu à partir des catégories courantes, jamais mis en cache : une nouvelle transaction, un montant modifié ou une catégorie supprimée s'y reflètent immédiatement.",
       },
       {
         titre: "Barre de progression d'une catégorie",
@@ -171,6 +171,11 @@ export const CALCULS_DOC: PageCalculs[] = [
         titre: "Objectifs d'épargne (Stats)",
         explication:
           "Même calcul de progression qu'sur Aperçu (actuel / cible, plafonné à 100%), avec en plus l'écart en euros par rapport au montant atteint le mois précédent, quand cette donnée est disponible.",
+      },
+      {
+        titre: "\"À ce rythme, encore environ {X} mois.\"",
+        explication:
+          "Sous la jauge de chaque objectif : (cible − actuel) divisé par le rythme mensuel récent. Ce rythme est le montant mensuel fixe si l'objectif est récurrent (signal le plus fiable), sinon la moyenne des versements réels des 3 derniers mois (reconstruits à partir de l'\"actuel\" archivé mois par mois, plus le mois en cours) — ou, s'il n'y a pas assez d'historique, le seul versement de ce mois-ci. N'apparaît pas si la cible est déjà atteinte. Si le rythme récent est nul ou négatif, affiche \"Rythme actuel insuffisant pour estimer une date\" à la place plutôt qu'une estimation absurde.",
       },
       {
         titre: "Répartition des dépenses / Entrées d'argent",

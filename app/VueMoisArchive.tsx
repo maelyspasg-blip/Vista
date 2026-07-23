@@ -28,6 +28,9 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
   const objStore = useObjectifs();
   const { couleurs: C, theme } = useTheme();
   const [enveloppeOuverte, setEnveloppeOuverte] = useState<string | null>(null);
+  const [deltaPourcentagePour, setDeltaPourcentagePour] = useState<
+    Record<string, boolean>
+  >({});
 
   const donnees: DonneesExport = {
     enveloppes: objStore.enveloppes,
@@ -111,6 +114,14 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
         );
         const deltaMoisPrecedent =
           montantMoisPrecedent !== null ? env.depense - montantMoisPrecedent : null;
+        // Même mécanique de toggle €/% que sur les cartes hero (Aperçu,
+        // Budget) : tap sur le delta pour basculer l'affichage.
+        const pctDeltaMoisPrecedent =
+          deltaMoisPrecedent !== null &&
+          montantMoisPrecedent !== null &&
+          montantMoisPrecedent !== 0
+            ? (deltaMoisPrecedent / Math.abs(montantMoisPrecedent)) * 100
+            : null;
 
         const lignes = env.type === "Fixe"
           ? objStore.historiquePaiements
@@ -155,13 +166,22 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                 <Text style={[styles.envDeltaTexte, { color: C.texteMuted }]}>
                   Mois précédent : {montantMoisPrecedent} €{" "}
                   <Text
+                    onPress={() =>
+                      setDeltaPourcentagePour((prev) => ({
+                        ...prev,
+                        [env.id]: !prev[env.id],
+                      }))
+                    }
                     style={{
                       color: deltaMoisPrecedent <= 0 ? C.accentText : C.peachText,
                       fontWeight: "700",
                     }}
                   >
-                    ({deltaMoisPrecedent > 0 ? "+" : ""}
-                    {deltaMoisPrecedent} €)
+                    (
+                    {deltaPourcentagePour[env.id] && pctDeltaMoisPrecedent !== null
+                      ? `${pctDeltaMoisPrecedent > 0 ? "+" : ""}${pctDeltaMoisPrecedent.toFixed(0)} %`
+                      : `${deltaMoisPrecedent > 0 ? "+" : ""}${deltaMoisPrecedent} €`}
+                    )
                   </Text>
                 </Text>
               )}

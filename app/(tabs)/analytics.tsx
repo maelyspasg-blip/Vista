@@ -866,7 +866,41 @@ export default function Analytics() {
       (o) => o.id === obj.id,
     );
     const delta = objPrecedent ? obj.actuel - objPrecedent.actuel : null;
-    return { ...obj, pct, delta };
+
+    // Rythme mensuel récent, pour estimer le temps restant jusqu'à la
+    // cible : le montant mensuel fixe si l'objectif est récurrent (signal
+    // le plus fiable, indépendant des aléas d'un mois précis), sinon la
+    // moyenne des versements réels des derniers mois — reconstruite à
+    // partir des "actuel" archivés (jamais un champ de versement dédié) plus
+    // le mois en cours. S'il n'y a pas assez d'historique, on retombe sur le
+    // seul versement de ce mois-ci.
+    const NB_MOIS_MOYENNE_RYTHME = 3;
+    let rythmeMensuel: number;
+    if (obj.recurrent && obj.montantMensuel && obj.montantMensuel > 0) {
+      rythmeMensuel = obj.montantMensuel;
+    } else {
+      const actuelsRecents = objStore.historiquesMois
+        .slice(-NB_MOIS_MOYENNE_RYTHME)
+        .map((s) => s.objectifs.find((o) => o.id === obj.id)?.actuel)
+        .filter((v): v is number => v !== undefined);
+      const sequence = [...actuelsRecents, obj.actuel];
+      rythmeMensuel =
+        sequence.length >= 2
+          ? sequence
+              .slice(1)
+              .map((v, i) => v - sequence[i])
+              .reduce((acc, d) => acc + d, 0) /
+            (sequence.length - 1)
+          : obj.contributionMois;
+    }
+    const objectifAtteint = obj.actuel >= obj.cible;
+    const moisRestants =
+      !objectifAtteint && rythmeMensuel > 0
+        ? Math.ceil((obj.cible - obj.actuel) / rythmeMensuel)
+        : null;
+    const rythmeInsuffisant = !objectifAtteint && rythmeMensuel <= 0;
+
+    return { ...obj, pct, delta, moisRestants, rythmeInsuffisant };
   });
 
   const repartitionDepenses = objStore.enveloppes
@@ -1484,6 +1518,20 @@ export default function Analytics() {
                     ]}
                   />
                 </View>
+                {obj.moisRestants !== null && (
+                  <Text
+                    style={[styles.objectifStatEstimation, { color: C.texteMuted }]}
+                  >
+                    À ce rythme, encore environ {obj.moisRestants} mois.
+                  </Text>
+                )}
+                {obj.rythmeInsuffisant && (
+                  <Text
+                    style={[styles.objectifStatEstimation, { color: C.texteMuted }]}
+                  >
+                    Rythme actuel insuffisant pour estimer une date
+                  </Text>
+                )}
                 <View style={styles.objectifStatFooter}>
                   <Text
                     style={[styles.objectifStatMontant, { color: C.texteMuted }]}
@@ -2720,6 +2768,7 @@ const styles = StyleSheet.create({
   },
   objectifStatNom: { fontSize: 14, fontWeight: "700" },
   objectifStatPct: { fontSize: 14, fontWeight: "700" },
+  objectifStatEstimation: { fontSize: 11, fontWeight: "500", marginTop: 6 },
   objectifStatFooter: {
     flexDirection: "row",
     justifyContent: "space-between",

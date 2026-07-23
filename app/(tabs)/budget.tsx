@@ -95,8 +95,14 @@ export default function Budget() {
   const [historiqueOuvertPour, setHistoriqueOuvertPour] = useState<
     Record<string, boolean>
   >({});
+  // Même mécanique de toggle €/% que sur VueMoisArchive et les cartes hero :
+  // tap sur le delta d'une catégorie pour basculer l'affichage.
+  const [deltaPourcentagePourCategorie, setDeltaPourcentagePourCategorie] =
+    useState<Record<string, boolean>>({});
   const [historiqueTotalOuvert, setHistoriqueTotalOuvert] = useState(false);
   const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(false);
+  const [deltaDepensesTotalPourcentage, setDeltaDepensesTotalPourcentage] =
+    useState(false);
   const [triCategories, setTriCategories] = useState<
     "alpha" | "montantAsc" | "montantDesc"
   >("alpha");
@@ -359,6 +365,13 @@ export default function Budget() {
     totalDepensesPrecedent !== null
       ? totalDepenses - totalDepensesPrecedent
       : null;
+  // Comparaison en % en plus du delta en €, togglable au clic sur la valeur.
+  const pctDeltaDepensesTotal =
+    deltaDepensesTotal !== null &&
+    totalDepensesPrecedent !== null &&
+    totalDepensesPrecedent !== 0
+      ? (deltaDepensesTotal / Math.abs(totalDepensesPrecedent)) * 100
+      : null;
   const HISTORIQUE_MOIS_MAX_TOTAL = 6;
   const historiqueDepensesTotal = snapshotMoisPrecedentTotal
     ? objStore.historiquesMois
@@ -393,7 +406,11 @@ export default function Budget() {
   const pctObjectifs =
     totalEpargne > 0 ? (contributionObjectifsTotal / totalEpargne) * pctEpargne : 0;
 
-  const depenseDominante = [...enveloppesCourantes].sort(
+  // Comparée sur toutes les catégories de dépense (Fixe + Variable, hors
+  // Entrée d'argent) — pas seulement les catégories Variable — pour
+  // refléter la vraie plus grosse dépense du mois, pas juste la plus grosse
+  // dépense variable.
+  const depenseDominante = [...enveloppesSansEntree].sort(
     (a, b) => b.depense - a.depense,
   )[0];
 
@@ -504,6 +521,12 @@ export default function Budget() {
       : null;
     const deltaMoisPrecedent =
       montantMoisPrecedent !== null ? env.depense - montantMoisPrecedent : null;
+    const pctDeltaMoisPrecedent =
+      deltaMoisPrecedent !== null &&
+      montantMoisPrecedent !== null &&
+      montantMoisPrecedent !== 0
+        ? (deltaMoisPrecedent / Math.abs(montantMoisPrecedent)) * 100
+        : null;
 
     const HISTORIQUE_MOIS_MAX = 6;
     const historiqueComparaison = existeMoisPrecedent
@@ -618,13 +641,22 @@ export default function Budget() {
               <Text style={[styles.envDeltaTexte, { color: C.texteMuted }]}>
                 Mois dernier (au {jourMaxPrecedent}) : {montantMoisPrecedent} €{" "}
                 <Text
+                  onPress={() =>
+                    setDeltaPourcentagePourCategorie((prev) => ({
+                      ...prev,
+                      [env.id]: !prev[env.id],
+                    }))
+                  }
                   style={{
                     color: deltaMoisPrecedent <= 0 ? C.accentText : C.peachText,
                     fontWeight: "700",
                   }}
                 >
-                  ({deltaMoisPrecedent > 0 ? "+" : ""}
-                  {deltaMoisPrecedent} €)
+                  (
+                  {deltaPourcentagePourCategorie[env.id] && pctDeltaMoisPrecedent !== null
+                    ? `${pctDeltaMoisPrecedent > 0 ? "+" : ""}${pctDeltaMoisPrecedent.toFixed(0)} %`
+                    : `${deltaMoisPrecedent > 0 ? "+" : ""}${deltaMoisPrecedent} €`}
+                  )
                 </Text>
               </Text>
               <InfoBulle
@@ -1040,16 +1072,26 @@ export default function Budget() {
                   size={11}
                   color={deltaDepensesTotal <= 0 ? C.accentText : C.peachText}
                 />
-                <Text
-                  style={[
-                    styles.envDeltaTexte,
-                    { color: deltaDepensesTotal <= 0 ? C.accentText : C.peachText },
-                  ]}
+                <TouchableOpacity
+                  activeOpacity={0.6}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  onPress={() =>
+                    setDeltaDepensesTotalPourcentage((v) => !v)
+                  }
                 >
-                  {deltaDepensesTotal > 0 ? "+" : ""}
-                  {deltaDepensesTotal} € vs mois dernier (au{" "}
-                  {jourMaxPrecedentTotal})
-                </Text>
+                  <Text
+                    style={[
+                      styles.envDeltaTexte,
+                      { color: deltaDepensesTotal <= 0 ? C.accentText : C.peachText },
+                    ]}
+                  >
+                    {deltaDepensesTotalPourcentage && pctDeltaDepensesTotal !== null
+                      ? `${pctDeltaDepensesTotal > 0 ? "+" : ""}${pctDeltaDepensesTotal.toFixed(0)} %`
+                      : `${deltaDepensesTotal > 0 ? "+" : ""}${deltaDepensesTotal} €`}
+                    {" vs mois dernier (au "}
+                    {jourMaxPrecedentTotal})
+                  </Text>
+                </TouchableOpacity>
                 <InfoBulle
                   titre="Comparaison au même jour"
                   texte={`Comparé aux dépenses cumulées au même jour le mois dernier (du 1er au ${jourMaxPrecedentTotal}), pas au mois complet — pour une comparaison à période équivalente.`}
@@ -1331,7 +1373,10 @@ export default function Budget() {
         {paiementsDuMois.map((p) => (
           <View
             key={`paye-${p.id}`}
-            style={[styles.envCard, { backgroundColor: p.couleur + "22" }]}
+            style={[
+              styles.envCard,
+              { backgroundColor: p.couleur + "22", borderColor: "transparent" },
+            ]}
           >
             <View style={styles.envRow}>
               <Text style={[styles.envNom, { color: C.texte }]}>{p.nom}</Text>
@@ -1371,7 +1416,10 @@ export default function Budget() {
             {entreesRecues.map((env) => (
               <View
                 key={env.id}
-                style={[styles.envCard, { backgroundColor: env.couleur + "22" }]}
+                style={[
+                  styles.envCard,
+                  { backgroundColor: env.couleur + "22", borderColor: "transparent" },
+                ]}
               >
                 <View style={styles.envRow}>
                   <Text style={[styles.envNom, { color: C.texte }]}>
@@ -1411,7 +1459,10 @@ export default function Budget() {
               AUTRES DÉPENSES
             </Text>
             <View
-              style={[styles.envCard, { backgroundColor: C.fondSecondaire }]}
+              style={[
+                styles.envCard,
+                { backgroundColor: C.fondSecondaire, borderColor: "transparent" },
+              ]}
             >
               {autresDepensesPayees.map((e) => (
                 <View key={e.id} style={styles.txLigne}>
