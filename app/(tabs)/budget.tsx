@@ -32,6 +32,7 @@ import {
   moisPrecedent,
 } from "../../utils/exportExcel";
 import { InfoBulle } from "../InfoBulle";
+import { NombreAnime } from "../NombreAnime";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { VueMoisArchive } from "../VueMoisArchive";
@@ -93,6 +94,7 @@ export default function Budget() {
   const [historiqueOuvertPour, setHistoriqueOuvertPour] = useState<
     Record<string, boolean>
   >({});
+  const [historiqueTotalOuvert, setHistoriqueTotalOuvert] = useState(false);
   const animsFlash = useRef<Map<string, Animated.Value>>(new Map()).current;
   const getAnimFlash = (id: string) => {
     if (!animsFlash.has(id)) animsFlash.set(id, new Animated.Value(0));
@@ -305,6 +307,53 @@ export default function Budget() {
     budgetTotal > 0
       ? Math.min((totalEntreeRecue / budgetTotal) * 100, 100)
       : 0;
+
+  // Comparaison "vs mois dernier" de la carte "Dépenses et argent immobilisé"
+  // (venue d'Aperçu) — au même jour le mois dernier, cumul reconstruit depuis
+  // les transactions/paiements jamais purgés, pour ne pas comparer un mois en
+  // cours forcément partiel à un mois dernier entier.
+  const { mois: moisPrecTotal, annee: anneePrecTotal } = moisPrecedent(
+    MOIS_ACTUEL,
+    ANNEE_ACTUELLE,
+  );
+  const jourActuelTotal = new Date().getDate();
+  const snapshotMoisPrecedentTotal = objStore.historiquesMois.find(
+    (s) => s.mois === moisPrecTotal && s.annee === anneePrecTotal,
+  );
+  const jourMaxPrecedentTotal = Math.min(
+    jourActuelTotal,
+    joursDansMois(moisPrecTotal, anneePrecTotal),
+  );
+  const totalDepensesPrecedent = snapshotMoisPrecedentTotal
+    ? depenseCumuleeAuJour(
+        objStore.transactions,
+        objStore.historiquePaiements,
+        moisPrecTotal,
+        anneePrecTotal,
+        jourMaxPrecedentTotal,
+      )
+    : null;
+  const deltaDepensesTotal =
+    totalDepensesPrecedent !== null
+      ? totalDepenses - totalDepensesPrecedent
+      : null;
+  const HISTORIQUE_MOIS_MAX_TOTAL = 6;
+  const historiqueDepensesTotal = snapshotMoisPrecedentTotal
+    ? objStore.historiquesMois
+        .slice(-HISTORIQUE_MOIS_MAX_TOTAL)
+        .map((s) => ({
+          mois: s.mois,
+          annee: s.annee,
+          montant: depenseCumuleeAuJour(
+            objStore.transactions,
+            objStore.historiquePaiements,
+            s.mois,
+            s.annee,
+            Math.min(jourActuelTotal, joursDansMois(s.mois, s.annee)),
+          ),
+        }))
+        .reverse()
+    : [];
 
   const objectifsAvecContribution = objStore.objectifs.filter(
     (o) => !o.ferme && o.contributionMois > 0,
@@ -953,21 +1002,78 @@ export default function Budget() {
                 },
           ]}
         >
-          <Text
-            style={[
-              styles.heroLabel,
-              { color: theme === "sombre" ? C.bleuGris : C.texteMuted },
-            ]}
-          >
-            TOTAL DÉPENSÉ
-          </Text>
-          <Text style={[styles.heroAmount, { color: C.texte }]}>
-            {totalDepenses} €
-          </Text>
+          <View style={styles.sectionTitleAvecInfo}>
+            <Text
+              style={[
+                styles.heroLabel,
+                { color: theme === "sombre" ? C.bleuGris : C.texteMuted, marginBottom: 0 },
+              ]}
+            >
+              DÉPENSES ET ARGENT IMMOBILISÉ
+            </Text>
+            <InfoBulle
+              titre="Dépenses et argent immobilisé"
+              texte="Inclut tes dépenses réelles ainsi que l'argent mis de côté (épargne et objectifs), qui reste à toi mais n'est plus disponible immédiatement."
+              couleur={theme === "sombre" ? C.bleuGris : C.texteMuted}
+            />
+          </View>
+          <NombreAnime
+            valeur={totalDepenses}
+            style={[styles.heroAmount, { color: C.texte }]}
+          />
           <Text style={[styles.heroSub, { color: C.texteMuted }]}>
             / {budgetTotal} € budget mensuel
           </Text>
-          <View style={[styles.progressBg, { backgroundColor: C.separateur }]}>
+          {deltaDepensesTotal !== null && (
+            <>
+              <View style={styles.envDeltaRow}>
+                <Ionicons
+                  name={deltaDepensesTotal > 0 ? "arrow-up" : "arrow-down"}
+                  size={11}
+                  color={deltaDepensesTotal <= 0 ? C.accentText : C.peachText}
+                />
+                <Text style={[styles.envDeltaTexte, { color: C.texteMuted }]}>
+                  {deltaDepensesTotal > 0 ? "+" : ""}
+                  {deltaDepensesTotal} € vs mois dernier (au{" "}
+                  {jourMaxPrecedentTotal})
+                </Text>
+                <InfoBulle
+                  titre="Comparaison au même jour"
+                  texte={`Comparé aux dépenses cumulées au même jour le mois dernier (du 1er au ${jourMaxPrecedentTotal}), pas au mois complet — pour une comparaison à période équivalente.`}
+                  couleur={C.texteMuted}
+                />
+              </View>
+              {historiqueDepensesTotal.length > 0 && (
+                <TouchableOpacity
+                  style={styles.envHistoriqueBouton}
+                  onPress={() => setHistoriqueTotalOuvert((v) => !v)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.envHistoriqueTexte, { color: C.texteMuted }]}>
+                    {historiqueTotalOuvert ? "Masquer l'historique" : "Voir l'historique"}
+                  </Text>
+                  <Ionicons
+                    name={historiqueTotalOuvert ? "chevron-up" : "chevron-down"}
+                    size={12}
+                    color={C.texteMuted}
+                  />
+                </TouchableOpacity>
+              )}
+              {historiqueTotalOuvert && (
+                <View style={styles.envHistoriqueListe}>
+                  {historiqueDepensesTotal.map((h) => (
+                    <Text
+                      key={`${h.annee}-${h.mois}`}
+                      style={[styles.envHistoriqueLigne, { color: C.texteMuted }]}
+                    >
+                      {MOIS_LABELS[h.mois]} {h.annee} : {h.montant} €
+                    </Text>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+          <View style={[styles.progressBg, { backgroundColor: C.separateur, marginTop: 12 }]}>
             <View
               style={[
                 styles.progressFill,

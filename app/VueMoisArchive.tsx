@@ -91,9 +91,13 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
           Aucune catégorie enregistrée ce mois-là.
         </Text>
       )}
-      {categories.map((env) => {
+      {categories.map((env, index) => {
         const pct = env.budget > 0 ? Math.min((env.depense / env.budget) * 100, 100) : 0;
         const estOuverte = enveloppeOuverte === env.id;
+        // Filet de sécurité : `env.id` doit toujours être renseigné (voir le
+        // mapping dans store.ts, chargerHistoriquesMois), mais on évite ici
+        // toute collision de clé React si une donnée malformée passait au travers.
+        const cle = env.id || `${env.nom}-${index}`;
         // `CategorieExport` (utils/exportExcel.ts) ne déclare pas `couleur` — inutile
         // à un classeur Excel — mais les objets réels (enveloppes courantes comme
         // enveloppes archivées) le portent bien à l'exécution.
@@ -120,7 +124,7 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
         );
 
         return (
-          <View key={env.id} style={[styles.envCard, { backgroundColor: couleur + "22" }]}>
+          <View key={cle} style={[styles.envCard, { backgroundColor: couleur + "22" }]}>
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={() => setEnveloppeOuverte(estOuverte ? null : env.id)}
@@ -199,7 +203,7 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
             const couleur = PALETTE_COULEURS[i % PALETTE_COULEURS.length];
             const pct = o.cible > 0 ? Math.min((o.actuel / o.cible) * 100, 100) : 0;
             return (
-              <View key={o.id} style={[styles.envCard, { backgroundColor: couleur + "22" }]}>
+              <View key={o.id || `${o.nom}-${i}`} style={[styles.envCard, { backgroundColor: couleur + "22" }]}>
                 <View style={styles.envRow}>
                   <View style={styles.envNomRow}>
                     <View style={[styles.envDot, { backgroundColor: couleur }]} />

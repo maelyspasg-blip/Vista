@@ -1569,7 +1569,14 @@ export function useObjectifs() {
           enveloppes: (enveloppesRows ?? [])
             .filter((e) => e.snapshot_mois_id === s.id)
             .map((e) => ({
-              id: e.enveloppe_id,
+              // enveloppe_id référence la catégorie source et peut devenir
+              // null si celle-ci a été supprimée depuis (supprimerEnveloppe
+              // fait un delete définitif sur `enveloppes`, et la FK sur
+              // snapshot_enveloppes.enveloppe_id passe alors à null) — on
+              // retombe sur l'id propre de la ligne snapshot_enveloppes,
+              // stable et toujours renseigné, pour ne jamais exposer un id
+              // vide en aval (clés de liste, comparaisons mois à mois).
+              id: e.enveloppe_id ?? e.id,
               nom: e.nom,
               depense: e.depense,
               budget: e.budget,
@@ -1579,7 +1586,9 @@ export function useObjectifs() {
           objectifs: (objectifsRows ?? [])
             .filter((o) => o.snapshot_mois_id === s.id)
             .map((o) => ({
-              id: o.objectif_id,
+              // Même risque que pour enveloppe_id ci-dessus : objectif_id
+              // devient null si l'objectif source a été supprimé depuis.
+              id: o.objectif_id ?? o.id,
               nom: o.nom,
               actuel: o.actuel,
               cible: o.cible,
@@ -1707,20 +1716,23 @@ export function useObjectifs() {
       }
     },
 
-    supprimerObjectif: (id: string) => {
+    supprimerObjectif: async (id: string) => {
+      // La suppression Supabase passe en premier : snapshot_objectifs.objectif_id
+      // est en ON DELETE NO ACTION, donc un objectif déjà archivé dans un mois
+      // passé sera rejeté (code Postgres 23503). On ne touche l'état local
+      // qu'une fois la suppression confirmée, pour ne jamais désynchroniser
+      // l'UI et la base si elle échoue.
+      const { error } = await supabase.from("objectifs").delete().eq("id", id);
+      if (error) {
+        console.error("Supabase delete objectif a échoué :", error);
+        signalerErreurSync(
+          error.code === "23503"
+            ? "Cet objectif a été archivé dans un mois passé et ne peut plus être supprimé."
+            : `Impossible de supprimer l'objectif : ${error.message}`,
+        );
+        return;
+      }
       setEtat({ objectifs: etat.objectifs.filter((o) => o.id !== id) });
-      supabase
-        .from("objectifs")
-        .delete()
-        .eq("id", id)
-        .then(({ error }) => {
-          if (error) {
-            console.error("Supabase delete objectif a échoué :", error);
-            signalerErreurSync(
-              `Impossible de supprimer l'objectif : ${error.message}`,
-            );
-          }
-        });
     },
 
     cloturerObjectif: (id: string) => {
@@ -1739,6 +1751,24 @@ export function useObjectifs() {
     supprimerEnveloppe: async (id: string) => {
       const enveloppe = etat.enveloppes.find((e) => e.id === id);
       if (!enveloppe) return;
+
+      // La suppression de la catégorie passe en premier, avant tout autre
+      // effet de bord : snapshot_enveloppes.enveloppe_id est en ON DELETE
+      // NO ACTION, donc une catégorie déjà archivée dans un mois passé sera
+      // rejetée par Postgres (code 23503). On ne touche l'état local ni les
+      // transactions/événements liés tant que ce n'est pas confirmé, pour ne
+      // jamais désynchroniser l'UI et la base, ni perdre des transactions
+      // pour une suppression qui n'aura finalement pas lieu.
+      const { error } = await supabase.from("enveloppes").delete().eq("id", id);
+      if (error) {
+        console.error("Supabase delete enveloppe a échoué :", error);
+        signalerErreurSync(
+          error.code === "23503"
+            ? "Cette catégorie a été archivée dans un mois passé et ne peut plus être supprimée."
+            : `Impossible de supprimer la catégorie : ${error.message}`,
+        );
+        return;
+      }
 
       const evenementsLies = etat.evenements.filter(
         (e) => e.categorieLiee === enveloppe.nom,
@@ -1782,14 +1812,6 @@ export function useObjectifs() {
             `Impossible de mettre à jour un événement lié : ${erreurEvenement.message}`,
           );
         }
-      }
-
-      const { error } = await supabase.from("enveloppes").delete().eq("id", id);
-      if (error) {
-        console.error("Supabase delete enveloppe a échoué :", error);
-        signalerErreurSync(
-          `Impossible de supprimer la catégorie : ${error.message}`,
-        );
       }
     },
 

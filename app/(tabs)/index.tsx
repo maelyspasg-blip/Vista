@@ -2,13 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { getInitiales } from "../../utils/initiales";
-import {
-  depenseCumuleeAuJour,
-  joursDansMois,
-  MOIS_LABELS,
-  moisPrecedent,
-  totalParType,
-} from "../../utils/exportExcel";
+import { moisPrecedent, totalParType } from "../../utils/exportExcel";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -169,7 +163,7 @@ export default function Dashboard() {
     objStore.modifierArgentDisponible(parseMontant(val) || 0, recurrent, reportAuto);
   };
   const [editionDisponible, setEditionDisponible] = useState(false);
-  const [historiqueDepenseOuvert, setHistoriqueDepenseOuvert] = useState(false);
+  const [deltaRestePourcentage, setDeltaRestePourcentage] = useState(false);
   const [disponibleRecurrentTemp, setDisponibleRecurrentTemp] = useState(
     objStore.argentDisponibleRecurrent,
   );
@@ -249,8 +243,6 @@ export default function Dashboard() {
     (acc, e) => acc + Math.max(0, e.budget - e.depense),
     0,
   );
-  const totalDepense = totalDepenseEnveloppes + objStore.epargneMois;
-
   const entreesRecuesCeMois = enveloppesEntree
     .filter((e) => {
       if (!e.payee || !e.dateFixe) return false;
@@ -287,19 +279,6 @@ export default function Dashboard() {
 
   const disponibleNum = parseMontant(argentDisponible) || 0;
   const disponibleEffectif = disponibleNum + totalEntreeRecue + totalEntreePrevue;
-  const pctUtilise =
-    disponibleEffectif > 0
-      ? Math.min((totalDepenseEnveloppes / disponibleEffectif) * 100, 100)
-      : 0;
-  const largeurBarFillAnimee = useLargeurAnimee(pctUtilise);
-  const pctEpargne =
-    disponibleEffectif > 0
-      ? Math.min((objStore.epargneMois / disponibleEffectif) * 100, 100)
-      : 0;
-  const pctEntreeRecue =
-    disponibleEffectif > 0
-      ? Math.min((totalEntreeRecue / disponibleEffectif) * 100, 100)
-      : 0;
 
   // "Reste estimé" doit correspondre exactement à ce qui sera reporté au
   // mois suivant (voir archiverMoisActuelInterne dans store.ts), qui ne
@@ -338,46 +317,6 @@ export default function Dashboard() {
   const snapshotMoisPrecedent = objStore.historiquesMois.find(
     (s) => s.mois === moisPrec && s.annee === anneePrec,
   );
-  // La partie "dépenses" se compare au même jour le mois dernier (cumul
-  // reconstruit depuis les transactions/paiements, jamais purgés) — pour ne
-  // pas comparer un mois en cours forcément partiel à un mois dernier entier.
-  // L'épargne n'a pas cette granularité par jour, elle reste comparée en
-  // mois complet ci-dessous.
-  const jourActuel = maintenant.getDate();
-  const jourMaxPrecedent = Math.min(
-    jourActuel,
-    joursDansMois(moisPrec, anneePrec),
-  );
-  const totalDepensePrecedent = snapshotMoisPrecedent
-    ? depenseCumuleeAuJour(
-        objStore.transactions,
-        objStore.historiquePaiements,
-        moisPrec,
-        anneePrec,
-        jourMaxPrecedent,
-      )
-    : null;
-  const deltaDepense =
-    totalDepensePrecedent !== null
-      ? totalDepenseEnveloppes - totalDepensePrecedent
-      : null;
-  const HISTORIQUE_MOIS_MAX = 6;
-  const historiqueDepenseCumulee = snapshotMoisPrecedent
-    ? objStore.historiquesMois
-        .slice(-HISTORIQUE_MOIS_MAX)
-        .map((s) => ({
-          mois: s.mois,
-          annee: s.annee,
-          montant: depenseCumuleeAuJour(
-            objStore.transactions,
-            objStore.historiquePaiements,
-            s.mois,
-            s.annee,
-            Math.min(jourActuel, joursDansMois(s.mois, s.annee)),
-          ),
-        }))
-        .reverse()
-    : [];
   const resteEstimePrecedent = snapshotMoisPrecedent
     ? snapshotMoisPrecedent.disponible +
       totalParType(snapshotMoisPrecedent.enveloppes, true) -
@@ -386,6 +325,36 @@ export default function Dashboard() {
     : null;
   const deltaReste =
     resteEstimePrecedent !== null ? resteEstime - resteEstimePrecedent : null;
+  // Comparaison en % en plus du delta en €, togglable au clic (voir hero
+  // "Reste estimé" ci-dessous) — au niveau du mois complet comme le delta,
+  // jamais "au même jour" puisque resteEstime est une projection de fin de
+  // mois, pas un cumul quotidien.
+  const pctDeltaReste =
+    deltaReste !== null && resteEstimePrecedent !== null && resteEstimePrecedent !== 0
+      ? (deltaReste / Math.abs(resteEstimePrecedent)) * 100
+      : null;
+  const etatReste: "positif" | "procheLimite" | "negatif" =
+    resteEstime < 0
+      ? "negatif"
+      : resteEstime < disponibleReel * 0.15
+        ? "procheLimite"
+        : "positif";
+  const heroResteLabel =
+    etatReste === "negatif"
+      ? "DÉPASSEMENT ESTIMÉ EN FIN DE MOIS"
+      : etatReste === "procheLimite"
+        ? "RESTE ESTIMÉ — BUDGET SERRÉ"
+        : "RESTE ESTIMÉ EN FIN DE MOIS";
+  const heroResteValeur =
+    etatReste === "negatif" ? Math.abs(resteEstime) : resteEstime;
+  const heroResteCouleurClair =
+    etatReste === "positif" ? C.texte : C.peachText;
+  const heroResteCouleurSombre =
+    etatReste === "positif"
+      ? "#FFFFFF"
+      : etatReste === "procheLimite"
+        ? "#FFE0C2"
+        : "#FFD2D2";
 
   const objectifsActifs = objStore.objectifs.filter((o) => !o.ferme);
   const objectifsClotures = objStore.objectifs.filter((o) => o.ferme);
@@ -423,30 +392,10 @@ export default function Dashboard() {
         ]
       : []),
   ];
-  const segmentsEpargnePositionnes = segmentsEpargne.reduce<
-    { cle: string; label: string; couleur: string; montant: number; pct: number; left: number }[]
-  >((acc, s) => {
-    const pct =
-      objStore.epargneMois > 0
-        ? (s.montant / objStore.epargneMois) * pctEpargne
-        : 0;
-    const left =
-      acc.length > 0
-        ? acc[acc.length - 1].left + acc[acc.length - 1].pct
-        : pctUtilise;
-    acc.push({ ...s, pct, left });
-    return acc;
-  }, []);
-  const finSegmentsEpargne =
-    segmentsEpargnePositionnes.length > 0
-      ? segmentsEpargnePositionnes[segmentsEpargnePositionnes.length - 1]
-          .left +
-        segmentsEpargnePositionnes[segmentsEpargnePositionnes.length - 1].pct
-      : pctUtilise;
   const lecture =
-    resteEstime < 0
+    etatReste === "negatif"
       ? { texte: "Risque de dépassement", couleurTexte: "#FFD2D2" }
-      : resteEstime < disponibleReel * 0.15
+      : etatReste === "procheLimite"
         ? { texte: "Tu es proche de la limite", couleurTexte: "#FFE0C2" }
         : {
             texte: "Tu devrais rester dans ton budget",
@@ -713,206 +662,6 @@ export default function Dashboard() {
                   borderWidth: 0.5,
                   borderColor: C.carteBorder,
                   borderLeftWidth: 3,
-                  borderLeftColor: C.accent,
-                }
-              : {
-                  backgroundColor: "#FFFFFF",
-                  borderWidth: 0.5,
-                  borderColor: "#E4E6EA",
-                  borderLeftWidth: 3,
-                  borderLeftColor: C.accent,
-                },
-          ]}
-        >
-          <View style={styles.switchLabelLigne}>
-            <Text
-              style={[
-                styles.heroLabel,
-                { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
-              ]}
-            >
-              DÉPENSES ET ARGENT IMMOBILISÉ
-            </Text>
-            <InfoBulle
-              titre="Dépenses et argent immobilisé"
-              texte="Inclut tes dépenses réelles ainsi que l'argent mis de côté (épargne et objectifs), qui reste à toi mais n'est plus disponible immédiatement."
-              couleur={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
-            />
-          </View>
-          <NombreAnime
-            valeur={totalDepense}
-            style={[
-              styles.heroAmount,
-              { color: theme === "sombre" ? "#FFFFFF" : C.texte },
-            ]}
-          />
-          {deltaDepense !== null && (
-            <>
-              <View style={styles.heroDeltaRow}>
-                <Ionicons
-                  name={deltaDepense > 0 ? "arrow-up" : "arrow-down"}
-                  size={11}
-                  color={deltaDepense <= 0 ? C.accentText : C.peachText}
-                />
-                <Text
-                  style={[
-                    styles.heroDeltaTexte,
-                    { color: deltaDepense <= 0 ? C.accentText : C.peachText },
-                  ]}
-                >
-                  {deltaDepense > 0 ? "+" : ""}
-                  {deltaDepense} € vs mois dernier (au {jourMaxPrecedent})
-                </Text>
-                <InfoBulle
-                  titre="Comparaison au même jour"
-                  texte={`Comparé aux dépenses cumulées au même jour le mois dernier (du 1er au ${jourMaxPrecedent}), pas au mois complet — pour une comparaison à période équivalente.`}
-                  couleur={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
-                />
-              </View>
-              {historiqueDepenseCumulee.length > 0 && (
-                <TouchableOpacity
-                  style={styles.heroHistoriqueBouton}
-                  onPress={() => setHistoriqueDepenseOuvert((v) => !v)}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.heroHistoriqueTexte,
-                      { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
-                    ]}
-                  >
-                    {historiqueDepenseOuvert ? "Masquer l'historique" : "Voir l'historique"}
-                  </Text>
-                  <Ionicons
-                    name={historiqueDepenseOuvert ? "chevron-up" : "chevron-down"}
-                    size={11}
-                    color={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
-                  />
-                </TouchableOpacity>
-              )}
-              {historiqueDepenseOuvert && (
-                <View style={styles.heroHistoriqueListe}>
-                  {historiqueDepenseCumulee.map((h) => (
-                    <Text
-                      key={`${h.annee}-${h.mois}`}
-                      style={[
-                        styles.heroHistoriqueLigne,
-                        { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
-                      ]}
-                    >
-                      {MOIS_LABELS[h.mois]} {h.annee} : {h.montant} €
-                    </Text>
-                  ))}
-                </View>
-              )}
-            </>
-          )}
-          <View
-            style={[
-              styles.barBg,
-              {
-                backgroundColor:
-                  theme === "sombre" ? "rgba(255,255,255,0.2)" : C.separateur,
-              },
-            ]}
-          >
-            <Animated.View
-              style={[
-                styles.barFill,
-                { width: largeurBarFillAnimee, backgroundColor: C.accent },
-              ]}
-            />
-            {segmentsEpargnePositionnes.map((s) => (
-              <View
-                key={s.cle}
-                style={[
-                  styles.barFillEpargne,
-                  {
-                    width: `${s.pct}%`,
-                    left: `${s.left}%`,
-                    backgroundColor: s.couleur,
-                  },
-                ]}
-              />
-            ))}
-            {totalEntreeRecue > 0 && (
-              <View
-                style={[
-                  styles.barFillEpargne,
-                  {
-                    width: `${pctEntreeRecue}%`,
-                    left: `${finSegmentsEpargne}%`,
-                    backgroundColor: C.vert,
-                  },
-                ]}
-              />
-            )}
-          </View>
-          <View style={styles.heroLegende}>
-            <View style={styles.heroLegendeItem}>
-              <View
-                style={[styles.heroLegendeDot, { backgroundColor: C.accent }]}
-              />
-              <Text
-                style={[
-                  styles.heroSub,
-                  {
-                    color:
-                      theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
-                  },
-                ]}
-              >
-                Dépenses {totalDepenseEnveloppes} €
-              </Text>
-            </View>
-            {segmentsEpargnePositionnes.map((s) => (
-              <View key={s.cle} style={styles.heroLegendeItem}>
-                <View
-                  style={[styles.heroLegendeDot, { backgroundColor: s.couleur }]}
-                />
-                <Text
-                  style={[
-                    styles.heroSub,
-                    {
-                      color:
-                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
-                    },
-                  ]}
-                >
-                  {s.label} {s.montant} €
-                </Text>
-              </View>
-            ))}
-            {totalEntreeRecue > 0 && (
-              <View style={styles.heroLegendeItem}>
-                <View
-                  style={[styles.heroLegendeDot, { backgroundColor: C.vert }]}
-                />
-                <Text
-                  style={[
-                    styles.heroSub,
-                    {
-                      color:
-                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
-                    },
-                  ]}
-                >
-                  Revenus {totalEntreeRecue} €
-                </Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        <View
-          style={[
-            styles.hero,
-            theme === "sombre"
-              ? {
-                  backgroundColor: C.carte,
-                  borderWidth: 0.5,
-                  borderColor: C.carteBorder,
-                  borderLeftWidth: 3,
                   borderLeftColor: C.peach,
                 }
               : {
@@ -930,15 +679,18 @@ export default function Dashboard() {
               { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
             ]}
           >
-            RESTE ESTIMÉ CE MOIS
+            {heroResteLabel}
           </Text>
           <NombreAnime
-            valeur={resteEstime}
+            valeur={heroResteValeur}
             style={[
               styles.heroAmount,
-              theme === "sombre"
-                ? { color: resteEstime < 0 ? "#FFD2D2" : "#FFFFFF" }
-                : { color: resteEstime < 0 ? C.peachText : C.texte },
+              {
+                color:
+                  theme === "sombre"
+                    ? heroResteCouleurSombre
+                    : heroResteCouleurClair,
+              },
             ]}
           />
           {deltaReste !== null && (
@@ -948,15 +700,23 @@ export default function Dashboard() {
                 size={11}
                 color={deltaReste >= 0 ? C.accentText : C.peachText}
               />
-              <Text
-                style={[
-                  styles.heroDeltaTexte,
-                  { color: deltaReste >= 0 ? C.accentText : C.peachText },
-                ]}
+              <TouchableOpacity
+                activeOpacity={pctDeltaReste !== null ? 0.6 : 1}
+                disabled={pctDeltaReste === null}
+                onPress={() => setDeltaRestePourcentage((v) => !v)}
               >
-                {deltaReste > 0 ? "+" : ""}
-                {deltaReste} € vs mois dernier
-              </Text>
+                <Text
+                  style={[
+                    styles.heroDeltaTexte,
+                    { color: deltaReste >= 0 ? C.accentText : C.peachText },
+                  ]}
+                >
+                  {deltaRestePourcentage && pctDeltaReste !== null
+                    ? `${pctDeltaReste > 0 ? "+" : ""}${pctDeltaReste.toFixed(0)} %`
+                    : `${deltaReste > 0 ? "+" : ""}${deltaReste} €`}
+                  {" vs mois dernier"}
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
           <View
