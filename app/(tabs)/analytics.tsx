@@ -14,7 +14,7 @@ import {
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from "react-native-svg";
 import { useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
-import { calculerSeries, TypeSerie } from "../../utils/series";
+import { calculerSeries, Serie, TypeSerie } from "../../utils/series";
 import {
   calculerScoreSante,
   genererExplicationsScore,
@@ -25,8 +25,8 @@ import {
   calculerDeltaTotal,
   calculerRythmeObjectif,
   calculerTauxEpargne,
-  genererInsightsStats,
 } from "../../utils/conseils";
+import { genererInsightsPeriode } from "../../utils/tendancesPeriode";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
@@ -595,6 +595,7 @@ export default function Analytics() {
   const { theme, couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
+  const [deltaDepMoyPourcentage, setDeltaDepMoyPourcentage] = useState(true);
   const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
   const [vue, setVue] = useState<Vue>("global");
   const [titoirOuvert, setTiroirOuvert] = useState(false);
@@ -822,17 +823,15 @@ export default function Analytics() {
   const pasSuffisammentDonnees = nbMoisAvecDonnees < nbMois;
 
   const depenseMoisActuel = getDepenseMois(MOIS_ACTUEL, ANNEE_ACTUELLE) ?? 0;
+  const budgetMoisActuel = getBudgetMois(MOIS_ACTUEL, ANNEE_ACTUELLE) ?? 0;
   const moisPrecedent = new Date(ANNEE_ACTUELLE, MOIS_ACTUEL - 1, 1);
   const depenseMoisPrec =
     getDepenseMois(moisPrecedent.getMonth(), moisPrecedent.getFullYear()) ?? 0;
   const joursEcoules = new Date().getDate();
   const depenseMoyJour =
     joursEcoules > 0 ? Math.round(depenseMoisActuel / joursEcoules) : 0;
-  const deltaDepMoy = calculerDeltaDepenseJournaliere(
-    depenseMoisActuel,
-    depenseMoisPrec,
-    joursEcoules,
-  );
+  const { pct: deltaDepMoy, deltaEuros: deltaDepMoyEuros } =
+    calculerDeltaDepenseJournaliere(depenseMoisActuel, depenseMoisPrec, joursEcoules);
 
   const enveloppesEntreeStats = objStore.enveloppes.filter(
     (e) => e.type === "Entrée",
@@ -852,7 +851,14 @@ export default function Analytics() {
 
   const deltaTotal = calculerDeltaTotal(depenseMoisActuel, depenseMoisPrec);
 
-  const insights = genererInsightsStats({ deltaDepMoy, tauxEpargne, deltaTotal });
+  const insights = genererInsightsPeriode({
+    donneesReelles,
+    donneesEpargne,
+    donneesPrevisionnelles,
+    labels,
+    nbMoisAvecDonnees,
+    series,
+  });
 
   const topDepenses: {
     nom: string;
@@ -895,6 +901,7 @@ export default function Analytics() {
       s.mois === moisPrecedent.getMonth() &&
       s.annee === moisPrecedent.getFullYear(),
   );
+  const epargneMoisPrec = snapshotMoisPrecedent?.epargne ?? null;
   const objectifsAvecDelta = objStore.objectifs.map((obj) => {
     const { pct, delta, moisRestants, rythmeInsuffisant } =
       calculerRythmeObjectif(obj, objStore.historiquesMois, snapshotMoisPrecedent);
@@ -1191,14 +1198,23 @@ export default function Analytics() {
                 size={11}
                 color={deltaDepMoy <= 0 ? C.accentText : C.peachText}
               />
-              <Text
-                style={[
-                  styles.kpiDelta,
-                  { color: deltaDepMoy <= 0 ? C.accentText : C.peachText },
-                ]}
+              <TouchableOpacity
+                activeOpacity={0.6}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                onPress={() => setDeltaDepMoyPourcentage((v) => !v)}
               >
-                {Math.abs(deltaDepMoy)}% vs mois dernier
-              </Text>
+                <Text
+                  style={[
+                    styles.kpiDelta,
+                    { color: deltaDepMoy <= 0 ? C.accentText : C.peachText },
+                  ]}
+                >
+                  {deltaDepMoyPourcentage
+                    ? `${Math.abs(deltaDepMoy)}%`
+                    : `${deltaDepMoyEuros > 0 ? "+" : ""}${deltaDepMoyEuros} €`}
+                  {" vs mois dernier"}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
           <View
@@ -1701,7 +1717,7 @@ export default function Analytics() {
               ))}
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
               {vueModalStats === "score" && (
                 <View
                   style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
@@ -1853,6 +1869,13 @@ export default function Analytics() {
                 const seuilManquant =
                   serie.type === "epargne-constante" &&
                   objStore.seuilEpargneConstante === null;
+                const explicationSerie = texteExplicationSerie(serie, {
+                  epargneMois: objStore.epargneMois,
+                  epargneMoisPrec,
+                  depenseMoisActuel,
+                  budgetMoisActuel,
+                  seuilEpargneConstante: objStore.seuilEpargneConstante,
+                });
 
                 return (
                   <View
@@ -2029,6 +2052,25 @@ export default function Analytics() {
                           >
                             Aucune série en cours
                           </Text>
+                        )}
+
+                        {explicationSerie && (
+                          <View style={styles.serieExplicationLigne}>
+                            <View
+                              style={[
+                                styles.serieExplicationDot,
+                                { backgroundColor: active ? C.vert : C.rouge },
+                              ]}
+                            />
+                            <Text
+                              style={[
+                                styles.serieExplicationTexte,
+                                { color: C.texteMuted },
+                              ]}
+                            >
+                              {explicationSerie}
+                            </Text>
+                          </View>
                         )}
 
                         <View style={styles.serieDots}>
@@ -2249,32 +2291,79 @@ export default function Analytics() {
                             style={styles.simulateurSlider}
                           />
 
-                          <View
-                            style={[
-                              styles.simulateurImpactBloc,
-                              {
-                                backgroundColor:
-                                  impactTotal6MoisSimulation >= 0
-                                    ? C.vertLight
-                                    : C.peachLight,
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.simulateurImpactTexte,
-                                {
-                                  color:
-                                    impactTotal6MoisSimulation >= 0
-                                      ? C.vertText
-                                      : C.peachText,
-                                },
-                              ]}
-                            >
-                              {impactTotal6MoisSimulation >= 0 ? "+" : ""}
-                              {impactTotal6MoisSimulation} € d&apos;épargne
-                              projetée sur {NB_MOIS_PROJECTION} mois
-                            </Text>
+                          <View style={styles.simulateurExplicationsBloc}>
+                            <View style={styles.serieExplicationLigne}>
+                              <View
+                                style={[
+                                  styles.serieExplicationDot,
+                                  { backgroundColor: C.purple },
+                                ]}
+                              />
+                              <Text
+                                style={[
+                                  styles.serieExplicationTexte,
+                                  { color: C.texte },
+                                ]}
+                              >
+                                Ta moyenne d&apos;épargne actuelle est de{" "}
+                                {Math.round(epargneMoyenneMensuelle)}€/mois,
+                                calculée sur tes {pointsRecentsEpargne.length}{" "}
+                                derniers mois.
+                              </Text>
+                            </View>
+                            {ecartMensuelSimule !== 0 && (
+                              <>
+                                <View style={styles.serieExplicationLigne}>
+                                  <View
+                                    style={[
+                                      styles.serieExplicationDot,
+                                      {
+                                        backgroundColor:
+                                          ecartMensuelSimule > 0
+                                            ? C.vert
+                                            : C.peach,
+                                      },
+                                    ]}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.serieExplicationTexte,
+                                      { color: C.texte },
+                                    ]}
+                                  >
+                                    Ce changement représente{" "}
+                                    {Math.abs(ecartMensuelSimule)}€ de{" "}
+                                    {ecartMensuelSimule > 0 ? "plus" : "moins"}{" "}
+                                    par mois sur cette catégorie.
+                                  </Text>
+                                </View>
+                                <View style={styles.serieExplicationLigne}>
+                                  <View
+                                    style={[
+                                      styles.serieExplicationDot,
+                                      {
+                                        backgroundColor:
+                                          impactTotal6MoisSimulation >= 0
+                                            ? C.vert
+                                            : C.peach,
+                                      },
+                                    ]}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.serieExplicationTexte,
+                                      { color: C.texte },
+                                    ]}
+                                  >
+                                    Sur {NB_MOIS_PROJECTION} mois, cela
+                                    représente{" "}
+                                    {impactTotal6MoisSimulation >= 0 ? "+" : ""}
+                                    {impactTotal6MoisSimulation}€ d&apos;épargne
+                                    projetée.
+                                  </Text>
+                                </View>
+                              </>
+                            )}
                           </View>
 
                           <GraphiqueLignes
@@ -2362,6 +2451,40 @@ const CONFIG_SERIE: Record<
   },
 };
 
+// Explique, pour une série donnée, ce qui se joue précisément ce mois-ci —
+// même esprit que "Ce qui influence ton score" : concret, basé sur les
+// vrais chiffres du mois, jamais une phrase générique. Retourne `null`
+// quand la donnée nécessaire n'existe pas encore (premier mois d'usage,
+// pas de budget défini, etc.), plutôt que d'afficher une phrase trompeuse.
+function texteExplicationSerie(
+  serie: Serie,
+  donnees: {
+    epargneMois: number;
+    epargneMoisPrec: number | null;
+    depenseMoisActuel: number;
+    budgetMoisActuel: number;
+    seuilEpargneConstante: number | null;
+  },
+): string | null {
+  const continueSerie = serie.enCours > 0;
+  if (serie.type === "epargne-croissante") {
+    if (donnees.epargneMoisPrec === null) return null;
+    return continueSerie
+      ? `Ce mois-ci : ton épargne (${donnees.epargneMois}€) dépasse celle du mois dernier (${donnees.epargneMoisPrec}€) — la série continue.`
+      : `Ce mois-ci : ton épargne (${donnees.epargneMois}€) n'a pas dépassé celle du mois dernier (${donnees.epargneMoisPrec}€) — la série est repartie à zéro.`;
+  }
+  if (serie.type === "budget-respecte") {
+    if (donnees.budgetMoisActuel <= 0) return null;
+    return continueSerie
+      ? `Ce mois-ci : tu as dépensé ${donnees.depenseMoisActuel}€ sur un budget de ${donnees.budgetMoisActuel}€ — la série continue.`
+      : `Ce mois-ci : tu as dépassé ton budget (${donnees.depenseMoisActuel}€ pour ${donnees.budgetMoisActuel}€ prévus) — la série est repartie à zéro.`;
+  }
+  if (donnees.seuilEpargneConstante === null) return null;
+  return continueSerie
+    ? `Ce mois-ci : ton épargne (${donnees.epargneMois}€) atteint ton seuil de ${donnees.seuilEpargneConstante}€ — la série continue.`
+    : `Ce mois-ci : ton épargne (${donnees.epargneMois}€) est sous ton seuil de ${donnees.seuilEpargneConstante}€ — la série est repartie à zéro.`;
+}
+
 function couleurScoreTeinte(
   mot: MotCleScore,
   c: typeof COULEURS.clair,
@@ -2442,7 +2565,13 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 26,
     paddingHorizontal: 26,
     paddingBottom: 20,
-    maxHeight: "80%",
+    // Hauteur fixe (pas un maxHeight) : les 3 onglets (Score/Séries/
+    // Simulateur) ont des contenus de longueurs très différentes — une
+    // hauteur qui s'adapte au contenu ferait sauter la fenêtre en changeant
+    // d'onglet. Le ScrollView interne (flex: 1) gère le défilement pour les
+    // contenus plus longs que cette hauteur, et laisse simplement de
+    // l'espace pour les contenus plus courts.
+    height: "80%",
   },
   serieCarte: {
     borderRadius: 16,
@@ -2523,6 +2652,19 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   scoreExplicationTexte: { flex: 1, fontSize: 13, lineHeight: 19 },
+  serieExplicationLigne: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  serieExplicationDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginTop: 5,
+    flexShrink: 0,
+  },
+  serieExplicationTexte: { flex: 1, fontSize: 13, lineHeight: 18 },
   serieDots: {
     flexDirection: "row",
     gap: 6,
@@ -2608,12 +2750,7 @@ const styles = StyleSheet.create({
   simulateurBudgetTexte: { fontSize: 15, fontWeight: "700" },
   simulateurDeltaTexte: { fontSize: 13, fontWeight: "600" },
   simulateurSlider: { width: "100%", height: 40, marginBottom: 4 },
-  simulateurImpactBloc: {
-    borderRadius: 13,
-    padding: 14,
-    marginVertical: 14,
-  },
-  simulateurImpactTexte: { fontSize: 14, fontWeight: "700", lineHeight: 20 },
+  simulateurExplicationsBloc: { marginVertical: 14 },
   simulateurLegende: {
     flexDirection: "row",
     gap: 16,

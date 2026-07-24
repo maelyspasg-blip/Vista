@@ -14,29 +14,30 @@ export type Conseil = {
   niveau: NiveauConseil;
 };
 
-// --- Signaux réutilisés tels quels par "Ce qu'il faut retenir" (Stats) et par
-// le moteur de conseils d'Aperçu, pour ne garder qu'un seul endroit qui sait
-// calculer ces trois pourcentages.
+// --- Signaux réutilisés tels quels par le moteur de conseils d'Aperçu et
+// par les KPI de Stats, pour ne garder qu'un seul endroit qui sait calculer
+// ces pourcentages.
 
-// Delta (%) de la dépense moyenne par jour de ce mois-ci vs le mois dernier.
-// Le mois dernier est ramené à une moyenne sur 30 jours fixes (pas son
-// nombre réel de jours) : approximation historique du moteur "Ce qu'il faut
-// retenir", conservée telle quelle pour ne pas changer un chiffre déjà
-// affiché aux utilisateurs.
+// Delta de la dépense moyenne par jour de ce mois-ci vs le mois dernier, en
+// % et en €. Le mois dernier est ramené à une moyenne sur 30 jours fixes
+// (pas son nombre réel de jours) : approximation historique conservée telle
+// quelle pour ne pas changer un chiffre déjà affiché aux utilisateurs.
 export function calculerDeltaDepenseJournaliere(
   depenseMoisActuel: number,
   depenseMoisPrec: number,
   joursEcoules: number,
-): number {
+): { pct: number; deltaEuros: number } {
   const depenseMoyJour =
     joursEcoules > 0 ? Math.round(depenseMoisActuel / joursEcoules) : 0;
   const depenseMoyJourPrec =
     depenseMoisPrec > 0 ? Math.round(depenseMoisPrec / 30) : 0;
-  return depenseMoyJourPrec > 0
-    ? Math.round(
-        ((depenseMoyJour - depenseMoyJourPrec) / depenseMoyJourPrec) * 100,
-      )
-    : 0;
+  const pct =
+    depenseMoyJourPrec > 0
+      ? Math.round(
+          ((depenseMoyJour - depenseMoyJourPrec) / depenseMoyJourPrec) * 100,
+        )
+      : 0;
+  return { pct, deltaEuros: depenseMoyJour - depenseMoyJourPrec };
 }
 
 export function calculerTauxEpargne(
@@ -53,38 +54,6 @@ export function calculerDeltaTotal(
   return depenseMoisPrec > 0
     ? Math.round(((depenseMoisActuel - depenseMoisPrec) / depenseMoisPrec) * 100)
     : 0;
-}
-
-// Phrases de "Ce qu'il faut retenir" (Stats) — logique inchangée, seulement
-// déplacée ici pour être la source unique de ces trois signaux.
-export function genererInsightsStats(signaux: {
-  deltaDepMoy: number;
-  tauxEpargne: number;
-  deltaTotal: number;
-}): string[] {
-  const { deltaDepMoy, tauxEpargne, deltaTotal } = signaux;
-  const insights: string[] = [];
-  if (deltaDepMoy < 0)
-    insights.push(
-      `Dépense journalière en baisse de ${Math.abs(deltaDepMoy)}% vs le mois dernier`,
-    );
-  else if (deltaDepMoy > 0)
-    insights.push(
-      `Dépense journalière en hausse de ${deltaDepMoy}% vs le mois dernier`,
-    );
-  if (tauxEpargne >= 20)
-    insights.push(`Bon taux d'épargne ce mois-ci à ${tauxEpargne}%`);
-  if (deltaTotal < 0)
-    insights.push(
-      `Tu as dépensé ${Math.abs(deltaTotal)}% de moins que le mois dernier`,
-    );
-  else if (deltaTotal > 0)
-    insights.push(`Tu as dépensé ${deltaTotal}% de plus que le mois dernier`);
-  if (insights.length === 0)
-    insights.push(
-      "Commence à enregistrer tes dépenses pour voir tes insights ici !",
-    );
-  return insights;
 }
 
 // Plus grosse dépense du mois (Budget) — comparée sur toutes les catégories
@@ -410,15 +379,15 @@ export function genererConseils(params: {
         .filter((e) => e.type !== "Entrée")
         .reduce((acc, e) => acc + e.depense, 0)
     : 0;
-  const deltaDepMoy = calculerDeltaDepenseJournaliere(
+  const { pct: deltaDepMoyPct } = calculerDeltaDepenseJournaliere(
     totalDepenses,
     depenseMoisPrec,
     jourActuel,
   );
   candidats.push(
-    deltaDepMoy < 0
+    deltaDepMoyPct < 0
       ? {
-          texte: `Ta dépense quotidienne moyenne est en baisse de ${Math.abs(deltaDepMoy)}% par rapport au mois dernier.`,
+          texte: `Ta dépense quotidienne moyenne est en baisse de ${Math.abs(deltaDepMoyPct)}% par rapport au mois dernier.`,
           niveau: "bon",
         }
       : undefined,

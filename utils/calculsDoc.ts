@@ -145,7 +145,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "DÉPENSE MOY. / JOUR",
         explication:
-          "Dépenses réelles du mois en cours (hors Entrée d'argent), divisées par le nombre de jours déjà écoulés dans le mois. La comparaison \"vs mois dernier\" prend les dépenses réelles du mois précédent divisées par 30 jours fixes (pas le nombre exact de jours de ce mois-là), puis calcule la variation en %.",
+          "Dépenses réelles du mois en cours (hors Entrée d'argent), divisées par le nombre de jours déjà écoulés dans le mois. La comparaison \"vs mois dernier\" prend les dépenses réelles du mois précédent divisées par 30 jours fixes (pas le nombre exact de jours de ce mois-là) : un tap sur la valeur bascule l'affichage entre variation en % (par défaut) et écart en €, comme les autres comparaisons mois-à-mois de l'app.",
       },
       {
         titre: "TAUX D'ÉPARGNE",
@@ -170,7 +170,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Ce qu'il faut retenir",
         explication:
-          "Des phrases générées automatiquement à partir de trois signaux déjà calculés : l'évolution de la dépense moyenne par jour vs le mois dernier, le taux d'épargne du mois (mentionné s'il atteint 20% ou plus), et la variation en % des dépenses totales vs le mois dernier.",
+          "Jusqu'à 3 phrases générées automatiquement à partir de la période sélectionnée (pas du seul mois en cours, voir \"Nos conseils\" sur Aperçu pour le coaching mensuel) : tendance des dépenses et de l'épargne entre le début et la fin de la période (à partir de 15% d'écart), mois le plus dépensier de la période, nombre de mois où le budget a été respecté, record de régularité tout juste établi (série en cours égale au record historique, à partir de 3 mois), et stabilité ou volatilité des dépenses d'un mois à l'autre. Les mois antérieurs au début de l'usage de l'app (zéro-remplis) sont ignorés dans ces calculs. Si aucun signal n'est disponible (pas assez d'historique sur cette période), un message neutre l'indique.",
       },
       {
         titre: "Comparaison \"{Mois} vs {Mois précédent}\"",
@@ -213,9 +213,19 @@ export const CALCULS_DOC: PageCalculs[] = [
           "Compte les mois consécutifs où l'épargne du mois atteint le seuil que tu as toi-même défini. Tant qu'aucun seuil n'est défini, aucun mois ne peut valider cette série.",
       },
       {
+        titre: "Séries — \"Ce mois-ci : ...\"",
+        explication:
+          "Sous le nombre de mois de chaque série, une phrase explique avec les vrais chiffres du mois en cours pourquoi la série continue ou repart à zéro (ex. épargne de ce mois vs mois dernier, dépenses vs budget, épargne vs seuil). N'apparaît pas si la donnée nécessaire manque encore (premier mois d'historique, aucun budget défini, aucun seuil configuré).",
+      },
+      {
         titre: "Score de santé financière",
         explication:
           "Une moyenne pondérée de 3 signaux, ramenée sur 100 : le respect du budget du mois en cours (40% — 100 si les dépenses réelles restent sous le budget total, puis descend de 2 points par tranche de 1% de dépassement, jusqu'à 0), la tendance d'épargne récente (30% — reprend la série \"Épargne croissante\", 6 mois consécutifs ou plus donnant le score maximum), et la progression moyenne de tes objectifs d'épargne actifs (30% — moyenne de actuel/cible sur tous les objectifs non clôturés). Si un signal ne peut pas être calculé (aucun budget défini, aucun objectif actif...), son poids est redistribué sur les signaux restants plutôt que de faire baisser artificiellement le score. Le mot-clé associé : 75 et plus = \"Solide\", 50 à 74 = \"À surveiller\", en dessous de 50 = \"Attention\".",
+      },
+      {
+        titre: "Simulateur — puces explicatives",
+        explication:
+          "Sous le curseur de budget simulé, jusqu'à 3 puces détaillent les hypothèses derrière la projection : la moyenne d'épargne réelle des derniers mois (jusqu'à 6, moins si l'historique est plus court) qui sert de base à la trajectoire actuelle, l'écart mensuel introduit par l'ajustement du curseur, et son cumul sur la période de projection. Les deux dernières n'apparaissent pas si le budget simulé est identique au budget actuel (rien à expliquer).",
       },
     ],
   },

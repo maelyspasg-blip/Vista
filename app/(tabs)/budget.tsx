@@ -1063,7 +1063,7 @@ export default function Budget() {
                 >
                   <Text
                     style={[
-                      styles.envDeltaTexte,
+                      styles.heroDeltaTexte,
                       { color: deltaDepensesTotal <= 0 ? C.accentText : C.peachText },
                     ]}
                   >
@@ -1870,13 +1870,13 @@ const styles = StyleSheet.create({
   },
   heroCard: { borderRadius: 22, padding: 24, marginBottom: 16 },
   heroLabel: {
-    fontSize: 11,
+    fontSize: 12,
     letterSpacing: 1,
     marginBottom: 8,
-    fontWeight: "700",
+    fontWeight: "600",
   },
-  heroAmount: { fontSize: 42, fontWeight: "700", marginBottom: 4 },
-  heroSub: { fontSize: 13, marginBottom: 16 },
+  heroAmount: { fontSize: 50, fontWeight: "700", marginBottom: 4 },
+  heroSub: { fontSize: 14, marginBottom: 16 },
   progressBg: {
     height: 6,
     borderRadius: 3,
@@ -1893,7 +1893,7 @@ const styles = StyleSheet.create({
   },
   heroLegendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   heroLegendeDot: { width: 7, height: 7, borderRadius: 4 },
-  heroLegendeTexte: { fontSize: 12, fontWeight: "600" },
+  heroLegendeTexte: { fontSize: 14 },
   insightBanner: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1950,6 +1950,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   envDeltaTexte: { fontSize: 11, fontWeight: "500", flexShrink: 1 },
+  // Dédié au delta de la carte hero "Dépenses et argent immobilisé" — même
+  // taille/graisse que heroDeltaTexte sur Aperçu (envDeltaTexte, réutilisé
+  // pour les deltas par catégorie plus bas dans la liste, reste plus petit
+  // intentionnellement pour ne pas rivaliser visuellement avec le hero).
+  heroDeltaTexte: { fontSize: 12, fontWeight: "600", flexShrink: 1 },
   envHistoriqueBouton: {
     flexDirection: "row",
     alignItems: "center",
