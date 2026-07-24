@@ -27,6 +27,7 @@ import { NombreAnime } from "../NombreAnime";
 import { SegmentHachure } from "../SegmentHachure";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { Enveloppe, Objectif, useObjectifs } from "../store";
+import { genererConseils } from "../../utils/conseils";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
@@ -336,44 +337,6 @@ export default function Dashboard() {
           100 - pctDepenseEstime - pctPrevuEstime,
         )
       : 0;
-  const pctEntreeRecueEstime =
-    disponibleEffectif > 0
-      ? Math.min(
-          (totalEntreeRecue / disponibleEffectif) * 100,
-          100 - pctDepenseEstime - pctPrevuEstime - pctEpargneEstime,
-        )
-      : 0;
-  // Argent encore non affecté : la part du montant saisi manuellement qui
-  // n'est ni dépensée, ni prévue dans une catégorie, ni immobilisée —
-  // distinct des entrées d'argent, réelles ou attendues.
-  const argentLibre = Math.max(
-    0,
-    disponibleNum - totalDepenseEnveloppes - totalDepensePrevue - objStore.epargneMois,
-  );
-  const pctEntreePrevueEstime =
-    disponibleEffectif > 0
-      ? Math.min(
-          (totalEntreePrevue / disponibleEffectif) * 100,
-          100 -
-            pctDepenseEstime -
-            pctPrevuEstime -
-            pctEpargneEstime -
-            pctEntreeRecueEstime,
-        )
-      : 0;
-  const pctLibreEstime =
-    disponibleEffectif > 0
-      ? Math.min(
-          (argentLibre / disponibleEffectif) * 100,
-          100 -
-            pctDepenseEstime -
-            pctPrevuEstime -
-            pctEpargneEstime -
-            pctEntreeRecueEstime -
-            pctEntreePrevueEstime,
-        )
-      : 0;
-
   // Comparaison "vs mois dernier" des deux cartes hero, à partir du dernier
   // mois archivé — même logique que "Reste estimé" ci-dessus, rejouée sur
   // les valeurs figées du snapshot au lieu de l'état courant.
@@ -470,6 +433,24 @@ export default function Dashboard() {
           texte: `Si tu continues comme ça, tu risques d'être à environ ${Math.round(heroResteValeur)}€ de dépassement en fin de mois.`,
           couleurTexte: "#FFD2D2",
         };
+
+  // "Nos conseils" : les 2-3 phrases de coaching les plus pertinentes du
+  // moment, générées à partir des mêmes signaux que "Ce qu'il faut retenir"
+  // (Stats) et la dépense dominante (Budget) — voir utils/conseils.ts pour
+  // la liste des règles et leur ordre de priorité.
+  const conseils = genererConseils({
+    enveloppes: objStore.enveloppes,
+    objectifs: objStore.objectifs,
+    transactions: objStore.transactions,
+    historiquePaiements: objStore.historiquePaiements,
+    historiquesMois: objStore.historiquesMois,
+    epargneMois: objStore.epargneMois,
+    resteEstime,
+    etatReste,
+    disponibleEffectif,
+    moisActuel: maintenant.getMonth(),
+    anneeActuelle: maintenant.getFullYear(),
+  });
 
   const ouvrirEditionEnveloppe = (env: Enveloppe) => {
     setEnveloppeEnEdition(env);
@@ -803,12 +784,6 @@ export default function Dashboard() {
                 { width: largeurBarSegmentAnimee, backgroundColor: C.accent },
               ]}
             />
-            {totalDepensePrevue > 0 && (
-              <SegmentHachure
-                style={[styles.barSegment, { width: `${pctPrevuEstime}%` }]}
-                couleur={C.peach}
-              />
-            )}
             {argentImmobiliseOuvert ? (
               <>
                 {epargneGenerique > 0 && (
@@ -838,24 +813,10 @@ export default function Dashboard() {
                 />
               )
             )}
-            {totalEntreeRecue > 0 && (
-              <View
-                style={[
-                  styles.barSegment,
-                  { width: `${pctEntreeRecueEstime}%`, backgroundColor: C.vert },
-                ]}
-              />
-            )}
-            {totalEntreePrevue > 0 && (
+            {totalDepensePrevue > 0 && (
               <SegmentHachure
-                style={[styles.barSegment, { width: `${pctEntreePrevueEstime}%` }]}
-                couleur={C.vert}
-              />
-            )}
-            {argentLibre > 0 && (
-              <SegmentHachure
-                style={[styles.barSegment, { width: `${pctLibreEstime}%` }]}
-                couleur={C.texteMuted}
+                style={[styles.barSegment, { width: `${pctPrevuEstime}%` }]}
+                couleur={C.peach}
               />
             )}
           </View>
@@ -876,22 +837,6 @@ export default function Dashboard() {
                 Dépensé {totalDepenseEnveloppes}€
               </Text>
             </View>
-            {totalDepensePrevue > 0 && (
-              <View style={styles.heroLegendeItem}>
-                <SegmentHachure style={styles.heroLegendeDot} couleur={C.peach} />
-                <Text
-                  style={[
-                    styles.heroSub,
-                    {
-                      color:
-                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
-                    },
-                  ]}
-                >
-                  Dépense prévue {totalDepensePrevue}€
-                </Text>
-              </View>
-            )}
             {objStore.epargneMois > 0 && (
               <TouchableOpacity
                 style={styles.heroLegendeItem}
@@ -955,11 +900,9 @@ export default function Dashboard() {
                 </Text>
               </View>
             )}
-            {totalEntreeRecue > 0 && (
+            {totalDepensePrevue > 0 && (
               <View style={styles.heroLegendeItem}>
-                <View
-                  style={[styles.heroLegendeDot, { backgroundColor: C.vert }]}
-                />
+                <SegmentHachure style={styles.heroLegendeDot} couleur={C.peach} />
                 <Text
                   style={[
                     styles.heroSub,
@@ -969,39 +912,7 @@ export default function Dashboard() {
                     },
                   ]}
                 >
-                  Entrée reçue {totalEntreeRecue}€
-                </Text>
-              </View>
-            )}
-            {totalEntreePrevue > 0 && (
-              <View style={styles.heroLegendeItem}>
-                <SegmentHachure style={styles.heroLegendeDot} couleur={C.vert} />
-                <Text
-                  style={[
-                    styles.heroSub,
-                    {
-                      color:
-                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
-                    },
-                  ]}
-                >
-                  Entrée prévue {totalEntreePrevue}€
-                </Text>
-              </View>
-            )}
-            {argentLibre > 0 && (
-              <View style={styles.heroLegendeItem}>
-                <SegmentHachure style={styles.heroLegendeDot} couleur={C.texteMuted} />
-                <Text
-                  style={[
-                    styles.heroSub,
-                    {
-                      color:
-                        theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
-                    },
-                  ]}
-                >
-                  Libre {argentLibre}€
+                  Dépense prévue {totalDepensePrevue}€
                 </Text>
               </View>
             )}
@@ -1025,6 +936,48 @@ export default function Dashboard() {
             </Text>
           </View>
         </View>
+
+        {conseils.length > 0 && (
+          <View
+            style={[
+              styles.conseilsCard,
+              { backgroundColor: C.carte, borderColor: C.carteBorder },
+            ]}
+          >
+            <Text style={[styles.conseilsLabel, { color: C.texteMuted }]}>
+              NOS CONSEILS
+            </Text>
+            {conseils.map((conseil, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.conseilItem,
+                  i > 0 && [
+                    styles.conseilItemBorder,
+                    { borderTopColor: C.separateur },
+                  ],
+                ]}
+              >
+                <View
+                  style={[
+                    styles.conseilDot,
+                    {
+                      backgroundColor:
+                        conseil.niveau === "alerte"
+                          ? C.rouge
+                          : conseil.niveau === "attention"
+                            ? C.peach
+                            : C.vert,
+                    },
+                  ]}
+                />
+                <Text style={[styles.conseilTexte, { color: C.texte }]}>
+                  {conseil.texte}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         <View style={styles.statsRow}>
           <View
@@ -2783,6 +2736,29 @@ const styles = StyleSheet.create({
   barSegment: { height: "100%" },
   lectureBanner: { borderRadius: 12, padding: 12, marginTop: 6 },
   lectureTexte: { fontSize: 14, fontWeight: "700", textAlign: "center" },
+  conseilsCard: {
+    borderRadius: 18,
+    borderWidth: 0.5,
+    padding: 16,
+    marginBottom: 18,
+  },
+  conseilsLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginBottom: 6,
+  },
+  conseilItem: { flexDirection: "row", gap: 10, paddingVertical: 8 },
+  conseilItemBorder: { borderTopWidth: 0.5 },
+  conseilDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 5,
+    flexShrink: 0,
+  },
+  conseilTexte: { flex: 1, fontSize: 13, lineHeight: 19 },
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
   statCard: {
     flex: 1,

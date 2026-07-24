@@ -33,9 +33,19 @@ export const CALCULS_DOC: PageCalculs[] = [
           "N'est pas un deuxième calcul : ce bandeau met en phrase exactement le même montant que \"RESTE ESTIMÉ EN FIN DE MOIS\" ci-dessus (aucune extrapolation séparée du rythme de dépense) — chiffre principal, phrase et delta vs mois dernier découlent tous de la même valeur, pour ne jamais afficher deux estimations qui pourraient se contredire. Si ce montant est positif ou nul : \"Il te restera environ [X]€ à la fin du mois si tu continues comme ça.\" S'il est négatif : \"Si tu continues comme ça, tu risques d'être à environ [X]€ de dépassement en fin de mois.\"",
       },
       {
+        titre: "Nos conseils",
+        explication:
+          "Sous le bandeau de projection, jusqu'à 3 phrases de coaching courtes, sans jargon, choisies parmi une dizaine de règles possibles et classées par ordre de priorité (dépassement de budget en premier, bonnes nouvelles en dernier) — seules les 2-3 plus pertinentes du moment s'affichent, jamais une liste qui s'allonge. Chaque règle regarde un signal déjà utilisé ailleurs dans l'app (le \"reste estimé\" ci-dessus, le taux d'épargne et le rythme des objectifs de Stats, la plus grosse dépense de Budget) ou compare le cumul de dépenses d'une catégorie à celui du mois dernier au même jour. Une puce verte signale une bonne nouvelle, orange une vigilance, rouge une alerte (dépassement réel ou quasi certain). Recalculé à chaque rendu à partir des données du mois en cours, jamais mis en cache.",
+      },
+      {
         titre: "+X € / +X % vs mois dernier",
         explication:
           "Écart entre le Reste estimé de ce mois et celui du mois dernier archivé, rejoué avec la même formule (Dépensé + Dépense prévue du snapshot archivé) sur les valeurs figées du mois précédent — comparé mois complet à mois complet. Un tap sur la valeur bascule l'affichage entre euros et pourcentage (pourcentage non disponible si le reste du mois dernier était nul).",
+      },
+      {
+        titre: "Ordre des segments de la barre de progression et de sa légende",
+        explication:
+          "Dans cet ordre, sur la barre comme dans la légende juste en dessous : \"Dépensé\", puis \"Argent immobilisé\", puis \"Dépense prévue\". Le reste de la barre (entrées d'argent déjà reçues ou encore attendues ce mois-ci, et tout montant saisi manuellement ni dépensé ni immobilisé) n'a plus de couleur ni de nom propre — il se fond avec le fond neutre de la barre, comme de l'argent encore disponible. Ces montants restent comptés normalement dans BUDGET et dans RESTE ESTIMÉ EN FIN DE MOIS ci-dessus : seul l'affichage détaillé de la barre a changé, aucune formule.",
       },
       {
         titre: "Légende « Argent immobilisé »",
@@ -45,7 +55,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Rayures diagonales sur la barre de progression",
         explication:
-          "Distingue visuellement ce qui est déjà réalisé/engagé (couleur pleine) de ce qui reste une prévision (rayures diagonales légères, y compris sur la petite pastille de légende correspondante). En rayures : \"Dépense prévue\" (budget de catégorie pas encore dépensé), \"Entrée prévue\" (entrées d'argent encore attendues ce mois-ci, catégories \"Entrée d'argent\" non reçues) et \"Libre\" (la part du montant saisi manuellement qui n'est ni dépensée, ni prévue dans une catégorie, ni immobilisée — de l'argent non encore affecté). En couleur pleine : \"Dépensé\", \"Entrée reçue\" et \"Argent immobilisé\", qui sont soit déjà arrivés/sortis, soit déjà mis de côté — jamais une prévision incertaine.",
+          "Distingue visuellement ce qui est déjà réalisé/engagé (couleur pleine) de ce qui reste une prévision (rayures diagonales légères, y compris sur la petite pastille de légende correspondante). En rayures : \"Dépense prévue\" (budget de catégorie pas encore dépensé). En couleur pleine : \"Dépensé\" et \"Argent immobilisé\", qui sont soit déjà sortis, soit déjà mis de côté — jamais une prévision incertaine.",
       },
       {
         titre: "Mis de côté ce mois",
@@ -93,14 +103,14 @@ export const CALCULS_DOC: PageCalculs[] = [
           "Compare les dépenses cumulées de ce mois à celles du mois dernier au même jour du mois (cumul reconstruit depuis les transactions/paiements individuels, jamais purgés) — pas au mois dernier entier, pour ne pas comparer un mois en cours forcément partiel à un mois complet. Un \"Voir l'historique\" déplie les 6 derniers mois archivés avec le même cumul \"au même jour\".",
       },
       {
+        titre: "Ordre des segments de la barre de progression et de sa légende",
+        explication:
+          "Dans cet ordre, sur la barre comme dans la légende juste en dessous : \"Dépenses\", puis \"Argent immobilisé\". Le reste de la barre (entrées d'argent déjà reçues ou encore attendues ce mois-ci) n'a plus de couleur ni de nom propre — il se fond avec le fond neutre de la barre, comme de l'argent encore disponible. Ces montants restent comptés normalement dans le budget mensuel affiché ci-dessous : seul l'affichage détaillé de la barre a changé, aucune formule.",
+      },
+      {
         titre: "Légende « Argent immobilisé »",
         explication:
           "Sous la barre de progression, l'épargne générique et les versements aux objectifs sont regroupés sous une seule pastille \"Argent immobilisé\" (total combiné) — la barre de progression fusionne alors aussi ses deux segments en un seul, de la même couleur que la pastille. Un tap la déplie en deux pastilles, \"Épargne\" (versements hors objectif) et \"Objectifs\" (somme des versements à tes objectifs actifs) ; la barre se redécompose alors en deux segments correspondants.",
-      },
-      {
-        titre: "Rayures diagonales sur la barre de progression",
-        explication:
-          "Distingue visuellement ce qui est déjà réalisé/engagé (couleur pleine) de ce qui reste une prévision (rayures diagonales légères, y compris sur la petite pastille de légende correspondante). En rayures : \"Entrée prévue\" (entrées d'argent encore attendues ce mois-ci, catégories \"Entrée d'argent\" non reçues). En couleur pleine : \"Dépenses\", \"Entrée reçue\" et \"Argent immobilisé\", qui sont soit déjà arrivés/sortis, soit déjà mis de côté — jamais une prévision incertaine.",
       },
       {
         titre: "/ {X}€ budget mensuel",

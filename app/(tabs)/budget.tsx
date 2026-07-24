@@ -31,9 +31,9 @@ import {
   MOIS_LABELS,
   moisPrecedent,
 } from "../../utils/exportExcel";
+import { trouverDepenseDominante } from "../../utils/conseils";
 import { InfoBulle } from "../InfoBulle";
 import { NombreAnime } from "../NombreAnime";
-import { SegmentHachure } from "../SegmentHachure";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { VueMoisArchive } from "../VueMoisArchive";
@@ -324,18 +324,6 @@ export default function Budget() {
     budgetTotal > 0
       ? Math.min((totalEpargne / budgetTotal) * 100, 100 - pctDepenses)
       : 0;
-  const pctEntreeRecue =
-    budgetTotal > 0
-      ? Math.min((totalEntreeRecue / budgetTotal) * 100, 100)
-      : 0;
-  const pctEntreePrevue =
-    budgetTotal > 0
-      ? Math.min(
-          (totalEntreePrevue / budgetTotal) * 100,
-          100 - pctDepenses - pctEpargne - pctEntreeRecue,
-        )
-      : 0;
-
   // Comparaison "vs mois dernier" de la carte "Dépenses et argent immobilisé"
   // (venue d'Aperçu) — au même jour le mois dernier, cumul reconstruit depuis
   // les transactions/paiements jamais purgés, pour ne pas comparer un mois en
@@ -406,13 +394,7 @@ export default function Budget() {
   const pctObjectifs =
     totalEpargne > 0 ? (contributionObjectifsTotal / totalEpargne) * pctEpargne : 0;
 
-  // Comparée sur toutes les catégories de dépense (Fixe + Variable, hors
-  // Entrée d'argent) — pas seulement les catégories Variable — pour
-  // refléter la vraie plus grosse dépense du mois, pas juste la plus grosse
-  // dépense variable.
-  const depenseDominante = [...enveloppesSansEntree].sort(
-    (a, b) => b.depense - a.depense,
-  )[0];
+  const depenseDominante = trouverDepenseDominante(enveloppesSansEntree);
 
   const ouvrirAjout = (enveloppeId?: string) => {
     setNomTx("");
@@ -1184,34 +1166,8 @@ export default function Budget() {
                 />
               )
             )}
-            {totalEntreeRecue > 0 && (
-              <View
-                style={[
-                  styles.progressFillEpargne,
-                  {
-                    width: `${pctEntreeRecue}%`,
-                    left: `${pctDepenses + pctEpargne}%`,
-                    backgroundColor: C.vert,
-                  },
-                ]}
-              />
-            )}
-            {totalEntreePrevue > 0 && (
-              <SegmentHachure
-                style={[
-                  styles.progressFillEpargne,
-                  {
-                    width: `${pctEntreePrevue}%`,
-                    left: `${pctDepenses + pctEpargne + pctEntreeRecue}%`,
-                  },
-                ]}
-                couleur={C.vert}
-              />
-            )}
           </View>
-          {(totalEpargne > 0 ||
-            totalEntreeRecue > 0 ||
-            totalEntreePrevue > 0) && (
+          {totalEpargne > 0 && (
             <View style={styles.heroLegende}>
               <View style={styles.heroLegendeItem}>
                 <View
@@ -1280,34 +1236,6 @@ export default function Budget() {
                     ]}
                   >
                     Objectifs {contributionObjectifsTotal} €
-                  </Text>
-                </View>
-              )}
-              {totalEntreeRecue > 0 && (
-                <View style={styles.heroLegendeItem}>
-                  <View
-                    style={[styles.heroLegendeDot, { backgroundColor: C.vert }]}
-                  />
-                  <Text
-                    style={[
-                      styles.heroLegendeTexte,
-                      { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
-                    ]}
-                  >
-                    Entrée reçue {totalEntreeRecue} €
-                  </Text>
-                </View>
-              )}
-              {totalEntreePrevue > 0 && (
-                <View style={styles.heroLegendeItem}>
-                  <SegmentHachure style={styles.heroLegendeDot} couleur={C.vert} />
-                  <Text
-                    style={[
-                      styles.heroLegendeTexte,
-                      { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
-                    ]}
-                  >
-                    Entrée prévue {totalEntreePrevue} €
                   </Text>
                 </View>
               )}

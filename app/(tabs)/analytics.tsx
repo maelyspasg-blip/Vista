@@ -11,11 +11,22 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import Svg, { Circle, Line, Path, Text as SvgText } from "react-native-svg";
+import Svg, { Circle, Line, Path, Rect, Text as SvgText } from "react-native-svg";
 import { useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { calculerSeries, TypeSerie } from "../../utils/series";
-import { calculerScoreSante, MotCleScore } from "../../utils/score";
+import {
+  calculerScoreSante,
+  genererExplicationsScore,
+  MotCleScore,
+} from "../../utils/score";
+import {
+  calculerDeltaDepenseJournaliere,
+  calculerDeltaTotal,
+  calculerRythmeObjectif,
+  calculerTauxEpargne,
+  genererInsightsStats,
+} from "../../utils/conseils";
 import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
@@ -299,10 +310,12 @@ function GraphiqueEvolutionMulti({
   series,
   labels,
   couleurs: C,
+  fondCarte,
 }: {
   series: SerieEvolution[];
   labels: string[];
   couleurs: typeof COULEURS.clair;
+  fondCarte: string;
 }) {
   const [selection, setSelection] = useState<number | null>(null);
   const toutes = series.flatMap((s) => s.donnees);
@@ -312,6 +325,7 @@ function GraphiqueEvolutionMulti({
   const n = labels.length;
   const largeurUtile = CHART_W - PADDING_LEFT - PADDING_X;
   const espacement = n > 1 ? largeurUtile / (n - 1) : largeurUtile;
+  const FONT_SIZE_LABEL = 9;
 
   const pointsParSerie = series.map((s) => ({
     ...s,
@@ -323,19 +337,32 @@ function GraphiqueEvolutionMulti({
 
   const dernier = n - 1;
   const indicesAffiches = indicesLabelsAffiches(n, espacement);
-  const labelsParPoint = indicesAffiches.map((i) => ({
-    i,
-    estPremier: i === 0,
-    estDernier: i === dernier,
-    items: positionsLabelsSansChevauchement(
-      pointsParSerie.map((s) => ({
-        y: s.points[i].y,
-        x: s.points[i].x,
-        valeur: s.donnees[i],
-        couleur: s.couleur,
-      })),
-    ),
-  }));
+  // Écart minimum entre étiquettes empilées verticalement quand plusieurs
+  // courbes ont des valeurs proches au même mois. Toutes les étiquettes
+  // partagent désormais la même taille de police (voir FONT_SIZE_LABEL plus
+  // bas), donc un seul écart suffit ; en plus de cet espacement, chaque
+  // étiquette reçoit un fond opaque (voir le Rect sous chaque SvgText) qui
+  // garantit qu'aucun glyphe — y compris le "€" final — ne peut être
+  // recouvert par une étiquette voisine, même si deux valeurs sont
+  // quasiment identiques.
+  const ECART_MIN_LABEL = 15;
+  const labelsParPoint = indicesAffiches.map((i) => {
+    const estDernier = i === dernier;
+    return {
+      i,
+      estPremier: i === 0,
+      estDernier,
+      items: positionsLabelsSansChevauchement(
+        pointsParSerie.map((s) => ({
+          y: s.points[i].y,
+          x: s.points[i].x,
+          valeur: s.donnees[i],
+          couleur: s.couleur,
+        })),
+        ECART_MIN_LABEL,
+      ),
+    };
+  });
 
   return (
     <View>
@@ -402,19 +429,46 @@ function GraphiqueEvolutionMulti({
             );
           })}
           {labelsParPoint.map(({ i, estPremier, estDernier, items }) =>
-            items.map((l, j) => (
-              <SvgText
-                key={`dp${i}-${j}`}
-                x={estDernier ? l.x + 2 : estPremier ? l.x - 2 : l.x}
-                y={l.yLabel}
-                fontSize={estDernier ? 11 : 9}
-                fontWeight={estDernier ? "700" : "500"}
-                fill={l.couleur}
-                textAnchor={estDernier ? "end" : estPremier ? "start" : "middle"}
-              >
-                {Math.round(l.valeur)}€
-              </SvgText>
-            )),
+            items.map((l, j) => {
+              // Même taille pour tous les points : seul le gras distingue le
+              // dernier point (mise en avant légère, sans écart de taille).
+              const texte = `${Math.round(l.valeur)}€`;
+              const x = estDernier ? l.x + 2 : estPremier ? l.x - 2 : l.x;
+              const anchor = estDernier ? "end" : estPremier ? "start" : "middle";
+              // Largeur approximative (pas de mesure de texte synchrone
+              // disponible en RN/SVG) : sert uniquement de fond opaque sous
+              // l'étiquette, pour qu'elle ne puisse jamais se faire
+              // partiellement recouvrir par une étiquette voisine.
+              const largeurApprox = texte.length * FONT_SIZE_LABEL * 0.62 + 4;
+              const rectX =
+                anchor === "end"
+                  ? x - largeurApprox
+                  : anchor === "start"
+                    ? x
+                    : x - largeurApprox / 2;
+              return (
+                <Fragment key={`dp${i}-${j}`}>
+                  <Rect
+                    x={rectX}
+                    y={l.yLabel - FONT_SIZE_LABEL}
+                    width={largeurApprox}
+                    height={FONT_SIZE_LABEL + 3}
+                    rx={3}
+                    fill={fondCarte}
+                  />
+                  <SvgText
+                    x={x}
+                    y={l.yLabel}
+                    fontSize={FONT_SIZE_LABEL}
+                    fontWeight={estDernier ? "700" : "500"}
+                    fill={l.couleur}
+                    textAnchor={anchor}
+                  >
+                    {texte}
+                  </SvgText>
+                </Fragment>
+              );
+            }),
           )}
           {labels.map((lbl, i) => (
             <SvgText
@@ -586,6 +640,16 @@ export default function Analytics() {
     seuilEpargneConstante: objStore.seuilEpargneConstante,
     objectifs: objStore.objectifs,
   });
+  const explicationsScore = genererExplicationsScore(
+    {
+      enveloppes: objStore.enveloppes,
+      epargneMois: objStore.epargneMois,
+      historiquesMois: objStore.historiquesMois,
+      seuilEpargneConstante: objStore.seuilEpargneConstante,
+      objectifs: objStore.objectifs,
+    },
+    scoreSante.details,
+  );
 
   const NB_MOIS_PROJECTION = 6;
   const budgetActuelSimule = enveloppeSimulee?.budget ?? 0;
@@ -764,14 +828,11 @@ export default function Analytics() {
   const joursEcoules = new Date().getDate();
   const depenseMoyJour =
     joursEcoules > 0 ? Math.round(depenseMoisActuel / joursEcoules) : 0;
-  const depenseMoyJourPrec =
-    depenseMoisPrec > 0 ? Math.round(depenseMoisPrec / 30) : 0;
-  const deltaDepMoy =
-    depenseMoyJourPrec > 0
-      ? Math.round(
-          ((depenseMoyJour - depenseMoyJourPrec) / depenseMoyJourPrec) * 100,
-        )
-      : 0;
+  const deltaDepMoy = calculerDeltaDepenseJournaliere(
+    depenseMoisActuel,
+    depenseMoisPrec,
+    joursEcoules,
+  );
 
   const enveloppesEntreeStats = objStore.enveloppes.filter(
     (e) => e.type === "Entrée",
@@ -787,37 +848,11 @@ export default function Analytics() {
   const disponible =
     objStore.argentDisponible + totalEntreeRecueStats + totalEntreePrevueStats;
   const epargne = objStore.epargneMois;
-  const tauxEpargne =
-    disponible > 0 ? Math.round((epargne / disponible) * 100) : 0;
+  const tauxEpargne = calculerTauxEpargne(epargne, disponible);
 
-  const deltaTotal =
-    depenseMoisPrec > 0
-      ? Math.round(
-          ((depenseMoisActuel - depenseMoisPrec) / depenseMoisPrec) * 100,
-        )
-      : 0;
+  const deltaTotal = calculerDeltaTotal(depenseMoisActuel, depenseMoisPrec);
 
-  const insights: string[] = [];
-  if (deltaDepMoy < 0)
-    insights.push(
-      `Dépense journalière en baisse de ${Math.abs(deltaDepMoy)}% vs le mois dernier`,
-    );
-  else if (deltaDepMoy > 0)
-    insights.push(
-      `Dépense journalière en hausse de ${deltaDepMoy}% vs le mois dernier`,
-    );
-  if (tauxEpargne >= 20)
-    insights.push(`Bon taux d'épargne ce mois-ci à ${tauxEpargne}%`);
-  if (deltaTotal < 0)
-    insights.push(
-      `Tu as dépensé ${Math.abs(deltaTotal)}% de moins que le mois dernier`,
-    );
-  else if (deltaTotal > 0)
-    insights.push(`Tu as dépensé ${deltaTotal}% de plus que le mois dernier`);
-  if (insights.length === 0)
-    insights.push(
-      "Commence à enregistrer tes dépenses pour voir tes insights ici !",
-    );
+  const insights = genererInsightsStats({ deltaDepMoy, tauxEpargne, deltaTotal });
 
   const topDepenses: {
     nom: string;
@@ -861,45 +896,8 @@ export default function Analytics() {
       s.annee === moisPrecedent.getFullYear(),
   );
   const objectifsAvecDelta = objStore.objectifs.map((obj) => {
-    const pct = obj.cible > 0 ? Math.min((obj.actuel / obj.cible) * 100, 100) : 0;
-    const objPrecedent = snapshotMoisPrecedent?.objectifs.find(
-      (o) => o.id === obj.id,
-    );
-    const delta = objPrecedent ? obj.actuel - objPrecedent.actuel : null;
-
-    // Rythme mensuel récent, pour estimer le temps restant jusqu'à la
-    // cible : le montant mensuel fixe si l'objectif est récurrent (signal
-    // le plus fiable, indépendant des aléas d'un mois précis), sinon la
-    // moyenne des versements réels des derniers mois — reconstruite à
-    // partir des "actuel" archivés (jamais un champ de versement dédié) plus
-    // le mois en cours. S'il n'y a pas assez d'historique, on retombe sur le
-    // seul versement de ce mois-ci.
-    const NB_MOIS_MOYENNE_RYTHME = 3;
-    let rythmeMensuel: number;
-    if (obj.recurrent && obj.montantMensuel && obj.montantMensuel > 0) {
-      rythmeMensuel = obj.montantMensuel;
-    } else {
-      const actuelsRecents = objStore.historiquesMois
-        .slice(-NB_MOIS_MOYENNE_RYTHME)
-        .map((s) => s.objectifs.find((o) => o.id === obj.id)?.actuel)
-        .filter((v): v is number => v !== undefined);
-      const sequence = [...actuelsRecents, obj.actuel];
-      rythmeMensuel =
-        sequence.length >= 2
-          ? sequence
-              .slice(1)
-              .map((v, i) => v - sequence[i])
-              .reduce((acc, d) => acc + d, 0) /
-            (sequence.length - 1)
-          : obj.contributionMois;
-    }
-    const objectifAtteint = obj.actuel >= obj.cible;
-    const moisRestants =
-      !objectifAtteint && rythmeMensuel > 0
-        ? Math.ceil((obj.cible - obj.actuel) / rythmeMensuel)
-        : null;
-    const rythmeInsuffisant = !objectifAtteint && rythmeMensuel <= 0;
-
+    const { pct, delta, moisRestants, rythmeInsuffisant } =
+      calculerRythmeObjectif(obj, objStore.historiquesMois, snapshotMoisPrecedent);
     return { ...obj, pct, delta, moisRestants, rythmeInsuffisant };
   });
 
@@ -1294,6 +1292,7 @@ export default function Analytics() {
             ]}
             labels={labels}
             couleurs={C}
+            fondCarte={theme === "sombre" ? C.carte : "#FAFAFA"}
           />
         </View>
 
@@ -1813,6 +1812,37 @@ export default function Analytics() {
                       </Text>
                     </View>
                   </View>
+
+                  {explicationsScore.length > 0 && (
+                    <View style={styles.scoreExplicationsBloc}>
+                      <Text
+                        style={[
+                          styles.scoreExplicationsLabel,
+                          { color: C.texteMuted },
+                        ]}
+                      >
+                        Ce qui influence ton score ce mois-ci
+                      </Text>
+                      {explicationsScore.map((exp, i) => (
+                        <View key={i} style={styles.scoreExplicationItem}>
+                          <View
+                            style={[
+                              styles.scoreExplicationDot,
+                              { backgroundColor: exp.positif ? C.vert : C.rouge },
+                            ]}
+                          />
+                          <Text
+                            style={[
+                              styles.scoreExplicationTexte,
+                              { color: C.texte },
+                            ]}
+                          >
+                            {exp.texte}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -2476,6 +2506,23 @@ const styles = StyleSheet.create({
   },
   scoreDetailLabel: { fontSize: 13 },
   scoreDetailValeur: { fontSize: 13, fontWeight: "700" },
+  scoreExplicationsBloc: { marginTop: 16 },
+  scoreExplicationsLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginBottom: 6,
+  },
+  scoreExplicationItem: { flexDirection: "row", gap: 10, paddingVertical: 6 },
+  scoreExplicationDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginTop: 6,
+    flexShrink: 0,
+  },
+  scoreExplicationTexte: { flex: 1, fontSize: 13, lineHeight: 19 },
   serieDots: {
     flexDirection: "row",
     gap: 6,
