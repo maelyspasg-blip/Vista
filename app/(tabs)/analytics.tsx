@@ -15,6 +15,7 @@ import Svg, { Circle, Line, Path, Rect, Text as SvgText } from "react-native-svg
 import { useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { calculerSeries, Serie, TypeSerie } from "../../utils/series";
+import { budgetDuMoisArchive, entreesBudgetDuMois } from "../../utils/budget";
 import {
   calculerScoreSante,
   genererExplicationsScore,
@@ -27,7 +28,7 @@ import {
   calculerTauxEpargne,
 } from "../../utils/conseils";
 import { genererInsightsPeriode } from "../../utils/tendancesPeriode";
-import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
+import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
@@ -540,7 +541,7 @@ function GraphiqueEvolutionMulti({
                 {s.label}
               </Text>
               <Text style={[styles.evolutionInfoValeur, { color: C.texte }]}>
-                {s.donnees[selection]} €
+                {formaterMontant(s.donnees[selection])} €
               </Text>
             </View>
           ))}
@@ -581,7 +582,7 @@ function JaugeRepartition({
               {s.label}
             </Text>
             <Text style={[styles.jaugePct, { color: C.texteMuted }]}>
-              {Math.round((s.montant / total) * 100)}% · {s.montant} €
+              {Math.round((s.montant / total) * 100)}% · {formaterMontant(s.montant)} €
             </Text>
           </View>
         ))}
@@ -765,35 +766,13 @@ export default function Analytics() {
 
   const getDisponibleMois = (mois: number, annee: number) => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
-      const enveloppesEntree = objStore.enveloppes.filter(
-        (e) => e.type === "Entrée",
-      );
-      const totalEntreeRecue = enveloppesEntree.reduce(
-        (acc, e) => acc + e.depense,
-        0,
-      );
-      const totalEntreePrevue = enveloppesEntree.reduce(
-        (acc, e) => acc + Math.max(0, e.budget - e.depense),
-        0,
-      );
-      return objStore.argentDisponible + totalEntreeRecue + totalEntreePrevue;
+      return entreesBudgetDuMois(objStore.enveloppes, annee, mois).total;
     }
     const snap = objStore.historiquesMois.find(
       (s) => s.mois === mois && s.annee === annee,
     );
     if (!snap) return null;
-    const enveloppesEntree = snap.enveloppes.filter(
-      (e) => e.type === "Entrée",
-    );
-    const totalEntreeRecue = enveloppesEntree.reduce(
-      (acc, e) => acc + e.depense,
-      0,
-    );
-    const totalEntreePrevue = enveloppesEntree.reduce(
-      (acc, e) => acc + Math.max(0, e.budget - e.depense),
-      0,
-    );
-    return snap.disponible + totalEntreeRecue + totalEntreePrevue;
+    return budgetDuMoisArchive(snap);
   };
 
   const enveloppesFiltrees =
@@ -833,19 +812,11 @@ export default function Analytics() {
   const { pct: deltaDepMoy, deltaEuros: deltaDepMoyEuros } =
     calculerDeltaDepenseJournaliere(depenseMoisActuel, depenseMoisPrec, joursEcoules);
 
-  const enveloppesEntreeStats = objStore.enveloppes.filter(
-    (e) => e.type === "Entrée",
-  );
-  const totalEntreeRecueStats = enveloppesEntreeStats.reduce(
-    (acc, e) => acc + e.depense,
-    0,
-  );
-  const totalEntreePrevueStats = enveloppesEntreeStats.reduce(
-    (acc, e) => acc + Math.max(0, e.budget - e.depense),
-    0,
-  );
-  const disponible =
-    objStore.argentDisponible + totalEntreeRecueStats + totalEntreePrevueStats;
+  const disponible = entreesBudgetDuMois(
+    objStore.enveloppes,
+    ANNEE_ACTUELLE,
+    MOIS_ACTUEL,
+  ).total;
   const epargne = objStore.epargneMois;
   const tauxEpargne = calculerTauxEpargne(epargne, disponible);
 
@@ -1084,8 +1055,16 @@ export default function Analytics() {
           animationType={reduireAnimations ? "none" : "slide"}
           onRequestClose={() => setPeriodePickerVisible(false)}
         >
-          <View style={styles.modalOverlayTouch}>
-            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+          <TouchableOpacity
+            style={styles.modalOverlayTouch}
+            activeOpacity={1}
+            onPress={() => setPeriodePickerVisible(false)}
+          >
+            <TouchableOpacity
+              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              activeOpacity={1}
+              onPress={() => {}}
+            >
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitre, { color: C.texte }]}>
                   Période
@@ -1122,8 +1101,8 @@ export default function Analytics() {
                   />
                 ))}
               </Picker>
-            </View>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
 
         {pasSuffisammentDonnees && (
@@ -1338,7 +1317,7 @@ export default function Analytics() {
                   <Text
                     style={[styles.barreEpargneVal, { color: C.bleuGris }]}
                   >
-                    {val > 0 ? `${val}€` : ""}
+                    {val > 0 ? `${formaterMontant(val)}€` : ""}
                   </Text>
                   <View
                     style={[
@@ -1488,14 +1467,14 @@ export default function Analytics() {
                   />
                 </View>
                 <Text style={[styles.cbarVal, { color: C.texte }]}>
-                  {env.depense} €
+                  {formaterMontant(env.depense)} €
                 </Text>
               </View>
             );
           })}
           {depenseMoisPrec > 0 && (
             <Text style={[styles.compareFooter, { color: C.texteMuted }]}>
-              Total ce mois : {depenseMoisActuel} € vs {depenseMoisPrec} € le
+              Total ce mois : {formaterMontant(depenseMoisActuel)} € vs {formaterMontant(depenseMoisPrec)} € le
               mois dernier
             </Text>
           )}
@@ -1551,7 +1530,7 @@ export default function Analytics() {
                   <Text
                     style={[styles.objectifStatMontant, { color: C.texteMuted }]}
                   >
-                    {obj.actuel} € / {obj.cible} €
+                    {formaterMontant(obj.actuel)} € / {formaterMontant(obj.cible)} €
                   </Text>
                   {obj.delta !== null && (
                     <Text
@@ -1561,7 +1540,7 @@ export default function Analytics() {
                       ]}
                     >
                       {obj.delta >= 0 ? "+" : ""}
-                      {obj.delta}€ vs mois dernier
+                      {formaterMontant(obj.delta)}€ vs mois dernier
                     </Text>
                   )}
                 </View>
@@ -1640,7 +1619,7 @@ export default function Analytics() {
                   {dep.mois}
                 </Text>
                 <Text style={[styles.topMontant, { color: C.texte }]}>
-                  {dep.montant} €
+                  {formaterMontant(dep.montant)} €
                 </Text>
               </View>
             ))}
@@ -1656,8 +1635,16 @@ export default function Analytics() {
         animationType={reduireAnimations ? "none" : "slide"}
         onRequestClose={() => setModalSeriesVisible(false)}
       >
-        <View style={styles.modalOverlayTouch}>
-          <View style={[styles.modalCardBadges, { backgroundColor: C.carte }]}>
+        <TouchableOpacity
+          style={styles.modalOverlayTouch}
+          activeOpacity={1}
+          onPress={() => setModalSeriesVisible(false)}
+        >
+          <TouchableOpacity
+            style={[styles.modalCardBadges, { backgroundColor: C.carte }]}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
             <View style={styles.modalHeader}>
               <View>
                 <Text style={[styles.modalTitre, { color: C.texte }]}>
@@ -1918,7 +1905,7 @@ export default function Analytics() {
                             titre="Épargne constante"
                             texte={
                               objStore.seuilEpargneConstante !== null
-                                ? `Le nombre de mois d'affilée où tu atteins ton seuil d'épargne personnalisé (actuellement ${objStore.seuilEpargneConstante}€).`
+                                ? `Le nombre de mois d'affilée où tu atteins ton seuil d'épargne personnalisé (actuellement ${formaterMontant(objStore.seuilEpargneConstante)}€).`
                                 : "Le nombre de mois d'affilée où tu atteins ton seuil d'épargne personnalisé. Définis un seuil ci-dessous pour commencer à le suivre."
                             }
                           />
@@ -2099,7 +2086,7 @@ export default function Analytics() {
                             <Text
                               style={[styles.serieLien, { color: C.texteMuted }]}
                             >
-                              Seuil : {objStore.seuilEpargneConstante} € · Modifier
+                              Seuil : {formaterMontant(objStore.seuilEpargneConstante ?? 0)} € · Modifier
                             </Text>
                           </TouchableOpacity>
                         )}
@@ -2234,7 +2221,7 @@ export default function Analytics() {
                                     { color: C.texteMuted },
                                   ]}
                                 >
-                                  {env.budget} €
+                                  {formaterMontant(env.budget)} €
                                 </Text>
                                 {sel && (
                                   <Ionicons
@@ -2332,7 +2319,7 @@ export default function Analytics() {
                                     ]}
                                   >
                                     Ce changement représente{" "}
-                                    {Math.abs(ecartMensuelSimule)}€ de{" "}
+                                    {formaterMontant(Math.abs(ecartMensuelSimule))}€ de{" "}
                                     {ecartMensuelSimule > 0 ? "plus" : "moins"}{" "}
                                     par mois sur cette catégorie.
                                   </Text>
@@ -2358,7 +2345,7 @@ export default function Analytics() {
                                     Sur {NB_MOIS_PROJECTION} mois, cela
                                     représente{" "}
                                     {impactTotal6MoisSimulation >= 0 ? "+" : ""}
-                                    {impactTotal6MoisSimulation}€ d&apos;épargne
+                                    {formaterMontant(impactTotal6MoisSimulation)}€ d&apos;épargne
                                     projetée.
                                   </Text>
                                 </View>
@@ -2415,8 +2402,8 @@ export default function Analytics() {
 
               <View style={{ height: 20 }} />
             </ScrollView>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </View>
   );
@@ -2470,19 +2457,19 @@ function texteExplicationSerie(
   if (serie.type === "epargne-croissante") {
     if (donnees.epargneMoisPrec === null) return null;
     return continueSerie
-      ? `Ce mois-ci : ton épargne (${donnees.epargneMois}€) dépasse celle du mois dernier (${donnees.epargneMoisPrec}€) — la série continue.`
-      : `Ce mois-ci : ton épargne (${donnees.epargneMois}€) n'a pas dépassé celle du mois dernier (${donnees.epargneMoisPrec}€) — la série est repartie à zéro.`;
+      ? `Ce mois-ci : ton épargne (${formaterMontant(donnees.epargneMois)}€) dépasse celle du mois dernier (${formaterMontant(donnees.epargneMoisPrec)}€) — la série continue.`
+      : `Ce mois-ci : ton épargne (${formaterMontant(donnees.epargneMois)}€) n'a pas dépassé celle du mois dernier (${formaterMontant(donnees.epargneMoisPrec)}€) — la série est repartie à zéro.`;
   }
   if (serie.type === "budget-respecte") {
     if (donnees.budgetMoisActuel <= 0) return null;
     return continueSerie
-      ? `Ce mois-ci : tu as dépensé ${donnees.depenseMoisActuel}€ sur un budget de ${donnees.budgetMoisActuel}€ — la série continue.`
-      : `Ce mois-ci : tu as dépassé ton budget (${donnees.depenseMoisActuel}€ pour ${donnees.budgetMoisActuel}€ prévus) — la série est repartie à zéro.`;
+      ? `Ce mois-ci : tu as dépensé ${formaterMontant(donnees.depenseMoisActuel)}€ sur un budget de ${formaterMontant(donnees.budgetMoisActuel)}€ — la série continue.`
+      : `Ce mois-ci : tu as dépassé ton budget (${formaterMontant(donnees.depenseMoisActuel)}€ pour ${formaterMontant(donnees.budgetMoisActuel)}€ prévus) — la série est repartie à zéro.`;
   }
   if (donnees.seuilEpargneConstante === null) return null;
   return continueSerie
-    ? `Ce mois-ci : ton épargne (${donnees.epargneMois}€) atteint ton seuil de ${donnees.seuilEpargneConstante}€ — la série continue.`
-    : `Ce mois-ci : ton épargne (${donnees.epargneMois}€) est sous ton seuil de ${donnees.seuilEpargneConstante}€ — la série est repartie à zéro.`;
+    ? `Ce mois-ci : ton épargne (${formaterMontant(donnees.epargneMois)}€) atteint ton seuil de ${formaterMontant(donnees.seuilEpargneConstante)}€ — la série continue.`
+    : `Ce mois-ci : ton épargne (${formaterMontant(donnees.epargneMois)}€) est sous ton seuil de ${formaterMontant(donnees.seuilEpargneConstante)}€ — la série est repartie à zéro.`;
 }
 
 function couleurScoreTeinte(

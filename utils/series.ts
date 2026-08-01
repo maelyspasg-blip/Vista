@@ -1,3 +1,5 @@
+import { formaterMontant } from "./montant";
+
 export type EnveloppeSerie = {
   depense: number;
   budget: number;
@@ -145,7 +147,7 @@ export function calculerSeries(donnees: DonneesSeries): Serie[] {
       "epargne-constante",
       "Épargne constante",
       seuil !== null
-        ? `Mois consécutifs où l'épargne a atteint ${seuil} €.`
+        ? `Mois consécutifs où l'épargne a atteint ${formaterMontant(seuil)} €.`
         : "Définis un seuil pour suivre cette série.",
       epargneConstanteParMois,
     ),

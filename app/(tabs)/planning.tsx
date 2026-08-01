@@ -1,11 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
-import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
+import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import {
   useFocusEffect,
   useLocalSearchParams,
   useRouter,
 } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   InputAccessoryView,
@@ -14,14 +14,18 @@ import {
   Modal,
   Platform,
   ScrollView,
+  StyleProp,
   StyleSheet,
   Switch,
   TouchableOpacity,
   View,
+  ViewStyle,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { scheduleOnRN } from "react-native-worklets";
 import { Calendar } from "react-native-calendars";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
+import { usePagerSwipe } from "../PagerSwipeContext";
 import {
   demanderPermissionNotifications,
   programmerNotificationsEvenement,
@@ -53,6 +57,10 @@ function heureEnMinutes(heure: string): number {
 
 function dateVersISO(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function premierJourMoisISO(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
 function genererOccurrencesEvenement(
@@ -186,12 +194,58 @@ type EvenementUnifie = {
   evenementId?: string;
 };
 
+/**
+ * Remplace TouchableOpacity dans les zones couvertes par `gesteSwipe` :
+ * TouchableOpacity gère le tap via l'ancien système de responder RN,
+ * indépendamment de Gesture.Pan — un swipe qui reste sous le seuil
+ * d'activation du Pan (40px) déclenche quand même onPress au relâchement,
+ * même après un déplacement horizontal net. Gesture.Tap().requireExternalGestureToFail(gesteSwipe)
+ * force le tap à attendre que gesteSwipe ait explicitement échoué à
+ * s'activer avant de se déclencher, ce qui distingue correctement les deux.
+ */
+function TapZone({
+  onTap,
+  gesteExterne,
+  style,
+  opaciteAuToucher = 1,
+  children,
+}: {
+  onTap: () => void;
+  gesteExterne: ReturnType<typeof Gesture.Pan>;
+  style?: StyleProp<ViewStyle>;
+  opaciteAuToucher?: number;
+  children?: ReactNode;
+}) {
+  const [presse, setPresse] = useState(false);
+
+  const geste = Gesture.Tap()
+    .requireExternalGestureToFail(gesteExterne)
+    .onBegin(() => {
+      scheduleOnRN(setPresse, true);
+    })
+    .onFinalize(() => {
+      scheduleOnRN(setPresse, false);
+    })
+    .onEnd((_e, succes) => {
+      if (succes) scheduleOnRN(onTap);
+    });
+
+  return (
+    <GestureDetector gesture={geste}>
+      <View style={[style, presse && { opacity: opaciteAuToucher }]}>
+        {children}
+      </View>
+    </GestureDetector>
+  );
+}
+
 export default function Planning() {
   const objStore = useObjectifs();
   const { theme, couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const router = useRouter();
   const params = useLocalSearchParams<{ editEventId?: string }>();
+  const { setSwipeOngletsActif } = usePagerSwipe();
 
   const [vue, setVue] = useState<"jour" | "semaine" | "mois">("jour");
   const [dateActuelle, setDateActuelle] = useState(new Date());
@@ -399,6 +453,16 @@ export default function Planning() {
     .activeOffsetX([-40, 40])
     .failOffsetY([-12, 12])
     .minDistance(40)
+    .hitSlop({ left: -24, right: -24 })
+    .onBegin(() => {
+      // Coupe le swipe natif entre onglets pendant tout le toucher dans
+      // cette zone, pour que le PagerView ne capte jamais le même geste
+      // que la navigation jour/semaine.
+      scheduleOnRN(setSwipeOngletsActif, false);
+    })
+    .onFinalize(() => {
+      scheduleOnRN(setSwipeOngletsActif, true);
+    })
     .onEnd((e) => {
       const vitesseOk = Math.abs(e.velocityX) > 200;
       if (vitesseOk && e.translationX < -70) allerSuivant();
@@ -592,6 +656,11 @@ export default function Planning() {
       couleur: choisirCouleurAutomatique(),
       type: typeFinancierEvent === "entree" ? "Entrée" : "Variable",
       recurrente: false,
+      // Une catégorie Variable non récurrente n'a pas de date naturelle —
+      // rattachée à son mois de création pour expirer correctement de "Tes
+      // catégories" (cf. utils/budget.ts:estCategorieActiveCeMois).
+      moisComptage:
+        typeFinancierEvent === "entree" ? undefined : premierJourMoisISO(new Date()),
     });
     setCreationCategorieEnCours(false);
     if (!nouvelle) return;
@@ -609,6 +678,11 @@ export default function Planning() {
       return;
     }
     finaliserCreationEvenement();
+  };
+
+  const fermerModalCreationAvecSauvegarde = () => {
+    validerInfos();
+    setModalCreationVisible(false);
   };
 
   function calculerPositions(evs: EvenementUnifie[]) {
@@ -795,14 +869,15 @@ export default function Planning() {
                   style={[styles.alldayZone, { borderColor: C.separateur }]}
                 >
                   {evsToutLaJourneeJour(dateActuelle).map((ev) => (
-                    <TouchableOpacity
+                    <TapZone
                       key={ev.id}
+                      gesteExterne={gesteSwipe}
                       style={[
                         styles.alldayPill,
                         { backgroundColor: ev.couleur + "22" },
                       ]}
-                      onPress={() => gererClicEvenement(ev)}
-                      activeOpacity={0.7}
+                      opaciteAuToucher={0.7}
+                      onTap={() => gererClicEvenement(ev)}
                     >
                       <Ionicons
                         name="pin-outline"
@@ -817,10 +892,10 @@ export default function Planning() {
                         <Text
                           style={[styles.alldayMontant, { color: ev.couleur }]}
                         >
-                          {ev.montant}€
+                          {formaterMontant(ev.montant)}€
                         </Text>
                       )}
-                    </TouchableOpacity>
+                    </TapZone>
                   ))}
                 </View>
               )}
@@ -842,19 +917,19 @@ export default function Planning() {
                   </View>
                   <View style={styles.eventsCol}>
                     {HEURES.map((h, i) => (
-                      <TouchableOpacity
+                      <TapZone
                         key={h}
+                        gesteExterne={gesteSwipe}
                         style={[styles.ligneFond, { borderTopColor: C.separateur }]}
-                        activeOpacity={0.5}
-                        onPress={() =>
-                          ouvrirCreationRapide(`${HEURE_DEBUT + i}h00`)
-                        }
+                        opaciteAuToucher={0.5}
+                        onTap={() => ouvrirCreationRapide(`${HEURE_DEBUT + i}h00`)}
                       />
                     ))}
                     {calculerPositions(evsHorairesJour(dateActuelle)).map(
                       ({ ev, top, height, left, width }) => (
-                        <TouchableOpacity
+                        <TapZone
                           key={ev.id}
+                          gesteExterne={gesteSwipe}
                           style={[
                             styles.eventCard,
                             {
@@ -866,8 +941,8 @@ export default function Planning() {
                               borderLeftColor: ev.couleur,
                             },
                           ]}
-                          activeOpacity={0.7}
-                          onPress={() => gererClicEvenement(ev)}
+                          opaciteAuToucher={0.7}
+                          onTap={() => gererClicEvenement(ev)}
                         >
                           <View style={styles.eventTopRow}>
                             <Text
@@ -884,7 +959,7 @@ export default function Planning() {
                                 ]}
                               >
                                 <Text style={styles.badgeFinancierTexte}>
-                                  {ev.montant}€
+                                  {formaterMontant(ev.montant ?? 0)}€
                                 </Text>
                               </View>
                             )}
@@ -892,7 +967,7 @@ export default function Planning() {
                           <Text style={[styles.eventHeure, { color: C.texteMuted }]}>
                             {ev.heure}
                           </Text>
-                        </TouchableOpacity>
+                        </TapZone>
                       ),
                     )}
                     {memeJour(dateActuelle, AUJOURDHUI) &&
@@ -918,14 +993,15 @@ export default function Planning() {
               <View style={styles.weekHeadRow}>
                 <View style={{ width: 32 }} />
                 {joursSemaineVue.map(({ jourDate, estAujourdhui }, i) => (
-                  <TouchableOpacity
+                  <TapZone
                     key={i}
+                    gesteExterne={gesteSwipe}
                     style={[
                       styles.weekHeadCol,
                       estAujourdhui && { backgroundColor: teinteAujourdhui },
                     ]}
-                    activeOpacity={0.7}
-                    onPress={() => ouvrirJour(jourDate)}
+                    opaciteAuToucher={0.7}
+                    onTap={() => ouvrirJour(jourDate)}
                   >
                     <Text style={[styles.weekHeadNom, { color: C.texteMuted }]}>
                       {JOURS_SEMAINE[i]}
@@ -942,7 +1018,7 @@ export default function Planning() {
                     >
                       {jourDate.getDate()}
                     </Text>
-                  </TouchableOpacity>
+                  </TapZone>
                 ))}
               </View>
 
@@ -954,14 +1030,15 @@ export default function Planning() {
                   {joursSemaineVue.map(({ evsToutLaJournee }, i) => (
                     <View key={i} style={styles.weekAlldayCol}>
                       {evsToutLaJournee.map((ev) => (
-                        <TouchableOpacity
+                        <TapZone
                           key={ev.id}
+                          gesteExterne={gesteSwipe}
                           style={[
                             styles.weekAlldayPill,
                             { backgroundColor: ev.couleur + "33" },
                           ]}
-                          activeOpacity={0.7}
-                          onPress={() => gererClicEvenement(ev)}
+                          opaciteAuToucher={0.7}
+                          onTap={() => gererClicEvenement(ev)}
                         >
                           <Text
                             style={[
@@ -972,7 +1049,7 @@ export default function Planning() {
                           >
                             {ev.nom}
                           </Text>
-                        </TouchableOpacity>
+                        </TapZone>
                       ))}
                     </View>
                   ))}
@@ -1014,14 +1091,15 @@ export default function Planning() {
                       ]}
                     >
                       {HEURES.map((h, hi) => (
-                        <TouchableOpacity
+                        <TapZone
                           key={h}
+                          gesteExterne={gesteSwipe}
                           style={[
                             styles.ligneFondSemaine,
                             { borderTopColor: C.separateur },
                           ]}
-                          activeOpacity={0.5}
-                          onPress={() => {
+                          opaciteAuToucher={0.5}
+                          onTap={() => {
                             setDateActuelle(jourDate);
                             ouvrirCreationRapide(
                               `${HEURE_DEBUT + hi}h00`,
@@ -1031,8 +1109,9 @@ export default function Planning() {
                         />
                       ))}
                       {positions.map(({ ev, top, height, left, width }) => (
-                        <TouchableOpacity
+                        <TapZone
                           key={ev.id}
+                          gesteExterne={gesteSwipe}
                           style={[
                             styles.weekEventBlock,
                             {
@@ -1044,8 +1123,8 @@ export default function Planning() {
                               borderLeftColor: ev.couleur,
                             },
                           ]}
-                          activeOpacity={0.7}
-                          onPress={() => gererClicEvenement(ev)}
+                          opaciteAuToucher={0.7}
+                          onTap={() => gererClicEvenement(ev)}
                         >
                           <Text
                             style={[
@@ -1056,7 +1135,7 @@ export default function Planning() {
                           >
                             {ev.nom}
                           </Text>
-                        </TouchableOpacity>
+                        </TapZone>
                       ))}
                       {estAujourdhui && ligneActuelleVisible && (
                         <View
@@ -1105,8 +1184,9 @@ export default function Planning() {
                         const nbSupplementaires = evs.length - evsVisibles.length;
 
                         return (
-                          <TouchableOpacity
+                          <TapZone
                             key={di}
+                            gesteExterne={gesteSwipe}
                             style={[
                               styles.monthCell,
                               { borderColor: C.separateur },
@@ -1114,8 +1194,8 @@ export default function Planning() {
                                 backgroundColor: teinteAujourdhui,
                               },
                             ]}
-                            activeOpacity={0.7}
-                            onPress={() => ouvrirJour(jourDate)}
+                            opaciteAuToucher={0.7}
+                            onTap={() => ouvrirJour(jourDate)}
                           >
                             <Text
                               style={[
@@ -1155,7 +1235,7 @@ export default function Planning() {
                                 +{nbSupplementaires}
                               </Text>
                             )}
-                          </TouchableOpacity>
+                          </TapZone>
                         );
                       })}
                     </View>
@@ -1194,8 +1274,16 @@ export default function Planning() {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <View style={styles.modalOverlayTouch}>
-            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+          <TouchableOpacity
+            style={styles.modalOverlayTouch}
+            activeOpacity={1}
+            onPress={fermerModalCreationAvecSauvegarde}
+          >
+            <TouchableOpacity
+              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              activeOpacity={1}
+              onPress={() => {}}
+            >
               <>
                   <View style={styles.modalHeader}>
                     <Text style={[styles.modalTitre, { color: C.texte }]}>
@@ -1926,8 +2014,8 @@ export default function Planning() {
                   </ScrollView>
                 </>
 
-            </View>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </KeyboardAvoidingView>
       </Modal>
     </View>

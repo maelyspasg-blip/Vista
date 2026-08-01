@@ -17,3 +17,14 @@ export function sanitizeMontantInput(text: string): string {
 export function parseMontant(text: string): number {
   return parseFloat(text.replace(',', '.'));
 }
+
+// Point central d'arrondi pour tout montant affiché : l'arithmétique flottante
+// JS produit régulièrement des valeurs comme 32.019999999999996 après une
+// suite d'additions/soustractions/pourcentages — jamais visible dans le
+// calcul lui-même, seulement à l'affichage. À appeler sur toute valeur
+// numérique interpolée directement dans du texte (ex: `${formaterMontant(x)} €`),
+// sauf si elle est déjà passée par Math.round (ou par NombreAnime, qui arrondit
+// en interne).
+export function formaterMontant(montant: number): number {
+  return Math.round((montant + Number.EPSILON) * 100) / 100;
+}

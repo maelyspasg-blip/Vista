@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
+import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { getInitiales } from "../../utils/initiales";
 import { moisPrecedent, totalParType } from "../../utils/exportExcel";
+import { entreesBudgetDuMois, estCategorieActiveCeMois } from "../../utils/budget";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -40,6 +41,10 @@ function bgClair(couleur: string) {
 
 function dateVersISO(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function premierJourMoisISO(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
 function formaterDateLongue(dateISO: string): string {
@@ -130,7 +135,7 @@ function DonutChart({
       </Svg>
       <View style={{ position: "absolute", alignItems: "center" }}>
         <Text style={{ fontSize: 19, fontWeight: "700", color: C.texte }}>
-          {total} €
+          {formaterMontant(total)} €
         </Text>
         <Text style={{ fontSize: 11, color: C.texteMuted }}>dépensé</Text>
       </View>
@@ -139,6 +144,7 @@ function DonutChart({
 }
 
 const ACCESSORY_ID = "numericDone";
+const COULEUR_BUDGET = "#845EC2";
 
 export default function Dashboard() {
   const objStore = useObjectifs();
@@ -146,25 +152,11 @@ export default function Dashboard() {
   const { reduireAnimations } = useAccessibilite();
   const C = couleurs;
   const router = useRouter();
+  const [fabMenuOuvert, setFabMenuOuvert] = useState(false);
 
   const enveloppes = objStore.enveloppes;
   const setEnveloppes = (nouvellesEnveloppes: Enveloppe[]) =>
     objStore.modifierEnveloppes(nouvellesEnveloppes);
-  const [argentDisponible, setArgentDisponibleLocal] = useState(
-    String(objStore.argentDisponible),
-  );
-  useEffect(() => {
-    setArgentDisponibleLocal(String(objStore.argentDisponible));
-  }, [objStore.argentDisponible]);
-  const setArgentDisponible = (
-    val: string,
-    recurrent: boolean,
-    reportAuto: boolean,
-  ) => {
-    setArgentDisponibleLocal(val);
-    objStore.modifierArgentDisponible(parseMontant(val) || 0, recurrent, reportAuto);
-  };
-  const [editionDisponible, setEditionDisponible] = useState(false);
   const [deltaRestePourcentage, setDeltaRestePourcentage] = useState(false);
   const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(false);
   const [triCategories, setTriCategories] = useState<
@@ -174,18 +166,22 @@ export default function Dashboard() {
     setTriCategories((t) =>
       t === "alpha" ? "montantAsc" : t === "montantAsc" ? "montantDesc" : "alpha",
     );
-  const [disponibleRecurrentTemp, setDisponibleRecurrentTemp] = useState(
-    objStore.argentDisponibleRecurrent,
-  );
-  const [disponibleReportTemp, setDisponibleReportTemp] = useState(
-    objStore.argentDisponibleReportAuto,
-  );
   const maintenant = new Date();
-  const moisActuelLabel = maintenant.toLocaleDateString("fr-FR", {
-    month: "long",
-    year: "numeric",
-  });
-  const [disponibleTemp, setDisponibleTemp] = useState("1800");
+
+  const [modalAjoutEntreeBudgetVisible, setModalAjoutEntreeBudgetVisible] =
+    useState(false);
+  const [nomEntreeBudget, setNomEntreeBudget] = useState("");
+  const [montantEntreeBudget, setMontantEntreeBudget] = useState("");
+  const [dateEntreeBudget, setDateEntreeBudget] = useState(
+    dateVersISO(new Date()),
+  );
+  const [moisComptageEntreeBudget, setMoisComptageEntreeBudget] = useState(
+    premierJourMoisISO(new Date()),
+  );
+  const [recurrenteEntreeBudget, setRecurrenteEntreeBudget] = useState(false);
+  const [creationEntreeBudgetEnCours, setCreationEntreeBudgetEnCours] =
+    useState(false);
+  const [entreesBudgetOuvert, setEntreesBudgetOuvert] = useState(false);
 
   const [modalEnveloppeVisible, setModalEnveloppeVisible] = useState(false);
   const [enveloppeEnEdition, setEnveloppeEnEdition] =
@@ -236,45 +232,34 @@ export default function Dashboard() {
     useState(false);
   const [objectifsCloturesOuvert, setObjectifsCloturesOuvert] =
     useState(false);
-  const [entreesDisponibleOuvert, setEntreesDisponibleOuvert] =
-    useState(false);
 
-  const enveloppesTriees = [...enveloppes].sort((a, b) => {
+  // Une catégorie ponctuelle (non récurrente) ne doit plus apparaître dans
+  // les catégories actives une fois son mois passé — Entrée/Budget,
+  // Variable non récurrente, Fixe qui ne se répète pas. Une catégorie
+  // permanente (récurrente) reste toujours affichée. Voir
+  // utils/budget.ts:estCategorieActiveCeMois pour le détail par type.
+  const enveloppesActives = enveloppes.filter((e) =>
+    estCategorieActiveCeMois(e, maintenant.getFullYear(), maintenant.getMonth()),
+  );
+  const enveloppesTriees = [...enveloppesActives].sort((a, b) => {
     if (triCategories === "alpha") return a.nom.localeCompare(b.nom, "fr");
     return triCategories === "montantAsc"
       ? a.depense - b.depense
       : b.depense - a.depense;
   });
   const enveloppesSansEntree = enveloppes.filter((e) => e.type !== "Entrée");
-  const enveloppesEntree = enveloppes.filter((e) => e.type === "Entrée");
   const totalDepenseEnveloppes = enveloppesSansEntree.reduce(
     (acc, e) => acc + e.depense,
     0,
   );
-  const totalEntreeRecue = enveloppesEntree.reduce(
-    (acc, e) => acc + e.depense,
-    0,
+  const budgetMois = entreesBudgetDuMois(
+    enveloppes,
+    maintenant.getFullYear(),
+    maintenant.getMonth(),
   );
-  const totalEntreePrevue = enveloppesEntree.reduce(
-    (acc, e) => acc + Math.max(0, e.budget - e.depense),
-    0,
-  );
-  const entreesRecuesCeMois = enveloppesEntree
-    .filter((e) => {
-      if (!e.payee || !e.dateFixe) return false;
-      const d = new Date(e.dateFixe);
-      return (
-        d.getMonth() === maintenant.getMonth() &&
-        d.getFullYear() === maintenant.getFullYear()
-      );
-    })
-    .sort(
-      (a, b) =>
-        new Date(b.dateFixe!).getTime() - new Date(a.dateFixe!).getTime(),
-    );
-  const totalEntreesRecuesCeMois = entreesRecuesCeMois.reduce(
-    (acc, e) => acc + e.budget,
-    0,
+  const entreesBudgetTriees = [...budgetMois.entrees].sort(
+    (a, b) =>
+      new Date(b.dateFixe ?? 0).getTime() - new Date(a.dateFixe ?? 0).getTime(),
   );
 
   const depensesNonCategorisees = objStore.evenements
@@ -293,8 +278,7 @@ export default function Dashboard() {
     })
     .reduce((acc, e) => acc + (e.montant ?? 0), 0);
 
-  const disponibleNum = parseMontant(argentDisponible) || 0;
-  const disponibleEffectif = disponibleNum + totalEntreeRecue + totalEntreePrevue;
+  const disponibleEffectif = budgetMois.total;
   // Montant encore budgété mais non dépensé dans chaque catégorie de
   // dépense — le "forecast" restant. Avec totalDepenseEnveloppes, couvre le
   // budget complet de chaque catégorie (dépensé + à venir), sans jamais
@@ -489,10 +473,28 @@ export default function Dashboard() {
                 typeTemp === "Fixe" ? repeteChaqueMoisTemp : undefined,
               afficherDansPlanning:
                 typeTemp === "Fixe" ? afficherPlanningTemp : undefined,
+              // Une catégorie Variable qui devient non récurrente ici et
+              // n'a encore jamais eu de mois de comptage (ex: elle était
+              // récurrente depuis sa création, donc jamais concernée par le
+              // backfill) est rattachée à maintenant, pour ne pas
+              // disparaître immédiatement de "Tes catégories" au moment de
+              // cet enregistrement. Une catégorie déjà non récurrente garde
+              // son mois de comptage existant, même modifiée par ailleurs —
+              // sinon toute retouche (couleur, budget...) la "ressusciterait"
+              // en repoussant indéfiniment son expiration.
+              moisComptage:
+                typeTemp === "Variable" && !recurrenteTemp && !e.moisComptage
+                  ? premierJourMoisISO(new Date())
+                  : e.moisComptage,
             }
           : e,
       ),
     );
+    setModalEnveloppeVisible(false);
+  };
+
+  const fermerModalEnveloppeAvecSauvegarde = () => {
+    sauvegarderEnveloppe();
     setModalEnveloppeVisible(false);
   };
 
@@ -537,6 +539,13 @@ export default function Dashboard() {
         nouveauType === "Fixe" ? nouveauRepeteChaqueMois : undefined,
       afficherDansPlanning:
         nouveauType === "Fixe" ? nouveauAfficherPlanning : undefined,
+      // Une catégorie Variable non récurrente n'a pas de date naturelle
+      // (contrairement à Fixe/Entrée qui ont dateFixe) — on la rattache
+      // explicitement à son mois de création pour qu'elle expire
+      // correctement de "Tes catégories" une fois ce mois passé si elle
+      // n'est pas récurrente (cf. utils/budget.ts:estCategorieActiveCeMois).
+      moisComptage:
+        nouveauType === "Variable" ? premierJourMoisISO(new Date()) : undefined,
     });
     setCreationEnveloppeEnCours(false);
     if (!nouvelle) return;
@@ -552,9 +561,57 @@ export default function Dashboard() {
     setModalAjoutVisible(false);
   };
 
-  const sauvegarderDisponible = () => {
-    setArgentDisponible(disponibleTemp, disponibleRecurrentTemp, disponibleReportTemp);
-    setEditionDisponible(false);
+  const fermerModalAjoutAvecSauvegarde = () => {
+    ajouterEnveloppe();
+    setModalAjoutVisible(false);
+  };
+
+  const ajouterEntreeBudget = async () => {
+    if (
+      !nomEntreeBudget ||
+      !montantEntreeBudget ||
+      creationEntreeBudgetEnCours
+    )
+      return;
+    setCreationEntreeBudgetEnCours(true);
+    const nouvelle = await objStore.ajouterEnveloppe({
+      nom: nomEntreeBudget,
+      depense: 0,
+      budget: parseMontant(montantEntreeBudget),
+      couleur: COULEUR_BUDGET,
+      type: "Entrée",
+      recurrente: recurrenteEntreeBudget,
+      dateFixe: dateEntreeBudget,
+      moisComptage: moisComptageEntreeBudget,
+    });
+    setCreationEntreeBudgetEnCours(false);
+    if (!nouvelle) return;
+    setNomEntreeBudget("");
+    setMontantEntreeBudget("");
+    setDateEntreeBudget(dateVersISO(new Date()));
+    setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
+    setRecurrenteEntreeBudget(false);
+    setModalAjoutEntreeBudgetVisible(false);
+  };
+
+  const fermerModalAjoutEntreeBudgetAvecSauvegarde = () => {
+    ajouterEntreeBudget();
+    setModalAjoutEntreeBudgetVisible(false);
+  };
+
+  // Bouton "+" flottant : menu à 2 choix réutilisant les formulaires déjà
+  // existants (dépense = Budget, entrée = carte Budget d'Aperçu) au lieu
+  // d'en dupliquer un troisième.
+  const ouvrirAjoutDepenseDepuisFab = () => {
+    setFabMenuOuvert(false);
+    router.push({ pathname: "/budget", params: { ouvrirAjout: "1" } });
+  };
+
+  const ouvrirAjoutEntreeDepuisFab = () => {
+    setFabMenuOuvert(false);
+    setDateEntreeBudget(dateVersISO(new Date()));
+    setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
+    setModalAjoutEntreeBudgetVisible(true);
   };
 
   const ouvrirModalEpargne = () => {
@@ -566,6 +623,14 @@ export default function Dashboard() {
   const sauvegarderEtFermerEpargne = () => {
     objStore.modifierEpargneMois(parseMontant(epargneTemp) || 0);
     setModalEpargneVisible(false);
+  };
+
+  const fermerModalEpargneAvecSauvegarde = () => {
+    if (vueModal === "liste") {
+      sauvegarderEtFermerEpargne();
+    } else {
+      sauvegarderObjectif();
+    }
   };
 
   const resetFormObjectif = () => {
@@ -763,7 +828,7 @@ export default function Dashboard() {
                 >
                   {deltaRestePourcentage && pctDeltaReste !== null
                     ? `${pctDeltaReste > 0 ? "+" : ""}${pctDeltaReste.toFixed(0)} %`
-                    : `${deltaReste > 0 ? "+" : ""}${deltaReste} €`}
+                    : `${deltaReste > 0 ? "+" : ""}${formaterMontant(deltaReste)} €`}
                   {" vs mois dernier"}
                 </Text>
               </TouchableOpacity>
@@ -834,7 +899,7 @@ export default function Dashboard() {
                   },
                 ]}
               >
-                Dépensé {totalDepenseEnveloppes}€
+                Dépensé {formaterMontant(totalDepenseEnveloppes)}€
               </Text>
             </View>
             {objStore.epargneMois > 0 && (
@@ -855,7 +920,7 @@ export default function Dashboard() {
                     },
                   ]}
                 >
-                  Argent immobilisé {objStore.epargneMois}€
+                  Argent immobilisé {formaterMontant(objStore.epargneMois)}€
                 </Text>
                 <Ionicons
                   name={argentImmobiliseOuvert ? "chevron-up" : "chevron-down"}
@@ -878,7 +943,7 @@ export default function Dashboard() {
                     },
                   ]}
                 >
-                  Épargne {epargneGenerique}€
+                  Épargne {formaterMontant(epargneGenerique)}€
                 </Text>
               </View>
             )}
@@ -896,7 +961,7 @@ export default function Dashboard() {
                     },
                   ]}
                 >
-                  Objectifs {contributionObjectifsTotal}€
+                  Objectifs {formaterMontant(contributionObjectifsTotal)}€
                 </Text>
               </View>
             )}
@@ -912,7 +977,7 @@ export default function Dashboard() {
                     },
                   ]}
                 >
-                  Dépense prévue {totalDepensePrevue}€
+                  Dépense prévue {formaterMontant(totalDepensePrevue)}€
                 </Text>
               </View>
             )}
@@ -1000,62 +1065,43 @@ export default function Dashboard() {
                   },
             ]}
           >
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => {
-                setDisponibleTemp(disponibleNum === 0 ? "" : argentDisponible);
-                setDisponibleRecurrentTemp(objStore.argentDisponibleRecurrent);
-                setDisponibleReportTemp(objStore.argentDisponibleReportAuto);
-                setEditionDisponible(true);
-              }}
-            >
-              <View style={styles.statLabelRow}>
-                <Text
-                  style={[
-                    styles.statLabel,
-                    { color: theme === "sombre" ? C.peach : C.texteMuted },
-                  ]}
-                >
-                  BUDGET
-                </Text>
-                <Ionicons
-                  name="pencil-outline"
-                  size={12}
-                  color={theme === "sombre" ? C.peach : C.texteMuted}
-                />
-              </View>
+            <View style={styles.statLabelRow}>
               <Text
                 style={[
-                  styles.statValue,
-                  { color: theme === "sombre" ? C.peachText : C.texte },
+                  styles.statLabel,
+                  { color: theme === "sombre" ? C.peach : C.texteMuted },
                 ]}
               >
-                {disponibleEffectif} €
+                BUDGET
               </Text>
-            </TouchableOpacity>
+            </View>
+            <Text
+              style={[
+                styles.statValue,
+                { color: theme === "sombre" ? C.peachText : C.texte },
+              ]}
+            >
+              {formaterMontant(disponibleEffectif)} €
+            </Text>
 
-            {entreesRecuesCeMois.length > 0 && (
+            {entreesBudgetTriees.length > 0 && (
               <>
                 <TouchableOpacity
                   activeOpacity={0.7}
                   style={styles.statImpactRow}
-                  onPress={() =>
-                    setEntreesDisponibleOuvert(!entreesDisponibleOuvert)
-                  }
+                  onPress={() => setEntreesBudgetOuvert(!entreesBudgetOuvert)}
                 >
                   <Text style={[styles.statImpactTexte, { color: C.vertText }]}>
-                    dont {entreesRecuesCeMois.length} entrée
-                    {entreesRecuesCeMois.length > 1 ? "s" : ""} reçue
-                    {entreesRecuesCeMois.length > 1 ? "s" : ""} ce mois-ci
-                    (+{totalEntreesRecuesCeMois}€)
+                    {entreesBudgetTriees.length} entrée
+                    {entreesBudgetTriees.length > 1 ? "s" : ""} ce mois-ci
                   </Text>
                   <Text style={[styles.statImpactChevron, { color: C.vertText }]}>
-                    {entreesDisponibleOuvert ? "▾" : "▸"}
+                    {entreesBudgetOuvert ? "▾" : "▸"}
                   </Text>
                 </TouchableOpacity>
-                {entreesDisponibleOuvert && (
+                {entreesBudgetOuvert && (
                   <View style={styles.statImpactTiroir}>
-                    {entreesRecuesCeMois.map((e) => (
+                    {entreesBudgetTriees.map((e) => (
                       <View key={e.id} style={styles.statImpactLigne}>
                         <Text
                           style={[styles.statImpactLigneNom, { color: C.texte }]}
@@ -1066,10 +1112,14 @@ export default function Dashboard() {
                         <Text
                           style={[
                             styles.statImpactLigneDetail,
-                            { color: C.vertText },
+                            { color: e.payee ? C.vertText : C.texteMuted },
                           ]}
                         >
-                          +{e.budget}€ · {formaterDateLongue(e.dateFixe!)}
+                          {e.payee ? "+" : ""}
+                          {formaterMontant(e.payee ? e.depense : e.budget)}€
+                          {e.dateFixe
+                            ? ` · ${e.payee ? "reçu" : "attendu"} ${formaterDateLongue(e.dateFixe)}`
+                            : ""}
                         </Text>
                       </View>
                     ))}
@@ -1077,6 +1127,42 @@ export default function Dashboard() {
                 )}
               </>
             )}
+
+            <TouchableOpacity
+              style={styles.budgetAjouterBouton}
+              activeOpacity={0.7}
+              onPress={() => {
+                setDateEntreeBudget(dateVersISO(new Date()));
+                setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
+                setModalAjoutEntreeBudgetVisible(true);
+              }}
+            >
+              <Text style={[styles.budgetAjouterTexte, { color: C.purple }]}>
+                + Ajouter une entrée
+              </Text>
+            </TouchableOpacity>
+
+            <View style={styles.budgetReportRow}>
+              <View style={styles.budgetReportLabelLigne}>
+                <Text
+                  style={[styles.budgetReportTexte, { color: C.texteMuted }]}
+                >
+                  Reporter le reste non dépensé
+                </Text>
+                <InfoBulle
+                  titre="Reporter le reste"
+                  texte="Le reste non dépensé de ce mois (Budget moins dépenses moins épargne) est ajouté automatiquement au Budget du mois suivant, sous forme d'une entrée « Report du mois précédent »."
+                />
+              </View>
+              <Switch
+                value={objStore.argentDisponibleReportAuto}
+                onValueChange={(v) => objStore.modifierReportAutoBudget(v)}
+                trackColor={{ false: C.separateur, true: C.purpleLight }}
+                thumbColor={
+                  objStore.argentDisponibleReportAuto ? C.purple : "#FFF"
+                }
+              />
+            </View>
           </View>
         </View>
 
@@ -1116,7 +1202,7 @@ export default function Dashboard() {
             </Text>
           </View>
           <Text style={[styles.epargneMontantAffiche, { color: C.accent }]}>
-            {objStore.epargneMois} €
+            {formaterMontant(objStore.epargneMois)} €
           </Text>
         </TouchableOpacity>
 
@@ -1142,7 +1228,7 @@ export default function Dashboard() {
                 { color: C.texteMuted },
               ]}
             >
-              {depensesNonCategorisees}€ de dépenses non catégorisées
+              {formaterMontant(depensesNonCategorisees)}€ de dépenses non catégorisées
             </Text>
           </TouchableOpacity>
         )}
@@ -1301,7 +1387,7 @@ export default function Dashboard() {
                   )}
                 </View>
                 <Text style={[styles.envMontant, { color: env.couleur }]}>
-                  {env.depense} € / {env.budget} €
+                  {formaterMontant(env.depense)} € / {formaterMontant(env.budget)} €
                 </Text>
               </View>
               <View
@@ -1367,8 +1453,56 @@ export default function Dashboard() {
           </View>
         </View>
 
-        <View style={{ height: 30 }} />
+        <View style={{ height: 90 }} />
       </ScrollView>
+
+      <View style={styles.fabContainer} pointerEvents="box-none">
+        {fabMenuOuvert && (
+          <View style={styles.fabMenu}>
+            <TouchableOpacity
+              style={styles.fabMenuItem}
+              activeOpacity={0.7}
+              onPress={ouvrirAjoutDepenseDepuisFab}
+              accessibilityRole="button"
+              accessibilityLabel="Ajouter une dépense"
+            >
+              <Text style={styles.fabMenuLabel}>
+                Dépense
+              </Text>
+              <View
+                style={[styles.fabMenuPastille, { backgroundColor: C.peachLight }]}
+              >
+                <Ionicons name="remove" size={16} color={C.peachText} />
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.fabMenuItem}
+              activeOpacity={0.7}
+              onPress={ouvrirAjoutEntreeDepuisFab}
+              accessibilityRole="button"
+              accessibilityLabel="Ajouter une entrée d'argent"
+            >
+              <Text style={styles.fabMenuLabel}>
+                Entrée d&apos;argent
+              </Text>
+              <View
+                style={[styles.fabMenuPastille, { backgroundColor: C.accentLight }]}
+              >
+                <Ionicons name="add" size={16} color={C.accentText} />
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+        <TouchableOpacity
+          style={[styles.fab, { backgroundColor: C.purple }]}
+          activeOpacity={0.8}
+          onPress={() => setFabMenuOuvert((v) => !v)}
+          accessibilityRole="button"
+          accessibilityLabel={fabMenuOuvert ? "Fermer le menu d'ajout" : "Ajouter"}
+        >
+          <Text style={styles.fabTexte}>{fabMenuOuvert ? "×" : "+"}</Text>
+        </TouchableOpacity>
+      </View>
 
       {Platform.OS === "ios" && (
         <InputAccessoryView nativeID={ACCESSORY_ID}>
@@ -1388,105 +1522,190 @@ export default function Dashboard() {
       )}
 
       <Modal
-        visible={editionDisponible}
+        visible={modalAjoutEntreeBudgetVisible}
         animationType={reduireAnimations ? "none" : "slide"}
         transparent
-        onRequestClose={() => setEditionDisponible(false)}
+        onRequestClose={() => setModalAjoutEntreeBudgetVisible(false)}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <View style={styles.modalOverlayTouch}>
-            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+          <TouchableOpacity
+            style={styles.modalOverlayTouch}
+            activeOpacity={1}
+            onPress={fermerModalAjoutEntreeBudgetAvecSauvegarde}
+          >
+            <TouchableOpacity
+              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              activeOpacity={1}
+              onPress={() => {}}
+            >
               <Text style={[styles.modalTitre, { color: C.texte }]}>
-                Montant du budget
+                Nouvelle entrée de Budget
               </Text>
-              <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                Montant total pour ce mois
-              </Text>
-              <View style={styles.modalInputRow}>
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                  Nom
+                </Text>
                 <TextInput
                   style={[
                     styles.input,
-                    { flex: 1, backgroundColor: C.fondSecondaire, color: C.texte },
+                    { backgroundColor: C.fondSecondaire, color: C.texte },
                   ]}
-                  keyboardType="decimal-pad"
-                  value={disponibleTemp}
-                  onChangeText={(text) => setDisponibleTemp(sanitizeMontantInput(text))}
+                  placeholder="Ex : Salaire, Prime..."
+                  placeholderTextColor={C.texteMuted}
+                  value={nomEntreeBudget}
+                  onChangeText={setNomEntreeBudget}
                   returnKeyType="done"
-                  onSubmitEditing={() => Keyboard.dismiss()}
-                  autoFocus
-                  inputAccessoryViewID={ACCESSORY_ID}
                 />
-                <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
-              </View>
-              <View style={styles.switchRow}>
-                <View style={styles.switchRowLabel}>
-                  <Text style={[styles.switchLabel, { color: C.texte }]}>
-                    Répéter ce montant chaque mois
-                  </Text>
-                  <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                    Repris automatiquement le mois suivant
-                  </Text>
-                </View>
-                <Switch
-                  value={disponibleRecurrentTemp}
-                  onValueChange={setDisponibleRecurrentTemp}
-                  trackColor={{ false: C.separateur, true: C.purpleLight }}
-                  thumbColor={disponibleRecurrentTemp ? C.purple : "#FFF"}
-                />
-              </View>
-              <View style={styles.switchRow}>
-                <View style={styles.switchRowLabel}>
-                  <View style={styles.switchLabelLigne}>
-                    <Text
-                      style={[
-                        styles.switchLabel,
-                        { color: C.texte, flexShrink: 1 },
-                      ]}
-                    >
-                      Reporter le reste non dépensé au mois prochain
-                    </Text>
-                    <InfoBulle
-                      titre="Reporter le reste"
-                      texte="Le reste est calculé comme Budget + entrées d'argent - dépenses réelles - épargne. Ce montant est ajouté au Budget du mois suivant."
-                    />
-                  </View>
-                  <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                    Ce qu&apos;il reste une fois les dépenses et
-                    l&apos;épargne déduites s&apos;ajoute au Budget du
-                    mois suivant, en plus du montant récurrent éventuel.
-                  </Text>
-                </View>
-                <Switch
-                  value={disponibleReportTemp}
-                  onValueChange={setDisponibleReportTemp}
-                  trackColor={{ false: C.separateur, true: C.purpleLight }}
-                  thumbColor={disponibleReportTemp ? C.purple : "#FFF"}
-                />
-              </View>
-              <TouchableOpacity
-                style={[styles.btnAjouter, { backgroundColor: C.hero }]}
-                onPress={() => {
-                  Keyboard.dismiss();
-                  sauvegarderDisponible();
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.btnAjouterTexte}>Enregistrer</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.btnAnnuler}
-                onPress={() => setEditionDisponible(false)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
-                  Annuler
+
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                  Montant
                 </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+                <View style={styles.modalInputRow}>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      { flex: 1, backgroundColor: C.fondSecondaire, color: C.texte },
+                    ]}
+                    placeholder="0"
+                    placeholderTextColor={C.texteMuted}
+                    keyboardType="decimal-pad"
+                    value={montantEntreeBudget}
+                    onChangeText={(text) =>
+                      setMontantEntreeBudget(sanitizeMontantInput(text))
+                    }
+                    returnKeyType="done"
+                    inputAccessoryViewID={ACCESSORY_ID}
+                  />
+                  <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
+                </View>
+
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                  Date réelle
+                </Text>
+                <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
+                  <Calendar
+                    current={dateEntreeBudget}
+                    onDayPress={(day) => {
+                      setDateEntreeBudget(day.dateString);
+                      setMoisComptageEntreeBudget(
+                        premierJourMoisISO(new Date(day.dateString)),
+                      );
+                    }}
+                    markedDates={{
+                      [dateEntreeBudget]: { selected: true, selectedColor: C.purple },
+                    }}
+                    theme={{
+                      calendarBackground: C.carte,
+                      dayTextColor: C.texte,
+                      monthTextColor: C.texte,
+                      textDisabledColor: C.texteMuted,
+                      textSectionTitleColor: C.texteMuted,
+                      selectedDayTextColor: "#FFFFFF",
+                      selectedDayBackgroundColor: C.purple,
+                      todayTextColor: C.purple,
+                      arrowColor: C.purple,
+                    }}
+                  />
+                </View>
+
+                <View style={styles.switchLabelLigne}>
+                  <Text style={[styles.modalLabel, { color: C.texteMuted, marginBottom: 0 }]}>
+                    Compter pour le mois de
+                  </Text>
+                  <InfoBulle
+                    titre="Compter pour le mois de"
+                    texte="Par défaut, le mois calendaire de la date réelle. Change-le si tu veux qu'un montant reçu en fin de mois soit compté pour le mois suivant."
+                  />
+                </View>
+                <View style={styles.typeRow}>
+                  {Array.from({ length: 4 }, (_, i) => {
+                    const d = new Date(
+                      maintenant.getFullYear(),
+                      maintenant.getMonth() + i,
+                      1,
+                    );
+                    const iso = premierJourMoisISO(d);
+                    const selectionne = moisComptageEntreeBudget === iso;
+                    return (
+                      <TouchableOpacity
+                        key={iso}
+                        style={[
+                          styles.typeChip,
+                          { backgroundColor: C.fondSecondaire },
+                          selectionne && { backgroundColor: C.purple },
+                        ]}
+                        onPress={() => setMoisComptageEntreeBudget(iso)}
+                        activeOpacity={0.7}
+                      >
+                        <Text
+                          style={[
+                            styles.typeChipTexte,
+                            { color: C.texteMuted },
+                            selectionne && styles.typeChipTexteActif,
+                          ]}
+                        >
+                          {d.toLocaleDateString("fr-FR", { month: "short" })}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <View style={styles.switchRow}>
+                  <View style={styles.switchRowLabel}>
+                    <Text style={[styles.switchLabel, { color: C.texte }]}>
+                      Répéter ce montant chaque mois
+                    </Text>
+                    <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                      Une nouvelle entrée identique sera créée automatiquement
+                      le mois suivant
+                    </Text>
+                  </View>
+                  <Switch
+                    value={recurrenteEntreeBudget}
+                    onValueChange={setRecurrenteEntreeBudget}
+                    trackColor={{ false: C.separateur, true: C.purpleLight }}
+                    thumbColor={recurrenteEntreeBudget ? C.purple : "#FFF"}
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.btnAjouter,
+                    {
+                      backgroundColor: C.hero,
+                      opacity: creationEntreeBudgetEnCours ? 0.6 : 1,
+                    },
+                  ]}
+                  onPress={ajouterEntreeBudget}
+                  activeOpacity={0.7}
+                  disabled={creationEntreeBudgetEnCours}
+                >
+                  {creationEntreeBudgetEnCours ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.btnAjouterTexte}>Ajouter</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.btnAnnuler}
+                  onPress={() => setModalAjoutEntreeBudgetVisible(false)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                    Annuler
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -1500,8 +1719,16 @@ export default function Dashboard() {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <View style={styles.modalOverlayTouch}>
-            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+          <TouchableOpacity
+            style={styles.modalOverlayTouch}
+            activeOpacity={1}
+            onPress={fermerModalEnveloppeAvecSauvegarde}
+          >
+            <TouchableOpacity
+              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              activeOpacity={1}
+              onPress={() => {}}
+            >
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitre, { color: C.texte }]}>Modifier la catégorie</Text>
               </View>
@@ -1758,8 +1985,8 @@ export default function Dashboard() {
                   <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>Annuler</Text>
                 </TouchableOpacity>
               </ScrollView>
-            </View>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -1773,8 +2000,16 @@ export default function Dashboard() {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <View style={styles.modalOverlayTouch}>
-            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+          <TouchableOpacity
+            style={styles.modalOverlayTouch}
+            activeOpacity={1}
+            onPress={fermerModalAjoutAvecSauvegarde}
+          >
+            <TouchableOpacity
+              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              activeOpacity={1}
+              onPress={() => {}}
+            >
               <Text style={[styles.modalTitre, { color: C.texte }]}>Nouvelle catégorie</Text>
 
               <ScrollView
@@ -2067,8 +2302,8 @@ export default function Dashboard() {
                   <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>Annuler</Text>
                 </TouchableOpacity>
               </ScrollView>
-            </View>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -2082,8 +2317,16 @@ export default function Dashboard() {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <View style={styles.modalOverlayTouch}>
-            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+          <TouchableOpacity
+            style={styles.modalOverlayTouch}
+            activeOpacity={1}
+            onPress={fermerModalEpargneAvecSauvegarde}
+          >
+            <TouchableOpacity
+              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              activeOpacity={1}
+              onPress={() => {}}
+            >
               {vueModal === "liste" ? (
                 <>
                   <View style={styles.modalHeader}>
@@ -2197,7 +2440,7 @@ export default function Dashboard() {
                               { color: obj.couleur },
                             ]}
                           >
-                            {obj.actuel} € / {obj.cible} €
+                            {formaterMontant(obj.actuel)} € / {formaterMontant(obj.cible)} €
                           </Text>
                           <View style={[styles.catBarBg, { backgroundColor: C.separateur }]}>
                             <View
@@ -2276,7 +2519,7 @@ export default function Dashboard() {
                                     { color: obj.couleur },
                                   ]}
                                 >
-                                  {obj.actuel} € / {obj.cible} €
+                                  {formaterMontant(obj.actuel)} € / {formaterMontant(obj.cible)} €
                                 </Text>
                                 <View style={[styles.catBarBg, { backgroundColor: C.separateur }]}>
                                   <View
@@ -2619,8 +2862,8 @@ export default function Dashboard() {
                   </ScrollView>
                 </>
               )}
-            </View>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </KeyboardAvoidingView>
       </Modal>
     </View>
@@ -2807,6 +3050,31 @@ const styles = StyleSheet.create({
   },
   statImpactLigneNom: { flex: 1, fontSize: 12, fontWeight: "600" },
   statImpactLigneDetail: { fontSize: 12, fontWeight: "600" },
+  budgetAjouterBouton: {
+    alignSelf: "stretch",
+    alignItems: "center",
+    marginTop: 10,
+    paddingVertical: 6,
+  },
+  budgetAjouterTexte: { fontSize: 13, fontWeight: "700" },
+  budgetReportRow: {
+    alignSelf: "stretch",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(128,128,128,0.25)",
+  },
+  budgetReportLabelLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flex: 1,
+    marginRight: 10,
+  },
+  budgetReportTexte: { fontSize: 12, fontWeight: "600", flexShrink: 1 },
   epargneCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -3075,4 +3343,60 @@ const styles = StyleSheet.create({
     borderTopWidth: 0.5,
   },
   accessoryTexte: { fontSize: 17, fontWeight: "700" },
+  fabContainer: {
+    position: "absolute",
+    right: 20,
+    bottom: 20,
+    alignItems: "flex-end",
+  },
+  fab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  fabTexte: {
+    fontSize: 28,
+    color: "#FFFFFF",
+    fontWeight: "300",
+    lineHeight: 32,
+  },
+  fabMenu: {
+    marginBottom: 14,
+    gap: 10,
+    alignItems: "flex-end",
+  },
+  fabMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  fabMenuLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    backgroundColor: "rgba(0,0,0,0.75)",
+    color: "#FFFFFF",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  fabMenuPastille: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
 });

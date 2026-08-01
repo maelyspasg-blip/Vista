@@ -4,6 +4,7 @@ import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { BarreProgression } from "./BarreProgression";
 import { PALETTE_COULEURS } from "./ColorPicker";
 import { useObjectifs } from "./store";
+import { formaterMontant } from "../utils/montant";
 import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
 import {
@@ -37,7 +38,6 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
     transactions: objStore.transactions,
     historiquesMois: objStore.historiquesMois,
     epargneMois: objStore.epargneMois,
-    argentDisponible: objStore.argentDisponible,
   };
 
   const envs = categoriesDuMois(donnees, mois, annee) ?? [];
@@ -149,7 +149,7 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                 </View>
                 <View style={styles.envRowRight}>
                   <Text style={[styles.envMontant, { color: couleur }]}>
-                    {env.depense} € / {env.budget} €
+                    {formaterMontant(env.depense)} € / {formaterMontant(env.budget)} €
                   </Text>
                   <Text style={[styles.chevron, { color: couleur }]}>
                     {estOuverte ? "▾" : "▸"}
@@ -164,7 +164,7 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
               />
               {montantMoisPrecedent !== null && deltaMoisPrecedent !== null && (
                 <Text style={[styles.envDeltaTexte, { color: C.texteMuted }]}>
-                  Mois précédent : {montantMoisPrecedent} €{" "}
+                  Mois précédent : {formaterMontant(montantMoisPrecedent)} €{" "}
                   <Text
                     onPress={() =>
                       setDeltaPourcentagePour((prev) => ({
@@ -180,7 +180,7 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                     (
                     {deltaPourcentagePour[env.id] && pctDeltaMoisPrecedent !== null
                       ? `${pctDeltaMoisPrecedent > 0 ? "+" : ""}${pctDeltaMoisPrecedent.toFixed(0)} %`
-                      : `${deltaMoisPrecedent > 0 ? "+" : ""}${deltaMoisPrecedent} €`}
+                      : `${deltaMoisPrecedent > 0 ? "+" : ""}${formaterMontant(deltaMoisPrecedent)} €`}
                     )
                   </Text>
                 </Text>
@@ -203,7 +203,7 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                         </Text>
                       </View>
                       <Text style={[styles.txMontant, { color: couleur }]}>
-                        - {ligne.montant} €
+                        - {formaterMontant(ligne.montant)} €
                       </Text>
                     </View>
                   ))
@@ -230,7 +230,7 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                     <Text style={[styles.envNom, { color: C.texte }]}>{o.nom}</Text>
                   </View>
                   <Text style={[styles.envMontant, { color: couleur }]}>
-                    {o.actuel} € / {o.cible} €
+                    {formaterMontant(o.actuel)} € / {formaterMontant(o.cible)} €
                   </Text>
                 </View>
                 <View style={[styles.envBarBg, { backgroundColor: C.separateur }]}>

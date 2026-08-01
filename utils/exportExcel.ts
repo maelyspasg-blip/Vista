@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { formaterMontant } from "./montant";
 
 export const MOIS_LABELS = [
   "Janvier",
@@ -21,6 +22,11 @@ export type CategorieExport = {
   depense: number;
   budget: number;
   type: "Fixe" | "Variable" | "Entrée";
+  // Uniquement pour type "Entrée" — cf. Enveloppe.moisComptage/dateFixe/payee
+  // dans app/store.ts.
+  dateFixe?: string;
+  payee?: boolean;
+  moisComptage?: string;
 };
 
 export type TransactionExport = {
@@ -44,7 +50,6 @@ export type DonneesExport = {
   transactions: TransactionExport[];
   historiquesMois: SnapshotExport[];
   epargneMois: number;
-  argentDisponible: number;
 };
 
 export type PeriodeExport = {
@@ -157,12 +162,31 @@ export function epargneDuMois(
   return snap ? snap.epargne : null;
 }
 
+// Mois auquel une catégorie "Entrée" est comptée : même logique que
+// moisComptageEffectif dans utils/budget.ts (dupliquée ici, CategorieExport
+// étant un type distinct et volontairement minimal).
+function moisComptageEffectifExport(env: CategorieExport): string | undefined {
+  if (env.moisComptage) return env.moisComptage;
+  if (env.dateFixe) {
+    const d = new Date(env.dateFixe);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  }
+  return undefined;
+}
+
 export function disponibleDuMois(
   donnees: DonneesExport,
   mois: number,
   annee: number,
 ): number | null {
-  if (estMoisActuel(mois, annee)) return donnees.argentDisponible;
+  if (estMoisActuel(mois, annee)) {
+    const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
+    return donnees.enveloppes
+      .filter(
+        (e) => e.type === "Entrée" && moisComptageEffectifExport(e) === moisISO,
+      )
+      .reduce((acc, e) => acc + (e.payee ? e.depense : e.budget), 0);
+  }
   const snap = donnees.historiquesMois.find(
     (s) => s.mois === mois && s.annee === annee,
   );
@@ -200,11 +224,11 @@ function feuilleResume(donnees: DonneesExport, periode: PeriodeExport) {
     const disponible = disponibleDuMois(donnees, mois, annee) ?? 0;
     lignes.push([
       label,
-      depenses,
-      entrees,
-      entrees - depenses,
-      epargne,
-      disponible,
+      formaterMontant(depenses),
+      formaterMontant(entrees),
+      formaterMontant(entrees - depenses),
+      formaterMontant(epargne),
+      formaterMontant(disponible),
     ]);
   });
 
@@ -244,7 +268,7 @@ function feuilleMatriceCategories(
     const valeurs = envsParMois.map((envs) => {
       if (!envs) return "";
       const cat = envs.find((e) => e.id === id);
-      return cat ? cat.depense : 0;
+      return formaterMontant(cat ? cat.depense : 0);
     });
     const valeursNum = valeurs.filter(
       (v): v is number => typeof v === "number",
@@ -254,7 +278,7 @@ function feuilleMatriceCategories(
       valeursNum.length > 0
         ? Math.round((total / valeursNum.length) * 100) / 100
         : 0;
-    lignes.push([nom, ...valeurs, total, moyenne]);
+    lignes.push([nom, ...valeurs, formaterMontant(total), moyenne]);
   });
 
   if (lignesCategories.length === 0) {
@@ -289,7 +313,7 @@ function feuilleTransactions(donnees: DonneesExport, periode: PeriodeExport) {
   );
 
   transactionsTriees.forEach((t) => {
-    lignes.push([t.date, t.nom, nomParEnveloppeId.get(t.enveloppeId) ?? "—", t.montant]);
+    lignes.push([t.date, t.nom, nomParEnveloppeId.get(t.enveloppeId) ?? "—", formaterMontant(t.montant)]);
   });
 
   if (transactionsTriees.length === 0) {

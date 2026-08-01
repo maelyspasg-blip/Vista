@@ -232,7 +232,6 @@ export default function Profil() {
       transactions: objStore.transactions,
       historiquesMois: objStore.historiquesMois,
       epargneMois: objStore.epargneMois,
-      argentDisponible: objStore.argentDisponible,
     };
 
     setExportEnCours(true);
@@ -308,7 +307,6 @@ export default function Profil() {
     transactions: objStore.transactions,
     historiquesMois: objStore.historiquesMois,
     epargneMois: objStore.epargneMois,
-    argentDisponible: objStore.argentDisponible,
   };
   const resumeRapport = periodeRapport
     ? calculerResumeVisuel(donneesRapport, periodeRapport)
@@ -406,6 +404,11 @@ export default function Profil() {
 
     setSuccesMotDePasse(true);
     setTimeout(fermerModalMotDePasse, 1400);
+  };
+
+  const fermerModalMotDePasseAvecSauvegarde = () => {
+    changerMotDePasse();
+    fermerModalMotDePasse();
   };
 
   const toggleNotifications = async (valeur: boolean) => {
@@ -801,8 +804,16 @@ export default function Profil() {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <View style={styles.modalOverlayTouch}>
-            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+          <TouchableOpacity
+            style={styles.modalOverlayTouch}
+            activeOpacity={1}
+            onPress={fermerModalMotDePasseAvecSauvegarde}
+          >
+            <TouchableOpacity
+              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              activeOpacity={1}
+              onPress={() => {}}
+            >
               <Text style={[styles.modalTitre, { color: C.texte }]}>
                 Changer de mot de passe
               </Text>
@@ -883,8 +894,8 @@ export default function Profil() {
                   Annuler
                 </Text>
               </TouchableOpacity>
-            </View>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -894,8 +905,16 @@ export default function Profil() {
         animationType={reduireAnimations ? "none" : "slide"}
         onRequestClose={() => setModalExportVisible(false)}
       >
-        <View style={styles.modalOverlayTouch}>
-          <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+        <TouchableOpacity
+          style={styles.modalOverlayTouch}
+          activeOpacity={1}
+          onPress={() => setModalExportVisible(false)}
+        >
+          <TouchableOpacity
+            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
             <Text style={[styles.modalTitre, { color: C.texte }]}>
               Exporter mes données
             </Text>
@@ -967,8 +986,8 @@ export default function Profil() {
                 Annuler
               </Text>
             </TouchableOpacity>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       <Modal
@@ -977,8 +996,16 @@ export default function Profil() {
         animationType={reduireAnimations ? "none" : "slide"}
         onRequestClose={() => setModalRapportVisible(false)}
       >
-        <View style={styles.modalOverlayTouch}>
-          <View style={[styles.modalCardCalculs, { backgroundColor: C.carte }]}>
+        <TouchableOpacity
+          style={styles.modalOverlayTouch}
+          activeOpacity={1}
+          onPress={() => setModalRapportVisible(false)}
+        >
+          <TouchableOpacity
+            style={[styles.modalCardCalculs, { backgroundColor: C.carte }]}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
             <ScrollView showsVerticalScrollIndicator={false}>
               <Text style={[styles.modalTitre, { color: C.texte }]}>
                 Exporter un résumé visuel
@@ -1070,8 +1097,8 @@ export default function Profil() {
               </TouchableOpacity>
               <View style={{ height: 20 }} />
             </ScrollView>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       <Modal
@@ -1080,9 +1107,15 @@ export default function Profil() {
         animationType={reduireAnimations ? "none" : "slide"}
         onRequestClose={() => setModalCalculsVisible(false)}
       >
-        <View style={styles.modalOverlayTouch}>
-          <View
+        <TouchableOpacity
+          style={styles.modalOverlayTouch}
+          activeOpacity={1}
+          onPress={() => setModalCalculsVisible(false)}
+        >
+          <TouchableOpacity
             style={[styles.modalCardCalculs, { backgroundColor: C.carte }]}
+            activeOpacity={1}
+            onPress={() => {}}
           >
             <View style={styles.modalHeaderCalculs}>
               <View style={styles.modalHeaderCalculsTitreBloc}>
@@ -1147,8 +1180,8 @@ export default function Profil() {
               )}
               <View style={{ height: 20 }} />
             </ScrollView>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </View>
   );

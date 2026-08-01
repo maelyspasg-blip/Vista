@@ -1,0 +1,82 @@
+import { Enveloppe, SnapshotMois } from "../app/store";
+
+// Mois auquel une enveloppe "Entrée" est comptée : moisComptage si défini,
+// sinon le mois calendaire de dateFixe (compat des lignes créées avant
+// l'introduction de ce champ). Même logique que côté store — dupliquée ici
+// car utils/ ne doit pas dépendre de la logique interne de store.ts, mais
+// le calcul lui-même reste identique.
+export function moisComptageEffectif(env: Enveloppe): string | undefined {
+  if (env.moisComptage) return env.moisComptage;
+  if (env.dateFixe) {
+    const d = new Date(env.dateFixe);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  }
+  return undefined;
+}
+
+export type EntreesBudgetMois = {
+  entrees: Enveloppe[];
+  recu: number;
+  attendu: number;
+  total: number;
+};
+
+/**
+ * "Budget" du mois en cours (ou de tout mois pas encore archivé) : la somme
+ * des enveloppes type "Entrée" comptées pour ce mois — reçues (payee) et
+ * encore attendues confondues. Remplace le calcul dupliqué indépendamment
+ * dans index.tsx/budget.tsx/analytics.tsx.
+ */
+export function entreesBudgetDuMois(
+  enveloppes: Enveloppe[],
+  annee: number,
+  mois: number,
+): EntreesBudgetMois {
+  const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
+  const entrees = enveloppes.filter(
+    (e) => e.type === "Entrée" && moisComptageEffectif(e) === moisISO,
+  );
+  const recu = entrees
+    .filter((e) => e.payee)
+    .reduce((acc, e) => acc + e.depense, 0);
+  const attendu = entrees
+    .filter((e) => !e.payee)
+    .reduce((acc, e) => acc + e.budget, 0);
+  return { entrees, recu, attendu, total: recu + attendu };
+}
+
+/**
+ * "Budget" d'un mois déjà archivé : pré-calculé au moment de l'archivage
+ * (cf. archiverMoisActuelInterne dans store.ts) et stocké dans
+ * SnapshotMois.disponible — pas besoin de re-dériver depuis les enveloppes
+ * archivées, qui ne portent plus l'information de mois de comptage.
+ */
+export function budgetDuMoisArchive(snapshot: SnapshotMois): number {
+  return snapshot.disponible;
+}
+
+/**
+ * Une catégorie (tout type confondu) est-elle active pour le mois donné ?
+ * "Active" = doit apparaître dans les listes courantes (Tes catégories
+ * d'Aperçu/Budget). Une catégorie permanente (Variable récurrente, Fixe qui
+ * se répète chaque mois) est toujours active, quel que soit le mois — c'est
+ * le comportement historique, inchangé. Une catégorie ponctuelle (non
+ * récurrente) n'est active que pour son propre mois — Entrée via
+ * moisComptage, Fixe via dateFixe (jamais avancée pour une facture qui ne se
+ * répète pas, donc fiable comme "mois auquel elle appartient"), Variable via
+ * moisComptage (fixé à la création, pas de date naturelle sinon).
+ */
+export function estCategorieActiveCeMois(
+  env: Enveloppe,
+  annee: number,
+  mois: number,
+): boolean {
+  const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
+  if (env.type === "Entrée") {
+    return moisComptageEffectif(env) === moisISO;
+  }
+  const estPermanente =
+    env.type === "Fixe" ? !!env.repeteChaqueMois : !!env.recurrente;
+  if (estPermanente) return true;
+  return moisComptageEffectif(env) === moisISO;
+}

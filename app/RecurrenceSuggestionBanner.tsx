@@ -3,6 +3,7 @@ import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { useObjectifs } from "./store";
 import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
+import { formaterMontant } from "../utils/montant";
 
 export function RecurrenceSuggestionBanner() {
   const { couleurs: C } = useTheme();
@@ -16,7 +17,7 @@ export function RecurrenceSuggestionBanner() {
       <View style={styles.contenu}>
         <View style={[styles.pastille, { backgroundColor: suggestionRecurrence.couleur }]} />
         <Text style={[styles.texte, { color: C.texte }]}>
-          Tu dépenses environ {suggestionRecurrence.montantMoyen} € dans{" "}
+          Tu dépenses environ {formaterMontant(suggestionRecurrence.montantMoyen)} € dans{" "}
           {suggestionRecurrence.nom} chaque mois. L&apos;automatiser ?
         </Text>
         <TouchableOpacity

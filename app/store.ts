@@ -9,6 +9,30 @@ import { annulerToutesNotifications } from "./notifications";
 // transparent au lieu de la pastille attendue.
 const COULEUR_PAR_DEFAUT = "#E63946";
 
+// Couleur des entrées "Report du mois précédent" auto-générées par
+// l'archivage mensuel (cf. archiverMoisActuelInterne).
+const COULEUR_REPORT = "#6BCB77";
+
+function dateVersISOInterne(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function premierJourMoisISO(annee: number, mois: number): string {
+  return dateVersISOInterne(new Date(annee, mois, 1));
+}
+
+// Mois auquel une enveloppe "Entrée" est comptée : moisComptage si défini,
+// sinon le mois calendaire de dateFixe (compat des lignes créées avant
+// l'introduction de ce champ).
+function moisComptageEffectif(env: Enveloppe): string | undefined {
+  if (env.moisComptage) return env.moisComptage;
+  if (env.dateFixe) {
+    const d = new Date(env.dateFixe);
+    return premierJourMoisISO(d.getFullYear(), d.getMonth());
+  }
+  return undefined;
+}
+
 export type Objectif = {
   id: string;
   nom: string;
@@ -36,6 +60,10 @@ export type Enveloppe = {
   payee?: boolean;
   repeteChaqueMois?: boolean;
   afficherDansPlanning?: boolean;
+  // Uniquement pour type "Entrée" : mois auquel ce montant est compté
+  // (1er jour du mois, ex. "2026-08-01"), indépendant de dateFixe — permet
+  // de recevoir un salaire le 28 juillet mais de le compter pour août.
+  moisComptage?: string;
 };
 
 export type PaiementHistorique = {
@@ -121,8 +149,6 @@ type EtatStore = {
   objectifs: Objectif[];
   epargneMois: number;
   enveloppes: Enveloppe[];
-  argentDisponible: number;
-  argentDisponibleRecurrent: boolean;
   argentDisponibleReportAuto: boolean;
   seuilEpargneConstante: number | null;
   prenom: string;
@@ -144,8 +170,6 @@ let etat: EtatStore = {
   objectifs: [],
   epargneMois: 0,
   enveloppes: [],
-  argentDisponible: 0,
-  argentDisponibleRecurrent: false,
   argentDisponibleReportAuto: false,
   seuilEpargneConstante: null,
   prenom: "",
@@ -195,6 +219,7 @@ type EnveloppeRow = {
   payee: boolean | null;
   repete_chaque_mois: boolean | null;
   afficher_dans_planning: boolean | null;
+  mois_comptage: string | null;
 };
 
 function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
@@ -211,6 +236,7 @@ function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
     payee: l.payee ?? undefined,
     repeteChaqueMois: l.repete_chaque_mois ?? undefined,
     afficherDansPlanning: l.afficher_dans_planning ?? undefined,
+    moisComptage: l.mois_comptage ?? undefined,
   };
 }
 
@@ -227,6 +253,7 @@ function enveloppeVersColonnes(e: Omit<Enveloppe, "id">) {
     payee: e.payee ?? null,
     repete_chaque_mois: e.repeteChaqueMois ?? null,
     afficher_dans_planning: e.afficherDansPlanning ?? null,
+    mois_comptage: e.moisComptage ?? null,
   };
 }
 
@@ -242,7 +269,8 @@ function enveloppesEgales(a: Enveloppe, b: Enveloppe): boolean {
     a.dateFixe === b.dateFixe &&
     a.payee === b.payee &&
     a.repeteChaqueMois === b.repeteChaqueMois &&
-    a.afficherDansPlanning === b.afficherDansPlanning
+    a.afficherDansPlanning === b.afficherDansPlanning &&
+    a.moisComptage === b.moisComptage
   );
 }
 
@@ -715,31 +743,46 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     cible: o.cible,
   }));
   const epargne = etat.epargneMois;
-  const disponible = etat.argentDisponible;
+
+  const moisArchiveISO = premierJourMoisISO(annee, mois);
+  // Une entrée "Entrée" ne fait partie de ce mois que si son mois de
+  // comptage correspond — celles pointant vers un mois futur (compté
+  // d'avance) restent intactes, ne sont ni archivées ni remises à zéro ici.
+  const estDuMoisArchive = (e: Enveloppe) =>
+    e.type === "Entrée" && moisComptageEffectif(e) === moisArchiveISO;
+
   const enveloppesSansEntree = etat.enveloppes.filter(
     (e) => e.type !== "Entrée",
   );
-  const enveloppesEntree = etat.enveloppes.filter(
-    (e) => e.type === "Entrée",
-  );
+  const entreesDuMois = etat.enveloppes.filter(estDuMoisArchive);
+
   const depenseReelle = enveloppesSansEntree.reduce(
     (acc, e) => acc + e.depense,
     0,
   );
-  const entreeRecue = enveloppesEntree.reduce((acc, e) => acc + e.depense, 0);
+  // Budget du mois = entrées déjà reçues (depense) + entrées encore
+  // attendues (budget), mêmes semantics que le total affiché pour le mois
+  // en cours ailleurs dans l'app.
+  const budgetDuMois = entreesDuMois.reduce(
+    (acc, e) => acc + (e.payee ? e.depense : e.budget),
+    0,
+  );
   const totalDepense = depenseReelle + etat.epargneMois;
 
-  const enveloppesMaj = etat.enveloppes.map((e) => ({
-    ...e,
-    depense: 0,
-    payee: e.type === "Fixe" ? false : e.payee,
-  }));
+  const enveloppesMaj = etat.enveloppes.map((e) => {
+    if (e.type === "Entrée" && !estDuMoisArchive(e)) return e;
+    return {
+      ...e,
+      depense: 0,
+      payee: e.type === "Fixe" ? false : e.payee,
+    };
+  });
 
   const snapshotId = await enregistrerSnapshotMoisSupabase({
     mois,
     annee,
     epargne,
-    disponible,
+    disponible: budgetDuMois,
     totalDepense,
     enveloppes: enveloppesSnapshot,
     objectifs: objectifsSnapshot,
@@ -752,7 +795,7 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     enveloppes: enveloppesSnapshot,
     objectifs: objectifsSnapshot,
     epargne,
-    disponible,
+    disponible: budgetDuMois,
     totalDepense,
   };
 
@@ -761,10 +804,85 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     contributionMois: 0,
   }));
 
-  const resteReel = disponible + entreeRecue - depenseReelle - epargne;
-  const baseRecurrente = etat.argentDisponibleRecurrent ? disponible : 0;
-  const report = etat.argentDisponibleReportAuto ? resteReel : 0;
-  const nouveauDisponible = baseRecurrente + report;
+  const resteReel = budgetDuMois - depenseReelle - epargne;
+
+  const moisSuivantDate = new Date(annee, mois + 1, 1);
+  const moisComptageSuivant = dateVersISOInterne(moisSuivantDate);
+
+  const nouvellesEntrees: Omit<Enveloppe, "id">[] = [];
+
+  // Reconduit pour le mois suivant chaque entrée "Entrée"/Budget de ce mois
+  // marquée récurrente — remplace l'ancien argentDisponibleRecurrent par
+  // une récurrence par entrée, désormais réellement effective (elle ne
+  // l'était pas jusqu'ici : recurrente/frequenceJours n'étaient stockés que
+  // pour l'affichage d'un badge, sans regénération automatique).
+  entreesDuMois
+    .filter((e) => e.recurrente)
+    .forEach((e) => {
+      let dateFixeSuivante = moisComptageSuivant;
+      if (e.dateFixe) {
+        const d = new Date(e.dateFixe);
+        d.setMonth(d.getMonth() + 1);
+        dateFixeSuivante = dateVersISOInterne(d);
+      }
+      nouvellesEntrees.push({
+        nom: e.nom,
+        depense: 0,
+        budget: e.budget,
+        couleur: e.couleur,
+        recurrente: true,
+        type: "Entrée",
+        dateFixe: dateFixeSuivante,
+        payee: false,
+        moisComptage: moisComptageSuivant,
+      });
+    });
+
+  // "Reporter le reste non dépensé" unifié dans le même mécanisme d'entrées
+  // plutôt que dans un champ à part : une entrée "Report" est créée pour le
+  // mois suivant avec le reste (positif ou négatif) de ce mois-ci.
+  if (etat.argentDisponibleReportAuto && resteReel !== 0) {
+    nouvellesEntrees.push({
+      nom: "Report du mois précédent",
+      depense: resteReel,
+      budget: resteReel,
+      couleur: COULEUR_REPORT,
+      recurrente: false,
+      type: "Entrée",
+      dateFixe: moisComptageSuivant,
+      payee: true,
+      moisComptage: moisComptageSuivant,
+    });
+  }
+
+  let entreesInserees: Enveloppe[] = [];
+  if (nouvellesEntrees.length > 0) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      const { data, error } = await supabase
+        .from("enveloppes")
+        .insert(
+          nouvellesEntrees.map((c) => ({
+            ...enveloppeVersColonnes(c),
+            user_id: user.id,
+          })),
+        )
+        .select();
+      if (error) {
+        console.error(
+          "Supabase insert entrées reconduites a échoué :",
+          error,
+        );
+        signalerErreurSync(
+          `Impossible de reconduire certaines entrées : ${error.message}`,
+        );
+      } else if (data) {
+        entreesInserees = data.map(enveloppeDepuisLigne);
+      }
+    }
+  }
 
   setEtat({
     historiquesMois: [...etat.historiquesMois, snapshot],
@@ -772,18 +890,10 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     epargneMois: 0,
     transactions: [],
     objectifs: objectifsMaj,
-    argentDisponible: nouveauDisponible,
   });
-  appliquerEnveloppes(enveloppesMaj);
+  appliquerEnveloppes([...enveloppesMaj, ...entreesInserees]);
   majEpargneMoisSupabase(0);
   majDernierMoisArchiveSupabase(mois, annee);
-  if (nouveauDisponible !== disponible) {
-    majArgentDisponibleSupabase(
-      nouveauDisponible,
-      etat.argentDisponibleRecurrent,
-      etat.argentDisponibleReportAuto,
-    );
-  }
   objectifsMaj.forEach((o) => {
     majObjectifSupabase(o.id, { contribution_mois: 0 });
   });
@@ -1025,29 +1135,27 @@ function majEpargneMoisSupabase(montant: number) {
   });
 }
 
-function majArgentDisponibleSupabase(
-  montant: number,
-  recurrent: boolean,
-  reportAuto: boolean,
-) {
+// argent_disponible / argent_disponible_recurrent ne sont plus lus ni
+// écrits par l'app : "Budget" est désormais une liste d'enveloppes type
+// Entrée (cf. archiverMoisActuelInterne). Les colonnes restent en base,
+// inutilisées, comme filet de sécurité — cf.
+// supabase/migrations/20260731100100_migrer_budget_vers_entrees.sql.
+// Seul "Reporter le reste" reste un réglage global (pas par entrée).
+function majReportAutoBudgetSupabase(reportAuto: boolean) {
   supabase.auth.getUser().then(({ data: { user } }) => {
     if (!user) return;
     supabase
       .from("profils")
-      .update({
-        argent_disponible: montant,
-        argent_disponible_recurrent: recurrent,
-        argent_disponible_report_auto: reportAuto,
-      })
+      .update({ argent_disponible_report_auto: reportAuto })
       .eq("user_id", user.id)
       .then(({ error }) => {
         if (error) {
           console.error(
-            "Supabase update argent_disponible a échoué :",
+            "Supabase update argent_disponible_report_auto a échoué :",
             error,
           );
           signalerErreurSync(
-            `Impossible de sauvegarder le montant disponible : ${error.message}`,
+            `Impossible de sauvegarder ce réglage : ${error.message}`,
           );
         }
       });
@@ -1144,8 +1252,6 @@ export function useObjectifs() {
     objectifs: local.objectifs,
     epargneMois: local.epargneMois,
     enveloppes: local.enveloppes,
-    argentDisponible: local.argentDisponible,
-    argentDisponibleRecurrent: local.argentDisponibleRecurrent,
     argentDisponibleReportAuto: local.argentDisponibleReportAuto,
     seuilEpargneConstante: local.seuilEpargneConstante,
     prenom: local.prenom,
@@ -1291,10 +1397,6 @@ export function useObjectifs() {
         setEtat({
           objectifs: (data ?? []).map(objectifDepuisLigne),
           epargneMois: profil?.epargne_mois ?? etat.epargneMois,
-          argentDisponible: profil?.argent_disponible ?? etat.argentDisponible,
-          argentDisponibleRecurrent:
-            profil?.argent_disponible_recurrent ??
-            etat.argentDisponibleRecurrent,
           argentDisponibleReportAuto:
             profil?.argent_disponible_report_auto ??
             etat.argentDisponibleReportAuto,
@@ -1822,17 +1924,9 @@ export function useObjectifs() {
       }
     },
 
-    modifierArgentDisponible: (
-      montant: number,
-      recurrent: boolean,
-      reportAuto: boolean,
-    ) => {
-      setEtat({
-        argentDisponible: montant,
-        argentDisponibleRecurrent: recurrent,
-        argentDisponibleReportAuto: reportAuto,
-      });
-      majArgentDisponibleSupabase(montant, recurrent, reportAuto);
+    modifierReportAutoBudget: (reportAuto: boolean) => {
+      setEtat({ argentDisponibleReportAuto: reportAuto });
+      majReportAutoBudgetSupabase(reportAuto);
     },
 
     modifierSeuilEpargneConstante: (seuil: number | null) => {

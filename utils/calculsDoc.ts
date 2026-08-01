@@ -15,17 +15,17 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "BUDGET",
         explication:
-          "Le montant que tu saisis manuellement, additionné des entrées d'argent déjà reçues ce mois-ci et des entrées d'argent encore attendues ce mois-ci (budget restant des catégories \"Entrée d'argent\"). C'est ce total combiné — pas seulement le montant que tu saisis — qui est utilisé partout ailleurs dans l'app (Budget, Stats) chaque fois qu'il est question du \"Budget\".",
+          "La somme de toutes les entrées de Budget comptées pour le mois en cours — déjà reçues et encore attendues confondues. Chaque entrée est ajoutée via \"+ Ajouter une entrée\" sur cette carte (ou via une catégorie \"Entrée d'argent\" créée ailleurs dans l'app — même mécanisme, même liste, seuls la présentation et le libellé diffèrent). Une entrée compte pour le mois indiqué par son sélecteur \"Compter pour le mois de\" à la création (par défaut le mois calendaire de sa date réelle, mais modifiable), pas forcément le mois de sa date réelle. C'est ce total — pas une seule entrée — qui est utilisé partout ailleurs dans l'app (Budget, Stats) chaque fois qu'il est question du \"Budget\".",
       },
       {
-        titre: "dont X entrée(s) reçue(s) ce mois-ci",
+        titre: "X entrée(s) ce mois-ci",
         explication:
-          "Sous-ligne dépliable sous BUDGET. Additionne le montant prévu (\"budget\") de chaque catégorie \"Entrée d'argent\" marquée comme reçue, dont la date est bien ce mois-ci.",
+          "Sous-ligne dépliable sous BUDGET, qui liste chaque entrée comptée pour le mois en cours avec son nom, son montant et sa date — reçues et encore attendues confondues (les entrées encore attendues sont affichées dans une couleur plus neutre).",
       },
       {
         titre: "RESTE ESTIMÉ EN FIN DE MOIS",
         explication:
-          "Une projection de fin de mois, pas un solde déjà réalisé : BUDGET (voir ci-dessus, disponible saisi + entrées reçues + entrées encore attendues) moins tout ce qui est prévu d'être dépensé ce mois-ci (Dépensé + Dépense prévue, soit le budget complet de chaque catégorie de dépense, qu'il soit déjà consommé ou non — une catégorie déjà en dépassement contribue son dépassement réel, jamais moins que ça) moins l'argent immobilisé (épargne + objectifs mis de côté ce mois-ci). Le libellé et la couleur changent selon un seuil sur ce même total : \"RESTE ESTIMÉ EN FIN DE MOIS\" si le reste dépasse 15% du BUDGET, \"RESTE ESTIMÉ — BUDGET SERRÉ\" en dessous de ce seuil, \"DÉPASSEMENT ESTIMÉ EN FIN DE MOIS\" si le reste est négatif (le montant affiché devient alors la valeur absolue du dépassement). Important : comme ce chiffre compte les dépenses encore seulement prévues, il ne correspond plus exactement au montant réellement reporté au mois suivant — voir \"Reporter le reste non dépensé au mois prochain\" plus bas, qui lui ne reporte que les flux déjà réalisés.",
+          "Une projection de fin de mois, pas un solde déjà réalisé : BUDGET (voir ci-dessus, la somme des entrées de Budget comptées pour ce mois) moins tout ce qui est prévu d'être dépensé ce mois-ci (Dépensé + Dépense prévue, soit le budget complet de chaque catégorie de dépense, qu'il soit déjà consommé ou non — une catégorie déjà en dépassement contribue son dépassement réel, jamais moins que ça) moins l'argent immobilisé (épargne + objectifs mis de côté ce mois-ci). Le libellé et la couleur changent selon un seuil sur ce même total : \"RESTE ESTIMÉ EN FIN DE MOIS\" si le reste dépasse 15% du BUDGET, \"RESTE ESTIMÉ — BUDGET SERRÉ\" en dessous de ce seuil, \"DÉPASSEMENT ESTIMÉ EN FIN DE MOIS\" si le reste est négatif (le montant affiché devient alors la valeur absolue du dépassement). Important : comme ce chiffre compte les dépenses encore seulement prévues, il ne correspond plus exactement au montant réellement reporté au mois suivant — voir \"Reporter le reste non dépensé\" plus bas, qui lui ne reporte que les flux déjà réalisés.",
       },
       {
         titre: "Bandeau de projection (\"Il te restera environ...\")",
@@ -45,7 +45,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Ordre des segments de la barre de progression et de sa légende",
         explication:
-          "Dans cet ordre, sur la barre comme dans la légende juste en dessous : \"Dépensé\", puis \"Argent immobilisé\", puis \"Dépense prévue\". Le reste de la barre (entrées d'argent déjà reçues ou encore attendues ce mois-ci, et tout montant saisi manuellement ni dépensé ni immobilisé) n'a plus de couleur ni de nom propre — il se fond avec le fond neutre de la barre, comme de l'argent encore disponible. Ces montants restent comptés normalement dans BUDGET et dans RESTE ESTIMÉ EN FIN DE MOIS ci-dessus : seul l'affichage détaillé de la barre a changé, aucune formule.",
+          "Dans cet ordre, sur la barre comme dans la légende juste en dessous : \"Dépensé\", puis \"Argent immobilisé\", puis \"Dépense prévue\". Le reste de la barre (entrées de Budget déjà reçues ou encore attendues ce mois-ci) n'a plus de couleur ni de nom propre — il se fond avec le fond neutre de la barre, comme de l'argent encore disponible. Ces montants restent comptés normalement dans BUDGET et dans RESTE ESTIMÉ EN FIN DE MOIS ci-dessus : seul l'affichage détaillé de la barre a changé, aucune formule.",
       },
       {
         titre: "Légende « Argent immobilisé »",
@@ -83,9 +83,9 @@ export const CALCULS_DOC: PageCalculs[] = [
           "Montant actuel divisé par le montant cible, plafonné à 100%. Le badge \"Atteint\" apparaît dès que le montant actuel est supérieur ou égal à la cible (la catégorie doit ensuite être clôturée manuellement pour ne plus être alimentée automatiquement — voir plus bas).",
       },
       {
-        titre: "Reporter le reste non dépensé au mois prochain",
+        titre: "Reporter le reste non dépensé",
         explication:
-          "Ce switch (dans la fenêtre d'édition de BUDGET) détermine ce qui alimente le Budget du mois suivant. À la clôture du mois, le reste reporté n'est pas calculé comme \"RESTE ESTIMÉ EN FIN DE MOIS\" ci-dessus, mais uniquement à partir de ce qui a été réellement réalisé, jamais des dépenses encore prévues : montant saisi manuellement + entrées d'argent réellement reçues − dépenses réelles − épargne mise de côté. Si le switch est activé, ce reste réalisé est reporté sur le mois suivant. Séparément, si \"Répéter ce montant chaque mois\" est activé, le montant saisi est aussi reconduit — les deux s'additionnent, ils ne s'excluent pas. Ce montant reporté est donc généralement différent (plus élevé) de ce qu'affichait \"RESTE ESTIMÉ EN FIN DE MOIS\" juste avant la clôture, puisque celui-ci avait déjà déduit les dépenses encore seulement prévues.",
+          "Ce switch, affiché directement sur la carte BUDGET, détermine ce qui alimente le Budget du mois suivant. À la clôture du mois, le reste reporté n'est pas calculé comme \"RESTE ESTIMÉ EN FIN DE MOIS\" ci-dessus, mais uniquement à partir de ce qui a été réellement réalisé, jamais des dépenses encore prévues : BUDGET du mois − dépenses réelles − épargne mise de côté. Si le switch est activé, ce reste réalisé devient automatiquement une nouvelle entrée « Report du mois précédent » comptée pour le mois suivant. Séparément, chaque entrée de Budget marquée \"Répéter ce montant chaque mois\" est elle aussi reconduite pour le mois suivant sous forme d'une nouvelle entrée identique — les deux mécanismes s'additionnent, ils ne s'excluent pas. Ce total reporté est donc généralement différent (plus élevé) de ce qu'affichait \"RESTE ESTIMÉ EN FIN DE MOIS\" juste avant la clôture, puisque celui-ci avait déjà déduit les dépenses encore seulement prévues.",
       },
     ],
   },
@@ -115,7 +115,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "/ {X}€ budget mensuel",
         explication:
-          "Le même total combiné que BUDGET sur Aperçu : montant du budget saisi manuellement + entrées d'argent déjà reçues ce mois + entrées d'argent encore attendues ce mois.",
+          "Le même total combiné que BUDGET sur Aperçu : la somme des entrées de Budget comptées pour ce mois, déjà reçues et encore attendues confondues.",
       },
       {
         titre: "\"X représente ta plus grosse dépense ce mois-ci\"",

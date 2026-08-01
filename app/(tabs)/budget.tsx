@@ -22,7 +22,8 @@ import {
 import { useTheme } from "../ThemeContext";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
-import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
+import { PALETTE_COULEURS } from "../ColorPicker";
+import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import {
   depenseCumuleeAuJour,
   depenseEnveloppeDansSnapshot,
@@ -32,6 +33,11 @@ import {
   moisPrecedent,
 } from "../../utils/exportExcel";
 import { trouverDepenseDominante } from "../../utils/conseils";
+import {
+  entreesBudgetDuMois,
+  estCategorieActiveCeMois,
+  moisComptageEffectif,
+} from "../../utils/budget";
 import { InfoBulle } from "../InfoBulle";
 import { NombreAnime } from "../NombreAnime";
 import { Text } from "../Texte";
@@ -65,6 +71,10 @@ function dateVersISO(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function premierJourMoisISO(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
 function formaterDateCourte(dateISO: string): string {
   const d = new Date(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
@@ -81,7 +91,10 @@ export default function Budget() {
   const objStore = useObjectifs();
   const { couleurs: C, theme } = useTheme();
   const { reduireAnimations } = useAccessibilite();
-  const params = useLocalSearchParams<{ section?: string }>();
+  const params = useLocalSearchParams<{
+    section?: string;
+    ouvrirAjout?: string;
+  }>();
   const router = useRouter();
 
   const [enveloppeOuverte, setEnveloppeOuverte] = useState<string | null>(null);
@@ -89,6 +102,11 @@ export default function Budget() {
   const [nomTx, setNomTx] = useState("");
   const [montantTx, setMontantTx] = useState("");
   const [enveloppeTx, setEnveloppeTx] = useState<string | null>(null);
+  const [creationCategorieOuverte, setCreationCategorieOuverte] =
+    useState(false);
+  const [nomNouvelleCategorie, setNomNouvelleCategorie] = useState("");
+  const [creationCategorieEnCours, setCreationCategorieEnCours] =
+    useState(false);
   const [ajoutTransactionEnCours, setAjoutTransactionEnCours] =
     useState(false);
   const [carteEnFlash, setCarteEnFlash] = useState<string | null>(null);
@@ -149,7 +167,11 @@ export default function Budget() {
           animated: !reduireAnimations,
         });
       }
-    }, [params.section, reduireAnimations]),
+      if (params.ouvrirAjout) {
+        setModalAjoutVisible(true);
+        router.setParams({ ouvrirAjout: undefined });
+      }
+    }, [params.section, params.ouvrirAjout, reduireAnimations, router]),
   );
 
   const MOIS_ACTUEL = new Date().getMonth();
@@ -183,15 +205,22 @@ export default function Budget() {
     return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
   });
 
+  // Une catégorie ponctuelle (non récurrente) expirée de son mois ne doit
+  // plus être proposée comme catégorie active — ni dans "Tes catégories",
+  // ni comme cible d'une nouvelle dépense. Voir
+  // utils/budget.ts:estCategorieActiveCeMois pour le détail par type.
   const enveloppesCourantes = objStore.enveloppes.filter(
-    (e) => e.type === "Variable",
+    (e) =>
+      e.type === "Variable" &&
+      estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
   );
 
   const categoriesAffichees = objStore.enveloppes.filter(
     (e) =>
-      e.type === "Variable" ||
-      (e.type !== "Entrée" &&
-        objStore.evenements.some((ev) => ev.categorieLiee === e.nom)),
+      estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL) &&
+      (e.type === "Variable" ||
+        (e.type !== "Entrée" &&
+          objStore.evenements.some((ev) => ev.categorieLiee === e.nom))),
   );
   const categoriesAffichesTriees = [...categoriesAffichees].sort((a, b) => {
     if (triCategories === "alpha") return a.nom.localeCompare(b.nom, "fr");
@@ -206,11 +235,16 @@ export default function Budget() {
     return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
   });
 
-  const entreesRecues = objStore.enveloppes.filter((e) => {
-    if (e.type !== "Entrée" || !e.payee || !e.dateFixe) return false;
-    const d = new Date(e.dateFixe);
-    return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
-  });
+  // Comptée pour le mois via moisComptage (pas dateFixe) — même critère que
+  // entreesBudgetDuMois, pour rester cohérent avec le total Budget affiché
+  // juste au-dessus de cette section.
+  const moisActuelISO = `${ANNEE_ACTUELLE}-${String(MOIS_ACTUEL + 1).padStart(2, "0")}-01`;
+  const entreesRecues = objStore.enveloppes.filter(
+    (e) =>
+      e.type === "Entrée" &&
+      e.payee &&
+      moisComptageEffectif(e) === moisActuelISO,
+  );
 
   const entreesAVenir = objStore.enveloppes.filter((e) => {
     if (e.type !== "Entrée" || e.payee || !e.dateFixe) return false;
@@ -300,24 +334,16 @@ export default function Budget() {
   const enveloppesSansEntree = objStore.enveloppes.filter(
     (e) => e.type !== "Entrée",
   );
-  const enveloppesEntree = objStore.enveloppes.filter(
-    (e) => e.type === "Entrée",
-  );
   const totalDepenses = enveloppesSansEntree.reduce(
     (acc, e) => acc + e.depense,
     0,
   );
-  const totalEntreeRecue = enveloppesEntree.reduce(
-    (acc, e) => acc + e.depense,
-    0,
-  );
-  const totalEntreePrevue = enveloppesEntree.reduce(
-    (acc, e) => acc + Math.max(0, e.budget - e.depense),
-    0,
-  );
   const totalEpargne = objStore.epargneMois;
-  const budgetTotal =
-    objStore.argentDisponible + totalEntreeRecue + totalEntreePrevue;
+  const budgetTotal = entreesBudgetDuMois(
+    objStore.enveloppes,
+    ANNEE_ACTUELLE,
+    MOIS_ACTUEL,
+  ).total;
   const pctDepenses =
     budgetTotal > 0 ? Math.min((totalDepenses / budgetTotal) * 100, 100) : 0;
   const pctEpargne =
@@ -400,7 +426,47 @@ export default function Budget() {
     setNomTx("");
     setMontantTx("");
     setEnveloppeTx(enveloppeId ?? enveloppesCourantes[0]?.id ?? null);
+    setCreationCategorieOuverte(false);
+    setNomNouvelleCategorie("");
     setModalAjoutVisible(true);
+  };
+
+  // Création de catégorie à la volée depuis "Nouvelle dépense" — même
+  // mécanisme que Planning (choisirCouleurAutomatique + ajouterEnveloppe),
+  // pour une expérience cohérente peu importe l'écran de création.
+  const choisirCouleurAutomatique = () => {
+    const couleursUtilisees = new Set(
+      objStore.enveloppes.map((env) => env.couleur),
+    );
+    const disponible = PALETTE_COULEURS.find(
+      (c) => !couleursUtilisees.has(c),
+    );
+    return (
+      disponible ??
+      PALETTE_COULEURS[objStore.enveloppes.length % PALETTE_COULEURS.length]
+    );
+  };
+
+  const creerNouvelleCategorieInline = async () => {
+    const nom = nomNouvelleCategorie.trim();
+    if (!nom || creationCategorieEnCours) return;
+    setCreationCategorieEnCours(true);
+    const nouvelle = await objStore.ajouterEnveloppe({
+      nom,
+      depense: 0,
+      budget: parseMontant(montantTx) || 0,
+      couleur: choisirCouleurAutomatique(),
+      type: "Variable",
+      recurrente: false,
+      // Rattachée à son mois de création pour expirer correctement de "Tes
+      // catégories" (cf. utils/budget.ts:estCategorieActiveCeMois).
+      moisComptage: premierJourMoisISO(new Date()),
+    });
+    setCreationCategorieEnCours(false);
+    if (!nouvelle) return;
+    setEnveloppeTx(nouvelle.id);
+    setNomNouvelleCategorie("");
+    setCreationCategorieOuverte(false);
   };
 
   const validerAjout = async () => {
@@ -419,10 +485,15 @@ export default function Budget() {
     setCarteEnFlash(enveloppeTx);
   };
 
+  const fermerModalAjoutAvecSauvegarde = () => {
+    validerAjout();
+    setModalAjoutVisible(false);
+  };
+
   const confirmerSuppressionTransaction = (nom: string, montant: number, id: string) => {
     Alert.alert(
       `Supprimer "${nom}" ?`,
-      `Cette dépense de ${montant} € sera définitivement supprimée.`,
+      `Cette dépense de ${formaterMontant(montant)} € sera définitivement supprimée.`,
       [
         { text: "Annuler", style: "cancel" },
         {
@@ -605,7 +676,7 @@ export default function Budget() {
             </View>
             <View style={styles.envRowRight}>
               <Text style={[styles.envMontant, { color: env.couleur }]}>
-                {env.depense} € / {env.budget} €
+                {formaterMontant(env.depense)} € / {formaterMontant(env.budget)} €
               </Text>
               <Text style={[styles.chevron, { color: env.couleur }]}>
                 {estOuverte ? "▾" : "▸"}
@@ -621,7 +692,7 @@ export default function Budget() {
           {montantMoisPrecedent !== null && deltaMoisPrecedent !== null && (
             <View style={styles.envDeltaRow}>
               <Text style={[styles.envDeltaTexte, { color: C.texteMuted }]}>
-                Mois dernier (au {jourMaxPrecedent}) : {montantMoisPrecedent} €{" "}
+                Mois dernier (au {jourMaxPrecedent}) : {formaterMontant(montantMoisPrecedent)} €{" "}
                 <Text
                   onPress={() =>
                     setDeltaPourcentagePourCategorie((prev) => ({
@@ -637,7 +708,7 @@ export default function Budget() {
                   (
                   {deltaPourcentagePourCategorie[env.id] && pctDeltaMoisPrecedent !== null
                     ? `${pctDeltaMoisPrecedent > 0 ? "+" : ""}${pctDeltaMoisPrecedent.toFixed(0)} %`
-                    : `${deltaMoisPrecedent > 0 ? "+" : ""}${deltaMoisPrecedent} €`}
+                    : `${deltaMoisPrecedent > 0 ? "+" : ""}${formaterMontant(deltaMoisPrecedent)} €`}
                   )
                 </Text>
               </Text>
@@ -676,7 +747,7 @@ export default function Budget() {
                   key={`${h.annee}-${h.mois}`}
                   style={[styles.envHistoriqueLigne, { color: C.texteMuted }]}
                 >
-                  {MOIS_LABELS[h.mois]} {h.annee} : {h.montant} €
+                  {MOIS_LABELS[h.mois]} {h.annee} : {formaterMontant(h.montant)} €
                 </Text>
               ))}
             </View>
@@ -709,7 +780,7 @@ export default function Budget() {
                             ]}
                           >
                             {m.nom}
-                            {m.montant !== null ? ` ${m.montant}€` : ""}
+                            {m.montant !== null ? ` ${formaterMontant(m.montant)}€` : ""}
                           </Text>
                         </TouchableOpacity>
                         <TouchableOpacity
@@ -827,7 +898,7 @@ export default function Budget() {
                         </Text>
                       </View>
                       <Text style={[styles.txMontant, { color: env.couleur }]}>
-                        - {ligne.montant} €
+                        - {formaterMontant(ligne.montant)} €
                       </Text>
                       {ligne.source === "transaction" && (
                         <TouchableOpacity
@@ -914,7 +985,7 @@ export default function Budget() {
                       </Text>
                     </View>
                     <Text style={[styles.txMontant, { color: env.couleur }]}>
-                      - {ligne.montant} €
+                      - {formaterMontant(ligne.montant)} €
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -1044,7 +1115,7 @@ export default function Budget() {
               { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
             ]}
           >
-            / {budgetTotal} € budget mensuel
+            / {formaterMontant(budgetTotal)} € budget mensuel
           </Text>
           {deltaDepensesTotal !== null && (
             <>
@@ -1069,7 +1140,7 @@ export default function Budget() {
                   >
                     {deltaDepensesTotalPourcentage && pctDeltaDepensesTotal !== null
                       ? `${pctDeltaDepensesTotal > 0 ? "+" : ""}${pctDeltaDepensesTotal.toFixed(0)} %`
-                      : `${deltaDepensesTotal > 0 ? "+" : ""}${deltaDepensesTotal} €`}
+                      : `${deltaDepensesTotal > 0 ? "+" : ""}${formaterMontant(deltaDepensesTotal)} €`}
                     {" vs mois dernier (au "}
                     {jourMaxPrecedentTotal})
                   </Text>
@@ -1111,7 +1182,7 @@ export default function Budget() {
                         { color: theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted },
                       ]}
                     >
-                      {MOIS_LABELS[h.mois]} {h.annee} : {h.montant} €
+                      {MOIS_LABELS[h.mois]} {h.annee} : {formaterMontant(h.montant)} €
                     </Text>
                   ))}
                 </View>
@@ -1182,7 +1253,7 @@ export default function Budget() {
                     { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
                   ]}
                 >
-                  Dépenses {totalDepenses} €
+                  Dépenses {formaterMontant(totalDepenses)} €
                 </Text>
               </View>
               {totalEpargne > 0 && (
@@ -1200,7 +1271,7 @@ export default function Budget() {
                       { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
                     ]}
                   >
-                    Argent immobilisé {totalEpargne} €
+                    Argent immobilisé {formaterMontant(totalEpargne)} €
                   </Text>
                   <Ionicons
                     name={argentImmobiliseOuvert ? "chevron-up" : "chevron-down"}
@@ -1220,7 +1291,7 @@ export default function Budget() {
                       { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
                     ]}
                   >
-                    Épargne {epargneGenerique} €
+                    Épargne {formaterMontant(epargneGenerique)} €
                   </Text>
                 </View>
               )}
@@ -1235,7 +1306,7 @@ export default function Budget() {
                       { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
                     ]}
                   >
-                    Objectifs {contributionObjectifsTotal} €
+                    Objectifs {formaterMontant(contributionObjectifsTotal)} €
                   </Text>
                 </View>
               )}
@@ -1309,7 +1380,7 @@ export default function Budget() {
             <View style={styles.envRow}>
               <Text style={[styles.envNom, { color: C.texte }]}>{p.nom}</Text>
               <Text style={[styles.envMontant, { color: p.couleur }]}>
-                {p.montant} € / {p.montant} €
+                {formaterMontant(p.montant)} € / {formaterMontant(p.montant)} €
               </Text>
             </View>
             <View style={[styles.envBarBg, { backgroundColor: C.separateur }]}>
@@ -1354,7 +1425,7 @@ export default function Budget() {
                     {env.nom}
                   </Text>
                   <Text style={[styles.envMontant, { color: env.couleur }]}>
-                    +{env.budget} € / {env.budget} €
+                    +{formaterMontant(env.budget)} € / {formaterMontant(env.budget)} €
                   </Text>
                 </View>
                 <View
@@ -1403,7 +1474,7 @@ export default function Budget() {
                     </Text>
                   </View>
                   <Text style={[styles.txMontant, { color: C.texte }]}>
-                    - {e.montant} €
+                    - {formaterMontant(e.montant ?? 0)} €
                   </Text>
                 </View>
               ))}
@@ -1456,7 +1527,7 @@ export default function Budget() {
                       style={[styles.fixeMontant, { color: ligne.couleur }]}
                     >
                       {ligne.estEntree ? "+" : ""}
-                      {ligne.montant} €
+                      {formaterMontant(ligne.montant)} €
                     </Text>
                   </View>
                   <View style={styles.fixeRowBottom}>
@@ -1561,8 +1632,16 @@ export default function Budget() {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <View style={styles.modalOverlayTouch}>
-            <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+          <TouchableOpacity
+            style={styles.modalOverlayTouch}
+            activeOpacity={1}
+            onPress={fermerModalAjoutAvecSauvegarde}
+          >
+            <TouchableOpacity
+              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              activeOpacity={1}
+              onPress={() => {}}
+            >
               <Text style={[styles.modalTitre, { color: C.texte }]}>
                 Nouvelle dépense
               </Text>
@@ -1640,7 +1719,85 @@ export default function Budget() {
                       </Text>
                     </TouchableOpacity>
                   ))}
+                  {!creationCategorieOuverte && (
+                    <TouchableOpacity
+                      style={[
+                        styles.envChoixChip,
+                        styles.envChoixChipNouvelle,
+                        { borderColor: C.purple },
+                      ]}
+                      onPress={() => setCreationCategorieOuverte(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="add" size={14} color={C.purple} />
+                      <Text style={[styles.envChoixTexte, { color: C.purple }]}>
+                        Créer une nouvelle catégorie
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
+
+                {creationCategorieOuverte && (
+                  <View style={styles.modalInputRow}>
+                    <TextInput
+                      style={[
+                        styles.input,
+                        {
+                          flex: 1,
+                          backgroundColor: C.fondSecondaire,
+                          color: C.texte,
+                        },
+                      ]}
+                      placeholder="Nom de la nouvelle catégorie"
+                      placeholderTextColor={C.texteMuted}
+                      value={nomNouvelleCategorie}
+                      onChangeText={setNomNouvelleCategorie}
+                      returnKeyType="done"
+                      autoFocus
+                      onSubmitEditing={creerNouvelleCategorieInline}
+                    />
+                    <TouchableOpacity
+                      style={[
+                        styles.btnCategorieAction,
+                        {
+                          backgroundColor: C.purple,
+                          opacity:
+                            nomNouvelleCategorie.trim() && !creationCategorieEnCours
+                              ? 1
+                              : 0.5,
+                        },
+                      ]}
+                      onPress={creerNouvelleCategorieInline}
+                      activeOpacity={0.7}
+                      disabled={
+                        !nomNouvelleCategorie.trim() || creationCategorieEnCours
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel="Valider la nouvelle catégorie"
+                    >
+                      {creationCategorieEnCours ? (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      ) : (
+                        <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.btnCategorieAction,
+                        { backgroundColor: C.fondSecondaire },
+                      ]}
+                      onPress={() => {
+                        setCreationCategorieOuverte(false);
+                        setNomNouvelleCategorie("");
+                      }}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel="Annuler la nouvelle catégorie"
+                    >
+                      <Ionicons name="close" size={20} color={C.texteMuted} />
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 {enveloppeTx &&
                   objStore.modelesDepenses.some(
@@ -1677,7 +1834,7 @@ export default function Budget() {
                                 ]}
                               >
                                 {m.nom}
-                                {m.montant !== null ? ` ${m.montant}€` : ""}
+                                {m.montant !== null ? ` ${formaterMontant(m.montant)}€` : ""}
                               </Text>
                             </TouchableOpacity>
                           ))}
@@ -1717,8 +1874,8 @@ export default function Budget() {
                   </Text>
                 </TouchableOpacity>
               </ScrollView>
-            </View>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -1728,12 +1885,18 @@ export default function Budget() {
         animationType={reduireAnimations ? "none" : "fade"}
         onRequestClose={() => setGestionEvenement(null)}
       >
-        <View style={styles.modalOverlayTouch}>
-          <View
+        <TouchableOpacity
+          style={styles.modalOverlayTouch}
+          activeOpacity={1}
+          onPress={() => setGestionEvenement(null)}
+        >
+          <TouchableOpacity
             style={[
               styles.modalCard,
               { backgroundColor: C.carte, paddingBottom: 26 },
             ]}
+            activeOpacity={1}
+            onPress={() => {}}
           >
             <Text style={[styles.modalTitre, { color: C.texte }]}>
               {gestionEvenement?.nom}
@@ -1786,8 +1949,8 @@ export default function Budget() {
                 Annuler
               </Text>
             </TouchableOpacity>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       <Modal
@@ -1796,8 +1959,16 @@ export default function Budget() {
         animationType={reduireAnimations ? "none" : "slide"}
         onRequestClose={() => setModalMoisVisible(false)}
       >
-        <View style={styles.modalOverlayTouch}>
-          <View style={[styles.modalCard, { backgroundColor: C.carte }]}>
+        <TouchableOpacity
+          style={styles.modalOverlayTouch}
+          activeOpacity={1}
+          onPress={() => setModalMoisVisible(false)}
+        >
+          <TouchableOpacity
+            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
             <Text style={[styles.modalTitre, { color: C.texte }]}>
               Choisir un mois
             </Text>
@@ -1844,8 +2015,8 @@ export default function Budget() {
                 Fermer
               </Text>
             </TouchableOpacity>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </View>
   );
@@ -2106,6 +2277,21 @@ const styles = StyleSheet.create({
   },
   envChoixChip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20 },
   envChoixTexte: { fontSize: 13, fontWeight: "600" },
+  envChoixChipNouvelle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "transparent",
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+  },
+  btnCategorieAction: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   btnValider: {
     borderRadius: 16,
     padding: 17,

@@ -71,21 +71,49 @@ export default function Preferences() {
       return;
     }
 
+    const montantBudget = parseMontant(budget) || 0;
+
     const { error } = await supabase
       .from("profils")
       .update({
         prenom: prenom.trim(),
-        argent_disponible: parseMontant(budget) || 0,
+        argent_disponible: montantBudget,
       })
       .eq("user_id", user.id);
 
-    setChargement(false);
-
     if (error) {
+      setChargement(false);
       setErreur(messageErreurAuth(error.message));
       return;
     }
 
+    // "Budget" est une liste d'entrées (public.enveloppes, type "Entrée") —
+    // cf. app/store.ts / utils/budget.ts. Le montant saisi ici devient la
+    // première entrée du mois en cours plutôt qu'un champ à part.
+    if (montantBudget !== 0) {
+      const premierJourMois = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
+      const { error: erreurEnveloppe } = await supabase
+        .from("enveloppes")
+        .insert({
+          user_id: user.id,
+          nom: "Budget",
+          depense: montantBudget,
+          budget: montantBudget,
+          couleur: "#845EC2",
+          recurrente: false,
+          type: "Entrée",
+          date_fixe: premierJourMois,
+          payee: true,
+          mois_comptage: premierJourMois,
+        });
+      if (erreurEnveloppe) {
+        setChargement(false);
+        setErreur(messageErreurAuth(erreurEnveloppe.message));
+        return;
+      }
+    }
+
+    setChargement(false);
     router.replace("/(tabs)");
   };
 
