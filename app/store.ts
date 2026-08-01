@@ -884,11 +884,18 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     }
   }
 
+  // `transactions` n'est JAMAIS remis à zéro ici (contrairement à
+  // epargneMois/enveloppes.depense) : chargerTransactions() charge déjà tout
+  // l'historique de l'utilisateur sans filtre de date (aucune notion de
+  // "mois en cours" côté Supabase), donc le vider ici ne fait que jeter des
+  // données déjà chargées pour rien — et casse silencieusement toute
+  // reconstruction "au même jour le mois dernier" une fois ce mois archivé
+  // (depenseCumuleeAuJour, calculerPaceCategorie, le détail par catégorie de
+  // VueMoisArchive) puisque ces calculs comptent sur l'historique complet.
   setEtat({
     historiquesMois: [...etat.historiquesMois, snapshot],
     dernierMoisArchive: { mois, annee },
     epargneMois: 0,
-    transactions: [],
     objectifs: objectifsMaj,
   });
   appliquerEnveloppes([...enveloppesMaj, ...entreesInserees]);

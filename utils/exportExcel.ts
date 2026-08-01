@@ -308,9 +308,14 @@ function feuilleTransactions(donnees: DonneesExport, periode: PeriodeExport) {
   const nomParEnveloppeId = new Map(
     donnees.enveloppes.map((e) => [e.id, e.nom]),
   );
-  const transactionsTriees = [...donnees.transactions].sort((a, b) =>
-    a.date.localeCompare(b.date),
-  );
+  // donnees.transactions contient tout l'historique de l'utilisateur (plus
+  // aucun tri par mois côté store depuis la correction de l'archivage) —
+  // on ne garde ici que le mois en cours, pour préserver le comportement
+  // déjà annoncé par le message ci-dessus ("disponible que pour le mois en
+  // cours").
+  const transactionsTriees = donnees.transactions
+    .filter((t) => estDansMois(t.date, d.getMonth(), d.getFullYear()))
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   transactionsTriees.forEach((t) => {
     lignes.push([t.date, t.nom, nomParEnveloppeId.get(t.enveloppeId) ?? "—", formaterMontant(t.montant)]);

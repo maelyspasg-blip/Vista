@@ -25,12 +25,11 @@ import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
 import { PALETTE_COULEURS } from "../ColorPicker";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import {
-  depenseCumuleeAuJour,
   depenseEnveloppeDansSnapshot,
   estDansMois,
-  joursDansMois,
   MOIS_LABELS,
   moisPrecedent,
+  totalParType,
 } from "../../utils/exportExcel";
 import { trouverDepenseDominante } from "../../utils/conseils";
 import {
@@ -351,29 +350,18 @@ export default function Budget() {
       ? Math.min((totalEpargne / budgetTotal) * 100, 100 - pctDepenses)
       : 0;
   // Comparaison "vs mois dernier" de la carte "Dépenses et argent immobilisé"
-  // (venue d'Aperçu) — au même jour le mois dernier, cumul reconstruit depuis
-  // les transactions/paiements jamais purgés, pour ne pas comparer un mois en
-  // cours forcément partiel à un mois dernier entier.
+  // (venue d'Aperçu) — contre le total du mois dernier entier, tel qu'archivé
+  // dans historiquesMois (snapshot figé à la clôture du mois, donc déjà une
+  // comparaison "mois complet vs mois en cours" honnête, sans limite de jour).
   const { mois: moisPrecTotal, annee: anneePrecTotal } = moisPrecedent(
     MOIS_ACTUEL,
     ANNEE_ACTUELLE,
   );
-  const jourActuelTotal = new Date().getDate();
   const snapshotMoisPrecedentTotal = objStore.historiquesMois.find(
     (s) => s.mois === moisPrecTotal && s.annee === anneePrecTotal,
   );
-  const jourMaxPrecedentTotal = Math.min(
-    jourActuelTotal,
-    joursDansMois(moisPrecTotal, anneePrecTotal),
-  );
   const totalDepensesPrecedent = snapshotMoisPrecedentTotal
-    ? depenseCumuleeAuJour(
-        objStore.transactions,
-        objStore.historiquePaiements,
-        moisPrecTotal,
-        anneePrecTotal,
-        jourMaxPrecedentTotal,
-      )
+    ? totalParType(snapshotMoisPrecedentTotal.enveloppes, false)
     : null;
   const deltaDepensesTotal =
     totalDepensesPrecedent !== null
@@ -393,13 +381,7 @@ export default function Budget() {
         .map((s) => ({
           mois: s.mois,
           annee: s.annee,
-          montant: depenseCumuleeAuJour(
-            objStore.transactions,
-            objStore.historiquePaiements,
-            s.mois,
-            s.annee,
-            Math.min(jourActuelTotal, joursDansMois(s.mois, s.annee)),
-          ),
+          montant: totalParType(s.enveloppes, false),
         }))
         .reverse()
     : [];
@@ -550,28 +532,17 @@ export default function Budget() {
       MOIS_ACTUEL,
       ANNEE_ACTUELLE,
     );
-    const jourActuel = new Date().getDate();
-    const existeMoisPrecedent =
-      depenseEnveloppeDansSnapshot(
-        objStore.historiquesMois,
-        env.id,
-        moisPrec,
-        anneePrec,
-      ) !== null;
-    const jourMaxPrecedent = Math.min(
-      jourActuel,
-      joursDansMois(moisPrec, anneePrec),
+    // Contre le total du mois dernier entier, tel qu'archivé dans
+    // historiquesMois (snapshot figé à la clôture du mois) — pas de
+    // recalcul depuis les transactions ici, on réutilise directement la
+    // même source que l'écran d'archive (VueMoisArchive).
+    const montantMoisPrecedent = depenseEnveloppeDansSnapshot(
+      objStore.historiquesMois,
+      env.id,
+      moisPrec,
+      anneePrec,
     );
-    const montantMoisPrecedent = existeMoisPrecedent
-      ? depenseCumuleeAuJour(
-          objStore.transactions,
-          objStore.historiquePaiements,
-          moisPrec,
-          anneePrec,
-          jourMaxPrecedent,
-          env.id,
-        )
-      : null;
+    const existeMoisPrecedent = montantMoisPrecedent !== null;
     const deltaMoisPrecedent =
       montantMoisPrecedent !== null ? env.depense - montantMoisPrecedent : null;
     const pctDeltaMoisPrecedent =
@@ -588,14 +559,12 @@ export default function Budget() {
           .map((s) => ({
             mois: s.mois,
             annee: s.annee,
-            montant: depenseCumuleeAuJour(
-              objStore.transactions,
-              objStore.historiquePaiements,
+            montant: depenseEnveloppeDansSnapshot(
+              objStore.historiquesMois,
+              env.id,
               s.mois,
               s.annee,
-              Math.min(jourActuel, joursDansMois(s.mois, s.annee)),
-              env.id,
-            ),
+            ) ?? 0,
           }))
           .reverse()
       : [];
@@ -692,7 +661,7 @@ export default function Budget() {
           {montantMoisPrecedent !== null && deltaMoisPrecedent !== null && (
             <View style={styles.envDeltaRow}>
               <Text style={[styles.envDeltaTexte, { color: C.texteMuted }]}>
-                Mois dernier (au {jourMaxPrecedent}) : {formaterMontant(montantMoisPrecedent)} €{" "}
+                Mois dernier : {formaterMontant(montantMoisPrecedent)} €{" "}
                 <Text
                   onPress={() =>
                     setDeltaPourcentagePourCategorie((prev) => ({
@@ -713,8 +682,8 @@ export default function Budget() {
                 </Text>
               </Text>
               <InfoBulle
-                titre="Comparaison au même jour"
-                texte={`Comparé aux dépenses cumulées au même jour le mois dernier (du 1er au ${jourMaxPrecedent}), pas au mois complet — pour une comparaison à période équivalente.`}
+                titre="Comparaison au mois dernier"
+                texte="Comparé au total des dépenses du mois dernier entier pour cette catégorie, une fois ce mois-là clos."
                 couleur={C.texteMuted}
               />
             </View>
@@ -1141,13 +1110,12 @@ export default function Budget() {
                     {deltaDepensesTotalPourcentage && pctDeltaDepensesTotal !== null
                       ? `${pctDeltaDepensesTotal > 0 ? "+" : ""}${pctDeltaDepensesTotal.toFixed(0)} %`
                       : `${deltaDepensesTotal > 0 ? "+" : ""}${formaterMontant(deltaDepensesTotal)} €`}
-                    {" vs mois dernier (au "}
-                    {jourMaxPrecedentTotal})
+                    {" vs mois dernier"}
                   </Text>
                 </TouchableOpacity>
                 <InfoBulle
-                  titre="Comparaison au même jour"
-                  texte={`Comparé aux dépenses cumulées au même jour le mois dernier (du 1er au ${jourMaxPrecedentTotal}), pas au mois complet — pour une comparaison à période équivalente.`}
+                  titre="Comparaison au mois dernier"
+                  texte="Comparé au total des dépenses du mois dernier entier, une fois ce mois-là clos."
                   couleur={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
                 />
               </View>
