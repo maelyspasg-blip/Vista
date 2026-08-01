@@ -23,8 +23,9 @@ import {
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import Svg, { Circle } from "react-native-svg";
-import { useLargeurAnimee } from "../BarreProgression";
+import { BarreProgression, useLargeurAnimee } from "../BarreProgression";
 import { NombreAnime } from "../NombreAnime";
+import { CocheAnimee } from "../CocheAnimee";
 import { SegmentHachure } from "../SegmentHachure";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { Enveloppe, Objectif, useObjectifs } from "../store";
@@ -402,6 +403,10 @@ export default function Dashboard() {
     objStore.epargneMois > 0
       ? (contributionObjectifsTotal / objStore.epargneMois) * pctEpargneEstime
       : 0;
+  const largeurEpargneGeneriqueAnimee = useLargeurAnimee(pctEpargneGeneriqueEstime);
+  const largeurObjectifsAnimee = useLargeurAnimee(pctObjectifsEstime);
+  const largeurEpargneAnimee = useLargeurAnimee(pctEpargneEstime);
+  const largeurPrevuAnimee = useLargeurAnimee(pctPrevuEstime);
   // Bandeau sous le hero "Reste estimé" : reflète directement heroResteValeur,
   // le même montant que le chiffre affiché en gros au-dessus — une seule
   // vérité pour toute la carte (chiffre principal, phrase et delta vs mois
@@ -852,35 +857,35 @@ export default function Dashboard() {
             {argentImmobiliseOuvert ? (
               <>
                 {epargneGenerique > 0 && (
-                  <View
+                  <Animated.View
                     style={[
                       styles.barSegment,
-                      { width: `${pctEpargneGeneriqueEstime}%`, backgroundColor: C.purple },
+                      { width: largeurEpargneGeneriqueAnimee, backgroundColor: C.purple },
                     ]}
                   />
                 )}
                 {contributionObjectifsTotal > 0 && (
-                  <View
+                  <Animated.View
                     style={[
                       styles.barSegment,
-                      { width: `${pctObjectifsEstime}%`, backgroundColor: C.lavande },
+                      { width: largeurObjectifsAnimee, backgroundColor: C.lavande },
                     ]}
                   />
                 )}
               </>
             ) : (
               objStore.epargneMois > 0 && (
-                <View
+                <Animated.View
                   style={[
                     styles.barSegment,
-                    { width: `${pctEpargneEstime}%`, backgroundColor: C.purple },
+                    { width: largeurEpargneAnimee, backgroundColor: C.purple },
                   ]}
                 />
               )
             )}
             {totalDepensePrevue > 0 && (
               <SegmentHachure
-                style={[styles.barSegment, { width: `${pctPrevuEstime}%` }]}
+                style={[styles.barSegment, { width: largeurPrevuAnimee }]}
                 couleur={C.peach}
               />
             )}
@@ -1315,11 +1320,7 @@ export default function Dashboard() {
                             { backgroundColor: C.accentLight },
                           ]}
                         >
-                          <Ionicons
-                            name="checkmark"
-                            size={12}
-                            color={C.texte}
-                          />
+                          <CocheAnimee taille={12} couleur={C.texte} epaisseurTrait={2} />
                         </View>
                       ) : (
                         <View
@@ -1390,16 +1391,12 @@ export default function Dashboard() {
                   {formaterMontant(env.depense)} € / {formaterMontant(env.budget)} €
                 </Text>
               </View>
-              <View
-                style={[styles.envBarBg, { backgroundColor: C.separateur }]}
-              >
-                <View
-                  style={[
-                    styles.envBarFill,
-                    { width: `${pct}%`, backgroundColor: env.couleur },
-                  ]}
-                />
-              </View>
+              <BarreProgression
+                pourcentage={pct}
+                couleur={env.couleur}
+                couleurFond={C.separateur}
+                hauteur={6}
+              />
             </TouchableOpacity>
           );
         })}
@@ -2412,9 +2409,15 @@ export default function Dashboard() {
                                 <View
                                   style={[
                                     styles.badgeAtteint,
-                                    { backgroundColor: C.vertLight },
+                                    {
+                                      backgroundColor: C.vertLight,
+                                      flexDirection: "row",
+                                      alignItems: "center",
+                                      gap: 3,
+                                    },
                                   ]}
                                 >
+                                  <CocheAnimee taille={10} couleur={C.vertText} epaisseurTrait={2.5} />
                                   <Text
                                     style={[
                                       styles.badgeAtteintTexte,
@@ -2442,17 +2445,12 @@ export default function Dashboard() {
                           >
                             {formaterMontant(obj.actuel)} € / {formaterMontant(obj.cible)} €
                           </Text>
-                          <View style={[styles.catBarBg, { backgroundColor: C.separateur }]}>
-                            <View
-                              style={[
-                                styles.catBarFill,
-                                {
-                                  width: `${pct}%`,
-                                  backgroundColor: obj.couleur,
-                                },
-                              ]}
-                            />
-                          </View>
+                          <BarreProgression
+                            pourcentage={pct}
+                            couleur={obj.couleur}
+                            couleurFond={C.separateur}
+                            hauteur={6}
+                          />
                         </TouchableOpacity>
                       );
                     })}
@@ -2521,14 +2519,12 @@ export default function Dashboard() {
                                 >
                                   {formaterMontant(obj.actuel)} € / {formaterMontant(obj.cible)} €
                                 </Text>
-                                <View style={[styles.catBarBg, { backgroundColor: C.separateur }]}>
-                                  <View
-                                    style={[
-                                      styles.catBarFill,
-                                      { width: `${pct}%`, backgroundColor: obj.couleur },
-                                    ]}
-                                  />
-                                </View>
+                                <BarreProgression
+                                  pourcentage={pct}
+                                  couleur={obj.couleur}
+                                  couleurFond={C.separateur}
+                                  hauteur={6}
+                                />
                               </View>
                             );
                           })}

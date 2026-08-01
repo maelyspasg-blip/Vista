@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import Slider from "@react-native-community/slider";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
+  Animated,
   Dimensions,
   Modal,
   Platform,
@@ -32,7 +33,8 @@ import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils
 import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
-import { useAccessibilite } from "../AccessibiliteContext";
+import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
+import { useLargeurAnimee } from "../BarreProgression";
 
 const MOIS_LABELS = [
   "Jan",
@@ -50,6 +52,31 @@ const MOIS_LABELS = [
 ];
 const MOIS_ACTUEL = new Date().getMonth();
 const ANNEE_ACTUELLE = new Date().getFullYear();
+
+// Défini au niveau module (pas dans le composant) pour ne pas recréer le
+// composant animé — et donc démonter/remonter la vue native du slider — à
+// chaque rendu.
+const SliderAnime = Animated.createAnimatedComponent(Slider);
+
+// Segment "cbarFill" (comparaison catégories / objectifs) avec largeur
+// animée — composant maison plutôt que BarreProgression car son rayon est
+// fixe (4px), pas la forme "pilule" (rayon = hauteur/2) du composant
+// partagé. Même raison que SliderAnime pour être au niveau module : garder
+// une identité de composant stable entre les rendus.
+function BarreCbarAnimee({
+  pourcentage,
+  couleur,
+  style,
+}: {
+  pourcentage: number;
+  couleur: string;
+  style?: object | object[];
+}) {
+  const largeur = useLargeurAnimee(pourcentage);
+  return (
+    <Animated.View style={[style, { width: largeur, backgroundColor: couleur }]} />
+  );
+}
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const CHART_W = SCREEN_W - 80;
@@ -607,6 +634,16 @@ export default function Analytics() {
   const [vueModalStats, setVueModalStats] = useState<
     "score" | "series" | "simulateur"
   >("score");
+  // Les 3 onglets (Score/Séries/Simulateur) partagent le même ScrollView —
+  // sans reset explicite, changer d'onglet garde l'ancien contentOffset, qui
+  // peut dépasser la hauteur du nouveau contenu et donner l'impression que le
+  // scroll est bloqué (impossible d'atteindre le bas des cartes Séries après
+  // avoir consulté un autre onglet plus court).
+  const scrollStatsRef = useRef<ScrollView>(null);
+  const changerVueModalStats = (v: "score" | "series" | "simulateur") => {
+    setVueModalStats(v);
+    scrollStatsRef.current?.scrollTo({ y: 0, animated: false });
+  };
   const [historiqueOuvert, setHistoriqueOuvert] = useState<
     Partial<Record<TypeSerie, boolean>>
   >({});
@@ -677,6 +714,23 @@ export default function Analytics() {
   const impactTotal6MoisSimulation = Math.round(
     ecartMensuelSimule * NB_MOIS_PROJECTION,
   );
+  // Transition douce de la couleur du curseur/piste du simulateur quand
+  // l'impact projeté change de signe, plutôt qu'un changement brutal.
+  const impactSimulePositif = impactTotal6MoisSimulation >= 0;
+  const animCouleurSlider = useRef(
+    new Animated.Value(impactSimulePositif ? 1 : 0),
+  ).current;
+  useEffect(() => {
+    Animated.timing(animCouleurSlider, {
+      toValue: impactSimulePositif ? 1 : 0,
+      duration: dureeAnimation(reduireAnimations, 350),
+      useNativeDriver: false,
+    }).start();
+  }, [impactSimulePositif, reduireAnimations, animCouleurSlider]);
+  const couleurSliderSimulation = animCouleurSlider.interpolate({
+    inputRange: [0, 1],
+    outputRange: [C.peachText, C.vertText],
+  });
 
   const ouvrirEditionSeuil = () => {
     setSeuilEpargneTemp(
@@ -889,7 +943,13 @@ export default function Analytics() {
     }));
 
   const repartitionEntrees = objStore.enveloppes
-    .filter((e) => e.type === "Entrée" && e.depense > 0)
+    // "Budget" est le nom réservé de l'entrée créée par la migration de
+    // l'ancien montant scalaire (cf. migration
+    // 20260731100100_migrer_budget_vers_entrees.sql) — elle représente le
+    // salaire principal, pas une "vraie" entrée d'argent secondaire au même
+    // titre que Salaire secondaire/Vinted/remboursements, donc on l'exclut
+    // de cette répartition.
+    .filter((e) => e.type === "Entrée" && e.depense > 0 && e.nom !== "Budget")
     .map((e) => ({
       cle: e.id,
       label: e.nom,
@@ -918,7 +978,10 @@ export default function Analytics() {
               styles.btnMenu,
               { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
             ]}
-            onPress={() => setModalSeriesVisible(true)}
+            onPress={() => {
+              setModalSeriesVisible(true);
+              scrollStatsRef.current?.scrollTo({ y: 0, animated: false });
+            }}
             activeOpacity={0.7}
             accessibilityRole="button"
             accessibilityLabel="Voir la santé financière et les séries"
@@ -1456,14 +1519,10 @@ export default function Analytics() {
                 <View
                   style={[styles.cbarTrack, { backgroundColor: C.separateur }]}
                 >
-                  <View
-                    style={[
-                      styles.cbarFill,
-                      {
-                        width: `${Math.min(pct, 100)}%`,
-                        backgroundColor: env.couleur,
-                      },
-                    ]}
+                  <BarreCbarAnimee
+                    pourcentage={Math.min(pct, 100)}
+                    couleur={env.couleur}
+                    style={styles.cbarFill}
                   />
                 </View>
                 <Text style={[styles.cbarVal, { color: C.texte }]}>
@@ -1505,11 +1564,10 @@ export default function Analytics() {
                   </Text>
                 </View>
                 <View style={[styles.cbarTrack, { backgroundColor: C.separateur }]}>
-                  <View
-                    style={[
-                      styles.cbarFill,
-                      { width: `${obj.pct}%`, backgroundColor: obj.couleur },
-                    ]}
+                  <BarreCbarAnimee
+                    pourcentage={obj.pct}
+                    couleur={obj.couleur}
+                    style={styles.cbarFill}
                   />
                 </View>
                 {obj.moisRestants !== null && (
@@ -1684,7 +1742,7 @@ export default function Analytics() {
                       borderColor: C.purple,
                     },
                   ]}
-                  onPress={() => setVueModalStats(v)}
+                  onPress={() => changerVueModalStats(v)}
                   activeOpacity={0.7}
                 >
                   <Text
@@ -1704,7 +1762,11 @@ export default function Analytics() {
               ))}
             </View>
 
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              ref={scrollStatsRef}
+              style={{ flex: 1 }}
+              showsVerticalScrollIndicator={false}
+            >
               {vueModalStats === "score" && (
                 <View
                   style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
@@ -2265,15 +2327,15 @@ export default function Analytics() {
                                 : `${budgetSimule > budgetActuelSimule ? "+" : ""}${Math.round(budgetSimule - budgetActuelSimule)} € vs actuel`}
                             </Text>
                           </View>
-                          <Slider
+                          <SliderAnime
                             value={budgetSimule}
                             minimumValue={0}
                             maximumValue={Math.max(budgetActuelSimule * 2, 100)}
                             step={5}
                             onValueChange={setBudgetSimule}
-                            minimumTrackTintColor={C.purple}
+                            minimumTrackTintColor={couleurSliderSimulation}
                             maximumTrackTintColor={C.separateur}
-                            thumbTintColor={C.purple}
+                            thumbTintColor={couleurSliderSimulation}
                             accessibilityLabel={`Budget simulé pour ${enveloppeSimulee.nom}`}
                             style={styles.simulateurSlider}
                           />

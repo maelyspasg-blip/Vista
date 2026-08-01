@@ -33,6 +33,7 @@ import {
 import { Evenement, useObjectifs } from "../store";
 import { useTheme } from "../ThemeContext";
 import { useAccessibilite } from "../AccessibiliteContext";
+import { BoutonPrincipal } from "../BoutonPrincipal";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 
@@ -1959,7 +1960,7 @@ export default function Planning() {
                       borderColor={C.texte}
                     />
 
-                    <TouchableOpacity
+                    <BoutonPrincipal
                       style={[
                         styles.btnSuivant,
                         {
@@ -1980,7 +1981,7 @@ export default function Planning() {
                             : "Créer l'événement"}
                         </Text>
                       )}
-                    </TouchableOpacity>
+                    </BoutonPrincipal>
                     {evenementEnEditionId !== null && (
                       <TouchableOpacity
                         style={[

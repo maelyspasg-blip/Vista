@@ -5,13 +5,13 @@ import {
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
-    TouchableOpacity,
     View,
 } from "react-native";
 import { supabase } from "../../supabaseClient";
 import { messageErreurAuth } from "../authErrors";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
+import { BoutonPrincipal } from "../BoutonPrincipal";
 
 const PURPLE = "#8B6FE8";
 
@@ -81,7 +81,7 @@ export default function Invite() {
 
         {!!erreur && <Text style={styles.erreurTexte}>{erreur}</Text>}
 
-        <TouchableOpacity
+        <BoutonPrincipal
           style={[
             styles.btnPrincipal,
             { opacity: formulaireValide && !chargement ? 1 : 0.5 },
@@ -95,7 +95,7 @@ export default function Invite() {
           ) : (
             <Text style={styles.btnTexte}>Commencer</Text>
           )}
-        </TouchableOpacity>
+        </BoutonPrincipal>
       </View>
     </KeyboardAvoidingView>
   );

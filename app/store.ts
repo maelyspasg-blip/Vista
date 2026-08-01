@@ -726,16 +726,31 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
   );
   if (dejaArchive) return;
 
-  const enveloppesSnapshot: SnapshotEnveloppe[] = etat.enveloppes.map(
-    (e) => ({
+  const moisArchiveISO = premierJourMoisISO(annee, mois);
+  // Une entrée "Entrée" ne fait partie de ce mois que si son mois de
+  // comptage correspond — celles pointant vers un mois futur (compté
+  // d'avance) restent intactes, ne sont ni archivées ni remises à zéro ici.
+  const estDuMoisArchive = (e: Enveloppe) =>
+    e.type === "Entrée" && moisComptageEffectif(e) === moisArchiveISO;
+
+  // Exclut du snapshot les "Entrée" comptées d'avance pour un mois futur :
+  // comme elles restent intactes dans etat.enveloppes (cf. estDuMoisArchive
+  // ci-dessus) jusqu'à ce que leur propre mois soit archivé, les inclure ici
+  // les ferait apparaître — avec leur depense/budget — dans CE snapshot ET
+  // dans tous les snapshots suivants tant qu'elles patientent, gonflant à
+  // tort les "Entrées totales" de chaque mois traversé entre-temps (catégories
+  // Fixe/Variable non concernées : leur `depense` est de toute façon remise à
+  // 0 chaque mois, cf. enveloppesMaj plus bas).
+  const enveloppesSnapshot: SnapshotEnveloppe[] = etat.enveloppes
+    .filter((e) => e.type !== "Entrée" || estDuMoisArchive(e))
+    .map((e) => ({
       id: e.id,
       nom: e.nom,
       depense: e.depense,
       budget: e.budget,
       couleur: e.couleur,
       type: e.type,
-    }),
-  );
+    }));
   const objectifsSnapshot: SnapshotObjectif[] = etat.objectifs.map((o) => ({
     id: o.id,
     nom: o.nom,
@@ -743,13 +758,6 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     cible: o.cible,
   }));
   const epargne = etat.epargneMois;
-
-  const moisArchiveISO = premierJourMoisISO(annee, mois);
-  // Une entrée "Entrée" ne fait partie de ce mois que si son mois de
-  // comptage correspond — celles pointant vers un mois futur (compté
-  // d'avance) restent intactes, ne sont ni archivées ni remises à zéro ici.
-  const estDuMoisArchive = (e: Enveloppe) =>
-    e.type === "Entrée" && moisComptageEffectif(e) === moisArchiveISO;
 
   const enveloppesSansEntree = etat.enveloppes.filter(
     (e) => e.type !== "Entrée",
@@ -2271,6 +2279,53 @@ export function useObjectifs() {
         );
         return null;
       }
+    },
+
+    modifierTransaction: async (
+      id: string,
+      nom: string,
+      montant: number,
+      enveloppeId: string,
+      date: string,
+    ): Promise<boolean> => {
+      const tx = etat.transactions.find((t) => t.id === id);
+      if (!tx) return false;
+
+      const transactionsMaj = etat.transactions.map((t) =>
+        t.id === id ? { ...t, nom, montant, enveloppeId, date } : t,
+      );
+      // Répercute le montant sur `depense` des enveloppes concernées : si la
+      // catégorie change, retire l'ancien montant de l'ancienne et ajoute le
+      // nouveau à la nouvelle ; sinon ajuste juste le delta sur place.
+      const enveloppesMaj =
+        tx.enveloppeId === enveloppeId
+          ? etat.enveloppes.map((e) =>
+              e.id === enveloppeId
+                ? { ...e, depense: Math.max(0, e.depense - tx.montant + montant) }
+                : e,
+            )
+          : etat.enveloppes.map((e) => {
+              if (e.id === tx.enveloppeId)
+                return { ...e, depense: Math.max(0, e.depense - tx.montant) };
+              if (e.id === enveloppeId)
+                return { ...e, depense: e.depense + montant };
+              return e;
+            });
+
+      setEtat({ transactions: transactionsMaj });
+      appliquerEnveloppes(enveloppesMaj);
+
+      const { error } = await supabase
+        .from("transactions")
+        .update(transactionVersColonnes({ nom, montant, enveloppeId, date }))
+        .eq("id", id);
+
+      if (error) {
+        console.error("Supabase update transaction a échoué :", error);
+        signalerErreurSync(`Impossible de modifier la dépense : ${error.message}`);
+        return false;
+      }
+      return true;
     },
 
     supprimerTransaction: (id: string) => {

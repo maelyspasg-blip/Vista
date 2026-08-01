@@ -12,6 +12,7 @@ import { supabase } from "../../supabaseClient";
 import { messageErreurAuth } from "../authErrors";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
+import { BoutonPrincipal } from "../BoutonPrincipal";
 
 const PURPLE = "#8B6FE8";
 
@@ -89,7 +90,7 @@ export default function Connexion() {
 
         {!!erreur && <Text style={styles.erreurTexte}>{erreur}</Text>}
 
-        <TouchableOpacity
+        <BoutonPrincipal
           style={[
             styles.btnPrincipal,
             { opacity: formulaireValide && !chargement ? 1 : 0.5 },
@@ -103,7 +104,7 @@ export default function Connexion() {
           ) : (
             <Text style={styles.btnTexte}>Se connecter</Text>
           )}
-        </TouchableOpacity>
+        </BoutonPrincipal>
       </View>
 
       <View style={styles.footer}>

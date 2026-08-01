@@ -12,6 +12,7 @@ import { messageErreurAuth } from "../authErrors";
 import { supabase } from "../../supabaseClient";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
+import { BoutonPrincipal } from "../BoutonPrincipal";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
@@ -105,7 +106,7 @@ export default function Inscription() {
                 ? `Vérifie ta boîte mail (${email.trim()}) et confirme ton adresse pour finaliser la conversion de ton essai. Tes données sont conservées.`
                 : `Vérifie ta boîte mail (${email.trim()}) et confirme ton adresse avant de te connecter.`}
             </Text>
-            <TouchableOpacity
+            <BoutonPrincipal
               style={styles.btnPrincipal}
               onPress={() =>
                 router.push(conversionEssai ? "/(tabs)" : "/onboarding/connexion")
@@ -115,7 +116,7 @@ export default function Inscription() {
               <Text style={styles.btnTexte}>
                 {conversionEssai ? "Continuer l'essai" : "Aller à la connexion"}
               </Text>
-            </TouchableOpacity>
+            </BoutonPrincipal>
           </View>
         ) : (
           <>
@@ -151,7 +152,7 @@ export default function Inscription() {
 
             {!!erreur && <Text style={styles.erreurTexte}>{erreur}</Text>}
 
-            <TouchableOpacity
+            <BoutonPrincipal
               style={[
                 styles.btnPrincipal,
                 { opacity: formulaireValide && !chargement ? 1 : 0.5 },
@@ -165,7 +166,7 @@ export default function Inscription() {
               ) : (
                 <Text style={styles.btnTexte}>Continuer</Text>
               )}
-            </TouchableOpacity>
+            </BoutonPrincipal>
           </>
         )}
       </View>

@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { StyleProp, View, ViewStyle } from "react-native";
+import { Animated } from "react-native";
 import Svg, { Defs, Line, Pattern, Rect } from "react-native-svg";
 
 // Segment de barre de progression rempli de rayures diagonales légères au
@@ -12,7 +12,7 @@ export function SegmentHachure({
   style,
   couleur,
 }: {
-  style?: StyleProp<ViewStyle>;
+  style?: object | object[];
   couleur: string;
 }) {
   // useId() renvoie des ids contenant des ":" (ex. ":r0:") — inoffensif pour
@@ -23,7 +23,7 @@ export function SegmentHachure({
   const patternId = `hachure${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
 
   return (
-    <View style={[{ overflow: "hidden" }, style]}>
+    <Animated.View style={[{ overflow: "hidden" }, style]}>
       <Svg width="100%" height="100%">
         <Defs>
           <Pattern
@@ -46,6 +46,6 @@ export function SegmentHachure({
         </Defs>
         <Rect width="100%" height="100%" fill={`url(#${patternId})`} />
       </Svg>
-    </View>
+    </Animated.View>
   );
 }

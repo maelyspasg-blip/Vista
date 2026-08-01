@@ -38,6 +38,7 @@ import { messageErreurAuth } from "./authErrors";
 import { demanderPermissionNotifications } from "./notifications";
 import { AccordionItem } from "./AccordionItem";
 import { RapportVisuelCarte } from "./RapportVisuelCarte";
+import { BoutonPrincipal } from "./BoutonPrincipal";
 import { SyncErrorBanner } from "./SyncErrorBanner";
 import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { useObjectifs } from "./store";
@@ -865,7 +866,7 @@ export default function Profil() {
                 </Text>
               )}
 
-              <TouchableOpacity
+              <BoutonPrincipal
                 style={[
                   styles.btnPrincipal,
                   {
@@ -875,7 +876,6 @@ export default function Profil() {
                   },
                 ]}
                 onPress={changerMotDePasse}
-                activeOpacity={0.7}
                 disabled={chargementMotDePasse}
               >
                 {chargementMotDePasse ? (
@@ -883,7 +883,7 @@ export default function Profil() {
                 ) : (
                   <Text style={styles.btnPrincipalTexte}>Enregistrer</Text>
                 )}
-              </TouchableOpacity>
+              </BoutonPrincipal>
 
               <TouchableOpacity
                 style={styles.btnAnnuler}
@@ -954,7 +954,7 @@ export default function Profil() {
               ))}
             </Picker>
 
-            <TouchableOpacity
+            <BoutonPrincipal
               style={[
                 styles.btnPrincipal,
                 {
@@ -964,7 +964,6 @@ export default function Profil() {
                 },
               ]}
               onPress={genererEtPartagerExport}
-              activeOpacity={0.7}
               disabled={exportEnCours}
             >
               {exportEnCours ? (
@@ -974,7 +973,7 @@ export default function Profil() {
                   Générer et partager
                 </Text>
               )}
-            </TouchableOpacity>
+            </BoutonPrincipal>
 
             <TouchableOpacity
               style={styles.btnAnnuler}
@@ -1006,7 +1005,7 @@ export default function Profil() {
             activeOpacity={1}
             onPress={() => {}}
           >
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ flexShrink: 1 }} showsVerticalScrollIndicator={false}>
               <Text style={[styles.modalTitre, { color: C.texte }]}>
                 Exporter un résumé visuel
               </Text>
@@ -1065,7 +1064,7 @@ export default function Profil() {
                 </Text>
               )}
 
-              <TouchableOpacity
+              <BoutonPrincipal
                 style={[
                   styles.btnPrincipal,
                   {
@@ -1075,7 +1074,6 @@ export default function Profil() {
                   },
                 ]}
                 onPress={partagerResumeVisuel}
-                activeOpacity={0.7}
                 disabled={partageRapportEnCours || !periodeRapport}
               >
                 {partageRapportEnCours ? (
@@ -1083,7 +1081,7 @@ export default function Profil() {
                 ) : (
                   <Text style={styles.btnPrincipalTexte}>Partager</Text>
                 )}
-              </TouchableOpacity>
+              </BoutonPrincipal>
 
               <TouchableOpacity
                 style={styles.btnAnnuler}
@@ -1168,7 +1166,7 @@ export default function Profil() {
               ))}
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ flexShrink: 1 }} showsVerticalScrollIndicator={false}>
               {CALCULS_DOC.find((g) => g.page === pageCalculsActive)?.entrees.map(
                 (entree) => (
                   <AccordionItem

@@ -42,7 +42,8 @@ import { NombreAnime } from "../NombreAnime";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { VueMoisArchive } from "../VueMoisArchive";
-import { BarreProgression } from "../BarreProgression";
+import { BarreProgression, useLargeurAnimee } from "../BarreProgression";
+import { BoutonPrincipal } from "../BoutonPrincipal";
 
 const ACCESSORY_ID = "numericDone";
 
@@ -101,6 +102,15 @@ export default function Budget() {
   const [nomTx, setNomTx] = useState("");
   const [montantTx, setMontantTx] = useState("");
   const [enveloppeTx, setEnveloppeTx] = useState<string | null>(null);
+  // Id + date de la transaction en cours d'édition — null en mode création.
+  // La date d'origine est préservée (pas de champ date dans ce formulaire) :
+  // seuls nom/montant/catégorie sont modifiables via le clic long.
+  const [transactionEnEdition, setTransactionEnEdition] = useState<
+    string | null
+  >(null);
+  const [dateTransactionEnEdition, setDateTransactionEnEdition] = useState<
+    string | null
+  >(null);
   const [creationCategorieOuverte, setCreationCategorieOuverte] =
     useState(false);
   const [nomNouvelleCategorie, setNomNouvelleCategorie] = useState("");
@@ -167,6 +177,8 @@ export default function Budget() {
         });
       }
       if (params.ouvrirAjout) {
+        setTransactionEnEdition(null);
+        setDateTransactionEnEdition(null);
         setModalAjoutVisible(true);
         router.setParams({ ouvrirAjout: undefined });
       }
@@ -401,6 +413,17 @@ export default function Budget() {
     totalEpargne > 0 ? (epargneGenerique / totalEpargne) * pctEpargne : 0;
   const pctObjectifs =
     totalEpargne > 0 ? (contributionObjectifsTotal / totalEpargne) * pctEpargne : 0;
+  // Segments de la barre "Dépenses et argent immobilisé" : largeur ET
+  // position (left, les segments sont juxtaposés en absolute) animées pour
+  // qu'un changement de répartition glisse au lieu de sauter.
+  const largeurDepensesAnimee = useLargeurAnimee(pctDepenses);
+  const largeurEpargneGeneriqueAnimee = useLargeurAnimee(pctEpargneGenerique);
+  const largeurObjectifsAnimee = useLargeurAnimee(pctObjectifs);
+  const largeurEpargneAnimee = useLargeurAnimee(pctEpargne);
+  const leftDepensesAnimee = useLargeurAnimee(pctDepenses);
+  const leftApresEpargneGeneriqueAnimee = useLargeurAnimee(
+    pctDepenses + pctEpargneGenerique,
+  );
 
   const depenseDominante = trouverDepenseDominante(enveloppesSansEntree);
 
@@ -408,6 +431,19 @@ export default function Budget() {
     setNomTx("");
     setMontantTx("");
     setEnveloppeTx(enveloppeId ?? enveloppesCourantes[0]?.id ?? null);
+    setTransactionEnEdition(null);
+    setDateTransactionEnEdition(null);
+    setCreationCategorieOuverte(false);
+    setNomNouvelleCategorie("");
+    setModalAjoutVisible(true);
+  };
+
+  const ouvrirEditionTransaction = (ligne: LigneDepense, enveloppeId: string) => {
+    setNomTx(ligne.nom);
+    setMontantTx(String(ligne.montant));
+    setEnveloppeTx(enveloppeId);
+    setTransactionEnEdition(ligne.id);
+    setDateTransactionEnEdition(ligne.date);
     setCreationCategorieOuverte(false);
     setNomNouvelleCategorie("");
     setModalAjoutVisible(true);
@@ -453,8 +489,24 @@ export default function Budget() {
 
   const validerAjout = async () => {
     if (!nomTx || !montantTx || !enveloppeTx || ajoutTransactionEnCours) return;
-    const dateStr = dateVersISO(new Date());
     setAjoutTransactionEnCours(true);
+    if (transactionEnEdition) {
+      const succes = await objStore.modifierTransaction(
+        transactionEnEdition,
+        nomTx,
+        parseMontant(montantTx),
+        enveloppeTx,
+        dateTransactionEnEdition ?? dateVersISO(new Date()),
+      );
+      setAjoutTransactionEnCours(false);
+      if (!succes) return;
+      setModalAjoutVisible(false);
+      setTransactionEnEdition(null);
+      setDateTransactionEnEdition(null);
+      setCarteEnFlash(enveloppeTx);
+      return;
+    }
+    const dateStr = dateVersISO(new Date());
     const nouvelle = await objStore.ajouterTransaction(
       nomTx,
       parseMontant(montantTx),
@@ -491,6 +543,8 @@ export default function Budget() {
     setNomTx(modele.nom);
     setMontantTx(modele.montant !== null ? String(modele.montant) : "");
     setEnveloppeTx(modele.enveloppeId);
+    setTransactionEnEdition(null);
+    setDateTransactionEnEdition(null);
     setModalAjoutVisible(true);
   };
 
@@ -909,9 +963,16 @@ export default function Budget() {
                   }
 
                   return (
-                    <View key={`transaction-${ligne.id}`} style={styles.txLigne}>
+                    <TouchableOpacity
+                      key={`transaction-${ligne.id}`}
+                      style={styles.txLigne}
+                      activeOpacity={0.6}
+                      onLongPress={() => ouvrirEditionTransaction(ligne, env.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Modifier ${ligne.nom}`}
+                    >
                       {contenu}
-                    </View>
+                    </TouchableOpacity>
                   );
                 })}
                 {lignesAVenirCategorie.map((ligne) => (
@@ -1084,7 +1145,9 @@ export default function Budget() {
               { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
             ]}
           >
-            / {formaterMontant(budgetTotal)} € budget mensuel
+            {"/ "}
+            <NombreAnime valeur={budgetTotal} suffixe="" />
+            {" € budget mensuel"}
           </Text>
           {deltaDepensesTotal !== null && (
             <>
@@ -1158,33 +1221,33 @@ export default function Budget() {
             </>
           )}
           <View style={[styles.progressBg, { backgroundColor: C.separateur, marginTop: 12 }]}>
-            <View
+            <Animated.View
               style={[
                 styles.progressFill,
-                { width: `${pctDepenses}%`, backgroundColor: C.bleuGris },
+                { width: largeurDepensesAnimee, backgroundColor: C.bleuGris },
               ]}
             />
             {argentImmobiliseOuvert ? (
               <>
                 {epargneGenerique > 0 && (
-                  <View
+                  <Animated.View
                     style={[
                       styles.progressFillEpargne,
                       {
-                        width: `${pctEpargneGenerique}%`,
-                        left: `${pctDepenses}%`,
+                        width: largeurEpargneGeneriqueAnimee,
+                        left: leftDepensesAnimee,
                         backgroundColor: C.purple,
                       },
                     ]}
                   />
                 )}
                 {contributionObjectifsTotal > 0 && (
-                  <View
+                  <Animated.View
                     style={[
                       styles.progressFillEpargne,
                       {
-                        width: `${pctObjectifs}%`,
-                        left: `${pctDepenses + pctEpargneGenerique}%`,
+                        width: largeurObjectifsAnimee,
+                        left: leftApresEpargneGeneriqueAnimee,
                         backgroundColor: C.lavande,
                       },
                     ]}
@@ -1193,12 +1256,12 @@ export default function Budget() {
               </>
             ) : (
               totalEpargne > 0 && (
-                <View
+                <Animated.View
                   style={[
                     styles.progressFillEpargne,
                     {
-                      width: `${pctEpargne}%`,
-                      left: `${pctDepenses}%`,
+                      width: largeurEpargneAnimee,
+                      left: leftDepensesAnimee,
                       backgroundColor: C.purple,
                     },
                   ]}
@@ -1594,7 +1657,11 @@ export default function Budget() {
         visible={modalAjoutVisible}
         animationType={reduireAnimations ? "none" : "slide"}
         transparent
-        onRequestClose={() => setModalAjoutVisible(false)}
+        onRequestClose={() => {
+          setModalAjoutVisible(false);
+          setTransactionEnEdition(null);
+          setDateTransactionEnEdition(null);
+        }}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
@@ -1611,7 +1678,7 @@ export default function Budget() {
               onPress={() => {}}
             >
               <Text style={[styles.modalTitre, { color: C.texte }]}>
-                Nouvelle dépense
+                {transactionEnEdition ? "Modifier la dépense" : "Nouvelle dépense"}
               </Text>
 
               <ScrollView
@@ -1810,7 +1877,7 @@ export default function Budget() {
                     </>
                   )}
 
-                <TouchableOpacity
+                <BoutonPrincipal
                   style={[
                     styles.btnValider,
                     {
@@ -1819,20 +1886,25 @@ export default function Budget() {
                     },
                   ]}
                   onPress={validerAjout}
-                  activeOpacity={0.7}
                   disabled={ajoutTransactionEnCours}
                 >
                   {ajoutTransactionEnCours ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
                     <Text style={styles.btnValiderTexte}>
-                      Ajouter la dépense
+                      {transactionEnEdition
+                        ? "Enregistrer les modifications"
+                        : "Ajouter la dépense"}
                     </Text>
                   )}
-                </TouchableOpacity>
+                </BoutonPrincipal>
                 <TouchableOpacity
                   style={styles.btnAnnuler}
-                  onPress={() => setModalAjoutVisible(false)}
+                  onPress={() => {
+                    setModalAjoutVisible(false);
+                    setTransactionEnEdition(null);
+                    setDateTransactionEnEdition(null);
+                  }}
                   activeOpacity={0.7}
                 >
                   <Text
@@ -1881,7 +1953,7 @@ export default function Budget() {
                     ? `, lié à ${gestionEvenement.categorie}.`
                     : ".")}
             </Text>
-            <TouchableOpacity
+            <BoutonPrincipal
               style={[styles.btnValider, { backgroundColor: C.hero }]}
               onPress={() => {
                 if (gestionEvenement) {
@@ -1892,11 +1964,10 @@ export default function Budget() {
                 }
                 setGestionEvenement(null);
               }}
-              activeOpacity={0.7}
             >
               <Text style={styles.btnValiderTexte}>Modifier</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
+            </BoutonPrincipal>
+            <BoutonPrincipal
               style={[styles.btnValider, { backgroundColor: "#E24B4A" }]}
               onPress={() => {
                 if (gestionEvenement) {
@@ -1904,10 +1975,9 @@ export default function Budget() {
                 }
                 setGestionEvenement(null);
               }}
-              activeOpacity={0.7}
             >
               <Text style={styles.btnValiderTexte}>Supprimer</Text>
-            </TouchableOpacity>
+            </BoutonPrincipal>
             <TouchableOpacity
               style={styles.btnAnnuler}
               onPress={() => setGestionEvenement(null)}

@@ -233,11 +233,12 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                     {formaterMontant(o.actuel)} € / {formaterMontant(o.cible)} €
                   </Text>
                 </View>
-                <View style={[styles.envBarBg, { backgroundColor: C.separateur }]}>
-                  <View
-                    style={[styles.envBarFill, { width: `${pct}%`, backgroundColor: couleur }]}
-                  />
-                </View>
+                <BarreProgression
+                  pourcentage={pct}
+                  couleur={couleur}
+                  couleurFond={C.separateur}
+                  hauteur={6}
+                />
               </View>
             );
           })}

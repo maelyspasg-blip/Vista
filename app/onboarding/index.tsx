@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { marquerOnboardingVu } from "../onboardingStorage";
 import { Text } from "../Texte";
+import { BoutonPrincipal } from "../BoutonPrincipal";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
@@ -102,7 +103,7 @@ export default function Onboarding() {
         ))}
       </View>
 
-      <TouchableOpacity
+      <BoutonPrincipal
         style={[styles.btnSuivant, { backgroundColor: slide.couleur }]}
         onPress={suivant}
         activeOpacity={0.8}
@@ -110,7 +111,7 @@ export default function Onboarding() {
         <Text style={styles.btnTexte}>
           {slideActuel === SLIDES.length - 1 ? "Commencer" : "Suivant"}
         </Text>
-      </TouchableOpacity>
+      </BoutonPrincipal>
     </View>
   );
 }

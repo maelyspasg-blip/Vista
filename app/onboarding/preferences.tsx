@@ -15,6 +15,7 @@ import { parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { messageErreurAuth } from "../authErrors";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
+import { BoutonPrincipal } from "../BoutonPrincipal";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
@@ -198,7 +199,7 @@ export default function Preferences() {
 
         {!!erreur && <Text style={styles.erreurTexte}>{erreur}</Text>}
 
-        <TouchableOpacity
+        <BoutonPrincipal
           style={[
             styles.btnPrincipal,
             { opacity: prenom && budget && !chargement ? 1 : 0.5 },
@@ -212,7 +213,7 @@ export default function Preferences() {
           ) : (
             <Text style={styles.btnTexte}>Lancer Vista</Text>
           )}
-        </TouchableOpacity>
+        </BoutonPrincipal>
 
         <View style={{ height: 40 }} />
       </ScrollView>
