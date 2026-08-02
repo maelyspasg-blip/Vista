@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -196,9 +197,51 @@ export default function Budget() {
     })),
     { mois: MOIS_ACTUEL, annee: ANNEE_ACTUELLE, estActuel: true },
   ].sort((a, b) => a.annee * 12 + a.mois - (b.annee * 12 + b.mois));
-  const [indexMois, setIndexMois] = useState(moisDisponibles.length - 1);
+  // Le mois sélectionné est identifié par {mois, annee}, jamais par un index
+  // brut dans moisDisponibles : ce tableau change de taille et d'ordre au fil
+  // du chargement — vide au tout premier rendu (historiquesMois démarre à
+  // [], cf. store.ts), peuplé ensuite depuis Supabase, sans `.order(...)` côté
+  // requête donc sans garantie de tri. Un index numérique figé au montage
+  // (ex. `moisDisponibles.length - 1`) se retrouvait décalé une fois les mois
+  // archivés chargés après coup, pointant vers un mois arbitraire (souvent le
+  // plus ancien) au lieu du mois en cours — le vrai bug derrière "Budget
+  // s'ouvre sur un mois périmé", indépendant de toute navigation utilisateur.
+  const [moisSelectionne, setMoisSelectionne] = useState(() => ({
+    mois: new Date().getMonth(),
+    annee: new Date().getFullYear(),
+  }));
   const [modalMoisVisible, setModalMoisVisible] = useState(false);
+
+  const indexTrouve = moisDisponibles.findIndex(
+    (m) => m.mois === moisSelectionne.mois && m.annee === moisSelectionne.annee,
+  );
+  const indexMois =
+    indexTrouve !== -1 ? indexTrouve : moisDisponibles.findIndex((m) => m.estActuel);
   const moisAffiche = moisDisponibles[indexMois] ?? moisDisponibles[moisDisponibles.length - 1];
+
+  const allerAuMois = (indexCible: number) => {
+    const cible = moisDisponibles[Math.max(0, Math.min(moisDisponibles.length - 1, indexCible))];
+    if (cible) setMoisSelectionne({ mois: cible.mois, annee: cible.annee });
+  };
+
+  // Filet de sécurité complémentaire : l'app reste souvent en vie en
+  // arrière-plan sur mobile (pas de vrai remount), donc si l'utilisateur avait
+  // navigué vers un mois passé puis remet l'app au premier plan, on réaligne
+  // explicitement sur le mois calendaire réel du moment.
+  const etatAppRef = useRef(AppState.currentState);
+
+  useEffect(() => {
+    const abonnement = AppState.addEventListener("change", (etatSuivant) => {
+      if (etatAppRef.current.match(/inactive|background/) && etatSuivant === "active") {
+        setMoisSelectionne({
+          mois: new Date().getMonth(),
+          annee: new Date().getFullYear(),
+        });
+      }
+      etatAppRef.current = etatSuivant;
+    });
+    return () => abonnement.remove();
+  }, []);
 
   const enveloppesParId = new Map(objStore.enveloppes.map((e) => [e.id, e]));
 
@@ -693,7 +736,7 @@ export default function Budget() {
           <View style={styles.envRow}>
             <View style={styles.envNomRow}>
               <View style={[styles.envDot, { backgroundColor: env.couleur }]} />
-              <Text style={[styles.envNom, { color: C.texte }]}>
+              <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
                 {env.nom}
               </Text>
             </View>
@@ -913,7 +956,10 @@ export default function Budget() {
                   const contenu = (
                     <>
                       <View style={{ flex: 1 }}>
-                        <Text style={[styles.txNom, { color: C.texte }]}>
+                        <Text
+                          style={[styles.txNom, { color: C.texte }]}
+                          numberOfLines={1}
+                        >
                           {ligne.nom}
                         </Text>
                         <Text style={[styles.txDate, { color: C.texteMuted }]}>
@@ -991,7 +1037,10 @@ export default function Budget() {
                   >
                     <View style={{ flex: 1 }}>
                       <View style={styles.txNomAVenirRow}>
-                        <Text style={[styles.txNom, { color: C.texte }]}>
+                        <Text
+                          style={[styles.txNom, { color: C.texte }]}
+                          numberOfLines={1}
+                        >
                           {ligne.nom}
                         </Text>
                         <View
@@ -1045,7 +1094,7 @@ export default function Budget() {
           <Text style={[styles.titre, { color: C.texte }]}>Budget</Text>
           <View style={styles.selecteurMoisRow}>
             <TouchableOpacity
-              onPress={() => setIndexMois((i) => Math.max(0, i - 1))}
+              onPress={() => allerAuMois(indexMois - 1)}
               disabled={indexMois === 0}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
@@ -1066,9 +1115,7 @@ export default function Budget() {
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={() =>
-                setIndexMois((i) => Math.min(moisDisponibles.length - 1, i + 1))
-              }
+              onPress={() => allerAuMois(indexMois + 1)}
               disabled={indexMois === moisDisponibles.length - 1}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
@@ -1409,7 +1456,9 @@ export default function Budget() {
             ]}
           >
             <View style={styles.envRow}>
-              <Text style={[styles.envNom, { color: C.texte }]}>{p.nom}</Text>
+              <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
+                {p.nom}
+              </Text>
               <Text style={[styles.envMontant, { color: p.couleur }]}>
                 {formaterMontant(p.montant)} € / {formaterMontant(p.montant)} €
               </Text>
@@ -1452,7 +1501,7 @@ export default function Budget() {
                 ]}
               >
                 <View style={styles.envRow}>
-                  <Text style={[styles.envNom, { color: C.texte }]}>
+                  <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
                     {env.nom}
                   </Text>
                   <Text style={[styles.envMontant, { color: env.couleur }]}>
@@ -1497,7 +1546,10 @@ export default function Budget() {
               {autresDepensesPayees.map((e) => (
                 <View key={e.id} style={styles.txLigne}>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.txNom, { color: C.texte }]}>
+                    <Text
+                      style={[styles.txNom, { color: C.texte }]}
+                      numberOfLines={1}
+                    >
                       {e.nom}
                     </Text>
                     <Text style={[styles.txDate, { color: C.texteMuted }]}>
@@ -1551,7 +1603,10 @@ export default function Budget() {
                 />
                 <View style={styles.fixeContent}>
                   <View style={styles.fixeRow}>
-                    <Text style={[styles.fixeNom, { color: ligne.couleur }]}>
+                    <Text
+                      style={[styles.fixeNom, { color: ligne.couleur }]}
+                      numberOfLines={1}
+                    >
                       {ligne.nom}
                     </Text>
                     <Text
@@ -2024,11 +2079,7 @@ export default function Budget() {
                         { borderBottomColor: C.separateur },
                       ]}
                       onPress={() => {
-                        setIndexMois(
-                          moisDisponibles.findIndex(
-                            (d) => d.mois === m.mois && d.annee === m.annee,
-                          ),
-                        );
+                        setMoisSelectionne({ mois: m.mois, annee: m.annee });
                         setModalMoisVisible(false);
                       }}
                       activeOpacity={0.7}
@@ -2144,11 +2195,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 11,
   },
-  envNom: { fontSize: 16, fontWeight: "700" },
-  envNomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  envDot: { width: 10, height: 10, borderRadius: 5 },
-  envRowRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  envMontant: { fontSize: 14, fontWeight: "700" },
+  envNom: { fontSize: 16, fontWeight: "700", flexShrink: 1 },
+  envNomRow: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, marginRight: 8 },
+  envDot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
+  envRowRight: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 },
+  envMontant: { fontSize: 14, fontWeight: "700", flexShrink: 0 },
   chevron: { fontSize: 14, fontWeight: "700" },
   envBarBg: { height: 6, borderRadius: 3, overflow: "hidden" },
   envBarFill: { height: "100%", borderRadius: 3 },
@@ -2265,8 +2316,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 5,
   },
-  fixeNom: { fontSize: 15, fontWeight: "700" },
-  fixeMontant: { fontSize: 15, fontWeight: "700" },
+  fixeNom: { fontSize: 15, fontWeight: "700", flexShrink: 1, marginRight: 8 },
+  fixeMontant: { fontSize: 15, fontWeight: "700", flexShrink: 0 },
   fixeRowBottom: {
     flexDirection: "row",
     justifyContent: "space-between",

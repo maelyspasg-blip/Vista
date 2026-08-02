@@ -1308,7 +1308,10 @@ export default function Dashboard() {
               </View>
               <View style={styles.envRow}>
                 <View style={styles.envNomRow}>
-                  <Text style={[styles.envNom, { color: C.texte }]}>
+                  <Text
+                    style={[styles.envNom, { color: C.texte }]}
+                    numberOfLines={1}
+                  >
                     {env.nom}
                   </Text>
                   {env.type === "Fixe" ? (
@@ -2399,7 +2402,10 @@ export default function Dashboard() {
                         >
                           <View style={styles.objectifModalHeader}>
                             <View style={styles.envNomRow}>
-                              <Text style={[styles.objectifModalNom, { color: C.texte }]}>
+                              <Text
+                                style={[styles.objectifModalNom, { color: C.texte }]}
+                                numberOfLines={1}
+                              >
                                 {obj.nom}
                               </Text>
                               {obj.recurrent && (
@@ -2500,7 +2506,10 @@ export default function Dashboard() {
                                 ]}
                               >
                                 <View style={styles.objectifModalHeader}>
-                                  <Text style={[styles.objectifModalNom, { color: C.texte }]}>
+                                  <Text
+                                    style={[styles.objectifModalNom, { color: C.texte }]}
+                                    numberOfLines={1}
+                                  >
                                     {obj.nom}
                                   </Text>
                                   <TouchableOpacity
@@ -3134,9 +3143,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  envNomRow: { flexDirection: "row", alignItems: "center", gap: 7 },
-  badgesRow: { flexDirection: "row", gap: 4 },
-  envNom: { fontSize: 16, fontWeight: "700" },
+  envNomRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    flexShrink: 1,
+    marginRight: 8,
+  },
+  badgesRow: { flexDirection: "row", gap: 4, flexShrink: 0 },
+  envNom: { fontSize: 16, fontWeight: "700", flexShrink: 1 },
   recurrenceBadge: {
     width: 19,
     height: 19,
@@ -3146,7 +3161,7 @@ const styles = StyleSheet.create({
   },
   badgeAtteint: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 20 },
   badgeAtteintTexte: { fontSize: 10, fontWeight: "700" },
-  envMontant: { fontSize: 14, fontWeight: "700" },
+  envMontant: { fontSize: 14, fontWeight: "700", flexShrink: 0 },
   envBarBg: {
     height: 6,
     borderRadius: 3,
@@ -3318,7 +3333,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 4,
   },
-  objectifModalNom: { fontSize: 15, fontWeight: "700" },
+  objectifModalNom: { fontSize: 15, fontWeight: "700", flexShrink: 1 },
   objectifModalMontant: { fontSize: 14, fontWeight: "700", marginBottom: 8 },
   catBarBg: {
     height: 6,

@@ -1,11 +1,25 @@
 import { Enveloppe, SnapshotMois } from "../app/store";
 
+// Forme minimale nécessaire pour résoudre le mois de comptage et calculer le
+// total "Entrées" d'un mois — satisfaite structurellement à la fois par
+// `Enveloppe` (app/store.ts) et par `CategorieExport` (utils/exportExcel.ts).
+// Permet à l'export Excel et au résumé visuel de réutiliser exactement le
+// même calcul que l'app plutôt que de le dupliquer avec leur propre type.
+export type EnveloppeComptable = {
+  type: "Fixe" | "Variable" | "Entrée";
+  dateFixe?: string;
+  payee?: boolean;
+  moisComptage?: string;
+  depense: number;
+  budget: number;
+};
+
 // Mois auquel une enveloppe "Entrée" est comptée : moisComptage si défini,
 // sinon le mois calendaire de dateFixe (compat des lignes créées avant
 // l'introduction de ce champ). Même logique que côté store — dupliquée ici
 // car utils/ ne doit pas dépendre de la logique interne de store.ts, mais
 // le calcul lui-même reste identique.
-export function moisComptageEffectif(env: Enveloppe): string | undefined {
+export function moisComptageEffectif(env: EnveloppeComptable): string | undefined {
   if (env.moisComptage) return env.moisComptage;
   if (env.dateFixe) {
     const d = new Date(env.dateFixe);
@@ -14,8 +28,8 @@ export function moisComptageEffectif(env: Enveloppe): string | undefined {
   return undefined;
 }
 
-export type EntreesBudgetMois = {
-  entrees: Enveloppe[];
+export type EntreesBudgetMois<T extends EnveloppeComptable = Enveloppe> = {
+  entrees: T[];
   recu: number;
   attendu: number;
   total: number;
@@ -25,13 +39,14 @@ export type EntreesBudgetMois = {
  * "Budget" du mois en cours (ou de tout mois pas encore archivé) : la somme
  * des enveloppes type "Entrée" comptées pour ce mois — reçues (payee) et
  * encore attendues confondues. Remplace le calcul dupliqué indépendamment
- * dans index.tsx/budget.tsx/analytics.tsx.
+ * dans index.tsx/budget.tsx/analytics.tsx, et dans l'export Excel/résumé
+ * visuel (cf. utils/exportExcel.ts, utils/rapportVisuel.ts).
  */
-export function entreesBudgetDuMois(
-  enveloppes: Enveloppe[],
+export function entreesBudgetDuMois<T extends EnveloppeComptable>(
+  enveloppes: T[],
   annee: number,
   mois: number,
-): EntreesBudgetMois {
+): EntreesBudgetMois<T> {
   const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
   const entrees = enveloppes.filter(
     (e) => e.type === "Entrée" && moisComptageEffectif(e) === moisISO,

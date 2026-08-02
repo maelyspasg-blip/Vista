@@ -145,7 +145,12 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
               <View style={styles.envRow}>
                 <View style={styles.envNomRow}>
                   <View style={[styles.envDot, { backgroundColor: couleur }]} />
-                  <Text style={[styles.envNom, { color: C.texte }]}>{env.nom}</Text>
+                  <Text
+                    style={[styles.envNom, { color: C.texte }]}
+                    numberOfLines={1}
+                  >
+                    {env.nom}
+                  </Text>
                 </View>
                 <View style={styles.envRowRight}>
                   <Text style={[styles.envMontant, { color: couleur }]}>
@@ -197,7 +202,12 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                   lignesTriees.map((ligne) => (
                     <View key={ligne.id} style={styles.txLigne}>
                       <View style={{ flex: 1 }}>
-                        <Text style={[styles.txNom, { color: C.texte }]}>{ligne.nom}</Text>
+                        <Text
+                          style={[styles.txNom, { color: C.texte }]}
+                          numberOfLines={1}
+                        >
+                          {ligne.nom}
+                        </Text>
                         <Text style={[styles.txDate, { color: C.texteMuted }]}>
                           {formaterDateCourte(ligne.date)}
                         </Text>
@@ -227,7 +237,12 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                 <View style={styles.envRow}>
                   <View style={styles.envNomRow}>
                     <View style={[styles.envDot, { backgroundColor: couleur }]} />
-                    <Text style={[styles.envNom, { color: C.texte }]}>{o.nom}</Text>
+                    <Text
+                      style={[styles.envNom, { color: C.texte }]}
+                      numberOfLines={1}
+                    >
+                      {o.nom}
+                    </Text>
                   </View>
                   <Text style={[styles.envMontant, { color: couleur }]}>
                     {formaterMontant(o.actuel)} € / {formaterMontant(o.cible)} €
@@ -288,11 +303,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 11,
   },
-  envNom: { fontSize: 16, fontWeight: "700" },
-  envNomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  envDot: { width: 10, height: 10, borderRadius: 5 },
-  envRowRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  envMontant: { fontSize: 14, fontWeight: "700" },
+  envNom: { fontSize: 16, fontWeight: "700", flexShrink: 1 },
+  envNomRow: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, marginRight: 8 },
+  envDot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
+  envRowRight: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 },
+  envMontant: { fontSize: 14, fontWeight: "700", flexShrink: 0 },
   chevron: { fontSize: 14, fontWeight: "700" },
   envBarBg: { height: 6, borderRadius: 3, overflow: "hidden" },
   envBarFill: { height: "100%", borderRadius: 3 },

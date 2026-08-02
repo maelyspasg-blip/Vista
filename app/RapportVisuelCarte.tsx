@@ -31,7 +31,10 @@ function LigneCategorie({
       <View style={styles.ligneCategorieEnTete}>
         <View style={styles.ligneCategorieNomBloc}>
           <View style={[styles.pastille, { backgroundColor: categorie.couleur }]} />
-          <Text style={[styles.nomCategorie, { color: couleurTexte }]}>
+          <Text
+            style={[styles.nomCategorie, { color: couleurTexte }]}
+            numberOfLines={1}
+          >
             {categorie.nom}
           </Text>
         </View>
@@ -166,10 +169,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 6,
   },
-  ligneCategorieNomBloc: { flexDirection: "row", alignItems: "center", gap: 8 },
-  pastille: { width: 9, height: 9, borderRadius: 4.5 },
-  nomCategorie: { fontSize: 13, fontWeight: "600" },
-  valeurCategorie: { fontSize: 12, fontWeight: "600" },
+  ligneCategorieNomBloc: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 1,
+    marginRight: 8,
+  },
+  pastille: { width: 9, height: 9, borderRadius: 4.5, flexShrink: 0 },
+  nomCategorie: { fontSize: 13, fontWeight: "600", flexShrink: 1 },
+  valeurCategorie: { fontSize: 12, fontWeight: "600", flexShrink: 0 },
   barreFond: {
     height: 8,
     borderRadius: 4,

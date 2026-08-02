@@ -1073,7 +1073,10 @@ export default function Analytics() {
                       { backgroundColor: env.couleur },
                     ]}
                   />
-                  <Text style={[styles.tiroirNom, { color: C.texte }]}>
+                  <Text
+                    style={[styles.tiroirNom, { color: C.texte }]}
+                    numberOfLines={1}
+                  >
                     {env.nom}
                   </Text>
                   {sel && (
@@ -1556,7 +1559,10 @@ export default function Analytics() {
                 ]}
               >
                 <View style={styles.objectifStatHeader}>
-                  <Text style={[styles.objectifStatNom, { color: C.texte }]}>
+                  <Text
+                    style={[styles.objectifStatNom, { color: C.texte }]}
+                    numberOfLines={1}
+                  >
                     {obj.nom}
                   </Text>
                   <Text style={[styles.objectifStatPct, { color: obj.couleur }]}>
@@ -1670,7 +1676,10 @@ export default function Analytics() {
                 >
                   <Text style={styles.topRankTexte}>{i + 1}</Text>
                 </View>
-                <Text style={[styles.topNom, { color: C.texte }]}>
+                <Text
+                  style={[styles.topNom, { color: C.texte }]}
+                  numberOfLines={1}
+                >
                   {dep.nom}
                 </Text>
                 <Text style={[styles.topMois, { color: C.texteMuted }]}>
@@ -2274,7 +2283,10 @@ export default function Analytics() {
                                     { backgroundColor: env.couleur },
                                   ]}
                                 />
-                                <Text style={[styles.tiroirNom, { color: C.texte }]}>
+                                <Text
+                                  style={[styles.tiroirNom, { color: C.texte }]}
+                                  numberOfLines={1}
+                                >
                                   {env.nom}
                                 </Text>
                                 <Text
@@ -2999,8 +3011,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
-  objectifStatNom: { fontSize: 14, fontWeight: "700" },
-  objectifStatPct: { fontSize: 14, fontWeight: "700" },
+  objectifStatNom: { fontSize: 14, fontWeight: "700", flexShrink: 1, marginRight: 8 },
+  objectifStatPct: { fontSize: 14, fontWeight: "700", flexShrink: 0 },
   objectifStatEstimation: { fontSize: 11, fontWeight: "500", marginTop: 6 },
   objectifStatFooter: {
     flexDirection: "row",

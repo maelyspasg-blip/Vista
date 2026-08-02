@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { entreesBudgetDuMois } from "./budget";
 import { formaterMontant } from "./montant";
 
 export const MOIS_LABELS = [
@@ -162,30 +163,19 @@ export function epargneDuMois(
   return snap ? snap.epargne : null;
 }
 
-// Mois auquel une catégorie "Entrée" est comptée : même logique que
-// moisComptageEffectif dans utils/budget.ts (dupliquée ici, CategorieExport
-// étant un type distinct et volontairement minimal).
-function moisComptageEffectifExport(env: CategorieExport): string | undefined {
-  if (env.moisComptage) return env.moisComptage;
-  if (env.dateFixe) {
-    const d = new Date(env.dateFixe);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
-  }
-  return undefined;
-}
-
+// "Entrées totales" du mois = ce qui est "disponible" à budgéter ce mois-ci —
+// même formule que entreesBudgetDuMois côté app (filtre mois_comptage +
+// payee ? depense : budget), réutilisée ici pour ne plus avoir deux calculs
+// séparés du même concept. Pour un mois déjà archivé, on relit directement
+// `snap.disponible` (pré-calculé à l'archivage, cf. store.ts) plutôt que de
+// re-dériver depuis `snap.enveloppes`, qui ne conserve pas le champ `payee`.
 export function disponibleDuMois(
   donnees: DonneesExport,
   mois: number,
   annee: number,
 ): number | null {
   if (estMoisActuel(mois, annee)) {
-    const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
-    return donnees.enveloppes
-      .filter(
-        (e) => e.type === "Entrée" && moisComptageEffectifExport(e) === moisISO,
-      )
-      .reduce((acc, e) => acc + (e.payee ? e.depense : e.budget), 0);
+    return entreesBudgetDuMois(donnees.enveloppes, annee, mois).total;
   }
   const snap = donnees.historiquesMois.find(
     (s) => s.mois === mois && s.annee === annee,
@@ -219,9 +209,13 @@ function feuilleResume(donnees: DonneesExport, periode: PeriodeExport) {
       return;
     }
     const depenses = totalParType(envs, false);
-    const entrees = totalParType(envs, true);
     const epargne = epargneDuMois(donnees, mois, annee) ?? 0;
+    // "Entrées totales" et "Argent disponible" sont le même concept dans cette
+    // app (le revenu du mois = ce qu'il y a à budgéter) : un seul calcul,
+    // partagé via disponibleDuMois, plutôt que deux totaux qui pourraient
+    // diverger.
     const disponible = disponibleDuMois(donnees, mois, annee) ?? 0;
+    const entrees = disponible;
     lignes.push([
       label,
       formaterMontant(depenses),

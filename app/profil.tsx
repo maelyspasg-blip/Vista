@@ -1005,7 +1005,7 @@ export default function Profil() {
             activeOpacity={1}
             onPress={() => {}}
           >
-            <ScrollView style={{ flexShrink: 1 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
               <Text style={[styles.modalTitre, { color: C.texte }]}>
                 Exporter un résumé visuel
               </Text>
@@ -1166,7 +1166,7 @@ export default function Profil() {
               ))}
             </View>
 
-            <ScrollView style={{ flexShrink: 1 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
               {CALCULS_DOC.find((g) => g.page === pageCalculsActive)?.entrees.map(
                 (entree) => (
                   <AccordionItem
@@ -1276,6 +1276,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: 24,
     maxHeight: "85%",
+    overflow: "hidden",
   },
   modalHeaderCalculs: {
     flexDirection: "row",

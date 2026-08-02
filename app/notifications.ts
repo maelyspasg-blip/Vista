@@ -20,13 +20,22 @@ export async function programmerNotificationsEvenement(
   id: string,
   nom: string,
   dateEvenement: Date,
+  heure: string,
+  touteLaJournee: boolean,
 ): Promise<void> {
   const veille = new Date(dateEvenement);
   veille.setDate(veille.getDate() - 1);
   veille.setHours(9, 0, 0, 0);
 
   const jourJ = new Date(dateEvenement);
-  jourJ.setHours(9, 0, 0, 0);
+  if (touteLaJournee) {
+    jourJ.setHours(9, 0, 0, 0);
+  } else {
+    const [hStr, mStr] = heure.replace("h", ":").split(":");
+    const h = Math.min(23, Math.max(0, parseInt(hStr, 10) || 0));
+    const m = Math.min(59, Math.max(0, parseInt(mStr, 10) || 0));
+    jourJ.setHours(h, m, 0, 0);
+  }
 
   if (veille.getTime() > Date.now()) {
     await Notifications.scheduleNotificationAsync({

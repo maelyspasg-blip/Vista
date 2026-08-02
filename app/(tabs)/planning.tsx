@@ -627,7 +627,13 @@ export default function Planning() {
     if (notifierEvent && !recurrentEvent && objStore.notificationsActives) {
       const autorise = await demanderPermissionNotifications();
       if (autorise) {
-        await programmerNotificationsEvenement(nouvel.id, nomEvent, dateEvent);
+        await programmerNotificationsEvenement(
+          nouvel.id,
+          nomEvent,
+          dateEvent,
+          heureEvent,
+          journeeEntiereEvent || multiJoursEvent,
+        );
       }
     }
     setModalCreationVisible(false);

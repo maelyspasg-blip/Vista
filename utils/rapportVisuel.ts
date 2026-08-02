@@ -1,5 +1,6 @@
 import {
   categoriesDuMois,
+  disponibleDuMois,
   DonneesExport,
   listeMois,
   MOIS_LABELS,
@@ -56,7 +57,10 @@ export function calculerResumeVisuel(
     if (!envs) return;
 
     totalDepense += totalParType(envs, false);
-    totalRecu += totalParType(envs, true);
+    // Même concept, même calcul que "Argent disponible"/"Entrées totales"
+    // dans l'export Excel (cf. utils/exportExcel.ts disponibleDuMois) — pas
+    // de re-somme séparée de `depense` qui ignorerait mois_comptage/payee.
+    totalRecu += disponibleDuMois(donnees, m, annee) ?? 0;
 
     envs
       .filter((e) => e.type !== "Entrée")
