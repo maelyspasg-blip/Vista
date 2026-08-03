@@ -248,8 +248,16 @@ export default function Dashboard() {
       ? a.depense - b.depense
       : b.depense - a.depense;
   });
-  const enveloppesSansEntree = enveloppes.filter((e) => e.type !== "Entrée");
-  const totalDepenseEnveloppes = enveloppesSansEntree.reduce(
+  // Même filtre que "Tes catégories" (estCategorieActiveCeMois, via
+  // enveloppesTriees) : une catégorie ponctuelle d'un autre mois (depense
+  // non nulle mais plus "active") ne doit compter ni dans le donut, ni dans
+  // les totaux financiers ci-dessous — sinon elle pèse à tort sur "Reste
+  // estimé" (jusqu'à le rendre faussement négatif) alors qu'elle ne fait
+  // plus partie du budget de ce mois-ci.
+  const enveloppesActivesSansEntree = enveloppesTriees.filter(
+    (e) => e.type !== "Entrée",
+  );
+  const totalDepenseEnveloppes = enveloppesActivesSansEntree.reduce(
     (acc, e) => acc + e.depense,
     0,
   );
@@ -286,7 +294,7 @@ export default function Dashboard() {
   // sous-compter un dépassement : une catégorie déjà en dépassement (depense
   // > budget) contribue 0 ici, mais son dépassement réel reste compté dans
   // totalDepenseEnveloppes.
-  const totalDepensePrevue = enveloppesSansEntree.reduce(
+  const totalDepensePrevue = enveloppesActivesSansEntree.reduce(
     (acc, e) => acc + Math.max(0, e.budget - e.depense),
     0,
   );
@@ -1419,13 +1427,13 @@ export default function Dashboard() {
           <View style={styles.graphContent}>
             <DonutChart
               couleurs={C}
-              data={enveloppesSansEntree.map((e) => ({
+              data={enveloppesActivesSansEntree.map((e) => ({
                 couleur: e.couleur,
                 valeur: e.depense,
               }))}
             />
             <View style={styles.graphLegende}>
-              {enveloppesSansEntree
+              {enveloppesActivesSansEntree
                 .filter((e) => e.depense > 0)
                 .map((e) => (
                   <View key={e.id} style={styles.legendeItem}>

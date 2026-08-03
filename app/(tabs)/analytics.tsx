@@ -17,7 +17,11 @@ import Svg, { Circle, Line, Path, Rect, Text as SvgText } from "react-native-svg
 import { useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { calculerSeries, Serie, TypeSerie } from "../../utils/series";
-import { budgetDuMoisArchive, entreesBudgetDuMois } from "../../utils/budget";
+import {
+  budgetDuMoisArchive,
+  entreesBudgetDuMois,
+  estCategorieActiveCeMois,
+} from "../../utils/budget";
 import {
   calculerScoreSante,
   genererExplicationsScore,
@@ -939,7 +943,12 @@ export default function Analytics() {
   });
 
   const repartitionDepenses = objStore.enveloppes
-    .filter((e) => e.type !== "Entrée" && e.depense > 0)
+    .filter(
+      (e) =>
+        e.type !== "Entrée" &&
+        e.depense > 0 &&
+        estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+    )
     .map((e) => ({
       cle: e.id,
       label: e.nom,
@@ -954,7 +963,13 @@ export default function Analytics() {
     // salaire principal, pas une "vraie" entrée d'argent secondaire au même
     // titre que Salaire secondaire/Vinted/remboursements, donc on l'exclut
     // de cette répartition.
-    .filter((e) => e.type === "Entrée" && e.depense > 0 && e.nom !== "Budget")
+    .filter(
+      (e) =>
+        e.type === "Entrée" &&
+        e.depense > 0 &&
+        e.nom !== "Budget" &&
+        estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+    )
     .map((e) => ({
       cle: e.id,
       label: e.nom,
