@@ -1006,7 +1006,9 @@ export default function Analytics() {
             accessibilityRole="button"
             accessibilityLabel="Voir la santé financière et les séries"
           >
-            <Ionicons name="ellipsis-horizontal" size={18} color={C.texte} />
+            <Text style={[styles.btnMenuTexte, { color: C.texte }]}>
+              Ton bilan
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -2645,13 +2647,14 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   btnMenu: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    paddingHorizontal: 14,
+    height: 32,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 0.5,
   },
+  btnMenuTexte: { fontSize: 13, fontWeight: "600" },
   titre: {
     fontSize: 22,
     fontWeight: "700",
