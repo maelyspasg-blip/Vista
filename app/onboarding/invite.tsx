@@ -64,6 +64,14 @@ export default function Invite() {
         </Text>
       </View>
 
+      <View style={styles.infoBox}>
+        <Text style={styles.infoTexte}>
+          Tu explores Vista en mode démo. Si tu crées un vrai compte, tu
+          pourras personnaliser ton espace dès le départ grâce à notre
+          questionnaire de configuration.
+        </Text>
+      </View>
+
       <View style={styles.form}>
         <Text style={styles.label}>Prénom</Text>
         <TextInput
@@ -110,7 +118,18 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   header: {
-    marginBottom: 40,
+    marginBottom: 24,
+  },
+  infoBox: {
+    backgroundColor: "#F0EEFF",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 32,
+  },
+  infoTexte: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: PURPLE,
   },
   titre: {
     fontSize: 28,

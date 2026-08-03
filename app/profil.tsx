@@ -39,6 +39,8 @@ import { demanderPermissionNotifications } from "./notifications";
 import { AccordionItem } from "./AccordionItem";
 import { RapportVisuelCarte } from "./RapportVisuelCarte";
 import { BoutonPrincipal } from "./BoutonPrincipal";
+import { GuestBanner } from "./GuestBanner";
+import { useGuest } from "./GuestContext";
 import { SyncErrorBanner } from "./SyncErrorBanner";
 import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { useObjectifs } from "./store";
@@ -122,6 +124,7 @@ export default function Profil() {
     setReduireAnimations,
   } = useAccessibilite();
   const objStore = useObjectifs();
+  const { isGuest } = useGuest();
 
   const [email, setEmail] = useState("");
   const [prenomTemp, setPrenomTemp] = useState(objStore.prenom);
@@ -427,9 +430,28 @@ export default function Profil() {
     }
   };
 
-  const seDeconnecter = async () => {
+  const confirmerDeconnexion = async () => {
     await supabase.auth.signOut();
     router.replace("/onboarding/connexion");
+  };
+
+  const seDeconnecter = () => {
+    if (!isGuest) {
+      confirmerDeconnexion();
+      return;
+    }
+    Alert.alert(
+      "Te déconnecter ?",
+      "Si tu te déconnectes, tu perdras l'accès à ton compte d'essai et tes données de démo.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Se déconnecter quand même",
+          style: "destructive",
+          onPress: confirmerDeconnexion,
+        },
+      ],
+    );
   };
 
   const [suppressionEnCours, setSuppressionEnCours] = useState(false);
@@ -483,6 +505,7 @@ export default function Profil() {
         <View style={{ width: 36 }} />
       </View>
 
+      <GuestBanner />
       <SyncErrorBanner />
 
       <ScrollView

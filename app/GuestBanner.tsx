@@ -1,22 +1,51 @@
 import { useRouter } from "expo-router";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useGuest } from "./GuestContext";
 import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
 
-export function GuestBanner({ joursRestants }: { joursRestants: number }) {
+const UNE_HEURE_MS = 3_600_000;
+const UN_JOUR_MS = 86_400_000;
+
+// Bannière d'essai invité, montée en flux (pas en overlay absolu) une fois
+// par sous-arbre de routes qui en a besoin — voir (tabs)/_layout.tsx et
+// profil.tsx. `topSafeArea` gère l'inset du haut d'écran quand rien d'autre
+// à cet endroit ne s'en charge déjà (cas des tabs).
+export function GuestBanner({ topSafeArea = false }: { topSafeArea?: boolean }) {
   const router = useRouter();
   const { couleurs } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { isGuest, msRestants } = useGuest();
 
-  const texteJours =
-    joursRestants <= 1 ? "dernier jour" : `${joursRestants} jours restants`;
+  if (!isGuest || msRestants === null) return null;
+
+  const { fond, texte } =
+    msRestants <= UNE_HEURE_MS
+      ? {
+          fond: couleurs.rouge,
+          texte: `Mode essai — ${Math.max(1, Math.ceil(msRestants / 60_000))}min restantes`,
+        }
+      : msRestants <= UN_JOUR_MS
+        ? {
+            fond: couleurs.peach,
+            texte: `Mode essai — ${Math.ceil(msRestants / UNE_HEURE_MS)}h restantes`,
+          }
+        : {
+            fond: couleurs.purple,
+            texte: `Mode essai — ${Math.ceil(msRestants / UN_JOUR_MS)}j restants`,
+          };
 
   return (
     <View
-      style={[styles.banniere, { backgroundColor: couleurs.purple }]}
-      pointerEvents="box-none"
+      style={[
+        styles.banniere,
+        { backgroundColor: fond },
+        topSafeArea && { marginTop: insets.top + 8 },
+      ]}
     >
-      <Text style={styles.texte}>
-        Mode essai — {texteJours}
+      <Text style={styles.texte} numberOfLines={1}>
+        {texte}
       </Text>
       <TouchableOpacity
         onPress={() => router.push("/onboarding/inscription")}
@@ -31,17 +60,15 @@ export function GuestBanner({ joursRestants }: { joursRestants: number }) {
 
 const styles = StyleSheet.create({
   banniere: {
-    position: "absolute",
-    top: 55,
-    left: 16,
-    right: 16,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    zIndex: 999,
   },
   texte: {
     color: "#FFFFFF",

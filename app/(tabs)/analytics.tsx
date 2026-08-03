@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import Slider from "@react-native-community/slider";
+import { useRouter } from "expo-router";
 import { Fragment, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -30,6 +31,8 @@ import {
 } from "../../utils/conseils";
 import { genererInsightsPeriode } from "../../utils/tendancesPeriode";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
+import { BoutonPrincipal } from "../BoutonPrincipal";
+import { useGuest } from "../GuestContext";
 import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
@@ -619,9 +622,11 @@ function JaugeRepartition({
 }
 
 export default function Analytics() {
+  const router = useRouter();
   const objStore = useObjectifs();
   const { theme, couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
+  const { isGuest } = useGuest();
   const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
   const [deltaDepMoyPourcentage, setDeltaDepMoyPourcentage] = useState(true);
   const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
@@ -1771,6 +1776,7 @@ export default function Analytics() {
               ))}
             </View>
 
+            <View style={{ flex: 1 }}>
             <ScrollView
               ref={scrollStatsRef}
               style={{ flex: 1 }}
@@ -2476,6 +2482,26 @@ export default function Analytics() {
 
               <View style={{ height: 20 }} />
             </ScrollView>
+            {isGuest && (
+              <View style={styles.overlayGuestStats}>
+                <Ionicons name="lock-closed-outline" size={28} color="#FFFFFF" />
+                <Text style={styles.overlayGuestTexte}>
+                  Crée un compte pour accéder aux statistiques complètes
+                </Text>
+                <BoutonPrincipal
+                  style={[styles.overlayGuestBouton, { backgroundColor: C.purple }]}
+                  onPress={() => {
+                    setModalSeriesVisible(false);
+                    router.push("/onboarding/inscription");
+                  }}
+                >
+                  <Text style={styles.overlayGuestBoutonTexte}>
+                    Créer un compte
+                  </Text>
+                </BoutonPrincipal>
+              </View>
+            )}
+            </View>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -2565,6 +2591,37 @@ function couleurScoreForte(
 }
 
 const styles = StyleSheet.create({
+  overlayGuestStats: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(20,20,30,0.82)",
+    borderBottomLeftRadius: 26,
+    borderBottomRightRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    gap: 14,
+  },
+  overlayGuestTexte: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "600",
+    textAlign: "center",
+    lineHeight: 21,
+  },
+  overlayGuestBouton: {
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+  },
+  overlayGuestBoutonTexte: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
   container: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 20 },
   header: { marginTop: 60, marginBottom: 16 },
   headerRow: {

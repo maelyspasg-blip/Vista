@@ -10,6 +10,7 @@ import { useEffect } from "react";
 import { AppState, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAccessibilite } from "../AccessibiliteContext";
+import { GuestBanner } from "../GuestBanner";
 import { PagerSwipeProvider, usePagerSwipe } from "../PagerSwipeContext";
 import { RecurrenceSuggestionBanner } from "../RecurrenceSuggestionBanner";
 import { SyncErrorBanner } from "../SyncErrorBanner";
@@ -138,6 +139,7 @@ export default function TabLayout() {
   return (
     <PagerSwipeProvider>
       <View style={{ flex: 1 }}>
+        <GuestBanner topSafeArea />
         <SyncErrorBanner />
         <RecurrenceSuggestionBanner />
         <TabsNavigator />

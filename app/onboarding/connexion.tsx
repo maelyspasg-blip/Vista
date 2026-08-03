@@ -2,12 +2,14 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
+    Image,
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
     TouchableOpacity,
     View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../supabaseClient";
 import { messageErreurAuth } from "../authErrors";
 import { Text } from "../Texte";
@@ -18,6 +20,7 @@ const PURPLE = "#8B6FE8";
 
 export default function Connexion() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
   const [chargement, setChargement] = useState(false);
@@ -49,9 +52,17 @@ export default function Connexion() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[
+        styles.container,
+        { paddingBottom: Math.max(24, insets.bottom + 12) },
+      ]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      <Image
+        source={require("../../assets/images/vista-logo-mark.png")}
+        style={styles.logo}
+        resizeMode="contain"
+      />
       <View style={styles.header}>
         <Text style={styles.titre}>Content de te revoir</Text>
         <Text style={styles.sousTitre}>Connecte-toi à ton compte Vista</Text>
@@ -107,6 +118,8 @@ export default function Connexion() {
         </BoutonPrincipal>
       </View>
 
+      <View style={styles.espaceur} />
+
       <View style={styles.footer}>
         <Text style={styles.footerTexte}>Pas encore de compte ? </Text>
         <TouchableOpacity
@@ -135,11 +148,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FFFFFF",
     paddingHorizontal: 28,
-    paddingTop: 80,
-    paddingBottom: 40,
+    paddingTop: 64,
   },
+  logo: { width: 28, height: 28, marginBottom: 24 },
   header: {
-    marginBottom: 40,
+    marginBottom: 28,
   },
   titre: {
     fontSize: 28,
@@ -152,8 +165,10 @@ const styles = StyleSheet.create({
     color: "#888",
     lineHeight: 22,
   },
-  form: {
+  form: {},
+  espaceur: {
     flex: 1,
+    maxHeight: 40,
   },
   label: {
     fontSize: 13,
@@ -168,7 +183,7 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 15,
     color: "#1A1A1A",
-    marginBottom: 20,
+    marginBottom: 16,
   },
   erreurTexte: {
     fontSize: 13,
