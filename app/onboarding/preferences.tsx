@@ -368,7 +368,19 @@ export default function Preferences() {
     }
     const { error } = await supabase
       .from("profils")
-      .update({ onboarding_complete: true })
+      .update({
+        onboarding_complete: true,
+        // Ces 4 flags démarrent à true (déjà vu) pour tout le monde par
+        // défaut — voir la migration tutoriel_premier_lancement. On les
+        // repasse à false ICI, et uniquement ici, car c'est le seul moment
+        // où l'on sait avec certitude qu'un utilisateur vient de terminer
+        // l'onboarding pour la première fois : chaque page affichera alors
+        // son tutoriel une seule fois, à son premier focus.
+        tutoriel_apercu_vu: false,
+        tutoriel_budget_vu: false,
+        tutoriel_planning_vu: false,
+        tutoriel_stats_vu: false,
+      })
       .eq("user_id", user.id);
     if (error) {
       setChargement(false);

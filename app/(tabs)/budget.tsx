@@ -45,8 +45,27 @@ import { TextInput } from "../TexteInput";
 import { VueMoisArchive } from "../VueMoisArchive";
 import { BarreProgression, useLargeurAnimee } from "../BarreProgression";
 import { BoutonPrincipal } from "../BoutonPrincipal";
+import { CibleTutoriel, RectCible } from "../CibleTutoriel";
+import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
+import { useTutoriel } from "../TutorielContext";
 
 const ACCESSORY_ID = "numericDone";
+
+const ETAPES_BUDGET: EtapeTutoriel[] = [
+  {
+    id: "categorie",
+    texte:
+      "Chaque catégorie a son propre budget. Appuie dessus pour voir le détail des dépenses.",
+  },
+  {
+    id: "ajouter",
+    texte: "Appuie ici pour ajouter une nouvelle dépense dans une catégorie.",
+  },
+  {
+    id: "mois",
+    texte: "Change de mois ici pour consulter ton historique ou anticiper le suivant.",
+  },
+];
 
 type LigneDepense = {
   id: string;
@@ -98,6 +117,13 @@ export default function Budget() {
   }>();
   const router = useRouter();
 
+  const { budget: tutorielBudgetVu, marquerVu: marquerTutorielVu } =
+    useTutoriel();
+  const [posCiblesTutoriel, setPosCiblesTutoriel] = useState<
+    Record<string, RectCible>
+  >({});
+  const mesurerCibleTutoriel = (id: string, rect: RectCible) =>
+    setPosCiblesTutoriel((p) => ({ ...p, [id]: rect }));
   const [enveloppeOuverte, setEnveloppeOuverte] = useState<string | null>(null);
   const [modalAjoutVisible, setModalAjoutVisible] = useState(false);
   const [nomTx, setNomTx] = useState("");
@@ -398,6 +424,14 @@ export default function Budget() {
     ANNEE_ACTUELLE,
     MOIS_ACTUEL,
   ).total;
+  // ⚠️ Jauge "Dépenses et argent immobilisé" : UNIQUEMENT ces deux segments
+  // (pctDepenses, pctEpargne/pctEpargneGenerique/pctObjectifs). Les entrées
+  // d'argent (reçues/prévues) ne doivent jamais y apparaître — elles sont
+  // déjà visibles ailleurs sur cet écran (carte Budget, section "Entrées
+  // d'argent reçues"). Un segment "Entrée reçue"/"Entrée prévue" a déjà été
+  // ajouté ici par erreur une fois (calqué à tort sur la jauge d'Aperçu, qui
+  // est une jauge différente et inclut légitimement les entrées) puis
+  // retiré — ne pas le réintroduire sur CETTE jauge.
   const pctDepenses =
     budgetTotal > 0 ? Math.min((totalDepenses / budgetTotal) * 100, 100) : 0;
   const pctEpargne =
@@ -624,6 +658,14 @@ export default function Budget() {
   const renderCarteCategorie = (env: Enveloppe) => {
     const pct = Math.min((env.depense / env.budget) * 100, 100);
     const estOuverte = enveloppeOuverte === env.id;
+    // Seule la toute première carte affichée sert de cible au tutoriel de
+    // premier lancement (id fixe "categorie") ; les autres reçoivent un id
+    // unique inutilisé — mesure inoffensive, évite une structure JSX
+    // conditionnelle juste pour ce cas.
+    const idCibleTutoriel =
+      env.id === categoriesAffichesTriees[0]?.id
+        ? "categorie"
+        : `carte-${env.id}`;
 
     const { mois: moisPrec, annee: anneePrec } = moisPrecedent(
       MOIS_ACTUEL,
@@ -716,8 +758,12 @@ export default function Budget() {
     const animFlash = getAnimFlash(env.id);
 
     return (
-      <Animated.View
+      <CibleTutoriel
         key={env.id}
+        id={idCibleTutoriel}
+        onMesure={mesurerCibleTutoriel}
+      >
+      <Animated.View
         style={[
           styles.envCard,
           {
@@ -1084,6 +1130,7 @@ export default function Budget() {
           </View>
         )}
       </Animated.View>
+      </CibleTutoriel>
     );
   };
 
@@ -1092,6 +1139,7 @@ export default function Budget() {
       <View style={[styles.header, { backgroundColor: C.fondPage }]}>
         <View>
           <Text style={[styles.titre, { color: C.texte }]}>Budget</Text>
+          <CibleTutoriel id="mois" onMesure={mesurerCibleTutoriel}>
           <View style={styles.selecteurMoisRow}>
             <TouchableOpacity
               onPress={() => allerAuMois(indexMois - 1)}
@@ -1132,6 +1180,7 @@ export default function Budget() {
               />
             </TouchableOpacity>
           </View>
+          </CibleTutoriel>
         </View>
       </View>
 
@@ -1267,11 +1316,14 @@ export default function Budget() {
               )}
             </>
           )}
+          {/* Jauge "Dépenses et argent immobilisé" : Dépenses + Argent
+              immobilisé UNIQUEMENT — pas de segment Entrée d'argent ici,
+              voir le commentaire au-dessus de pctDepenses. */}
           <View style={[styles.progressBg, { backgroundColor: C.separateur, marginTop: 12 }]}>
             <Animated.View
               style={[
                 styles.progressFill,
-                { width: largeurDepensesAnimee, backgroundColor: C.bleuGris },
+                { width: largeurDepensesAnimee, backgroundColor: C.accent },
               ]}
             />
             {argentImmobiliseOuvert ? (
@@ -1316,14 +1368,54 @@ export default function Budget() {
               )
             )}
           </View>
-          {totalEpargne > 0 && (
-            <View style={styles.heroLegende}>
+          {/* Légende toujours affichée, même quand un montant est à 0€ — pour
+              que la structure de la jauge (quels segments existent) reste
+              lisible même un mois sans épargne/objectifs. Ne conditionner
+              l'affichage QUE sur argentImmobiliseOuvert (replier/déplier),
+              jamais sur une valeur > 0. */}
+          <View style={styles.heroLegende}>
+            <View style={styles.heroLegendeItem}>
+              <View
+                style={[
+                  styles.heroLegendeDot,
+                  { backgroundColor: C.accent },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.heroLegendeTexte,
+                  { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
+                ]}
+              >
+                Dépenses {formaterMontant(totalDepenses)} €
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.heroLegendeItem}
+              activeOpacity={0.7}
+              onPress={() => setArgentImmobiliseOuvert((v) => !v)}
+            >
+              <View
+                style={[styles.heroLegendeDot, { backgroundColor: C.purple }]}
+              />
+              <Text
+                style={[
+                  styles.heroLegendeTexte,
+                  { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
+                ]}
+              >
+                Argent immobilisé {formaterMontant(totalEpargne)} €
+              </Text>
+              <Ionicons
+                name={argentImmobiliseOuvert ? "chevron-up" : "chevron-down"}
+                size={11}
+                color={theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted}
+              />
+            </TouchableOpacity>
+            {argentImmobiliseOuvert && (
               <View style={styles.heroLegendeItem}>
                 <View
-                  style={[
-                    styles.heroLegendeDot,
-                    { backgroundColor: C.bleuGris },
-                  ]}
+                  style={[styles.heroLegendeDot, { backgroundColor: C.purple }]}
                 />
                 <Text
                   style={[
@@ -1331,65 +1423,26 @@ export default function Budget() {
                     { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
                   ]}
                 >
-                  Dépenses {formaterMontant(totalDepenses)} €
+                  Épargne {formaterMontant(epargneGenerique)} €
                 </Text>
               </View>
-              {totalEpargne > 0 && (
-                <TouchableOpacity
-                  style={styles.heroLegendeItem}
-                  activeOpacity={0.7}
-                  onPress={() => setArgentImmobiliseOuvert((v) => !v)}
+            )}
+            {argentImmobiliseOuvert && (
+              <View style={styles.heroLegendeItem}>
+                <View
+                  style={[styles.heroLegendeDot, { backgroundColor: C.lavande }]}
+                />
+                <Text
+                  style={[
+                    styles.heroLegendeTexte,
+                    { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
+                  ]}
                 >
-                  <View
-                    style={[styles.heroLegendeDot, { backgroundColor: C.purple }]}
-                  />
-                  <Text
-                    style={[
-                      styles.heroLegendeTexte,
-                      { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
-                    ]}
-                  >
-                    Argent immobilisé {formaterMontant(totalEpargne)} €
-                  </Text>
-                  <Ionicons
-                    name={argentImmobiliseOuvert ? "chevron-up" : "chevron-down"}
-                    size={11}
-                    color={theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted}
-                  />
-                </TouchableOpacity>
-              )}
-              {argentImmobiliseOuvert && epargneGenerique > 0 && (
-                <View style={styles.heroLegendeItem}>
-                  <View
-                    style={[styles.heroLegendeDot, { backgroundColor: C.purple }]}
-                  />
-                  <Text
-                    style={[
-                      styles.heroLegendeTexte,
-                      { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
-                    ]}
-                  >
-                    Épargne {formaterMontant(epargneGenerique)} €
-                  </Text>
-                </View>
-              )}
-              {argentImmobiliseOuvert && contributionObjectifsTotal > 0 && (
-                <View style={styles.heroLegendeItem}>
-                  <View
-                    style={[styles.heroLegendeDot, { backgroundColor: C.lavande }]}
-                  />
-                  <Text
-                    style={[
-                      styles.heroLegendeTexte,
-                      { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
-                    ]}
-                  >
-                    Objectifs {formaterMontant(contributionObjectifsTotal)} €
-                  </Text>
-                </View>
-              )}
-            </View>
-          )}
+                  Objectifs {formaterMontant(contributionObjectifsTotal)} €
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
 
         {depenseDominante && depenseDominante.depense > 0 && (
@@ -1436,6 +1489,7 @@ export default function Budget() {
               </Text>
             </TouchableOpacity>
           </View>
+          <CibleTutoriel id="ajouter" onMesure={mesurerCibleTutoriel}>
           <TouchableOpacity
             style={[styles.btnAjouter, { backgroundColor: C.accentLight }]}
             onPress={() => ouvrirAjout()}
@@ -1445,6 +1499,7 @@ export default function Budget() {
               + Ajouter
             </Text>
           </TouchableOpacity>
+          </CibleTutoriel>
         </View>
 
         {paiementsDuMois.map((p) => (
@@ -2107,6 +2162,16 @@ export default function Budget() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <TutorielOverlay
+        visible={
+          !tutorielBudgetVu &&
+          ETAPES_BUDGET.every((e) => posCiblesTutoriel[e.id])
+        }
+        etapes={ETAPES_BUDGET}
+        positions={posCiblesTutoriel}
+        onTerminer={() => marquerTutorielVu("budget")}
+      />
     </View>
   );
 }

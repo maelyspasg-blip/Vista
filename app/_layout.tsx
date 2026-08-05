@@ -15,6 +15,14 @@ import "./calendarLocale";
 import { ecouterOnboardingTermine } from "./onboardingCompletion";
 import { getOnboardingVu } from "./onboardingStorage";
 import { Theme, ThemeProvider } from "./ThemeContext";
+import { PageTutoriel, TutorielContext, TutorielStatus } from "./TutorielContext";
+
+const COLONNES_TUTORIEL: Record<PageTutoriel, string> = {
+  apercu: "tutoriel_apercu_vu",
+  budget: "tutoriel_budget_vu",
+  planning: "tutoriel_planning_vu",
+  stats: "tutoriel_stats_vu",
+};
 
 const INTERVALLE_VERIFICATION_ESSAI_MS = 60000;
 
@@ -64,7 +72,46 @@ export default function RootLayout() {
   const [guestExpiresAt, setGuestExpiresAt] = useState<string | null>(null);
   const [msRestantsEssai, setMsRestantsEssai] = useState<number | null>(null);
   const [estGuestExpire, setEstGuestExpire] = useState(false);
+  const [tutoriel, setTutoriel] = useState<
+    Omit<TutorielStatus, "marquerVu" | "reinitialiser">
+  >({
+    apercu: true,
+    budget: true,
+    planning: true,
+    stats: true,
+  });
   const dernierUserIdRef = useRef<string | null>(null);
+
+  const marquerTutorielVu = (page: PageTutoriel) => {
+    setTutoriel((t) => ({ ...t, [page]: true }));
+    const userId = dernierUserIdRef.current;
+    if (!userId) return;
+    supabase
+      .from("profils")
+      .update({ [COLONNES_TUTORIEL[page]]: true })
+      .eq("user_id", userId)
+      .then(({ error }) => {
+        if (error) console.error("Supabase update tutoriel a échoué :", error);
+      });
+  };
+
+  const reinitialiserTutoriel = () => {
+    setTutoriel({ apercu: false, budget: false, planning: false, stats: false });
+    const userId = dernierUserIdRef.current;
+    if (!userId) return;
+    supabase
+      .from("profils")
+      .update({
+        tutoriel_apercu_vu: false,
+        tutoriel_budget_vu: false,
+        tutoriel_planning_vu: false,
+        tutoriel_stats_vu: false,
+      })
+      .eq("user_id", userId)
+      .then(({ error }) => {
+        if (error) console.error("Supabase update tutoriel a échoué :", error);
+      });
+  };
 
   useEffect(() => {
     (async () => {
@@ -79,11 +126,17 @@ export default function RootLayout() {
         const { data: profil } = await supabase
           .from("profils")
           .select(
-            "theme, is_guest, guest_expires_at, taille_texte, contraste_renforce, reduire_animations, onboarding_complete",
+            "theme, is_guest, guest_expires_at, taille_texte, contraste_renforce, reduire_animations, onboarding_complete, tutoriel_apercu_vu, tutoriel_budget_vu, tutoriel_planning_vu, tutoriel_stats_vu",
           )
           .eq("user_id", data.session.user.id)
           .single();
         setOnboardingComplete(profil?.onboarding_complete ?? true);
+        setTutoriel({
+          apercu: profil?.tutoriel_apercu_vu ?? true,
+          budget: profil?.tutoriel_budget_vu ?? true,
+          planning: profil?.tutoriel_planning_vu ?? true,
+          stats: profil?.tutoriel_stats_vu ?? true,
+        });
         if (profil?.theme === "clair" || profil?.theme === "sombre") {
           setThemeInitial(profil.theme);
         }
@@ -151,13 +204,21 @@ export default function RootLayout() {
         setEstGuestExpire(false);
         supabase
           .from("profils")
-          .select("onboarding_complete, is_guest, guest_expires_at")
+          .select(
+            "onboarding_complete, is_guest, guest_expires_at, tutoriel_apercu_vu, tutoriel_budget_vu, tutoriel_planning_vu, tutoriel_stats_vu",
+          )
           .eq("user_id", nouvelleSession.user.id)
           .single()
           .then(({ data: profil }) => {
             setOnboardingComplete(profil?.onboarding_complete ?? true);
             setIsGuest(!!profil?.is_guest);
             setGuestExpiresAt(profil?.is_guest ? profil.guest_expires_at : null);
+            setTutoriel({
+              apercu: profil?.tutoriel_apercu_vu ?? true,
+              budget: profil?.tutoriel_budget_vu ?? true,
+              planning: profil?.tutoriel_planning_vu ?? true,
+              stats: profil?.tutoriel_stats_vu ?? true,
+            });
           });
       },
     );
@@ -252,7 +313,15 @@ export default function RootLayout() {
       <AccessibiliteProvider initial={accessibiliteInitiale}>
         <ThemeProvider themeInitial={themeInitial}>
           <GuestContext.Provider value={{ isGuest, msRestants: msRestantsEssai }}>
-            <Navigateur />
+            <TutorielContext.Provider
+              value={{
+                ...tutoriel,
+                marquerVu: marquerTutorielVu,
+                reinitialiser: reinitialiserTutoriel,
+              }}
+            >
+              <Navigateur />
+            </TutorielContext.Provider>
           </GuestContext.Provider>
         </ThemeProvider>
       </AccessibiliteProvider>

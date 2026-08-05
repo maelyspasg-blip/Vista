@@ -36,6 +36,9 @@ import { useAccessibilite } from "../AccessibiliteContext";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
+import { CibleTutoriel, RectCible } from "../CibleTutoriel";
+import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
+import { useTutoriel } from "../TutorielContext";
 
 type FrequenceEvenement = "jour" | "semaine" | "mois" | "an";
 
@@ -43,6 +46,22 @@ const JOURS_SEMAINE = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const HEURES = Array.from({ length: 24 }, (_, i) => `${i}h`);
 const HEURE_DEBUT = 0;
 const HAUTEUR_HEURE = 56;
+
+const ETAPES_PLANNING_BASE: EtapeTutoriel[] = [
+  {
+    id: "grille",
+    texte:
+      "Appuie sur un créneau pour ajouter rapidement un événement ou une dépense à cette heure.",
+  },
+  {
+    id: "vue",
+    texte: "Change de vue — jour, semaine ou mois — selon ce que tu veux voir.",
+  },
+  {
+    id: "evenement",
+    texte: "Appuie sur un événement pour le modifier ou le supprimer.",
+  },
+];
 // Décalage de défilement initial pour ouvrir la grille sur les heures de
 // la journée plutôt qu'à minuit — la grille reste entièrement scrollable
 // vers 0h-8h et 20h-23h59.
@@ -246,6 +265,13 @@ export default function Planning() {
   const { reduireAnimations } = useAccessibilite();
   const router = useRouter();
   const params = useLocalSearchParams<{ editEventId?: string }>();
+  const { planning: tutorielPlanningVu, marquerVu: marquerTutorielVu } =
+    useTutoriel();
+  const [posCiblesTutoriel, setPosCiblesTutoriel] = useState<
+    Record<string, RectCible>
+  >({});
+  const mesurerCibleTutoriel = (id: string, rect: RectCible) =>
+    setPosCiblesTutoriel((p) => ({ ...p, [id]: rect }));
   const { setSwipeOngletsActif } = usePagerSwipe();
 
   const [vue, setVue] = useState<"jour" | "semaine" | "mois">("jour");
@@ -802,6 +828,15 @@ export default function Planning() {
   const teinteAujourdhui =
     theme === "sombre" ? "rgba(139,111,232,0.3)" : "#E3DDFB";
 
+  // "evenement" n'est une cible valable que si le jour affiché a au moins un
+  // événement à montrer — sinon l'étape est simplement omise (pas de
+  // placeholder vide) plutôt que de bloquer le tutoriel sur une cible qui
+  // n'existera jamais.
+  const aUnEvenementAujourdhui = evsHorairesJour(dateActuelle).length > 0;
+  const ETAPES_PLANNING = ETAPES_PLANNING_BASE.filter(
+    (e) => e.id !== "evenement" || aUnEvenementAujourdhui,
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
       <View style={styles.header}>
@@ -815,7 +850,11 @@ export default function Planning() {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.tabsRow, { backgroundColor: C.fondSecondaire }]}>
+      <CibleTutoriel
+        id="vue"
+        onMesure={mesurerCibleTutoriel}
+        style={[styles.tabsRow, { backgroundColor: C.fondSecondaire }]}
+      >
         {(["jour", "semaine", "mois"] as const).map((v) => (
           <TouchableOpacity
             key={v}
@@ -837,7 +876,7 @@ export default function Planning() {
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </CibleTutoriel>
 
       <View style={styles.dayHeader}>
         <Text
@@ -922,7 +961,11 @@ export default function Planning() {
                       </View>
                     ))}
                   </View>
-                  <View style={styles.eventsCol}>
+                  <CibleTutoriel
+                    id="grille"
+                    onMesure={mesurerCibleTutoriel}
+                    style={styles.eventsCol}
+                  >
                     {HEURES.map((h, i) => (
                       <TapZone
                         key={h}
@@ -933,49 +976,80 @@ export default function Planning() {
                       />
                     ))}
                     {calculerPositions(evsHorairesJour(dateActuelle)).map(
-                      ({ ev, top, height, left, width }) => (
-                        <TapZone
-                          key={ev.id}
-                          gesteExterne={gesteSwipe}
-                          style={[
-                            styles.eventCard,
-                            {
+                      ({ ev, top, height, left, width }, index) => {
+                        const carteEvenement = (
+                          <TapZone
+                            gesteExterne={gesteSwipe}
+                            style={[
+                              styles.eventCard,
+                              index === 0
+                                ? { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }
+                                : {
+                                    top,
+                                    height,
+                                    left: left as any,
+                                    width: width as any,
+                                  },
+                              {
+                                backgroundColor: ev.couleur + "22",
+                                borderLeftColor: ev.couleur,
+                              },
+                            ]}
+                            opaciteAuToucher={0.7}
+                            onTap={() => gererClicEvenement(ev)}
+                          >
+                            <View style={styles.eventTopRow}>
+                              <Text
+                                style={[styles.eventTitre, { color: ev.couleur }]}
+                                numberOfLines={1}
+                              >
+                                {ev.nom}
+                              </Text>
+                              {ev.estFinancier && (
+                                <View
+                                  style={[
+                                    styles.badgeFinancier,
+                                    { backgroundColor: ev.couleur },
+                                  ]}
+                                >
+                                  <Text style={styles.badgeFinancierTexte}>
+                                    {formaterMontant(ev.montant ?? 0)}€
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text style={[styles.eventHeure, { color: C.texteMuted }]}>
+                              {ev.heure}
+                            </Text>
+                          </TapZone>
+                        );
+                        // Le premier événement du jour sert de cible tutoriel :
+                        // c'est CibleTutoriel qui porte alors le positionnement
+                        // absolu (top/left/width/height calculés), pas TapZone
+                        // — TapZone se contente de remplir cette boîte (0/0/0/0).
+                        // Voir CibleTutoriel.tsx : sans ça, TapZone (position
+                        // "relative" par défaut de React Native) deviendrait le
+                        // référentiel de son propre position:absolute et
+                        // casserait le calcul de calculerPositions.
+                        return index === 0 ? (
+                          <CibleTutoriel
+                            key={ev.id}
+                            id="evenement"
+                            onMesure={mesurerCibleTutoriel}
+                            style={{
+                              position: "absolute",
                               top,
                               height,
                               left: left as any,
                               width: width as any,
-                              backgroundColor: ev.couleur + "22",
-                              borderLeftColor: ev.couleur,
-                            },
-                          ]}
-                          opaciteAuToucher={0.7}
-                          onTap={() => gererClicEvenement(ev)}
-                        >
-                          <View style={styles.eventTopRow}>
-                            <Text
-                              style={[styles.eventTitre, { color: ev.couleur }]}
-                              numberOfLines={1}
-                            >
-                              {ev.nom}
-                            </Text>
-                            {ev.estFinancier && (
-                              <View
-                                style={[
-                                  styles.badgeFinancier,
-                                  { backgroundColor: ev.couleur },
-                                ]}
-                              >
-                                <Text style={styles.badgeFinancierTexte}>
-                                  {formaterMontant(ev.montant ?? 0)}€
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-                          <Text style={[styles.eventHeure, { color: C.texteMuted }]}>
-                            {ev.heure}
-                          </Text>
-                        </TapZone>
-                      ),
+                            }}
+                          >
+                            {carteEvenement}
+                          </CibleTutoriel>
+                        ) : (
+                          <View key={ev.id}>{carteEvenement}</View>
+                        );
+                      },
                     )}
                     {memeJour(dateActuelle, AUJOURDHUI) &&
                       ligneActuelleVisible && (
@@ -988,7 +1062,7 @@ export default function Planning() {
                           <View style={styles.ligneActuellePoint} />
                         </View>
                       )}
-                  </View>
+                  </CibleTutoriel>
                 </View>
                 <View style={{ height: 40 }} />
               </ScrollView>
@@ -2025,6 +2099,17 @@ export default function Planning() {
           </TouchableOpacity>
         </KeyboardAvoidingView>
       </Modal>
+
+      <TutorielOverlay
+        visible={
+          !tutorielPlanningVu &&
+          ETAPES_PLANNING.length > 0 &&
+          ETAPES_PLANNING.every((e) => posCiblesTutoriel[e.id])
+        }
+        etapes={ETAPES_PLANNING}
+        positions={posCiblesTutoriel}
+        onTerminer={() => marquerTutorielVu("planning")}
+      />
     </View>
   );
 }

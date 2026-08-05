@@ -42,6 +42,24 @@ import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { useLargeurAnimee } from "../BarreProgression";
+import { CibleTutoriel, RectCible } from "../CibleTutoriel";
+import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
+import { useTutoriel } from "../TutorielContext";
+
+const ETAPES_STATS: EtapeTutoriel[] = [
+  {
+    id: "periode",
+    texte: "Choisis la période à analyser : 3, 6 ou 12 derniers mois.",
+  },
+  {
+    id: "graphique",
+    texte: "Ce graphique montre l'évolution de ton budget, ton épargne et tes dépenses dans le temps.",
+  },
+  {
+    id: "bilan",
+    texte: "Retrouve ici ton score financier et tes séries de suivi.",
+  },
+];
 
 const MOIS_LABELS = [
   "Jan",
@@ -631,6 +649,13 @@ export default function Analytics() {
   const { theme, couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const { isGuest } = useGuest();
+  const { stats: tutorielStatsVu, marquerVu: marquerTutorielVu } =
+    useTutoriel();
+  const [posCiblesTutoriel, setPosCiblesTutoriel] = useState<
+    Record<string, RectCible>
+  >({});
+  const mesurerCibleTutoriel = (id: string, rect: RectCible) =>
+    setPosCiblesTutoriel((p) => ({ ...p, [id]: rect }));
   const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
   const [deltaDepMoyPourcentage, setDeltaDepMoyPourcentage] = useState(true);
   const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
@@ -993,6 +1018,7 @@ export default function Analytics() {
               {MOIS_LABELS[MOIS_ACTUEL]} {ANNEE_ACTUELLE}
             </Text>
           </View>
+          <CibleTutoriel id="bilan" onMesure={mesurerCibleTutoriel}>
           <TouchableOpacity
             style={[
               styles.btnMenu,
@@ -1010,6 +1036,7 @@ export default function Analytics() {
               Ton bilan
             </Text>
           </TouchableOpacity>
+          </CibleTutoriel>
         </View>
 
         <View style={styles.chipRow}>
@@ -1121,6 +1148,7 @@ export default function Analytics() {
           </View>
         )}
 
+        <CibleTutoriel id="periode" onMesure={mesurerCibleTutoriel}>
         <TouchableOpacity
           style={[
             styles.periodeBouton,
@@ -1136,6 +1164,7 @@ export default function Analytics() {
             {formaterPeriode(nbMoisSelectionne)}
           </Text>
         </TouchableOpacity>
+        </CibleTutoriel>
 
         <Modal
           visible={periodePickerVisible}
@@ -1342,7 +1371,9 @@ export default function Analytics() {
             Évolution
           </Text>
         </View>
-        <View
+        <CibleTutoriel
+          id="graphique"
+          onMesure={mesurerCibleTutoriel}
           style={[
             styles.chartCard,
             {
@@ -1377,7 +1408,7 @@ export default function Analytics() {
             couleurs={C}
             fondCarte={theme === "sombre" ? C.carte : "#FAFAFA"}
           />
-        </View>
+        </CibleTutoriel>
 
         <Text
           style={[
@@ -2522,6 +2553,16 @@ export default function Analytics() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <TutorielOverlay
+        visible={
+          !tutorielStatsVu &&
+          ETAPES_STATS.every((e) => posCiblesTutoriel[e.id])
+        }
+        etapes={ETAPES_STATS}
+        positions={posCiblesTutoriel}
+        onTerminer={() => marquerTutorielVu("stats")}
+      />
     </View>
   );
 }

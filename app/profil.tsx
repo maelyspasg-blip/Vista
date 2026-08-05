@@ -45,6 +45,7 @@ import { SyncErrorBanner } from "./SyncErrorBanner";
 import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { useObjectifs } from "./store";
 import { Theme, useTheme } from "./ThemeContext";
+import { useTutoriel } from "./TutorielContext";
 
 const OPTIONS_TAILLE_TEXTE: { valeur: TailleTexte; label: string }[] = [
   { valeur: "petit", label: "Petit" },
@@ -115,6 +116,7 @@ function styleCarte(
 export default function Profil() {
   const router = useRouter();
   const { theme, couleurs: C, toggleTheme } = useTheme();
+  const { reinitialiser: reinitialiserTutoriel } = useTutoriel();
   const {
     tailleTexte,
     contrasteRenforce,
@@ -644,6 +646,20 @@ export default function Profil() {
               accessibilityLabel="Notifications"
             />
           </View>
+
+          <TouchableOpacity
+            style={[styles.btnSecondaire, { borderColor: C.separateur, marginTop: 18 }]}
+            onPress={() => {
+              reinitialiserTutoriel();
+              router.replace("/(tabs)");
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="help-circle-outline" size={16} color={C.texte} />
+            <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+              Revoir le tutoriel
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>

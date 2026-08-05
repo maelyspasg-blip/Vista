@@ -35,6 +35,27 @@ import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { useAccessibilite } from "../AccessibiliteContext";
+import { CibleTutoriel, RectCible } from "../CibleTutoriel";
+import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
+import { useTutoriel } from "../TutorielContext";
+
+const ETAPES_APERCU: EtapeTutoriel[] = [
+  {
+    id: "reste-estime",
+    texte:
+      "C'est ton indicateur principal. Il te dit combien il te restera à la fin du mois si tu continues comme ça.",
+  },
+  {
+    id: "budget",
+    texte:
+      "C'est ton salaire mensuel. Appuie dessus pour le modifier ou ajouter une entrée d'argent.",
+  },
+  {
+    id: "fab",
+    texte:
+      "Appuie ici pour ajouter une dépense ou une entrée d'argent rapidement, depuis n'importe où.",
+  },
+];
 
 function bgClair(couleur: string) {
   return couleur + "22";
@@ -154,6 +175,13 @@ export default function Dashboard() {
   const C = couleurs;
   const router = useRouter();
   const [fabMenuOuvert, setFabMenuOuvert] = useState(false);
+  const { apercu: tutorielApercuVu, marquerVu: marquerTutorielVu } =
+    useTutoriel();
+  const [posCiblesTutoriel, setPosCiblesTutoriel] = useState<
+    Record<string, RectCible>
+  >({});
+  const mesurerCibleTutoriel = (id: string, rect: RectCible) =>
+    setPosCiblesTutoriel((p) => ({ ...p, [id]: rect }));
 
   const enveloppes = objStore.enveloppes;
   const setEnveloppes = (nouvellesEnveloppes: Enveloppe[]) =>
@@ -294,6 +322,11 @@ export default function Dashboard() {
   // sous-compter un dépassement : une catégorie déjà en dépassement (depense
   // > budget) contribue 0 ici, mais son dépassement réel reste compté dans
   // totalDepenseEnveloppes.
+  // ⚠️ Doit toujours produire le segment "Dépense prévue" (hachures oranges)
+  // sur la jauge "Reste estimé" ci-dessous dès que ce total est > 0 — voir
+  // `{totalDepensePrevue > 0 && <SegmentHachure ...>}` plus bas (x2 : barre +
+  // légende). Si le segment semble manquer alors que ce total est bien > 0,
+  // le bug est côté rendu SVG natif (cf. SegmentHachure.tsx), pas ici.
   const totalDepensePrevue = enveloppesActivesSansEntree.reduce(
     (acc, e) => acc + Math.max(0, e.budget - e.depense),
     0,
@@ -727,6 +760,15 @@ export default function Dashboard() {
     setMontantAjoutObjectif("");
   };
 
+  // TEMPORAIRE — debug jauge "Reste estimé" (segment "Dépense prévue"
+  // invisible signalé sur device réel) : à retirer une fois la cause confirmée.
+  console.log(
+    "[debug jauge Reste estimé] totalDepensePrevue:",
+    totalDepensePrevue,
+    "pctPrevuEstime:",
+    pctPrevuEstime,
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: C.fondPage }}>
       <ScrollView
@@ -736,7 +778,14 @@ export default function Dashboard() {
       >
         <View style={[styles.header, { backgroundColor: C.fondPage }]}>
           <View>
-            <Text style={[styles.appName, { color: C.texte }]}>VISTA</Text>
+            <View style={styles.appNameRow}>
+              <Image
+                source={require("../../assets/images/vista-logo-mark.png")}
+                style={styles.appLogo}
+                contentFit="contain"
+              />
+              <Text style={[styles.appName, { color: C.texte }]}>VISTA</Text>
+            </View>
             <Text style={[styles.subtitle, { color: C.texteMuted }]}>
               {new Date().toLocaleDateString("fr-FR", {
                 month: "long",
@@ -781,6 +830,7 @@ export default function Dashboard() {
           </View>
         </View>
 
+        <CibleTutoriel id="reste-estime" onMesure={mesurerCibleTutoriel}>
         <View
           style={[
             styles.hero,
@@ -891,6 +941,10 @@ export default function Dashboard() {
                 />
               )
             )}
+            {/* Segment "Dépense prévue" — ne jamais retirer cette condition
+                ni le SegmentHachure : cf. commentaire sur totalDepensePrevue
+                plus haut et la règle dans SegmentHachure.tsx (dimensions Svg
+                toujours numériques, jamais "100%"). */}
             {totalDepensePrevue > 0 && (
               <SegmentHachure
                 style={[styles.barSegment, { width: largeurPrevuAnimee }]}
@@ -978,6 +1032,9 @@ export default function Dashboard() {
                 </Text>
               </View>
             )}
+            {/* Entrée de légende du segment "Dépense prévue" — garder en
+                phase avec le segment de la barre ci-dessus (même condition,
+                même totalDepensePrevue). */}
             {totalDepensePrevue > 0 && (
               <View style={styles.heroLegendeItem}>
                 <SegmentHachure style={styles.heroLegendeDot} couleur={C.peach} />
@@ -1014,6 +1071,7 @@ export default function Dashboard() {
             </Text>
           </View>
         </View>
+        </CibleTutoriel>
 
         {conseils.length > 0 && (
           <View
@@ -1058,6 +1116,11 @@ export default function Dashboard() {
         )}
 
         <View style={styles.statsRow}>
+          <CibleTutoriel
+            id="budget"
+            onMesure={mesurerCibleTutoriel}
+            style={{ flex: 1 }}
+          >
           <View
             style={[
               styles.statCard,
@@ -1177,6 +1240,7 @@ export default function Dashboard() {
               />
             </View>
           </View>
+          </CibleTutoriel>
         </View>
 
         <TouchableOpacity
@@ -1501,6 +1565,7 @@ export default function Dashboard() {
             </TouchableOpacity>
           </View>
         )}
+        <CibleTutoriel id="fab" onMesure={mesurerCibleTutoriel}>
         <TouchableOpacity
           style={[styles.fab, { backgroundColor: C.purple }]}
           activeOpacity={0.8}
@@ -1510,7 +1575,18 @@ export default function Dashboard() {
         >
           <Text style={styles.fabTexte}>{fabMenuOuvert ? "×" : "+"}</Text>
         </TouchableOpacity>
+        </CibleTutoriel>
       </View>
+
+      <TutorielOverlay
+        visible={
+          !tutorielApercuVu &&
+          ETAPES_APERCU.every((e) => posCiblesTutoriel[e.id])
+        }
+        etapes={ETAPES_APERCU}
+        positions={posCiblesTutoriel}
+        onTerminer={() => marquerTutorielVu("apercu")}
+      />
 
       {Platform.OS === "ios" && (
         <InputAccessoryView nativeID={ACCESSORY_ID}>
@@ -2900,6 +2976,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 60,
     marginBottom: 24,
+  },
+  appNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  appLogo: {
+    width: 22,
+    height: 22,
   },
   appName: {
     fontSize: 23,
