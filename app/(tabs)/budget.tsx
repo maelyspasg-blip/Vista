@@ -46,10 +46,97 @@ import { VueMoisArchive } from "../VueMoisArchive";
 import { BarreProgression, useLargeurAnimee } from "../BarreProgression";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { CibleTutoriel, RectCible } from "../CibleTutoriel";
-import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
+import {
+  CouleursTheme,
+  EtapeTutoriel,
+  TutorielOverlay,
+} from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
 
 const ACCESSORY_ID = "numericDone";
+
+function maquetteAjouterDepense(C: CouleursTheme) {
+  return (
+    <View
+      style={{
+        backgroundColor: C.fondSecondaire,
+        borderRadius: 12,
+        padding: 10,
+        marginBottom: 12,
+      }}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          marginBottom: 6,
+        }}
+      >
+        <Text style={{ fontSize: 12, fontWeight: "700", color: C.texte }}>
+          Courses
+        </Text>
+        <Text style={{ fontSize: 11, color: C.texteMuted }}>77 € / 200 €</Text>
+      </View>
+      <View
+        style={{
+          height: 5,
+          borderRadius: 3,
+          backgroundColor: C.separateur,
+          overflow: "hidden",
+          marginBottom: 8,
+        }}
+      >
+        <View style={{ width: "38%", height: "100%", backgroundColor: C.vert }} />
+      </View>
+      <Text style={{ fontSize: 11, color: C.texteMuted }}>Carrefour · 45 €</Text>
+      <Text style={{ fontSize: 11, color: C.texteMuted, marginTop: 2 }}>
+        Auchan · 32 €
+      </Text>
+    </View>
+  );
+}
+
+function maquetteRaccourcis(C: CouleursTheme) {
+  const puces = [
+    { label: "Café · 3 €", ajouter: false },
+    { label: "Métro · 2 €", ajouter: false },
+    { label: "+ Raccourci", ajouter: true },
+  ];
+  return (
+    <View
+      style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 }}
+    >
+      {puces.map((p) => (
+        <View
+          key={p.label}
+          style={[
+            {
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              borderRadius: 14,
+              backgroundColor: p.ajouter ? "transparent" : C.purpleLight,
+            },
+            p.ajouter && {
+              borderWidth: 1,
+              borderStyle: "dashed",
+              borderColor: C.carteBorder,
+            },
+          ]}
+        >
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: "600",
+              color: p.ajouter ? C.texteMuted : C.purpleText,
+            }}
+          >
+            {p.label}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 const ETAPES_BUDGET: EtapeTutoriel[] = [
   {
@@ -58,8 +145,18 @@ const ETAPES_BUDGET: EtapeTutoriel[] = [
       "Chaque catégorie a son propre budget. Appuie dessus pour voir le détail des dépenses.",
   },
   {
+    texte:
+      "Au fil du mois, rentre chaque dépense dans sa catégorie pour faire progresser ta jauge. Ex: tu as prévu 200€ pour les courses — ajoute Carrefour 45€, Auchan 32€...",
+    maquette: maquetteAjouterDepense,
+  },
+  {
     id: "ajouter",
     texte: "Appuie ici pour ajouter une nouvelle dépense dans une catégorie.",
+  },
+  {
+    texte:
+      "Crée des raccourcis pour tes dépenses fréquentes — un tap suffit pour pré-remplir le formulaire.",
+    maquette: maquetteRaccourcis,
   },
   {
     id: "mois",
@@ -2166,11 +2263,15 @@ export default function Budget() {
       <TutorielOverlay
         visible={
           !tutorielBudgetVu &&
-          ETAPES_BUDGET.every((e) => posCiblesTutoriel[e.id])
+          ETAPES_BUDGET.every((e) => !e.id || posCiblesTutoriel[e.id])
         }
         etapes={ETAPES_BUDGET}
         positions={posCiblesTutoriel}
-        onTerminer={() => marquerTutorielVu("budget")}
+        onTerminer={() => {
+          marquerTutorielVu("budget");
+          router.push("/(tabs)/planning");
+        }}
+        onFermer={() => marquerTutorielVu("budget")}
       />
     </View>
   );

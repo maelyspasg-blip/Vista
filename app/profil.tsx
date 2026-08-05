@@ -768,31 +768,35 @@ export default function Profil() {
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-          DÉTAIL DES CALCULS
-        </Text>
-        <View
-          style={[
-            styles.carte,
-            { backgroundColor: C.carte, borderColor: C.carteBorder },
-            styleCarte(theme, C.lavande, contrasteRenforce),
-          ]}
-        >
-          <Text style={[styles.calculsIntro, { color: C.texteMuted }]}>
-            Comment chaque chiffre affiché dans l&apos;app est calculé,
-            page par page.
-          </Text>
-          <TouchableOpacity
-            style={[styles.btnSecondaire, { borderColor: C.separateur }]}
-            onPress={() => setModalCalculsVisible(true)}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="calculator-outline" size={16} color={C.texte} />
-            <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
-              Voir le détail des calculs
+        {objStore.isAdmin && (
+          <>
+            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+              DÉTAIL DES CALCULS
             </Text>
-          </TouchableOpacity>
-        </View>
+            <View
+              style={[
+                styles.carte,
+                { backgroundColor: C.carte, borderColor: C.carteBorder },
+                styleCarte(theme, C.lavande, contrasteRenforce),
+              ]}
+            >
+              <Text style={[styles.calculsIntro, { color: C.texteMuted }]}>
+                Comment chaque chiffre affiché dans l&apos;app est calculé,
+                page par page.
+              </Text>
+              <TouchableOpacity
+                style={[styles.btnSecondaire, { borderColor: C.separateur }]}
+                onPress={() => setModalCalculsVisible(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="calculator-outline" size={16} color={C.texte} />
+                <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+                  Voir le détail des calculs
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
 
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           COMPTE

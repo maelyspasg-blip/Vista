@@ -126,7 +126,7 @@ export default function RootLayout() {
         const { data: profil } = await supabase
           .from("profils")
           .select(
-            "theme, is_guest, guest_expires_at, taille_texte, contraste_renforce, reduire_animations, onboarding_complete, tutoriel_apercu_vu, tutoriel_budget_vu, tutoriel_planning_vu, tutoriel_stats_vu",
+            "theme, is_guest, guest_expires_at, taille_texte, contraste_renforce, reduire_animations, onboarding_complete, is_admin, tutoriel_apercu_vu, tutoriel_budget_vu, tutoriel_planning_vu, tutoriel_stats_vu",
           )
           .eq("user_id", data.session.user.id)
           .single();
@@ -147,7 +147,10 @@ export default function RootLayout() {
           reduireAnimations: profil?.reduire_animations ?? undefined,
         });
 
-        if (profil?.is_guest && profil.guest_expires_at) {
+        // !profil.is_admin : un admin n'est jamais traité comme invité
+        // restreint (pas de bannière d'essai, pas d'expiration forcée),
+        // même si is_guest est techniquement vrai en base.
+        if (profil?.is_guest && profil.guest_expires_at && !profil.is_admin) {
           setIsGuest(true);
           setGuestExpiresAt(profil.guest_expires_at);
           const msRestants =
@@ -205,14 +208,23 @@ export default function RootLayout() {
         supabase
           .from("profils")
           .select(
-            "onboarding_complete, is_guest, guest_expires_at, tutoriel_apercu_vu, tutoriel_budget_vu, tutoriel_planning_vu, tutoriel_stats_vu",
+            "onboarding_complete, is_guest, guest_expires_at, is_admin, tutoriel_apercu_vu, tutoriel_budget_vu, tutoriel_planning_vu, tutoriel_stats_vu",
           )
           .eq("user_id", nouvelleSession.user.id)
           .single()
           .then(({ data: profil }) => {
             setOnboardingComplete(profil?.onboarding_complete ?? true);
-            setIsGuest(!!profil?.is_guest);
-            setGuestExpiresAt(profil?.is_guest ? profil.guest_expires_at : null);
+            // Un admin n'est jamais traité comme invité restreint, même si
+            // is_guest est techniquement vrai en base : bannière d'essai,
+            // flou des stats et expiration forcée en dépendent tous via cet
+            // état, donc c'est le point unique à corriger ici plutôt que de
+            // dupliquer la condition à chaque consommateur.
+            setIsGuest(!!profil?.is_guest && !profil?.is_admin);
+            setGuestExpiresAt(
+              profil?.is_guest && !profil?.is_admin
+                ? profil.guest_expires_at
+                : null,
+            );
             setTutoriel({
               apercu: profil?.tutoriel_apercu_vu ?? true,
               budget: profil?.tutoriel_budget_vu ?? true,

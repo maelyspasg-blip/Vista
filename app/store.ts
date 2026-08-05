@@ -154,6 +154,7 @@ type EtatStore = {
   prenom: string;
   nom: string;
   avatarUrl: string | null;
+  isAdmin: boolean;
   notificationsActives: boolean;
   transactions: Transaction[];
   modelesDepenses: ModeleDepense[];
@@ -175,6 +176,7 @@ let etat: EtatStore = {
   prenom: "",
   nom: "",
   avatarUrl: null,
+  isAdmin: false,
   notificationsActives: true,
   transactions: TRANSACTIONS_INIT,
   modelesDepenses: [],
@@ -1272,6 +1274,11 @@ export function useObjectifs() {
     prenom: local.prenom,
     nom: local.nom,
     avatarUrl: local.avatarUrl,
+    isAdmin: local.isAdmin,
+    // Réutilisable partout pour conditionner l'affichage des fonctionnalités
+    // premium/admin — jamais positionné par le code, uniquement lu depuis
+    // profils.is_admin (activé manuellement depuis le dashboard Supabase).
+    estAdmin: () => local.isAdmin,
     notificationsActives: local.notificationsActives,
     transactions: local.transactions,
     modelesDepenses: local.modelesDepenses,
@@ -1378,7 +1385,7 @@ export function useObjectifs() {
             supabase
               .from("profils")
               .select(
-                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, seuil_epargne_constante, prenom, nom, avatar_url, notifications_actives, dernier_mois_archive_mois, dernier_mois_archive_annee",
+                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, seuil_epargne_constante, prenom, nom, avatar_url, is_admin, notifications_actives, dernier_mois_archive_mois, dernier_mois_archive_annee",
               )
               .eq("user_id", user.id)
               .single(),
@@ -1420,6 +1427,7 @@ export function useObjectifs() {
           prenom: profil?.prenom ?? etat.prenom,
           nom: profil?.nom ?? etat.nom,
           avatarUrl: profil?.avatar_url ?? etat.avatarUrl,
+          isAdmin: profil?.is_admin ?? etat.isAdmin,
           notificationsActives:
             profil?.notifications_actives ?? etat.notificationsActives,
           dernierMoisArchive,

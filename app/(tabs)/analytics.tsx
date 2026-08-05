@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import Slider from "@react-native-community/slider";
 import { useRouter } from "expo-router";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, ReactNode, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -43,13 +43,108 @@ import { TextInput } from "../TexteInput";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { useLargeurAnimee } from "../BarreProgression";
 import { CibleTutoriel, RectCible } from "../CibleTutoriel";
-import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
+import {
+  CouleursTheme,
+  EtapeTutoriel,
+  TutorielOverlay,
+} from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
+
+function maquettePeriode(C: CouleursTheme) {
+  const options = ["3 mois", "6 mois", "1 an"];
+  return (
+    <View style={{ flexDirection: "row", gap: 6, marginBottom: 12 }}>
+      {options.map((label, i) => (
+        <View
+          key={label}
+          style={{
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderRadius: 10,
+            backgroundColor: i === 0 ? C.purple : C.fondSecondaire,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 10,
+              fontWeight: "600",
+              color: i === 0 ? "#FFFFFF" : C.texteMuted,
+            }}
+          >
+            {label}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function maquetteSectionsStats(C: CouleursTheme) {
+  const carte = (contenu: ReactNode, label: string) => (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: C.fondSecondaire,
+        borderRadius: 10,
+        paddingVertical: 8,
+        alignItems: "center",
+      }}
+    >
+      {contenu}
+      <Text style={{ fontSize: 9, color: C.texteMuted, marginTop: 4 }}>
+        {label}
+      </Text>
+    </View>
+  );
+  return (
+    <View style={{ flexDirection: "row", gap: 6, marginBottom: 12 }}>
+      {carte(
+        <Svg width={40} height={20}>
+          <Path
+            d="M2 16 L12 8 L22 12 L38 4"
+            stroke={C.purple}
+            strokeWidth={2}
+            fill="none"
+          />
+        </Svg>,
+        "Évolution",
+      )}
+      {carte(
+        <View
+          style={{
+            flexDirection: "row",
+            gap: 3,
+            height: 20,
+            alignItems: "flex-end",
+          }}
+        >
+          <View style={{ width: 5, height: 10, backgroundColor: C.accent, borderRadius: 2 }} />
+          <View style={{ width: 5, height: 18, backgroundColor: C.peach, borderRadius: 2 }} />
+          <View style={{ width: 5, height: 6, backgroundColor: C.bleuGris, borderRadius: 2 }} />
+        </View>,
+        "Répartition",
+      )}
+      {carte(
+        <Text style={{ fontSize: 14, fontWeight: "800", color: C.purple }}>
+          82<Text style={{ fontSize: 9, fontWeight: "600" }}>/100</Text>
+        </Text>,
+        "Ton bilan",
+      )}
+    </View>
+  );
+}
 
 const ETAPES_STATS: EtapeTutoriel[] = [
   {
+    texte:
+      "Explore tes finances en détail : évolution dans le temps, répartition par catégorie, et dans Ton bilan — ton score de santé financière et le simulateur.",
+    maquette: maquetteSectionsStats,
+  },
+  {
     id: "periode",
-    texte: "Choisis la période à analyser : 3, 6 ou 12 derniers mois.",
+    texte:
+      "Choisis la période à analyser — de 3 mois jusqu'à tout ton historique disponible.",
+    maquette: maquettePeriode,
   },
   {
     id: "graphique",
@@ -202,6 +297,7 @@ function formaterPeriode(nbMois: number): string {
 }
 
 const PERIODE_MAX_MOIS = 120; // plafond fixe (10 ans), indépendant des données de l'utilisateur
+const HAUTEUR_TRACK_EPARGNE = 90; // hauteur de la zone de tracé du graphique "Épargne dans le temps"
 
 type OptionPeriode = {
   valeur: number;
@@ -1272,14 +1368,25 @@ export default function Analytics() {
                   },
             ]}
           >
-            <Text
-              style={[
-                styles.kpiLabel,
-                { color: theme === "sombre" ? C.accent : C.texteMuted },
-              ]}
-            >
-              DÉPENSE MOY. / JOUR
-            </Text>
+            <View style={styles.kpiLabelRow}>
+              <Text
+                style={[
+                  styles.kpiLabel,
+                  {
+                    marginBottom: 0,
+                    color: theme === "sombre" ? C.accent : C.texteMuted,
+                  },
+                ]}
+              >
+                DÉPENSE MOY. / JOUR
+              </Text>
+              <InfoBulle
+                titre="Dépense moyenne par jour"
+                texte="Calculée en divisant tes dépenses totales par le nombre de jours écoulés depuis le début du mois. En début de mois, ce chiffre peut paraître élevé — il s'étale et se stabilise naturellement au fil des jours."
+                taille={12}
+                couleur={theme === "sombre" ? C.accent : C.texteMuted}
+              />
+            </View>
             <Text
               style={[
                 styles.kpiVal,
@@ -1427,39 +1534,85 @@ export default function Analytics() {
             },
           ]}
         >
-          <View style={styles.barresEpargne}>
-            {donneesEpargne.map((val, i) => {
-              const maxE = Math.max(...donneesEpargne, 1);
-              const h = Math.round((val / maxE) * 90);
-              return (
-                <View key={i} style={styles.barreEpargneCol}>
-                  <Text
-                    style={[styles.barreEpargneVal, { color: C.bleuGris }]}
-                  >
-                    {val > 0 ? `${formaterMontant(val)}€` : ""}
-                  </Text>
+          {(() => {
+            const maxBrutEpargne = Math.max(...donneesEpargne, 1);
+            const ticksEpargne = calculerTicksY(maxBrutEpargne);
+            const maxEpargne = ticksEpargne[ticksEpargne.length - 1];
+            return (
+              <View style={styles.epargneChartRow}>
+                <View style={[styles.epargneAxeY, { height: HAUTEUR_TRACK_EPARGNE }]}>
+                  {[...ticksEpargne].reverse().map((t) => (
+                    <Text
+                      key={t}
+                      style={[styles.epargneAxeYTexte, { color: C.texteMuted }]}
+                    >
+                      {t}€
+                    </Text>
+                  ))}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.barresEpargneValeursRow}>
+                    {donneesEpargne.map((val, i) => (
+                      <Text
+                        key={i}
+                        style={[styles.barreEpargneVal, { color: C.bleuGris }]}
+                      >
+                        {val > 0 ? `${formaterMontant(val)}€` : ""}
+                      </Text>
+                    ))}
+                  </View>
                   <View
                     style={[
-                      styles.barreEpargneTrack,
-                      { backgroundColor: C.separateur },
+                      styles.epargnePlotZone,
+                      { height: HAUTEUR_TRACK_EPARGNE },
                     ]}
                   >
-                    <View
-                      style={[
-                        styles.barreEpargneRemplissage,
-                        { height: h, backgroundColor: C.bleuGris },
-                      ]}
-                    />
+                    {ticksEpargne.map((t) => (
+                      <View
+                        key={t}
+                        style={[
+                          styles.epargneGridline,
+                          {
+                            top:
+                              HAUTEUR_TRACK_EPARGNE -
+                              (t / maxEpargne) * HAUTEUR_TRACK_EPARGNE,
+                            backgroundColor: C.separateur,
+                          },
+                        ]}
+                      />
+                    ))}
+                    <View style={styles.barresEpargne}>
+                      {donneesEpargne.map((val, i) => {
+                        const h = Math.round(
+                          (val / maxEpargne) * HAUTEUR_TRACK_EPARGNE,
+                        );
+                        return (
+                          <View key={i} style={styles.barreEpargneCol}>
+                            <View
+                              style={[
+                                styles.barreEpargneRemplissage,
+                                { height: h, backgroundColor: C.bleuGris },
+                              ]}
+                            />
+                          </View>
+                        );
+                      })}
+                    </View>
                   </View>
-                  <Text
-                    style={[styles.barreEpargneLabel, { color: C.texteMuted }]}
-                  >
-                    {labels[i]}
-                  </Text>
+                  <View style={styles.barresEpargneValeursRow}>
+                    {labels.map((lbl, i) => (
+                      <Text
+                        key={i}
+                        style={[styles.barreEpargneLabel, { color: C.texteMuted }]}
+                      >
+                        {lbl}
+                      </Text>
+                    ))}
+                  </View>
                 </View>
-              );
-            })}
-          </View>
+              </View>
+            );
+          })()}
         </View>
 
         <Text
@@ -1561,7 +1714,17 @@ export default function Analytics() {
               {deltaTotal}%
             </Text>
           </View>
-          {objStore.enveloppes.map((env) => {
+          {objStore.enveloppes
+            // Comparaison honnête uniquement entre catégories présentes dans
+            // LES DEUX mois comparés — une catégorie qui n'existait pas le
+            // mois dernier (ou plus ce mois-ci) n'a rien de comparable à
+            // afficher ici.
+            .filter((env) =>
+              snapshotMoisPrecedent?.enveloppes.some((e) => e.id === env.id),
+            )
+            // Plus chère en premier, pas alphabétique.
+            .sort((a, b) => b.depense - a.depense)
+            .map((env) => {
             const pct =
               env.budget > 0 ? Math.round((env.depense / env.budget) * 100) : 0;
             return (
@@ -2557,7 +2720,7 @@ export default function Analytics() {
       <TutorielOverlay
         visible={
           !tutorielStatsVu &&
-          ETAPES_STATS.every((e) => posCiblesTutoriel[e.id])
+          ETAPES_STATS.every((e) => !e.id || posCiblesTutoriel[e.id])
         }
         etapes={ETAPES_STATS}
         positions={posCiblesTutoriel}
@@ -2968,6 +3131,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 4,
   },
+  kpiLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginBottom: 4,
+  },
   kpiVal: { fontSize: 22, fontWeight: "700" },
   kpiDelta: { fontSize: 11, fontWeight: "600" },
   kpiDeltaRow: {
@@ -3058,29 +3227,46 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     marginTop: 10,
   },
+  epargneChartRow: { flexDirection: "row" },
+  epargneAxeY: { width: 32, justifyContent: "space-between", marginRight: 6 },
+  epargneAxeYTexte: { fontSize: 9, textAlign: "right" },
+  barresEpargneValeursRow: {
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-around",
+  },
+  epargnePlotZone: { position: "relative" },
+  epargneGridline: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
+  },
   barresEpargne: {
     flexDirection: "row",
     gap: 8,
     alignItems: "flex-end",
     justifyContent: "space-around",
-    height: 130,
+    height: "100%",
   },
   barreEpargneCol: {
     flex: 1,
     alignItems: "center",
     justifyContent: "flex-end",
   },
-  barreEpargneVal: { fontSize: 9, fontWeight: "700", marginBottom: 3 },
-  barreEpargneTrack: {
-    width: "80%",
-    height: 90,
-    justifyContent: "flex-end",
-    backgroundColor: "#F0F0F0",
-    borderRadius: 6,
-    overflow: "hidden",
+  barreEpargneVal: {
+    flex: 1,
+    fontSize: 9,
+    fontWeight: "700",
+    textAlign: "center",
   },
-  barreEpargneRemplissage: { width: "100%", borderRadius: 6 },
-  barreEpargneLabel: { fontSize: 10, color: "#999", marginTop: 5 },
+  barreEpargneRemplissage: { width: "60%", borderRadius: 6 },
+  barreEpargneLabel: {
+    flex: 1,
+    fontSize: 10,
+    color: "#999",
+    textAlign: "center",
+  },
   insightCard: { backgroundColor: "#F0EEFF", borderRadius: 16, padding: 18 },
   insightItem: { flexDirection: "row", gap: 10, paddingVertical: 10 },
   insightItemBorder: {

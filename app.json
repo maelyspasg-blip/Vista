@@ -25,7 +25,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.RECORD_AUDIO"
-      ]
+      ],
+      "package": "com.maelyspasgvista.vista"
     },
     "web": {
       "output": "static",

@@ -1581,11 +1581,15 @@ export default function Dashboard() {
       <TutorielOverlay
         visible={
           !tutorielApercuVu &&
-          ETAPES_APERCU.every((e) => posCiblesTutoriel[e.id])
+          ETAPES_APERCU.every((e) => !e.id || posCiblesTutoriel[e.id])
         }
         etapes={ETAPES_APERCU}
         positions={posCiblesTutoriel}
-        onTerminer={() => marquerTutorielVu("apercu")}
+        onTerminer={() => {
+          marquerTutorielVu("apercu");
+          router.push("/(tabs)/budget");
+        }}
+        onFermer={() => marquerTutorielVu("apercu")}
       />
 
       {Platform.OS === "ios" && (

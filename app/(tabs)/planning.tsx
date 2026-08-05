@@ -37,7 +37,11 @@ import { BoutonPrincipal } from "../BoutonPrincipal";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { CibleTutoriel, RectCible } from "../CibleTutoriel";
-import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
+import {
+  CouleursTheme,
+  EtapeTutoriel,
+  TutorielOverlay,
+} from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
 
 type FrequenceEvenement = "jour" | "semaine" | "mois" | "an";
@@ -46,12 +50,50 @@ const JOURS_SEMAINE = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const HEURES = Array.from({ length: 24 }, (_, i) => `${i}h`);
 const HEURE_DEBUT = 0;
 const HAUTEUR_HEURE = 56;
+const ORDRE_VUES = ["jour", "semaine", "mois"] as const;
+
+function maquetteFormulaireEvenement(C: CouleursTheme) {
+  const champs = [
+    { label: "Nom", valeur: "Facture électricité" },
+    { label: "Date", valeur: "28 août" },
+    { label: "Montant", valeur: "65 €" },
+    { label: "Catégorie", valeur: "Factures" },
+  ];
+  return (
+    <View
+      style={{
+        backgroundColor: C.fondSecondaire,
+        borderRadius: 12,
+        padding: 10,
+        gap: 6,
+        marginBottom: 12,
+      }}
+    >
+      {champs.map((champ) => (
+        <View
+          key={champ.label}
+          style={{ flexDirection: "row", justifyContent: "space-between" }}
+        >
+          <Text style={{ fontSize: 11, color: C.texteMuted }}>{champ.label}</Text>
+          <Text style={{ fontSize: 11, fontWeight: "600", color: C.texte }}>
+            {champ.valeur}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 const ETAPES_PLANNING_BASE: EtapeTutoriel[] = [
   {
     id: "grille",
     texte:
       "Appuie sur un créneau pour ajouter rapidement un événement ou une dépense à cette heure.",
+  },
+  {
+    texte:
+      "Planifie une dépense à venir — elle se déduira automatiquement de ton budget le jour J, et apparaîtra dans Aperçu comme dépense prévue.",
+    maquette: maquetteFormulaireEvenement,
   },
   {
     id: "vue",
@@ -496,6 +538,39 @@ export default function Planning() {
       else if (vitesseOk && e.translationX > 70) allerPrecedent();
     });
 
+  // Geste séparé du swipe jour/semaine ci-dessus : celui-ci vit sur le
+  // sélecteur Jour/Semaine/Mois (tabsRow) et fait défiler entre les 3 vues,
+  // pas entre les dates. Comme il couvre une zone JSX différente de
+  // gesteSwipe (le sélecteur, pas la grille en dessous), les deux ne se
+  // disputent jamais le même toucher. Même garde-fou setSwipeOngletsActif
+  // que gesteSwipe pour empêcher le PagerView de capter ce swipe en
+  // parallèle — c'est ce garde-fou (absent des tentatives précédentes) qui
+  // manquait pour que le swipe fonctionne sans conflit avec le pager natif
+  // des onglets.
+  const gesteSwipeVue = Gesture.Pan()
+    .activeOffsetX([-40, 40])
+    .failOffsetY([-12, 12])
+    .minDistance(40)
+    .onBegin(() => {
+      scheduleOnRN(setSwipeOngletsActif, false);
+    })
+    .onFinalize(() => {
+      scheduleOnRN(setSwipeOngletsActif, true);
+    })
+    .onEnd((e) => {
+      const vitesseOk = Math.abs(e.velocityX) > 200;
+      const indexActuel = ORDRE_VUES.indexOf(vue);
+      if (
+        vitesseOk &&
+        e.translationX < -70 &&
+        indexActuel < ORDRE_VUES.length - 1
+      ) {
+        scheduleOnRN(setVue, ORDRE_VUES[indexActuel + 1]);
+      } else if (vitesseOk && e.translationX > 70 && indexActuel > 0) {
+        scheduleOnRN(setVue, ORDRE_VUES[indexActuel - 1]);
+      }
+    });
+
   const ouvrirJour = (date: Date) => {
     setDateActuelle(date);
     setVue("jour");
@@ -850,32 +925,41 @@ export default function Planning() {
         </TouchableOpacity>
       </View>
 
-      <CibleTutoriel
-        id="vue"
-        onMesure={mesurerCibleTutoriel}
-        style={[styles.tabsRow, { backgroundColor: C.fondSecondaire }]}
-      >
-        {(["jour", "semaine", "mois"] as const).map((v) => (
-          <TouchableOpacity
-            key={v}
-            style={[
-              styles.tabBtn,
-              vue === v && [styles.tabBtnActif, { backgroundColor: C.carte }],
-            ]}
-            onPress={() => setVue(v)}
-            activeOpacity={0.7}
-          >
-            <Text
-              style={[
-                styles.tabTexte,
-                { color: C.texteMuted },
-                vue === v && { color: C.purple },
-              ]}
-            >
-              {v.charAt(0).toUpperCase() + v.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
+      {/* GestureDetector doit envelopper directement une View native (pas
+          CibleTutoriel, qui n'est pas un forwardRef) pour pouvoir attacher
+          son gestionnaire de geste — CibleTutoriel reste donc à l'extérieur,
+          simple mesure de position, sans rôle dans la reconnaissance du
+          geste. Les TouchableOpacity sont remplacées par TapZone : un
+          TouchableOpacity ordinaire ignore gesteSwipeVue (ancien système de
+          responder RN) et peut déclencher onPress même après un swipe net —
+          exactement le conflit qui a bloqué cette fonctionnalité jusqu'ici. */}
+      <CibleTutoriel id="vue" onMesure={mesurerCibleTutoriel}>
+        <GestureDetector gesture={gesteSwipeVue}>
+          <View style={[styles.tabsRow, { backgroundColor: C.fondSecondaire }]}>
+            {(["jour", "semaine", "mois"] as const).map((v) => (
+              <TapZone
+                key={v}
+                gesteExterne={gesteSwipeVue}
+                style={[
+                  styles.tabBtn,
+                  vue === v && [styles.tabBtnActif, { backgroundColor: C.carte }],
+                ]}
+                opaciteAuToucher={0.7}
+                onTap={() => setVue(v)}
+              >
+                <Text
+                  style={[
+                    styles.tabTexte,
+                    { color: C.texteMuted },
+                    vue === v && { color: C.purple },
+                  ]}
+                >
+                  {v.charAt(0).toUpperCase() + v.slice(1)}
+                </Text>
+              </TapZone>
+            ))}
+          </View>
+        </GestureDetector>
       </CibleTutoriel>
 
       <View style={styles.dayHeader}>
@@ -946,6 +1030,22 @@ export default function Planning() {
                 </View>
               )}
 
+              {/* La cible tutoriel "grille" est le ScrollView lui-même (taille
+                  bornée = viewport visible), PAS eventsCol : eventsCol contient
+                  les 24h de contenu (~1344px, bien plus haut que l'écran) et
+                  vit à l'intérieur du ScrollView qui a un contentOffset initial
+                  (scroll sur ~8h). measureInWindow sur eventsCol renverrait
+                  alors la position/hauteur du contenu SCROLLABLE complet (avec
+                  un y potentiellement négatif, décalé par le scroll initial),
+                  pas la zone réellement visible à l'écran — d'où un trou et
+                  une bulle complètement mal placés. Mesurer le ScrollView
+                  contourne le problème : sa propre boîte ne bouge jamais,
+                  quel que soit le défilement de son contenu interne. */}
+              <CibleTutoriel
+                id="grille"
+                onMesure={mesurerCibleTutoriel}
+                style={{ flex: 1 }}
+              >
               <ScrollView
                 style={styles.timeline}
                 showsVerticalScrollIndicator={false}
@@ -961,11 +1061,7 @@ export default function Planning() {
                       </View>
                     ))}
                   </View>
-                  <CibleTutoriel
-                    id="grille"
-                    onMesure={mesurerCibleTutoriel}
-                    style={styles.eventsCol}
-                  >
+                  <View style={styles.eventsCol}>
                     {HEURES.map((h, i) => (
                       <TapZone
                         key={h}
@@ -1062,10 +1158,11 @@ export default function Planning() {
                           <View style={styles.ligneActuellePoint} />
                         </View>
                       )}
-                  </CibleTutoriel>
+                  </View>
                 </View>
                 <View style={{ height: 40 }} />
               </ScrollView>
+              </CibleTutoriel>
             </View>
           )}
 
@@ -2104,11 +2201,15 @@ export default function Planning() {
         visible={
           !tutorielPlanningVu &&
           ETAPES_PLANNING.length > 0 &&
-          ETAPES_PLANNING.every((e) => posCiblesTutoriel[e.id])
+          ETAPES_PLANNING.every((e) => !e.id || posCiblesTutoriel[e.id])
         }
         etapes={ETAPES_PLANNING}
         positions={posCiblesTutoriel}
-        onTerminer={() => marquerTutorielVu("planning")}
+        onTerminer={() => {
+          marquerTutorielVu("planning");
+          router.push("/(tabs)/analytics");
+        }}
+        onFermer={() => marquerTutorielVu("planning")}
       />
     </View>
   );
