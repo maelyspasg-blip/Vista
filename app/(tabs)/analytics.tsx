@@ -34,6 +34,10 @@ import {
   calculerTauxEpargne,
 } from "../../utils/conseils";
 import { genererInsightsPeriode } from "../../utils/tendancesPeriode";
+// Alias : ce fichier a déjà son propre MOIS_LABELS (abrégé, pour les axes de
+// graphiques) — celui d'exportExcel donne les noms complets, utilisés
+// uniquement pour le titre "Variation d'un mois à l'autre".
+import { MOIS_LABELS as MOIS_LABELS_COMPLETS } from "../../utils/exportExcel";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useGuest } from "../GuestContext";
@@ -754,6 +758,19 @@ export default function Analytics() {
     setPosCiblesTutoriel((p) => ({ ...p, [id]: rect }));
   const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
   const [deltaDepMoyPourcentage, setDeltaDepMoyPourcentage] = useState(true);
+  // Comparaison mensuelle par catégorie : modeGlobal pilote l'affichage par
+  // défaut (€ ou %) ; modesParCategorie ne contient que les lignes basculées
+  // individuellement (override). Retaper le toggle global vide cette map —
+  // c'est ce qui "resynchronise" toutes les lignes d'un coup sur le nouveau
+  // mode global, sans avoir à connaître la liste des catégories ici.
+  const [modeCompareGlobal, setModeCompareGlobal] = useState<
+    "euros" | "pourcentage"
+  >("euros");
+  const [modesCompareParCategorie, setModesCompareParCategorie] = useState<
+    Record<string, "euros" | "pourcentage">
+  >({});
+  const [categoriesInchangeesOuvert, setCategoriesInchangeesOuvert] =
+    useState(false);
   const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
   const [vue, setVue] = useState<Vue>("global");
   const [titoirOuvert, setTiroirOuvert] = useState(false);
@@ -962,6 +979,46 @@ export default function Analytics() {
   const enveloppesFiltrees =
     categoriesSelectionnees.length > 0 ? categoriesSelectionnees : undefined;
 
+  // Nom affiché par l'indicateur entonnoir posé à côté des sections
+  // réellement recalculées à partir de enveloppesFiltrees ci-dessus (pas
+  // toutes les sections de la page — certaines, comme "Épargne dans le
+  // temps" ou les objectifs, restent globales quel que soit ce filtre).
+  const nomFiltreActif =
+    categoriesSelectionnees.length === 1
+      ? (objStore.enveloppes.find((e) => e.id === categoriesSelectionnees[0])
+          ?.nom ?? null)
+      : categoriesSelectionnees.length > 1
+        ? `${categoriesSelectionnees.length} catégories`
+        : null;
+
+  const renderIndicateurFiltre = () => (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+      <View>
+        <Ionicons
+          name="funnel-outline"
+          size={13}
+          color={nomFiltreActif ? C.accent : C.texteMuted}
+        />
+        {nomFiltreActif && (
+          <Ionicons
+            name="checkmark-circle"
+            size={9}
+            color={C.accent}
+            style={{ position: "absolute", bottom: -3, right: -4 }}
+          />
+        )}
+      </View>
+      {nomFiltreActif && (
+        <Text
+          style={{ fontSize: 11, fontWeight: "600", color: C.accent }}
+          numberOfLines={1}
+        >
+          {nomFiltreActif}
+        </Text>
+      )}
+    </View>
+  );
+
   const donneesReelles = moisAffiches.map(
     ({ mois, annee }) => getDepenseMois(mois, annee, enveloppesFiltrees) ?? 0,
   );
@@ -1063,6 +1120,29 @@ export default function Analytics() {
     return { ...obj, pct, delta, moisRestants, rythmeInsuffisant };
   });
 
+  // Comparaison mensuelle par catégorie : uniquement les catégories présentes
+  // dans LES DEUX mois comparés (sinon la comparaison n'a pas de sens), plus
+  // chère en premier. Séparées en deux groupes : celles qui ont vraiment
+  // varié (affichées par défaut) et celles à delta nul (masquées derrière le
+  // tiroir "Voir les catégories sans changement").
+  const categoriesComparees = objStore.enveloppes
+    .filter((env) =>
+      snapshotMoisPrecedent?.enveloppes.some((e) => e.id === env.id),
+    )
+    .map((env) => {
+      const depensePrec =
+        snapshotMoisPrecedent?.enveloppes.find((e) => e.id === env.id)
+          ?.depense ?? 0;
+      return { env, depensePrec, delta: env.depense - depensePrec };
+    })
+    .sort((a, b) => b.env.depense - a.env.depense);
+  const categoriesCompareesChangees = categoriesComparees.filter(
+    (c) => c.delta !== 0,
+  );
+  const categoriesCompareesInchangees = categoriesComparees.filter(
+    (c) => c.delta === 0,
+  );
+
   const repartitionDepenses = objStore.enveloppes
     .filter(
       (e) =>
@@ -1109,7 +1189,7 @@ export default function Analytics() {
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={[styles.header, styles.headerRow]}>
           <View>
-            <Text style={[styles.titre, { color: C.texte }]}>Stats</Text>
+            <Text style={[styles.titre, { color: C.texte }]}>Statistiques</Text>
             <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
               {MOIS_LABELS[MOIS_ACTUEL]} {ANNEE_ACTUELLE}
             </Text>
@@ -1467,16 +1547,24 @@ export default function Analytics() {
           </View>
         </View>
 
-        <View style={[styles.sectionLabelRow, { marginTop: 8 }]}>
-          <Ionicons name="trending-up" size={13} color={C.texteMuted} />
-          <Text
-            style={[
-              styles.sectionLabel,
-              { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
-            ]}
-          >
-            Évolution
-          </Text>
+        <View
+          style={[
+            styles.sectionLabelRow,
+            { marginTop: 8, justifyContent: "space-between" },
+          ]}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Ionicons name="trending-up" size={13} color={C.texteMuted} />
+            <Text
+              style={[
+                styles.sectionLabel,
+                { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+              ]}
+            >
+              Évolution
+            </Text>
+          </View>
+          {renderIndicateurFiltre()}
         </View>
         <CibleTutoriel
           id="graphique"
@@ -1652,9 +1740,19 @@ export default function Analytics() {
           ))}
         </View>
 
-        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-          Dépensé vs dépenses prévues
-        </Text>
+        <View
+          style={[styles.sectionLabelRow, { justifyContent: "space-between" }]}
+        >
+          <Text
+            style={[
+              styles.sectionLabel,
+              { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+            ]}
+          >
+            Dépensé vs dépenses prévues
+          </Text>
+          {renderIndicateurFiltre()}
+        </View>
         <View
           style={[
             styles.chartCard,
@@ -1699,34 +1797,81 @@ export default function Analytics() {
             },
           ]}
         >
-          <View style={styles.compareHead}>
+          <View style={{ marginBottom: 14 }}>
             <Text style={[styles.compareTitle, { color: C.texte }]}>
-              {MOIS_LABELS[MOIS_ACTUEL]} vs{" "}
-              {MOIS_LABELS[moisPrecedent.getMonth()]}
+              Variation d&apos;un mois à l&apos;autre — {MOIS_LABELS_COMPLETS[MOIS_ACTUEL]}{" "}
+              vs {MOIS_LABELS_COMPLETS[moisPrecedent.getMonth()]}
             </Text>
-            <Text
-              style={[
-                styles.compareDelta,
-                { color: deltaTotal <= 0 ? C.accentText : C.peachText },
-              ]}
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: 8,
+              }}
             >
-              {deltaTotal > 0 ? "+" : ""}
-              {deltaTotal}%
-            </Text>
+              <View
+                style={[
+                  styles.toggleCompareGlobal,
+                  { backgroundColor: C.separateur },
+                ]}
+              >
+                {(["euros", "pourcentage"] as const).map((mode) => (
+                  <TouchableOpacity
+                    key={mode}
+                    style={[
+                      styles.toggleCompareOption,
+                      modeCompareGlobal === mode && {
+                        backgroundColor: C.carte,
+                      },
+                    ]}
+                    onPress={() => {
+                      setModeCompareGlobal(mode);
+                      setModesCompareParCategorie({});
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.toggleCompareTexte,
+                        {
+                          color:
+                            modeCompareGlobal === mode
+                              ? C.texte
+                              : C.texteMuted,
+                        },
+                      ]}
+                    >
+                      {mode === "euros" ? "€" : "%"}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text
+                style={[
+                  styles.compareDelta,
+                  { color: deltaTotal <= 0 ? C.accentText : C.peachText },
+                ]}
+              >
+                {deltaTotal > 0 ? "+" : ""}
+                {deltaTotal}%
+              </Text>
+            </View>
           </View>
-          {objStore.enveloppes
-            // Comparaison honnête uniquement entre catégories présentes dans
-            // LES DEUX mois comparés — une catégorie qui n'existait pas le
-            // mois dernier (ou plus ce mois-ci) n'a rien de comparable à
-            // afficher ici.
-            .filter((env) =>
-              snapshotMoisPrecedent?.enveloppes.some((e) => e.id === env.id),
-            )
-            // Plus chère en premier, pas alphabétique.
-            .sort((a, b) => b.depense - a.depense)
-            .map((env) => {
+          {categoriesCompareesChangees.map(({ env, depensePrec, delta }) => {
             const pct =
               env.budget > 0 ? Math.round((env.depense / env.budget) * 100) : 0;
+            const deltaPct =
+              depensePrec !== 0
+                ? Math.round((delta / Math.abs(depensePrec)) * 100)
+                : env.depense > 0
+                  ? 100
+                  : 0;
+            const mode = modesCompareParCategorie[env.id] ?? modeCompareGlobal;
+            const texteDelta =
+              mode === "pourcentage"
+                ? `${deltaPct > 0 ? "+" : ""}${deltaPct}%`
+                : `${delta > 0 ? "+" : ""}${formaterMontant(delta)} €`;
             return (
               <View key={env.id} style={styles.cbarRow}>
                 <Text
@@ -1744,12 +1889,84 @@ export default function Analytics() {
                     style={styles.cbarFill}
                   />
                 </View>
-                <Text style={[styles.cbarVal, { color: C.texte }]}>
-                  {formaterMontant(env.depense)} €
-                </Text>
+                <TouchableOpacity
+                  onPress={() =>
+                    setModesCompareParCategorie((m) => ({
+                      ...m,
+                      [env.id]:
+                        mode === "pourcentage" ? "euros" : "pourcentage",
+                    }))
+                  }
+                  activeOpacity={0.6}
+                >
+                  <Text
+                    style={[
+                      styles.cbarVal,
+                      { color: delta <= 0 ? C.accentText : C.peachText },
+                    ]}
+                  >
+                    {texteDelta}
+                  </Text>
+                </TouchableOpacity>
               </View>
             );
           })}
+
+          {categoriesCompareesInchangees.length > 0 && (
+            <View style={{ marginTop: categoriesCompareesChangees.length > 0 ? 4 : 0 }}>
+              <TouchableOpacity
+                style={[styles.tiroirBouton, { backgroundColor: C.fondSecondaire }]}
+                onPress={() =>
+                  setCategoriesInchangeesOuvert(!categoriesInchangeesOuvert)
+                }
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.tiroirBoutonTexte, { color: C.texte }]}>
+                  Voir les catégories sans changement (
+                  {categoriesCompareesInchangees.length})
+                </Text>
+                <Text style={[styles.tiroirChevron, { color: C.texteMuted }]}>
+                  {categoriesInchangeesOuvert ? "▾" : "▸"}
+                </Text>
+              </TouchableOpacity>
+              {categoriesInchangeesOuvert &&
+                categoriesCompareesInchangees.map(({ env }) => {
+                  const pct =
+                    env.budget > 0
+                      ? Math.round((env.depense / env.budget) * 100)
+                      : 0;
+                  return (
+                    <View
+                      key={env.id}
+                      style={[styles.cbarRow, { marginTop: 10 }]}
+                    >
+                      <Text
+                        style={[styles.cbarLabel, { color: C.texte }]}
+                        numberOfLines={1}
+                      >
+                        {env.nom}
+                      </Text>
+                      <View
+                        style={[
+                          styles.cbarTrack,
+                          { backgroundColor: C.separateur },
+                        ]}
+                      >
+                        <BarreCbarAnimee
+                          pourcentage={Math.min(pct, 100)}
+                          couleur={env.couleur}
+                          style={styles.cbarFill}
+                        />
+                      </View>
+                      <Text style={[styles.cbarVal, { color: C.texteMuted }]}>
+                        {modeCompareGlobal === "pourcentage" ? "0%" : "0 €"}
+                      </Text>
+                    </View>
+                  );
+                })}
+            </View>
+          )}
+
           {depenseMoisPrec > 0 && (
             <Text style={[styles.compareFooter, { color: C.texteMuted }]}>
               Total ce mois : {formaterMontant(depenseMoisActuel)} € vs {formaterMontant(depenseMoisPrec)} € le
@@ -3199,6 +3416,17 @@ const styles = StyleSheet.create({
   },
   compareTitle: { fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
   compareDelta: { fontSize: 13, fontWeight: "700" },
+  toggleCompareGlobal: {
+    flexDirection: "row",
+    borderRadius: 10,
+    padding: 2,
+  },
+  toggleCompareOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  toggleCompareTexte: { fontSize: 12, fontWeight: "700" },
   cbarRow: {
     flexDirection: "row",
     alignItems: "center",

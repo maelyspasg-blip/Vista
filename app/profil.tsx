@@ -547,6 +547,23 @@ export default function Profil() {
                 Changer la photo
               </Text>
             </TouchableOpacity>
+            {objStore.isAdmin && (
+              <View
+                style={[
+                  styles.badgeAdmin,
+                  { backgroundColor: C.lavandeLight },
+                ]}
+              >
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={12}
+                  color={C.texteMuted}
+                />
+                <Text style={[styles.badgeAdminTexte, { color: C.texteMuted }]}>
+                  Administrateur
+                </Text>
+              </View>
+            )}
           </View>
 
           <Text style={[styles.champLabel, { color: C.texteMuted }]}>
@@ -1286,6 +1303,19 @@ const styles = StyleSheet.create({
   },
   avatarChangerTexte: {
     fontSize: 13,
+    fontWeight: "600",
+  },
+  badgeAdmin: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  badgeAdminTexte: {
+    fontSize: 11,
     fontWeight: "600",
   },
   champValeurStatique: {

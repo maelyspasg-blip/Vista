@@ -90,7 +90,7 @@ function TabsNavigator() {
       <MaterialTopTabs.Screen
         name="analytics"
         options={{
-          title: "Stats",
+          title: "Statistiques",
           tabBarIcon: ({ color }) => (
             <Ionicons name="bar-chart-outline" size={22} color={color} />
           ),

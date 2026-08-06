@@ -1796,6 +1796,26 @@ export function useObjectifs() {
       majEpargneMoisSupabase(nouvelleEpargneMois);
     },
 
+    // Versement ponctuel libre (bouton "Ajouter un versement" sur les cartes
+    // objectif du tiroir Mis de côté) : contrairement à ajouterFondsObjectif
+    // ci-dessus, ne touche NI contribution_mois NI epargneMois — ce n'est pas
+    // une mensualité et ça ne doit pas fausser le rythme mensuel utilisé pour
+    // les projections (calculerRythmeObjectif) ni le "Mis de côté ce mois".
+    // Seul objectifs.actuel change, localement et sur Supabase.
+    ajouterVersementPonctuel: (id: string, montant: number) => {
+      const objectif = etat.objectifs.find((o) => o.id === id);
+      if (!objectif) return;
+      const nouveauActuel = objectif.actuel + montant;
+
+      setEtat({
+        objectifs: etat.objectifs.map((o) =>
+          o.id === id ? { ...o, actuel: nouveauActuel } : o,
+        ),
+      });
+
+      majObjectifSupabase(id, { actuel: nouveauActuel });
+    },
+
     verifierVersementsObjectifs: () => {
       const aujourdhui = new Date();
       const jourActuel = aujourdhui.getDate();

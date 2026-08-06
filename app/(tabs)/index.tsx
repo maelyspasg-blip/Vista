@@ -257,6 +257,12 @@ export default function Dashboard() {
   const [jourDuMoisObjectif, setJourDuMoisObjectif] = useState("1");
   const [calendrierJourOuvert, setCalendrierJourOuvert] = useState(false);
   const [montantAjoutObjectif, setMontantAjoutObjectif] = useState("");
+  // Versement ponctuel libre depuis la liste "TES OBJECTIFS" du tiroir Mis
+  // de côté — distinct du formulaire d'édition complet (objectifEnEdition/
+  // montantAjoutObjectif ci-dessus, qui touche contribution_mois).
+  const [objectifPourVersement, setObjectifPourVersement] =
+    useState<Objectif | null>(null);
+  const [montantVersementPonctuel, setMontantVersementPonctuel] = useState("");
   const [sauvegardeObjectifEnCours, setSauvegardeObjectifEnCours] =
     useState(false);
   const [objectifsCloturesOuvert, setObjectifsCloturesOuvert] =
@@ -276,6 +282,16 @@ export default function Dashboard() {
       ? a.depense - b.depense
       : b.depense - a.depense;
   });
+  // "Tes catégories" affiche deux groupes distincts (Entrées d'argent /
+  // Dépenses) plutôt qu'une liste mélangée — le tri choisi (A→Z ou montant)
+  // s'applique indépendamment à l'intérieur de chaque groupe, déjà garanti
+  // puisqu'on filtre enveloppesTriees (déjà triée) sans re-trier.
+  const enveloppesTrieesEntrees = enveloppesTriees.filter(
+    (e) => e.type === "Entrée",
+  );
+  const enveloppesTrieesDepenses = enveloppesTriees.filter(
+    (e) => e.type !== "Entrée",
+  );
   // Même filtre que "Tes catégories" (estCategorieActiveCeMois, via
   // enveloppesTriees) : une catégorie ponctuelle d'un autre mois (depense
   // non nulle mais plus "active") ne doit compter ni dans le donut, ni dans
@@ -760,6 +776,135 @@ export default function Dashboard() {
     setMontantAjoutObjectif("");
   };
 
+  const ouvrirVersementPonctuel = (obj: Objectif) => {
+    setObjectifPourVersement(obj);
+    setMontantVersementPonctuel("");
+  };
+
+  const fermerVersementPonctuel = () => {
+    setObjectifPourVersement(null);
+    setMontantVersementPonctuel("");
+  };
+
+  const confirmerVersementPonctuel = () => {
+    if (!objectifPourVersement) return;
+    const montant = parseMontant(montantVersementPonctuel) || 0;
+    if (montant <= 0) return;
+    objStore.ajouterVersementPonctuel(objectifPourVersement.id, montant);
+    fermerVersementPonctuel();
+  };
+
+  const renderCarteEnveloppe = (env: Enveloppe) => {
+    const pct = Math.min((env.depense / env.budget) * 100, 100);
+    return (
+      <TouchableOpacity
+        key={env.id}
+        style={[styles.envCard, { backgroundColor: bgClair(env.couleur) }]}
+        activeOpacity={0.7}
+        onPress={() => ouvrirEditionEnveloppe(env)}
+      >
+        <View
+          style={[
+            styles.typePastille,
+            {
+              backgroundColor:
+                env.type === "Entrée" ? C.accentLight : C.peachLight,
+            },
+          ]}
+        >
+          <Ionicons
+            name={env.type === "Entrée" ? "add" : "remove"}
+            size={13}
+            color={env.type === "Entrée" ? C.accentText : C.peachText}
+          />
+        </View>
+        <View style={styles.envRow}>
+          <View style={styles.envNomRow}>
+            <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
+              {env.nom}
+            </Text>
+            {env.type === "Fixe" ? (
+              <View style={styles.badgesRow}>
+                {env.payee ? (
+                  <View
+                    style={[
+                      styles.recurrenceBadge,
+                      { backgroundColor: C.accentLight },
+                    ]}
+                  >
+                    <CocheAnimee taille={12} couleur={C.texte} epaisseurTrait={2} />
+                  </View>
+                ) : (
+                  <View
+                    style={[
+                      styles.recurrenceBadge,
+                      { backgroundColor: C.iconeBoutonFond },
+                    ]}
+                  >
+                    <Ionicons name="calendar-outline" size={12} color={C.texte} />
+                  </View>
+                )}
+                {env.repeteChaqueMois && (
+                  <View
+                    style={[
+                      styles.recurrenceBadge,
+                      { backgroundColor: C.iconeBoutonFond },
+                    ]}
+                  >
+                    <Ionicons name="repeat" size={12} color={C.texte} />
+                  </View>
+                )}
+              </View>
+            ) : env.type === "Entrée" ? (
+              <View style={styles.badgesRow}>
+                {env.dateFixe && (
+                  <View
+                    style={[
+                      styles.recurrenceBadge,
+                      { backgroundColor: C.vertLight },
+                    ]}
+                  >
+                    <Ionicons name="calendar-outline" size={12} color={C.vertText} />
+                  </View>
+                )}
+                {env.recurrente && (
+                  <View
+                    style={[
+                      styles.recurrenceBadge,
+                      { backgroundColor: C.iconeBoutonFond },
+                    ]}
+                  >
+                    <Ionicons name="repeat" size={12} color={C.texte} />
+                  </View>
+                )}
+              </View>
+            ) : (
+              env.recurrente && (
+                <View
+                  style={[
+                    styles.recurrenceBadge,
+                    { backgroundColor: C.iconeBoutonFond },
+                  ]}
+                >
+                  <Ionicons name="repeat" size={12} color={C.texte} />
+                </View>
+              )
+            )}
+          </View>
+          <Text style={[styles.envMontant, { color: env.couleur }]}>
+            {formaterMontant(env.depense)} € / {formaterMontant(env.budget)} €
+          </Text>
+        </View>
+        <BarreProgression
+          pourcentage={pct}
+          couleur={env.couleur}
+          couleurFond={C.separateur}
+          hauteur={6}
+        />
+      </TouchableOpacity>
+    );
+  };
+
   // TEMPORAIRE — debug jauge "Reste estimé" (segment "Dépense prévue"
   // invisible signalé sur device réel) : à retirer une fois la cause confirmée.
   console.log(
@@ -784,7 +929,7 @@ export default function Dashboard() {
                 style={styles.appLogo}
                 contentFit="contain"
               />
-              <Text style={[styles.appName, { color: C.texte }]}>VISTA</Text>
+              <Text style={[styles.appName, { color: C.texte }]}>Vista</Text>
             </View>
             <Text style={[styles.subtitle, { color: C.texteMuted }]}>
               {new Date().toLocaleDateString("fr-FR", {
@@ -1351,130 +1496,37 @@ export default function Dashboard() {
           </TouchableOpacity>
         </View>
 
-        {enveloppesTriees.map((env) => {
-          const pct = Math.min((env.depense / env.budget) * 100, 100);
-          return (
-            <TouchableOpacity
-              key={env.id}
+        {enveloppesTrieesEntrees.length > 0 && (
+          <>
+            <Text
               style={[
-                styles.envCard,
-                { backgroundColor: bgClair(env.couleur) },
+                styles.sectionTitle,
+                { color: C.texteMuted, marginBottom: 8 },
               ]}
-              activeOpacity={0.7}
-              onPress={() => ouvrirEditionEnveloppe(env)}
             >
-              <View
-                style={[
-                  styles.typePastille,
-                  {
-                    backgroundColor:
-                      env.type === "Entrée" ? C.accentLight : C.peachLight,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={env.type === "Entrée" ? "add" : "remove"}
-                  size={13}
-                  color={env.type === "Entrée" ? C.accentText : C.peachText}
-                />
-              </View>
-              <View style={styles.envRow}>
-                <View style={styles.envNomRow}>
-                  <Text
-                    style={[styles.envNom, { color: C.texte }]}
-                    numberOfLines={1}
-                  >
-                    {env.nom}
-                  </Text>
-                  {env.type === "Fixe" ? (
-                    <View style={styles.badgesRow}>
-                      {env.payee ? (
-                        <View
-                          style={[
-                            styles.recurrenceBadge,
-                            { backgroundColor: C.accentLight },
-                          ]}
-                        >
-                          <CocheAnimee taille={12} couleur={C.texte} epaisseurTrait={2} />
-                        </View>
-                      ) : (
-                        <View
-                          style={[
-                            styles.recurrenceBadge,
-                            { backgroundColor: C.iconeBoutonFond },
-                          ]}
-                        >
-                          <Ionicons
-                            name="calendar-outline"
-                            size={12}
-                            color={C.texte}
-                          />
-                        </View>
-                      )}
-                      {env.repeteChaqueMois && (
-                        <View
-                          style={[
-                            styles.recurrenceBadge,
-                            { backgroundColor: C.iconeBoutonFond },
-                          ]}
-                        >
-                          <Ionicons name="repeat" size={12} color={C.texte} />
-                        </View>
-                      )}
-                    </View>
-                  ) : env.type === "Entrée" ? (
-                    <View style={styles.badgesRow}>
-                      {env.dateFixe && (
-                        <View
-                          style={[
-                            styles.recurrenceBadge,
-                            { backgroundColor: C.vertLight },
-                          ]}
-                        >
-                          <Ionicons
-                            name="calendar-outline"
-                            size={12}
-                            color={C.vertText}
-                          />
-                        </View>
-                      )}
-                      {env.recurrente && (
-                        <View
-                          style={[
-                            styles.recurrenceBadge,
-                            { backgroundColor: C.iconeBoutonFond },
-                          ]}
-                        >
-                          <Ionicons name="repeat" size={12} color={C.texte} />
-                        </View>
-                      )}
-                    </View>
-                  ) : (
-                    env.recurrente && (
-                      <View
-                        style={[
-                          styles.recurrenceBadge,
-                          { backgroundColor: C.iconeBoutonFond },
-                        ]}
-                      >
-                        <Ionicons name="repeat" size={12} color={C.texte} />
-                      </View>
-                    )
-                  )}
-                </View>
-                <Text style={[styles.envMontant, { color: env.couleur }]}>
-                  {formaterMontant(env.depense)} € / {formaterMontant(env.budget)} €
-                </Text>
-              </View>
-              <BarreProgression
-                pourcentage={pct}
-                couleur={env.couleur}
-                couleurFond={C.separateur}
-                hauteur={6}
-              />
-            </TouchableOpacity>
-          );
-        })}
+              ENTRÉES D&apos;ARGENT
+            </Text>
+            {enveloppesTrieesEntrees.map(renderCarteEnveloppe)}
+          </>
+        )}
+
+        {enveloppesTrieesDepenses.length > 0 && (
+          <>
+            <Text
+              style={[
+                styles.sectionTitle,
+                {
+                  color: C.texteMuted,
+                  marginTop: enveloppesTrieesEntrees.length > 0 ? 16 : 0,
+                  marginBottom: 8,
+                },
+              ]}
+            >
+              DÉPENSES
+            </Text>
+            {enveloppesTrieesDepenses.map(renderCarteEnveloppe)}
+          </>
+        )}
 
         <View
           style={[
@@ -2416,6 +2468,87 @@ export default function Dashboard() {
               onPress={() => {}}
             >
               {vueModal === "liste" ? (
+                objectifPourVersement ? (
+                  <>
+                    <View style={styles.modalHeader}>
+                      <Text style={[styles.modalTitre, { color: C.texte }]}>
+                        Ajouter un versement
+                      </Text>
+                      <TouchableOpacity
+                        onPress={fermerVersementPonctuel}
+                        activeOpacity={0.6}
+                        accessibilityRole="button"
+                        accessibilityLabel="Fermer"
+                      >
+                        <Ionicons name="close" size={20} color={C.texteMuted} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Montant à ajouter à « {objectifPourVersement.nom} »
+                    </Text>
+                    <View style={styles.modalInputRow}>
+                      <TextInput
+                        style={[
+                          styles.input,
+                          {
+                            flex: 1,
+                            backgroundColor: C.fondSecondaire,
+                            color: C.texte,
+                          },
+                        ]}
+                        placeholder="0"
+                        placeholderTextColor={C.texteMuted}
+                        keyboardType="decimal-pad"
+                        value={montantVersementPonctuel}
+                        onChangeText={(text) =>
+                          setMontantVersementPonctuel(sanitizeMontantInput(text))
+                        }
+                        returnKeyType="done"
+                        autoFocus
+                        inputAccessoryViewID={ACCESSORY_ID}
+                      />
+                      <Text style={[styles.modalEuro, { color: C.texteMuted }]}>
+                        €
+                      </Text>
+                    </View>
+
+                    <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+                      <TouchableOpacity
+                        style={[styles.btnAnnuler, { flex: 1, marginTop: 0 }]}
+                        onPress={fermerVersementPonctuel}
+                        activeOpacity={0.7}
+                      >
+                        <Text
+                          style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}
+                        >
+                          Annuler
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.btnAjouter,
+                          {
+                            flex: 1,
+                            marginTop: 0,
+                            backgroundColor: C.purple,
+                            opacity:
+                              (parseMontant(montantVersementPonctuel) || 0) <= 0
+                                ? 0.5
+                                : 1,
+                          },
+                        ]}
+                        onPress={confirmerVersementPonctuel}
+                        activeOpacity={0.7}
+                        disabled={
+                          (parseMontant(montantVersementPonctuel) || 0) <= 0
+                        }
+                      >
+                        <Text style={styles.btnAjouterTexte}>Confirmer</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
                 <>
                   <View style={styles.modalHeader}>
                     <Text style={[styles.modalTitre, { color: C.texte }]}>
@@ -2545,6 +2678,27 @@ export default function Dashboard() {
                             couleurFond={C.separateur}
                             hauteur={6}
                           />
+                          <TouchableOpacity
+                            style={styles.btnVersementPonctuel}
+                            onPress={() => ouvrirVersementPonctuel(obj)}
+                            activeOpacity={0.7}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Ajouter un versement à ${obj.nom}`}
+                          >
+                            <Ionicons
+                              name="add-circle-outline"
+                              size={13}
+                              color={obj.couleur}
+                            />
+                            <Text
+                              style={[
+                                styles.btnVersementPonctuelTexte,
+                                { color: obj.couleur },
+                              ]}
+                            >
+                              Ajouter un versement
+                            </Text>
+                          </TouchableOpacity>
                         </TouchableOpacity>
                       );
                     })}
@@ -2647,6 +2801,7 @@ export default function Dashboard() {
                     </TouchableOpacity>
                   </ScrollView>
                 </>
+                )
               ) : (
                 <>
                   <View style={styles.modalHeader}>
@@ -3432,6 +3587,14 @@ const styles = StyleSheet.create({
   },
   objectifModalNom: { fontSize: 15, fontWeight: "700", flexShrink: 1 },
   objectifModalMontant: { fontSize: 14, fontWeight: "700", marginBottom: 8 },
+  btnVersementPonctuel: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 10,
+    alignSelf: "flex-start",
+  },
+  btnVersementPonctuelTexte: { fontSize: 12, fontWeight: "600" },
   catBarBg: {
     height: 6,
     borderRadius: 3,
