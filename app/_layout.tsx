@@ -50,6 +50,7 @@ function Navigateur() {
       <Stack.Screen name="onboarding/essai-expire" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="profil" />
+      <Stack.Screen name="ajout-rapide" />
     </Stack>
   );
 }

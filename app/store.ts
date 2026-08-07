@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
 import { annulerToutesNotifications } from "./notifications";
+import {
+  synchroniserWidgetAjoutRapide,
+  synchroniserWidgetPlanning,
+} from "../utils/widgetsSync";
 
 // Couleur de secours si une ligne existante a `couleur` vide/null en base
 // (donnée legacy, colonne nullable côté Supabase malgré le type non-null ici)
@@ -987,6 +991,19 @@ function detecterMotifRecurrent(
   }
 
   return null;
+}
+
+function synchroniserWidgetsInterne() {
+  synchroniserWidgetPlanning({
+    evenements: etat.evenements,
+    enveloppes: etat.enveloppes,
+    historiquePaiements: etat.historiquePaiements,
+    objectifs: etat.objectifs,
+  });
+  synchroniserWidgetAjoutRapide({
+    transactions: etat.transactions,
+    enveloppes: etat.enveloppes,
+  });
 }
 
 function verifierMotifsRecurrentsInterne() {
@@ -2076,6 +2093,17 @@ export function useObjectifs() {
       verifierMotifsRecurrentsInterne();
     },
 
+    // Relit `etat` en direct (comme les autres verifierXxx ci-dessus) plutôt
+    // que de recevoir des données en argument — appelée depuis une closure
+    // d'effet capturée une seule fois (app/(tabs)/_layout.tsx, dep array
+    // vide), un objet `objStore` capté au montage aurait des champs figés
+    // (`local.evenements` de la toute première render) ; en relisant `etat`
+    // au moment de l'appel, cette méthode reste toujours à jour, exactement
+    // comme verifierEcheancesFixes le fait déjà pour la même raison.
+    synchroniserWidgets: () => {
+      synchroniserWidgetsInterne();
+    },
+
     accepterSuggestionRecurrence: () => {
       const suggestion = etat.suggestionRecurrence;
       if (!suggestion) return;
@@ -2134,6 +2162,7 @@ export function useObjectifs() {
 
         const nouvel = evenementDepuisLigne(data);
         setEtat({ evenements: [...etat.evenements, nouvel] });
+        synchroniserWidgetsInterne();
 
         if (
           nouvel.estFinancier &&
@@ -2157,6 +2186,7 @@ export function useObjectifs() {
     supprimerEvenement: (id: string) => {
       const ev = etat.evenements.find((e) => e.id === id);
       setEtat({ evenements: etat.evenements.filter((e) => e.id !== id) });
+      synchroniserWidgetsInterne();
 
       if (
         ev?.estFinancier &&
@@ -2195,6 +2225,7 @@ export function useObjectifs() {
           e.id === id ? { ...e, ...champs } : e,
         ),
       });
+      synchroniserWidgetsInterne();
 
       const colonnes: Record<string, unknown> = {};
       if ("nom" in champs) colonnes.nom = champs.nom;
@@ -2299,6 +2330,10 @@ export function useObjectifs() {
         );
         setEtat({ transactions: [...etat.transactions, nouvelle] });
         appliquerEnveloppes(enveloppesMaj);
+        synchroniserWidgetAjoutRapide({
+          transactions: etat.transactions,
+          enveloppes: etat.enveloppes,
+        });
         return nouvelle;
       } catch (e) {
         console.error("Ajout de dépense a échoué :", e);
@@ -2342,6 +2377,10 @@ export function useObjectifs() {
 
       setEtat({ transactions: transactionsMaj });
       appliquerEnveloppes(enveloppesMaj);
+      synchroniserWidgetAjoutRapide({
+        transactions: etat.transactions,
+        enveloppes: etat.enveloppes,
+      });
 
       const { error } = await supabase
         .from("transactions")
@@ -2368,6 +2407,10 @@ export function useObjectifs() {
         transactions: etat.transactions.filter((t) => t.id !== id),
       });
       appliquerEnveloppes(enveloppesMaj);
+      synchroniserWidgetAjoutRapide({
+        transactions: etat.transactions,
+        enveloppes: etat.enveloppes,
+      });
       supabase
         .from("transactions")
         .delete()

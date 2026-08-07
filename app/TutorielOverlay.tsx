@@ -280,7 +280,7 @@ const styles = StyleSheet.create({
     position: "absolute",
   },
   centreWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     padding: MARGE_ECRAN,

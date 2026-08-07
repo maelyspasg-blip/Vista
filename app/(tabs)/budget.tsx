@@ -24,6 +24,7 @@ import { useTheme } from "../ThemeContext";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
 import { PALETTE_COULEURS } from "../ColorPicker";
+import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import {
   depenseEnveloppeDansSnapshot,
@@ -211,6 +212,7 @@ export default function Budget() {
   const params = useLocalSearchParams<{
     section?: string;
     ouvrirAjout?: string;
+    enveloppeId?: string;
   }>();
   const router = useRouter();
 
@@ -304,11 +306,19 @@ export default function Budget() {
         // Réutilise le même reset complet que le bouton "+ Ajouter" de
         // Budget (nom/montant/catégorie/état d'édition) — sans ça, rouvrir
         // ce formulaire depuis le FAB d'Aperçu conservait les valeurs de la
-        // dépense précédemment saisie.
-        ouvrirAjout();
-        router.setParams({ ouvrirAjout: undefined });
+        // dépense précédemment saisie. `enveloppeId` (widget "Ajout rapide"
+        // via app/ajout-rapide.tsx) pré-sélectionne la catégorie ; absent
+        // pour le FAB normal et pour la pastille "+ Autre" du widget.
+        ouvrirAjout(params.enveloppeId);
+        router.setParams({ ouvrirAjout: undefined, enveloppeId: undefined });
       }
-    }, [params.section, params.ouvrirAjout, reduireAnimations, router]),
+    }, [
+      params.section,
+      params.ouvrirAjout,
+      params.enveloppeId,
+      reduireAnimations,
+      router,
+    ]),
   );
 
   const MOIS_ACTUEL = new Date().getMonth();
@@ -628,18 +638,11 @@ export default function Budget() {
   // Création de catégorie à la volée depuis "Nouvelle dépense" — même
   // mécanisme que Planning (choisirCouleurAutomatique + ajouterEnveloppe),
   // pour une expérience cohérente peu importe l'écran de création.
-  const choisirCouleurAutomatique = () => {
-    const couleursUtilisees = new Set(
+  const choisirCouleurAutomatique = () =>
+    couleurLaPlusDistincte(
+      PALETTE_COULEURS,
       objStore.enveloppes.map((env) => env.couleur),
     );
-    const disponible = PALETTE_COULEURS.find(
-      (c) => !couleursUtilisees.has(c),
-    );
-    return (
-      disponible ??
-      PALETTE_COULEURS[objStore.enveloppes.length % PALETTE_COULEURS.length]
-    );
-  };
 
   const creerNouvelleCategorieInline = async () => {
     const nom = nomNouvelleCategorie.trim();
@@ -680,6 +683,12 @@ export default function Budget() {
       setTransactionEnEdition(null);
       setDateTransactionEnEdition(null);
       setCarteEnFlash(enveloppeTx);
+      // Vide le formulaire dès la fermeture réussie, pas seulement à la
+      // prochaine ouverture (ouvrirAjout/ouvrirEditionTransaction le font
+      // déjà) — double garantie contre un nom/montant qui traînerait si un
+      // futur appelant rouvrait un jour la modale sans passer par eux.
+      setNomTx("");
+      setMontantTx("");
       return;
     }
     const dateStr = dateVersISO(new Date());
@@ -693,6 +702,8 @@ export default function Budget() {
     if (!nouvelle) return;
     setModalAjoutVisible(false);
     setCarteEnFlash(enveloppeTx);
+    setNomTx("");
+    setMontantTx("");
   };
 
   const fermerModalAjoutAvecSauvegarde = () => {
@@ -1288,7 +1299,16 @@ export default function Budget() {
           <VueMoisArchive mois={moisAffiche.mois} annee={moisAffiche.annee} />
         </ScrollView>
       ) : (
-      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        // Un <Modal transparent> ne suffit pas toujours à empêcher un
+        // ScrollView natif en arrière-plan de continuer à répondre au
+        // toucher pendant qu'on interagit avec un champ de la modale
+        // (constaté sur le formulaire de modification d'une dépense) —
+        // désactivé explicitement tant que cette modale est ouverte.
+        scrollEnabled={!modalAjoutVisible}
+      >
         <View
           style={[
             styles.heroCard,
