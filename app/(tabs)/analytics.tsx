@@ -211,6 +211,12 @@ const PADDING_LEFT = 34;
 // permanence au-dessus du dernier point de chaque courbe (jamais coupée,
 // même quand ce point touche le maximum de l'échelle).
 const PADDING_HAUT = 20;
+// Hauteur totale du <Svg> de GraphiqueLignes (voir son `height` prop) —
+// fixe, jamais recalculée à partir des données. Utilisée pour réserver un
+// espace identique autour du composant (ex: Simulateur) afin qu'aucun
+// contenu voisin (légende, etc.) ne puisse bouger verticalement pendant un
+// re-render déclenché par un changement de valeurs (glissement de curseur).
+const HAUTEUR_GRAPHIQUE_LIGNES = CHART_H + 24 + PADDING_HAUT;
 
 // Étale verticalement les libellés de "dernier point" pour éviter qu'ils se
 // chevauchent quand plusieurs courbes ont des valeurs proches à la fin de
@@ -237,32 +243,24 @@ function positionsLabelsSansChevauchement<T extends { y: number }>(
   return resultat;
 }
 
-// Largeur minimale (px) pour qu'un libellé de valeur reste lisible sans
-// chevaucher son voisin horizontal.
-const LARGEUR_MIN_LABEL_POINT = 34;
-
-// Affiche la valeur de tous les points quand la période est courte (le cas
-// courant), mais s'éclaircit automatiquement sur les longues périodes
-// (jusqu'à 10 ans) pour ne jamais produire un amas illisible — toujours en
-// gardant le premier et le dernier point.
-function indicesLabelsAffiches(n: number, espacement: number): number[] {
+// Affiche la valeur de tous les points quand la période est courte, mais
+// s'éclaircit par paliers fixes sur les longues périodes pour ne jamais
+// produire un amas illisible : 1-6 mois → toutes ; 7-12 → 1/2 ; 13-24 → 1/3 ;
+// 25+ → pas calculé dynamiquement pour ne jamais dépasser ~7 étiquettes.
+// Le premier et le dernier point sont toujours affichés (bornes temporelles
+// toujours visibles), quel que soit le pas.
+function indicesLabelsAffiches(n: number): number[] {
   if (n <= 0) return [];
   if (n === 1) return [0];
 
-  const largeurDisponible = (n - 1) * espacement;
-  const maxLabels = Math.max(
-    2,
-    Math.floor(largeurDisponible / LARGEUR_MIN_LABEL_POINT) + 1,
-  );
-  if (maxLabels >= n) {
-    return Array.from({ length: n }, (_, i) => i);
-  }
+  let pas: number;
+  if (n <= 6) pas = 1;
+  else if (n <= 12) pas = 2;
+  else if (n <= 24) pas = 3;
+  else pas = Math.ceil(n / 7);
 
-  const pas = (n - 1) / (maxLabels - 1);
   const indices = new Set<number>();
-  for (let k = 0; k < maxLabels; k++) {
-    indices.add(Math.round(k * pas));
-  }
+  for (let i = 0; i < n; i += pas) indices.add(i);
   indices.add(n - 1);
   return [...indices].sort((a, b) => a - b);
 }
@@ -363,19 +361,23 @@ function GraphiqueLignes({
     .join(" ");
 
   const dernier = n - 1;
-  const indicesAffiches = indicesLabelsAffiches(n, espacement);
+  const indicesAffiches = indicesLabelsAffiches(n);
   const labelsParPoint = indicesAffiches.map((i) => ({
     i,
     estPremier: i === 0,
     estDernier: i === dernier,
-    items: positionsLabelsSansChevauchement([
-      { y: pointsReels[i].y, x: pointsReels[i].x, valeur: donneesReelles[i], couleur: C.accent },
-      { y: pointsPrevus[i].y, x: pointsPrevus[i].x, valeur: donneesPrevisionnelles[i], couleur: C.peach },
-    ]),
+    // Une valeur nulle n'apporte rien et ajoute du bruit visuel — le point
+    // reste affiché sur la courbe, juste sans étiquette au-dessus.
+    items: positionsLabelsSansChevauchement(
+      [
+        { y: pointsReels[i].y, x: pointsReels[i].x, valeur: donneesReelles[i], couleur: C.accent },
+        { y: pointsPrevus[i].y, x: pointsPrevus[i].x, valeur: donneesPrevisionnelles[i], couleur: C.peach },
+      ].filter((it) => it.valeur !== 0),
+    ),
   }));
 
   return (
-    <Svg width={CHART_W} height={CHART_H + 24 + PADDING_HAUT}>
+    <Svg width={CHART_W} height={HAUTEUR_GRAPHIQUE_LIGNES}>
       {ticks.map((t) => {
         const y = PADDING_HAUT + CHART_H - (t / max) * (CHART_H - 10) + 5;
         return (
@@ -489,7 +491,7 @@ function GraphiqueEvolutionMulti({
   }));
 
   const dernier = n - 1;
-  const indicesAffiches = indicesLabelsAffiches(n, espacement);
+  const indicesAffiches = indicesLabelsAffiches(n);
   // Écart minimum entre étiquettes empilées verticalement quand plusieurs
   // courbes ont des valeurs proches au même mois. Toutes les étiquettes
   // partagent désormais la même taille de police (voir FONT_SIZE_LABEL plus
@@ -505,13 +507,17 @@ function GraphiqueEvolutionMulti({
       i,
       estPremier: i === 0,
       estDernier,
+      // Une valeur nulle n'apporte rien et ajoute du bruit visuel — le
+      // point reste affiché sur la courbe, juste sans étiquette au-dessus.
       items: positionsLabelsSansChevauchement(
-        pointsParSerie.map((s) => ({
-          y: s.points[i].y,
-          x: s.points[i].x,
-          valeur: s.donnees[i],
-          couleur: s.couleur,
-        })),
+        pointsParSerie
+          .map((s) => ({
+            y: s.points[i].y,
+            x: s.points[i].x,
+            valeur: s.donnees[i],
+            couleur: s.couleur,
+          }))
+          .filter((it) => it.valeur !== 0),
         ECART_MIN_LABEL,
       ),
     };
@@ -758,17 +764,17 @@ export default function Analytics() {
     setPosCiblesTutoriel((p) => ({ ...p, [id]: rect }));
   const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
   const [deltaDepMoyPourcentage, setDeltaDepMoyPourcentage] = useState(true);
-  // Comparaison mensuelle par catégorie : modeGlobal pilote l'affichage par
-  // défaut (€ ou %) ; modesParCategorie ne contient que les lignes basculées
-  // individuellement (override). Retaper le toggle global vide cette map —
-  // c'est ce qui "resynchronise" toutes les lignes d'un coup sur le nouveau
-  // mode global, sans avoir à connaître la liste des catégories ici.
-  const [modeCompareGlobal, setModeCompareGlobal] = useState<
-    "euros" | "pourcentage"
-  >("euros");
-  const [modesCompareParCategorie, setModesCompareParCategorie] = useState<
-    Record<string, "euros" | "pourcentage">
-  >({});
+  // Comparaison mensuelle par catégorie : un seul état pour toute la
+  // section (pas de toggle par ligne) — taper n'importe quelle valeur
+  // affichée (une ligne ou le delta total en haut) bascule tout d'un coup.
+  const [comparaisonEnPourcentage, setComparaisonEnPourcentage] =
+    useState(false);
+  // Même mécanique de toggle, indépendante de comparaisonEnPourcentage
+  // ci-dessus (sections distinctes) : indicateur de variation réel vs
+  // prévu sur toute la période sélectionnée, affiché sous le titre du
+  // graphique "Dépensé vs dépenses prévues".
+  const [depenseVsPrevuEnPourcentage, setDepenseVsPrevuEnPourcentage] =
+    useState(false);
   const [categoriesInchangeesOuvert, setCategoriesInchangeesOuvert] =
     useState(false);
   const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
@@ -1031,6 +1037,22 @@ export default function Analytics() {
   const donneesDisponible = moisAffiches.map(
     ({ mois, annee }) => getDisponibleMois(mois, annee) ?? 0,
   );
+
+  // Variation totale réel vs prévu sur toute la période affichée (pas un
+  // mois précis) — indicateur affiché sous le titre de "Dépensé vs dépenses
+  // prévues".
+  const totalReelPeriode = donneesReelles.reduce((acc, v) => acc + v, 0);
+  const totalPrevuPeriode = donneesPrevisionnelles.reduce(
+    (acc, v) => acc + v,
+    0,
+  );
+  const deltaPeriodeEuros = totalReelPeriode - totalPrevuPeriode;
+  const deltaPeriodePct =
+    totalPrevuPeriode > 0
+      ? Math.round((deltaPeriodeEuros / totalPrevuPeriode) * 100)
+      : totalReelPeriode > 0
+        ? 100
+        : 0;
   const labels = moisAffiches.map(({ mois }) => MOIS_LABELS[mois]);
 
   const moisAvecDonnees = moisAffiches.filter(({ mois, annee }) => {
@@ -1062,51 +1084,42 @@ export default function Analytics() {
   const tauxEpargne = calculerTauxEpargne(epargne, disponible);
 
   const deltaTotal = calculerDeltaTotal(depenseMoisActuel, depenseMoisPrec);
+  const deltaTotalEuros = depenseMoisActuel - depenseMoisPrec;
 
-  const insights = genererInsightsPeriode({
-    donneesReelles,
-    donneesEpargne,
-    donneesPrevisionnelles,
-    labels,
-    nbMoisAvecDonnees,
-    series,
-  });
-
-  const topDepenses: {
-    nom: string;
-    montant: number;
-    couleur: string;
-    mois: string;
-  }[] = [];
+  // Regroupé par catégorie (id, identité stable d'un mois à l'autre — même
+  // convention que categoriesComparees plus bas) et sommé sur toute la
+  // période affichée : une catégorie qui dépense sur plusieurs mois ne doit
+  // apparaître qu'une seule fois dans le classement, avec son total, pas une
+  // ligne par mois (ce qui biaisait le classement en laissant une même
+  // catégorie occuper plusieurs rangs du top).
+  const topDepensesParCategorie = new Map<
+    string,
+    { nom: string; montant: number; couleur: string }
+  >();
   moisAffiches.forEach(({ mois, annee }) => {
-    if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
-      objStore.enveloppes.forEach((e) => {
-        if (e.type !== "Entrée" && e.depense > 0)
-          topDepenses.push({
-            nom: e.nom,
-            montant: e.depense,
-            couleur: e.couleur,
-            mois: MOIS_LABELS[mois],
-          });
-      });
-    } else {
-      const snap = objStore.historiquesMois.find(
-        (s) => s.mois === mois && s.annee === annee,
-      );
-      snap?.enveloppes.forEach((e) => {
-        if (e.type !== "Entrée" && e.depense > 0)
-          topDepenses.push({
-            nom: e.nom,
-            montant: e.depense,
-            couleur: e.couleur,
-            mois: MOIS_LABELS[mois],
-          });
-      });
-    }
+    const enveloppesMois =
+      mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
+        ? objStore.enveloppes
+        : (objStore.historiquesMois.find(
+            (s) => s.mois === mois && s.annee === annee,
+          )?.enveloppes ?? []);
+    enveloppesMois.forEach((e) => {
+      if (e.type === "Entrée" || e.depense <= 0) return;
+      const existante = topDepensesParCategorie.get(e.id);
+      if (existante) {
+        existante.montant += e.depense;
+      } else {
+        topDepensesParCategorie.set(e.id, {
+          nom: e.nom,
+          montant: e.depense,
+          couleur: e.couleur,
+        });
+      }
+    });
   });
-  const topDepensesTri = topDepenses
+  const topDepensesTri = [...topDepensesParCategorie.values()]
     .sort((a, b) => b.montant - a.montant)
-    .slice(0, 5);
+    .slice(0, 3);
 
   const snapshotMoisPrecedent = objStore.historiquesMois.find(
     (s) =>
@@ -1118,6 +1131,30 @@ export default function Analytics() {
     const { pct, delta, moisRestants, rythmeInsuffisant } =
       calculerRythmeObjectif(obj, objStore.historiquesMois, snapshotMoisPrecedent);
     return { ...obj, pct, delta, moisRestants, rythmeInsuffisant };
+  });
+
+  // Dépense de chaque catégorie (hors Entrée d'argent) sur les mêmes mois
+  // que donneesReelles — utilisé par les insights pour identifier la
+  // catégorie qui accélère le plus (règle 1) et celle qui explique le pic
+  // de dépense de la période (règle 5).
+  const depensesParCategorie = objStore.enveloppes
+    .filter((e) => e.type !== "Entrée")
+    .map((env) => ({
+      nom: env.nom,
+      parMois: moisAffiches.map(
+        ({ mois, annee }) => getDepenseMois(mois, annee, [env.id]) ?? 0,
+      ),
+    }));
+
+  const insights = genererInsightsPeriode({
+    donneesReelles,
+    donneesEpargne,
+    donneesPrevisionnelles,
+    labels,
+    nbMoisAvecDonnees,
+    series,
+    depensesParCategorie,
+    objectifs: objectifsAvecDelta,
   });
 
   // Comparaison mensuelle par catégorie : uniquement les catégories présentes
@@ -1547,63 +1584,72 @@ export default function Analytics() {
           </View>
         </View>
 
-        <View
-          style={[
-            styles.sectionLabelRow,
-            { marginTop: 8, justifyContent: "space-between" },
-          ]}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Ionicons name="trending-up" size={13} color={C.texteMuted} />
-            <Text
+        {/* Masqué quand un filtre "Par catégorie" est actif : Budget et
+            Épargne ne varient pas selon la catégorie sélectionnée, donc ce
+            graphique n'apporte plus d'information pertinente dans ce
+            contexte — seul "Dépensé vs dépenses prévues" (plus bas) reste
+            recalculé et utile avec un filtre catégorie. */}
+        {!nomFiltreActif && (
+          <>
+            <View
               style={[
-                styles.sectionLabel,
-                { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                styles.sectionLabelRow,
+                { marginTop: 8, justifyContent: "space-between" },
               ]}
             >
-              Évolution
-            </Text>
-          </View>
-          {renderIndicateurFiltre()}
-        </View>
-        <CibleTutoriel
-          id="graphique"
-          onMesure={mesurerCibleTutoriel}
-          style={[
-            styles.chartCard,
-            {
-              backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-              borderColor: C.carteBorder,
-            },
-          ]}
-        >
-          <GraphiqueEvolutionMulti
-            key={nbMoisSelectionne}
-            series={[
-              {
-                cle: "disponible",
-                label: "Budget",
-                couleur: C.purple,
-                donnees: donneesDisponible,
-              },
-              {
-                cle: "epargne",
-                label: "Épargne",
-                couleur: C.bleuGris,
-                donnees: donneesEpargne,
-              },
-              {
-                cle: "depenses",
-                label: "Dépenses",
-                couleur: C.accent,
-                donnees: donneesReelles,
-              },
-            ]}
-            labels={labels}
-            couleurs={C}
-            fondCarte={theme === "sombre" ? C.carte : "#FAFAFA"}
-          />
-        </CibleTutoriel>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Ionicons name="trending-up" size={13} color={C.texteMuted} />
+                <Text
+                  style={[
+                    styles.sectionLabel,
+                    { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                  ]}
+                >
+                  Évolution
+                </Text>
+              </View>
+              {renderIndicateurFiltre()}
+            </View>
+            <CibleTutoriel
+              id="graphique"
+              onMesure={mesurerCibleTutoriel}
+              style={[
+                styles.chartCard,
+                {
+                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                  borderColor: C.carteBorder,
+                },
+              ]}
+            >
+              <GraphiqueEvolutionMulti
+                key={nbMoisSelectionne}
+                series={[
+                  {
+                    cle: "disponible",
+                    label: "Budget",
+                    couleur: C.purple,
+                    donnees: donneesDisponible,
+                  },
+                  {
+                    cle: "epargne",
+                    label: "Épargne",
+                    couleur: C.bleuGris,
+                    donnees: donneesEpargne,
+                  },
+                  {
+                    cle: "depenses",
+                    label: "Dépenses",
+                    couleur: C.accent,
+                    donnees: donneesReelles,
+                  },
+                ]}
+                labels={labels}
+                couleurs={C}
+                fondCarte={theme === "sombre" ? C.carte : "#FAFAFA"}
+              />
+            </CibleTutoriel>
+          </>
+        )}
 
         <Text
           style={[
@@ -1626,6 +1672,9 @@ export default function Analytics() {
             const maxBrutEpargne = Math.max(...donneesEpargne, 1);
             const ticksEpargne = calculerTicksY(maxBrutEpargne);
             const maxEpargne = ticksEpargne[ticksEpargne.length - 1];
+            const indicesAffichesEpargne = indicesLabelsAffiches(
+              donneesEpargne.length,
+            );
             return (
               <View style={styles.epargneChartRow}>
                 <View style={[styles.epargneAxeY, { height: HAUTEUR_TRACK_EPARGNE }]}>
@@ -1645,7 +1694,9 @@ export default function Analytics() {
                         key={i}
                         style={[styles.barreEpargneVal, { color: C.bleuGris }]}
                       >
-                        {val > 0 ? `${formaterMontant(val)}€` : ""}
+                        {val !== 0 && indicesAffichesEpargne.includes(i)
+                          ? `${formaterMontant(val)}€`
+                          : ""}
                       </Text>
                     ))}
                   </View>
@@ -1741,16 +1792,41 @@ export default function Analytics() {
         </View>
 
         <View
-          style={[styles.sectionLabelRow, { justifyContent: "space-between" }]}
+          style={[
+            styles.sectionLabelRow,
+            { justifyContent: "space-between", alignItems: "flex-start" },
+          ]}
         >
-          <Text
-            style={[
-              styles.sectionLabel,
-              { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
-            ]}
-          >
-            Dépensé vs dépenses prévues
-          </Text>
+          <View>
+            <Text
+              style={[
+                styles.sectionLabel,
+                { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+              ]}
+            >
+              Dépensé vs dépenses prévues
+            </Text>
+            <TouchableOpacity
+              onPress={() => setDepenseVsPrevuEnPourcentage((v) => !v)}
+              activeOpacity={0.6}
+              hitSlop={{ top: 4, bottom: 4, left: 0, right: 8 }}
+            >
+              <Text
+                style={[
+                  styles.depensePrevuDelta,
+                  {
+                    color:
+                      deltaPeriodeEuros <= 0 ? C.accentText : C.peachText,
+                  },
+                ]}
+              >
+                {depenseVsPrevuEnPourcentage
+                  ? `${deltaPeriodePct > 0 ? "+" : ""}${deltaPeriodePct}%`
+                  : `${deltaPeriodeEuros > 0 ? "+" : ""}${formaterMontant(deltaPeriodeEuros)} €`}{" "}
+                vs prévu
+              </Text>
+            </TouchableOpacity>
+          </View>
           {renderIndicateurFiltre()}
         </View>
         <View
@@ -1802,61 +1878,22 @@ export default function Analytics() {
               Variation d&apos;un mois à l&apos;autre — {MOIS_LABELS_COMPLETS[MOIS_ACTUEL]}{" "}
               vs {MOIS_LABELS_COMPLETS[moisPrecedent.getMonth()]}
             </Text>
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginTop: 8,
-              }}
+            <TouchableOpacity
+              style={{ alignSelf: "flex-end", marginTop: 8 }}
+              onPress={() => setComparaisonEnPourcentage((v) => !v)}
+              activeOpacity={0.6}
             >
-              <View
-                style={[
-                  styles.toggleCompareGlobal,
-                  { backgroundColor: C.separateur },
-                ]}
-              >
-                {(["euros", "pourcentage"] as const).map((mode) => (
-                  <TouchableOpacity
-                    key={mode}
-                    style={[
-                      styles.toggleCompareOption,
-                      modeCompareGlobal === mode && {
-                        backgroundColor: C.carte,
-                      },
-                    ]}
-                    onPress={() => {
-                      setModeCompareGlobal(mode);
-                      setModesCompareParCategorie({});
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.toggleCompareTexte,
-                        {
-                          color:
-                            modeCompareGlobal === mode
-                              ? C.texte
-                              : C.texteMuted,
-                        },
-                      ]}
-                    >
-                      {mode === "euros" ? "€" : "%"}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
               <Text
                 style={[
                   styles.compareDelta,
                   { color: deltaTotal <= 0 ? C.accentText : C.peachText },
                 ]}
               >
-                {deltaTotal > 0 ? "+" : ""}
-                {deltaTotal}%
+                {comparaisonEnPourcentage
+                  ? `${deltaTotal > 0 ? "+" : ""}${deltaTotal}%`
+                  : `${deltaTotalEuros > 0 ? "+" : ""}${formaterMontant(deltaTotalEuros)} €`}
               </Text>
-            </View>
+            </TouchableOpacity>
           </View>
           {categoriesCompareesChangees.map(({ env, depensePrec, delta }) => {
             const pct =
@@ -1867,11 +1904,9 @@ export default function Analytics() {
                 : env.depense > 0
                   ? 100
                   : 0;
-            const mode = modesCompareParCategorie[env.id] ?? modeCompareGlobal;
-            const texteDelta =
-              mode === "pourcentage"
-                ? `${deltaPct > 0 ? "+" : ""}${deltaPct}%`
-                : `${delta > 0 ? "+" : ""}${formaterMontant(delta)} €`;
+            const texteDelta = comparaisonEnPourcentage
+              ? `${deltaPct > 0 ? "+" : ""}${deltaPct}%`
+              : `${delta > 0 ? "+" : ""}${formaterMontant(delta)} €`;
             return (
               <View key={env.id} style={styles.cbarRow}>
                 <Text
@@ -1890,13 +1925,7 @@ export default function Analytics() {
                   />
                 </View>
                 <TouchableOpacity
-                  onPress={() =>
-                    setModesCompareParCategorie((m) => ({
-                      ...m,
-                      [env.id]:
-                        mode === "pourcentage" ? "euros" : "pourcentage",
-                    }))
-                  }
+                  onPress={() => setComparaisonEnPourcentage((v) => !v)}
                   activeOpacity={0.6}
                 >
                   <Text
@@ -1958,9 +1987,16 @@ export default function Analytics() {
                           style={styles.cbarFill}
                         />
                       </View>
-                      <Text style={[styles.cbarVal, { color: C.texteMuted }]}>
-                        {modeCompareGlobal === "pourcentage" ? "0%" : "0 €"}
-                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setComparaisonEnPourcentage((v) => !v)}
+                        activeOpacity={0.6}
+                      >
+                        <Text
+                          style={[styles.cbarVal, { color: C.texteMuted }]}
+                        >
+                          {comparaisonEnPourcentage ? "0%" : "0 €"}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
                   );
                 })}
@@ -2114,9 +2150,6 @@ export default function Analytics() {
                   numberOfLines={1}
                 >
                   {dep.nom}
-                </Text>
-                <Text style={[styles.topMois, { color: C.texteMuted }]}>
-                  {dep.mois}
                 </Text>
                 <Text style={[styles.topMontant, { color: C.texte }]}>
                   {formaterMontant(dep.montant)} €
@@ -2806,67 +2839,100 @@ export default function Analytics() {
                                 derniers mois.
                               </Text>
                             </View>
-                            {ecartMensuelSimule !== 0 && (
-                              <>
-                                <View style={styles.serieExplicationLigne}>
-                                  <View
-                                    style={[
-                                      styles.serieExplicationDot,
-                                      {
-                                        backgroundColor:
-                                          ecartMensuelSimule > 0
-                                            ? C.vert
-                                            : C.peach,
-                                      },
-                                    ]}
-                                  />
-                                  <Text
-                                    style={[
-                                      styles.serieExplicationTexte,
-                                      { color: C.texte },
-                                    ]}
-                                  >
-                                    Ce changement représente{" "}
-                                    {formaterMontant(Math.abs(ecartMensuelSimule))}€ de{" "}
-                                    {ecartMensuelSimule > 0 ? "plus" : "moins"}{" "}
-                                    par mois sur cette catégorie.
-                                  </Text>
-                                </View>
-                                <View style={styles.serieExplicationLigne}>
-                                  <View
-                                    style={[
-                                      styles.serieExplicationDot,
-                                      {
-                                        backgroundColor:
-                                          impactTotal6MoisSimulation >= 0
-                                            ? C.vert
-                                            : C.peach,
-                                      },
-                                    ]}
-                                  />
-                                  <Text
-                                    style={[
-                                      styles.serieExplicationTexte,
-                                      { color: C.texte },
-                                    ]}
-                                  >
-                                    Sur {NB_MOIS_PROJECTION} mois, cela
-                                    représente{" "}
-                                    {impactTotal6MoisSimulation >= 0 ? "+" : ""}
-                                    {formaterMontant(impactTotal6MoisSimulation)}€ d&apos;épargne
-                                    projetée.
-                                  </Text>
-                                </View>
-                              </>
-                            )}
+                            {/* Toujours montées (opacité togglée, jamais
+                                démontées) pour que leur hauteur reste
+                                réservée en permanence : les démonter quand
+                                ecartMensuelSimule passe par 0 pendant le
+                                glissement du curseur faisait sauter tout ce
+                                qui suit (graphique + légende) à chaque
+                                aller-retour, donnant l'impression que le
+                                graphique se redimensionnait. */}
+                            <View
+                              style={{
+                                opacity: ecartMensuelSimule !== 0 ? 1 : 0,
+                              }}
+                              accessibilityElementsHidden={
+                                ecartMensuelSimule === 0
+                              }
+                              importantForAccessibility={
+                                ecartMensuelSimule !== 0
+                                  ? "yes"
+                                  : "no-hide-descendants"
+                              }
+                            >
+                              <View style={styles.serieExplicationLigne}>
+                                <View
+                                  style={[
+                                    styles.serieExplicationDot,
+                                    {
+                                      backgroundColor:
+                                        ecartMensuelSimule > 0
+                                          ? C.vert
+                                          : C.peach,
+                                    },
+                                  ]}
+                                />
+                                <Text
+                                  style={[
+                                    styles.serieExplicationTexte,
+                                    { color: C.texte },
+                                  ]}
+                                >
+                                  Ce changement représente{" "}
+                                  {formaterMontant(Math.abs(ecartMensuelSimule))}€ de{" "}
+                                  {ecartMensuelSimule > 0 ? "plus" : "moins"}{" "}
+                                  par mois sur cette catégorie.
+                                </Text>
+                              </View>
+                              <View style={styles.serieExplicationLigne}>
+                                <View
+                                  style={[
+                                    styles.serieExplicationDot,
+                                    {
+                                      backgroundColor:
+                                        impactTotal6MoisSimulation >= 0
+                                          ? C.vert
+                                          : C.peach,
+                                    },
+                                  ]}
+                                />
+                                <Text
+                                  style={[
+                                    styles.serieExplicationTexte,
+                                    { color: C.texte },
+                                  ]}
+                                >
+                                  Sur {NB_MOIS_PROJECTION} mois, cela
+                                  représente{" "}
+                                  {impactTotal6MoisSimulation >= 0 ? "+" : ""}
+                                  {formaterMontant(impactTotal6MoisSimulation)}€ d&apos;épargne
+                                  projetée.
+                                </Text>
+                              </View>
+                            </View>
                           </View>
 
-                          <GraphiqueLignes
-                            donneesReelles={donneesReellesSimulation}
-                            donneesPrevisionnelles={donneesPrevisionnellesSimulation}
-                            labels={labelsSimulation}
-                            couleurs={C}
-                          />
+                          {/* Hauteur fixée en dur (HAUTEUR_GRAPHIQUE_LIGNES,
+                              identique à celle du <Svg> interne, jamais
+                              recalculée depuis les données) et overflow
+                              hidden : quelle que soit l'amplitude des
+                              courbes au fil du glissement du curseur, ce
+                              conteneur n'est jamais redimensionné, donc la
+                              légende juste en dessous ne peut plus être
+                              poussée hors de l'écran. */}
+                          <View
+                            style={{
+                              height: HAUTEUR_GRAPHIQUE_LIGNES,
+                              overflow: "hidden",
+                            }}
+                          >
+                            <GraphiqueLignes
+                              donneesReelles={donneesReellesSimulation}
+                              donneesPrevisionnelles={donneesPrevisionnellesSimulation}
+                              labels={labelsSimulation}
+                              couleurs={C}
+                            />
+                          </View>
                           <View style={styles.simulateurLegende}>
                             <View style={styles.simulateurLegendeItem}>
                               <View
@@ -3416,17 +3482,7 @@ const styles = StyleSheet.create({
   },
   compareTitle: { fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
   compareDelta: { fontSize: 13, fontWeight: "700" },
-  toggleCompareGlobal: {
-    flexDirection: "row",
-    borderRadius: 10,
-    padding: 2,
-  },
-  toggleCompareOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  toggleCompareTexte: { fontSize: 12, fontWeight: "700" },
+  depensePrevuDelta: { fontSize: 12, fontWeight: "600", marginTop: 2 },
   cbarRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -3527,7 +3583,6 @@ const styles = StyleSheet.create({
   },
   topRankTexte: { fontSize: 11, fontWeight: "700", color: "#FFFFFF" },
   topNom: { flex: 1, fontSize: 13, fontWeight: "600", color: "#1A1A1A" },
-  topMois: { fontSize: 11, color: "#999", marginRight: 8 },
   topMontant: { fontSize: 13, fontWeight: "700", color: "#1A1A1A" },
   objectifStatItem: {
     borderRadius: 16,

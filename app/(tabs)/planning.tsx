@@ -257,13 +257,17 @@ type EvenementUnifie = {
 };
 
 /**
- * Remplace TouchableOpacity dans les zones couvertes par `gesteSwipe` :
+ * Remplace TouchableOpacity dans les zones où un tap doit être distingué
+ * d'un swipe (grille de Planning, sélecteur Jour/Semaine/Mois) :
  * TouchableOpacity gère le tap via l'ancien système de responder RN,
- * indépendamment de Gesture.Pan — un swipe qui reste sous le seuil
- * d'activation du Pan (40px) déclenche quand même onPress au relâchement,
- * même après un déplacement horizontal net. Gesture.Tap().requireExternalGestureToFail(gesteSwipe)
- * force le tap à attendre que gesteSwipe ait explicitement échoué à
- * s'activer avant de se déclencher, ce qui distingue correctement les deux.
+ * indépendamment des gestes RNGH, et peut déclencher onPress même après un
+ * déplacement net. `.maxDistance()`/`.maxDuration()` bornent le tap
+ * lui-même (un swipe rapide/brusque — a fortiori celui destiné au pager
+ * natif de changement d'onglet — dépasse ces seuils et ne se déclenche
+ * jamais comme création d'événement), sans dépendre d'un autre geste.
+ * `gesteExterne`, optionnel, ajoute une exigence supplémentaire pour les
+ * zones qui partagent effectivement leur emprise tactile avec un Pan dédié
+ * (ex: le sélecteur de vue et son geste de swipe interne).
  */
 function TapZone({
   onTap,
@@ -273,15 +277,20 @@ function TapZone({
   children,
 }: {
   onTap: () => void;
-  gesteExterne: ReturnType<typeof Gesture.Pan>;
+  gesteExterne?: ReturnType<typeof Gesture.Pan>;
   style?: StyleProp<ViewStyle>;
   opaciteAuToucher?: number;
   children?: ReactNode;
 }) {
   const [presse, setPresse] = useState(false);
 
-  const geste = Gesture.Tap()
-    .requireExternalGestureToFail(gesteExterne)
+  let geste = Gesture.Tap()
+    .maxDistance(12)
+    .maxDuration(200);
+  if (gesteExterne) {
+    geste = geste.requireExternalGestureToFail(gesteExterne);
+  }
+  geste = geste
     .onBegin(() => {
       scheduleOnRN(setPresse, true);
     })
@@ -518,35 +527,22 @@ export default function Planning() {
     setDateActuelle(d);
   };
 
-  const gesteSwipe = Gesture.Pan()
-    .activeOffsetX([-40, 40])
-    .failOffsetY([-12, 12])
-    .minDistance(40)
-    .hitSlop({ left: -24, right: -24 })
-    .onBegin(() => {
-      // Coupe le swipe natif entre onglets pendant tout le toucher dans
-      // cette zone, pour que le PagerView ne capte jamais le même geste
-      // que la navigation jour/semaine.
-      scheduleOnRN(setSwipeOngletsActif, false);
-    })
-    .onFinalize(() => {
-      scheduleOnRN(setSwipeOngletsActif, true);
-    })
-    .onEnd((e) => {
-      const vitesseOk = Math.abs(e.velocityX) > 200;
-      if (vitesseOk && e.translationX < -70) allerSuivant();
-      else if (vitesseOk && e.translationX > 70) allerPrecedent();
-    });
-
-  // Geste séparé du swipe jour/semaine ci-dessus : celui-ci vit sur le
-  // sélecteur Jour/Semaine/Mois (tabsRow) et fait défiler entre les 3 vues,
-  // pas entre les dates. Comme il couvre une zone JSX différente de
-  // gesteSwipe (le sélecteur, pas la grille en dessous), les deux ne se
-  // disputent jamais le même toucher. Même garde-fou setSwipeOngletsActif
-  // que gesteSwipe pour empêcher le PagerView de capter ce swipe en
-  // parallèle — c'est ce garde-fou (absent des tentatives précédentes) qui
-  // manquait pour que le swipe fonctionne sans conflit avec le pager natif
-  // des onglets.
+  // Le changement d'onglet par swipe (vers Budget/Statistiques) est
+  // entièrement délégué au pager natif de material-top-tabs, exactement
+  // comme sur les autres pages (Aperçu/Budget/Statistiques) : la grille n'a
+  // plus aucun Gesture.Pan qui intercepte le swipe horizontal avant lui, un
+  // seul geste fluide suffit donc pour changer d'onglet, sans le
+  // délai/la course entre deux reconnaisseurs de gestes qui obligeait
+  // auparavant à swiper deux fois. Distinguer "swipe lent → change de vue"
+  // de "swipe rapide → change d'onglet" sur la même zone tactile (ancienne
+  // approche, un seul Gesture.Pan pleine grille décidant après coup dans
+  // onEnd) s'est révélé peu fiable en usage réel : la vélocité n'est connue
+  // qu'après que le Pan a déjà capté le toucher et désactivé le pager natif,
+  // ce qui retardait/cassait le swipe d'onglet. Séparer par ZONE plutôt que
+  // par vitesse est bien plus robuste : le changement de vue par swipe reste
+  // possible, mais uniquement sur le sélecteur dédié (tabsRow, geste
+  // ci-dessous), une zone étroite qui ne dispute jamais le swipe d'onglet
+  // fait sur le reste de l'écran.
   const gesteSwipeVue = Gesture.Pan()
     .activeOffsetX([-40, 40])
     .failOffsetY([-12, 12])
@@ -990,8 +986,7 @@ export default function Planning() {
         </View>
       </View>
 
-      <GestureDetector gesture={gesteSwipe}>
-        <View style={{ flex: 1 }}>
+      <View style={{ flex: 1 }}>
           {vue === "jour" && (
             <View style={{ flex: 1 }}>
               {evsToutLaJourneeJour(dateActuelle).length > 0 && (
@@ -1001,7 +996,6 @@ export default function Planning() {
                   {evsToutLaJourneeJour(dateActuelle).map((ev) => (
                     <TapZone
                       key={ev.id}
-                      gesteExterne={gesteSwipe}
                       style={[
                         styles.alldayPill,
                         { backgroundColor: ev.couleur + "22" },
@@ -1065,7 +1059,6 @@ export default function Planning() {
                     {HEURES.map((h, i) => (
                       <TapZone
                         key={h}
-                        gesteExterne={gesteSwipe}
                         style={[styles.ligneFond, { borderTopColor: C.separateur }]}
                         opaciteAuToucher={0.5}
                         onTap={() => ouvrirCreationRapide(`${HEURE_DEBUT + i}h00`)}
@@ -1075,7 +1068,6 @@ export default function Planning() {
                       ({ ev, top, height, left, width }, index) => {
                         const carteEvenement = (
                           <TapZone
-                            gesteExterne={gesteSwipe}
                             style={[
                               styles.eventCard,
                               index === 0
@@ -1173,7 +1165,6 @@ export default function Planning() {
                 {joursSemaineVue.map(({ jourDate, estAujourdhui }, i) => (
                   <TapZone
                     key={i}
-                    gesteExterne={gesteSwipe}
                     style={[
                       styles.weekHeadCol,
                       estAujourdhui && { backgroundColor: teinteAujourdhui },
@@ -1210,7 +1201,6 @@ export default function Planning() {
                       {evsToutLaJournee.map((ev) => (
                         <TapZone
                           key={ev.id}
-                          gesteExterne={gesteSwipe}
                           style={[
                             styles.weekAlldayPill,
                             { backgroundColor: ev.couleur + "33" },
@@ -1271,7 +1261,6 @@ export default function Planning() {
                       {HEURES.map((h, hi) => (
                         <TapZone
                           key={h}
-                          gesteExterne={gesteSwipe}
                           style={[
                             styles.ligneFondSemaine,
                             { borderTopColor: C.separateur },
@@ -1289,7 +1278,6 @@ export default function Planning() {
                       {positions.map(({ ev, top, height, left, width }) => (
                         <TapZone
                           key={ev.id}
-                          gesteExterne={gesteSwipe}
                           style={[
                             styles.weekEventBlock,
                             {
@@ -1364,7 +1352,6 @@ export default function Planning() {
                         return (
                           <TapZone
                             key={di}
-                            gesteExterne={gesteSwipe}
                             style={[
                               styles.monthCell,
                               { borderColor: C.separateur },
@@ -1422,8 +1409,7 @@ export default function Planning() {
               </View>
             </View>
           )}
-        </View>
-      </GestureDetector>
+      </View>
 
       {Platform.OS === "ios" && (
         <InputAccessoryView nativeID={ACCESSORY_ID}>

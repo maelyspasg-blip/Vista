@@ -301,9 +301,11 @@ export default function Budget() {
         });
       }
       if (params.ouvrirAjout) {
-        setTransactionEnEdition(null);
-        setDateTransactionEnEdition(null);
-        setModalAjoutVisible(true);
+        // Réutilise le même reset complet que le bouton "+ Ajouter" de
+        // Budget (nom/montant/catégorie/état d'édition) — sans ça, rouvrir
+        // ce formulaire depuis le FAB d'Aperçu conservait les valeurs de la
+        // dépense précédemment saisie.
+        ouvrirAjout();
         router.setParams({ ouvrirAjout: undefined });
       }
     }, [params.section, params.ouvrirAjout, reduireAnimations, router]),

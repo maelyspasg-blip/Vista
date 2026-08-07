@@ -480,19 +480,20 @@ export default function Dashboard() {
           couleurTexte: "#FFD2D2",
         };
 
-  // "Nos conseils" : les 2-3 phrases de coaching les plus pertinentes du
-  // moment, générées à partir des mêmes signaux que "Ce qu'il faut retenir"
-  // (Stats) et la dépense dominante (Budget) — voir utils/conseils.ts pour
-  // la liste des règles et leur ordre de priorité.
+  // "Nos conseils" : les 2 phrases de coaching immédiat les plus pertinentes
+  // du moment (conscientes de où on en est dans le mois) — distinctes par
+  // construction de "Ce qu'il faut retenir" (Stats), qui analyse la période
+  // sélectionnée plutôt que le mois en cours. Voir utils/conseils.ts pour la
+  // liste des règles et leur ordre de priorité.
   const conseils = genererConseils({
     enveloppes: objStore.enveloppes,
     objectifs: objStore.objectifs,
+    historiquesMois: objStore.historiquesMois,
     transactions: objStore.transactions,
     historiquePaiements: objStore.historiquePaiements,
-    historiquesMois: objStore.historiquesMois,
     epargneMois: objStore.epargneMois,
     resteEstime,
-    etatReste,
+    resteEstimePrecedent,
     disponibleEffectif,
     moisActuel: maintenant.getMonth(),
     anneeActuelle: maintenant.getFullYear(),
