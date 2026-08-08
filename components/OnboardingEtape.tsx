@@ -10,15 +10,22 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { BarreProgression } from "../BarreProgression";
-import { BoutonPrincipal } from "../BoutonPrincipal";
-import { Text } from "../Texte";
-import { useTheme } from "../ThemeContext";
+import { BarreProgression } from "../app/BarreProgression";
+import { BoutonPrincipal } from "../app/BoutonPrincipal";
+import { Text } from "../app/Texte";
+import { useTheme } from "../app/ThemeContext";
 
 // Wrapper commun aux 6 écrans du questionnaire d'onboarding : fond, logo,
 // barre de progression, titre/aide, zone de contenu scrollable, et le
 // bouton principal (+ éventuel bouton secondaire "Passer cette étape") fixé
 // en bas. Évite de dupliquer cette mécanique dans chaque écran.
+//
+// Vit hors de app/ (pas app/onboarding/) : expo-router scanne récursivement
+// tout app/ pour construire sa table de routes, et un fichier sans default
+// export à l'intérieur y déclenche "Route ... is missing the required
+// default export" même préfixé d'un underscore (cette version d'expo-router
+// n'a pas de convention d'exclusion par nom de fichier, seul _layout est
+// spécial — vérifié dans node_modules/expo-router/build/getRoutesCore.js).
 export function OnboardingEtape({
   etapeActuelle,
   totalEtapes,
@@ -72,7 +79,7 @@ export function OnboardingEtape({
           </TouchableOpacity>
         )}
         <Image
-          source={require("../../assets/images/vista-logo-mark.png")}
+          source={require("../assets/images/vista-logo-mark.png")}
           style={styles.logo}
           resizeMode="contain"
         />

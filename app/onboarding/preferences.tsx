@@ -20,7 +20,7 @@ import { useObjectifs } from "../store";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { useTheme } from "../ThemeContext";
-import { OnboardingEtape } from "./_OnboardingEtape";
+import { OnboardingEtape } from "../../components/OnboardingEtape";
 
 const ACCESSORY_ID = "onboardingNumericDone";
 const TOTAL_ETAPES = 6;

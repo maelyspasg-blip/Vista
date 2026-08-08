@@ -31,7 +31,7 @@ import {
   demanderPermissionNotifications,
   programmerNotificationsEvenement,
 } from "../notifications";
-import { Evenement, useObjectifs } from "../store";
+import { Enveloppe, Evenement, useObjectifs } from "../store";
 import { useTheme } from "../ThemeContext";
 import { useAccessibilite } from "../AccessibiliteContext";
 import { BoutonPrincipal } from "../BoutonPrincipal";
@@ -286,6 +286,7 @@ function TapZone({
   const [presse, setPresse] = useState(false);
 
   let geste = Gesture.Tap()
+    .runOnJS(true)
     .maxDistance(12)
     .maxDuration(200);
   if (gesteExterne) {
@@ -426,8 +427,19 @@ export default function Planning() {
     }
   });
 
+  // Déduplique par NOM avant de générer les échéances : une catégorie
+  // supprimée puis recréée (même nom, id différent) peut laisser deux lignes
+  // "Fixe" vivantes en base pour ce qui est conceptuellement une seule
+  // catégorie — sans ce filtre, chacune générait sa propre échéance le même
+  // jour, affichant "Loyer" en double dans la grille (et gonflant son total
+  // dans le Top dépenses de Stats, qui regroupe aussi par nom).
+  const enveloppesFixesUniques = new Map<string, Enveloppe>();
   objStore.enveloppes
     .filter((e) => e.type === "Fixe" && e.afficherDansPlanning && e.dateFixe)
+    .forEach((e) => {
+      if (!enveloppesFixesUniques.has(e.nom)) enveloppesFixesUniques.set(e.nom, e);
+    });
+  [...enveloppesFixesUniques.values()]
     .forEach((e) => {
       const dateOrigine = new Date(e.dateFixe!);
       if (e.repeteChaqueMois) {
@@ -545,6 +557,7 @@ export default function Planning() {
   // ci-dessous), une zone étroite qui ne dispute jamais le swipe d'onglet
   // fait sur le reste de l'écran.
   const gesteSwipeVue = Gesture.Pan()
+    .runOnJS(true)
     .activeOffsetX([-40, 40])
     .failOffsetY([-12, 12])
     .minDistance(40)
@@ -692,10 +705,22 @@ export default function Planning() {
   };
 
   const gererClicEvenement = (ev: EvenementUnifie) => {
-    if (!ev.modifiable) {
-      router.push("/");
-      return;
-    }
+    // eslint-disable-next-line no-console
+    console.log("[DEBUG gererClicEvenement]", {
+      id: ev.id,
+      nom: ev.nom,
+      modifiable: ev.modifiable,
+      evenementId: ev.evenementId,
+      sourceTrouvee: ev.evenementId
+        ? !!objStore.evenements.find((e) => e.id === ev.evenementId)
+        : null,
+    });
+    // Non modifiable = généré à partir d'une catégorie Fixe, d'un objectif
+    // récurrent ou d'un historique de paiement (pas un vrai Evenement en
+    // base) — rien à éditer ici. On ne navigue plus ailleurs dans ce cas :
+    // ça sortait l'utilisateur de Planning de façon inattendue sans qu'il
+    // ait demandé à changer d'onglet.
+    if (!ev.modifiable) return;
     const source = objStore.evenements.find((e) => e.id === ev.evenementId);
     if (!source) return;
     ouvrirEditionEvenement(source);
@@ -988,14 +1013,14 @@ export default function Planning() {
                   style={[styles.alldayZone, { borderColor: C.separateur }]}
                 >
                   {evsToutLaJourneeJour(dateActuelle).map((ev) => (
-                    <TapZone
+                    <TouchableOpacity
                       key={ev.id}
                       style={[
                         styles.alldayPill,
                         { backgroundColor: ev.couleur + "22" },
                       ]}
-                      opaciteAuToucher={0.7}
-                      onTap={() => gererClicEvenement(ev)}
+                      activeOpacity={0.7}
+                      onPress={() => gererClicEvenement(ev)}
                     >
                       <Ionicons
                         name="pin-outline"
@@ -1013,7 +1038,7 @@ export default function Planning() {
                           {formaterMontant(ev.montant)}€
                         </Text>
                       )}
-                    </TapZone>
+                    </TouchableOpacity>
                   ))}
                 </View>
               )}
@@ -1051,17 +1076,17 @@ export default function Planning() {
                   </View>
                   <View style={styles.eventsCol}>
                     {HEURES.map((h, i) => (
-                      <TapZone
+                      <TouchableOpacity
                         key={h}
                         style={[styles.ligneFond, { borderTopColor: C.separateur }]}
-                        opaciteAuToucher={0.5}
-                        onTap={() => ouvrirCreationRapide(`${HEURE_DEBUT + i}h00`)}
+                        activeOpacity={0.5}
+                        onPress={() => ouvrirCreationRapide(`${HEURE_DEBUT + i}h00`)}
                       />
                     ))}
                     {calculerPositions(evsHorairesJour(dateActuelle)).map(
                       ({ ev, top, height, left, width }, index) => {
                         const carteEvenement = (
-                          <TapZone
+                          <TouchableOpacity
                             style={[
                               styles.eventCard,
                               index === 0
@@ -1077,8 +1102,8 @@ export default function Planning() {
                                 borderLeftColor: ev.couleur,
                               },
                             ]}
-                            opaciteAuToucher={0.7}
-                            onTap={() => gererClicEvenement(ev)}
+                            activeOpacity={0.7}
+                            onPress={() => gererClicEvenement(ev)}
                           >
                             <View style={styles.eventTopRow}>
                               <Text
@@ -1103,7 +1128,7 @@ export default function Planning() {
                             <Text style={[styles.eventHeure, { color: C.texteMuted }]}>
                               {ev.heure}
                             </Text>
-                          </TapZone>
+                          </TouchableOpacity>
                         );
                         // Le premier événement du jour sert de cible tutoriel :
                         // c'est CibleTutoriel qui porte alors le positionnement
@@ -1157,14 +1182,14 @@ export default function Planning() {
               <View style={styles.weekHeadRow}>
                 <View style={{ width: 32 }} />
                 {joursSemaineVue.map(({ jourDate, estAujourdhui }, i) => (
-                  <TapZone
+                  <TouchableOpacity
                     key={i}
                     style={[
                       styles.weekHeadCol,
                       estAujourdhui && { backgroundColor: teinteAujourdhui },
                     ]}
-                    opaciteAuToucher={0.7}
-                    onTap={() => ouvrirJour(jourDate)}
+                    activeOpacity={0.7}
+                    onPress={() => ouvrirJour(jourDate)}
                   >
                     <Text style={[styles.weekHeadNom, { color: C.texteMuted }]}>
                       {JOURS_SEMAINE[i]}
@@ -1181,7 +1206,7 @@ export default function Planning() {
                     >
                       {jourDate.getDate()}
                     </Text>
-                  </TapZone>
+                  </TouchableOpacity>
                 ))}
               </View>
 
@@ -1193,14 +1218,14 @@ export default function Planning() {
                   {joursSemaineVue.map(({ evsToutLaJournee }, i) => (
                     <View key={i} style={styles.weekAlldayCol}>
                       {evsToutLaJournee.map((ev) => (
-                        <TapZone
+                        <TouchableOpacity
                           key={ev.id}
                           style={[
                             styles.weekAlldayPill,
                             { backgroundColor: ev.couleur + "33" },
                           ]}
-                          opaciteAuToucher={0.7}
-                          onTap={() => gererClicEvenement(ev)}
+                          activeOpacity={0.7}
+                          onPress={() => gererClicEvenement(ev)}
                         >
                           <Text
                             style={[
@@ -1211,7 +1236,7 @@ export default function Planning() {
                           >
                             {ev.nom}
                           </Text>
-                        </TapZone>
+                        </TouchableOpacity>
                       ))}
                     </View>
                   ))}
@@ -1253,14 +1278,14 @@ export default function Planning() {
                       ]}
                     >
                       {HEURES.map((h, hi) => (
-                        <TapZone
+                        <TouchableOpacity
                           key={h}
                           style={[
                             styles.ligneFondSemaine,
                             { borderTopColor: C.separateur },
                           ]}
-                          opaciteAuToucher={0.5}
-                          onTap={() => {
+                          activeOpacity={0.5}
+                          onPress={() => {
                             setDateActuelle(jourDate);
                             ouvrirCreationRapide(
                               `${HEURE_DEBUT + hi}h00`,
@@ -1270,7 +1295,7 @@ export default function Planning() {
                         />
                       ))}
                       {positions.map(({ ev, top, height, left, width }) => (
-                        <TapZone
+                        <TouchableOpacity
                           key={ev.id}
                           style={[
                             styles.weekEventBlock,
@@ -1283,8 +1308,8 @@ export default function Planning() {
                               borderLeftColor: ev.couleur,
                             },
                           ]}
-                          opaciteAuToucher={0.7}
-                          onTap={() => gererClicEvenement(ev)}
+                          activeOpacity={0.7}
+                          onPress={() => gererClicEvenement(ev)}
                         >
                           <Text
                             style={[
@@ -1295,7 +1320,7 @@ export default function Planning() {
                           >
                             {ev.nom}
                           </Text>
-                        </TapZone>
+                        </TouchableOpacity>
                       ))}
                       {estAujourdhui && ligneActuelleVisible && (
                         <View
@@ -1344,7 +1369,7 @@ export default function Planning() {
                         const nbSupplementaires = evs.length - evsVisibles.length;
 
                         return (
-                          <TapZone
+                          <TouchableOpacity
                             key={di}
                             style={[
                               styles.monthCell,
@@ -1353,8 +1378,8 @@ export default function Planning() {
                                 backgroundColor: teinteAujourdhui,
                               },
                             ]}
-                            opaciteAuToucher={0.7}
-                            onTap={() => ouvrirJour(jourDate)}
+                            activeOpacity={0.7}
+                            onPress={() => ouvrirJour(jourDate)}
                           >
                             <Text
                               style={[
@@ -1394,7 +1419,7 @@ export default function Planning() {
                                 +{nbSupplementaires}
                               </Text>
                             )}
-                          </TapZone>
+                          </TouchableOpacity>
                         );
                       })}
                     </View>

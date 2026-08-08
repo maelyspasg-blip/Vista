@@ -167,7 +167,6 @@ function DonutChart({
 }
 
 const ACCESSORY_ID = "numericDone";
-const COULEUR_BUDGET = "#845EC2";
 
 export default function Dashboard() {
   const objStore = useObjectifs();
@@ -209,6 +208,11 @@ export default function Dashboard() {
     premierJourMoisISO(new Date()),
   );
   const [recurrenteEntreeBudget, setRecurrenteEntreeBudget] = useState(false);
+  const [couleurEntreeBudget, setCouleurEntreeBudget] = useState(
+    PALETTE_COULEURS[0],
+  );
+  const [paletteOuverteEntreeBudget, setPaletteOuverteEntreeBudget] =
+    useState(false);
   const [creationEntreeBudgetEnCours, setCreationEntreeBudgetEnCours] =
     useState(false);
   const [entreesBudgetOuvert, setEntreesBudgetOuvert] = useState(false);
@@ -647,7 +651,7 @@ export default function Dashboard() {
       nom: nomEntreeBudget,
       depense: 0,
       budget: parseMontant(montantEntreeBudget),
-      couleur: COULEUR_BUDGET,
+      couleur: couleurEntreeBudget,
       type: "Entrée",
       recurrente: recurrenteEntreeBudget,
       dateFixe: dateEntreeBudget,
@@ -660,6 +664,13 @@ export default function Dashboard() {
     setDateEntreeBudget(dateVersISO(new Date()));
     setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
     setRecurrenteEntreeBudget(false);
+    setCouleurEntreeBudget(
+      couleurLaPlusDistincte(
+        PALETTE_COULEURS,
+        enveloppes.map((e) => e.couleur),
+      ),
+    );
+    setPaletteOuverteEntreeBudget(false);
     setModalAjoutEntreeBudgetVisible(false);
   };
 
@@ -911,15 +922,6 @@ export default function Dashboard() {
       </TouchableOpacity>
     );
   };
-
-  // TEMPORAIRE — debug jauge "Reste estimé" (segment "Dépense prévue"
-  // invisible signalé sur device réel) : à retirer une fois la cause confirmée.
-  console.log(
-    "[debug jauge Reste estimé] totalDepensePrevue:",
-    totalDepensePrevue,
-    "pctPrevuEstime:",
-    pctPrevuEstime,
-  );
 
   return (
     <View style={{ flex: 1, backgroundColor: C.fondPage }}>
@@ -1362,6 +1364,12 @@ export default function Dashboard() {
               onPress={() => {
                 setDateEntreeBudget(dateVersISO(new Date()));
                 setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
+                setCouleurEntreeBudget(
+                  couleurLaPlusDistincte(
+                    PALETTE_COULEURS,
+                    enveloppes.map((e) => e.couleur),
+                  ),
+                );
                 setModalAjoutEntreeBudgetVisible(true);
               }}
             >
@@ -1810,6 +1818,44 @@ export default function Dashboard() {
                     );
                   })}
                 </View>
+
+                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                  Couleur
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.couleurTiroirBouton,
+                    { backgroundColor: C.fondSecondaire },
+                  ]}
+                  onPress={() =>
+                    setPaletteOuverteEntreeBudget(!paletteOuverteEntreeBudget)
+                  }
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.couleurRond,
+                      { backgroundColor: couleurEntreeBudget },
+                    ]}
+                  />
+                  <Text style={[styles.couleurTiroirTexte, { color: C.texte }]}>
+                    Choisir une couleur
+                  </Text>
+                  <Text style={[styles.couleurChevron, { color: C.texteMuted }]}>
+                    {paletteOuverteEntreeBudget ? "▾" : "▸"}
+                  </Text>
+                </TouchableOpacity>
+                {paletteOuverteEntreeBudget && (
+                  <ColorPicker
+                    value={couleurEntreeBudget}
+                    onChange={(c) => {
+                      setCouleurEntreeBudget(c);
+                      setPaletteOuverteEntreeBudget(false);
+                    }}
+                    borderColor={C.texte}
+                    couleursUtilisees={enveloppes.map((e) => e.couleur)}
+                  />
+                )}
 
                 <View style={styles.switchRow}>
                   <View style={styles.switchRowLabel}>

@@ -292,6 +292,14 @@ export default function Budget() {
   } | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const positionAutresDepenses = useRef(0);
+  // Garde contre les faux déclenchements : material-top-tabs garde tous les
+  // onglets montés, donc cet effet peut se redéclencher sur un focus non
+  // intentionnel (ex: survol de Budget pendant un swipe entre Planning et un
+  // autre onglet) avant que router.setParams({ouvrirAjout: undefined}) ait
+  // fini de propager. En ne retraitant jamais deux fois la même valeur de
+  // params.ouvrirAjout, seul un VRAI nouveau push explicite (depuis le FAB,
+  // qui repart toujours de "1") peut rouvrir le formulaire.
+  const dernierOuvrirAjoutTraite = useRef<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -301,7 +309,10 @@ export default function Budget() {
           animated: !reduireAnimations,
         });
       }
-      if (params.ouvrirAjout) {
+      if (!params.ouvrirAjout) {
+        dernierOuvrirAjoutTraite.current = null;
+      } else if (params.ouvrirAjout !== dernierOuvrirAjoutTraite.current) {
+        dernierOuvrirAjoutTraite.current = params.ouvrirAjout;
         // Réutilise le même reset complet que le bouton "+ Ajouter" de
         // Budget (nom/montant/catégorie/état d'édition) — sans ça, rouvrir
         // ce formulaire depuis le FAB d'Aperçu conservait les valeurs de la

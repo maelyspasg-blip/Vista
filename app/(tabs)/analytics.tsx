@@ -14,7 +14,7 @@ import {
   View,
 } from "react-native";
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from "react-native-svg";
-import { useObjectifs } from "../store";
+import { Enveloppe, useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { calculerSeries, Serie, TypeSerie } from "../../utils/series";
 import {
@@ -176,6 +176,11 @@ const MOIS_LABELS = [
 ];
 const MOIS_ACTUEL = new Date().getMonth();
 const ANNEE_ACTUELLE = new Date().getFullYear();
+// Suffixe de titre pour les sections calculées sur le mois en cours (ex:
+// "Vue d'ensemble — Août 2026"), par opposition à celles calculées sur la
+// période sélectionnée (nbMois derniers mois, voir plus bas dans le
+// composant).
+const LABEL_MOIS_ACTUEL = `${MOIS_LABELS_COMPLETS[MOIS_ACTUEL]} ${ANNEE_ACTUELLE}`;
 
 // Défini au niveau module (pas dans le composant) pour ne pas recréer le
 // composant animé — et donc démonter/remonter la vue native du slider — à
@@ -923,6 +928,9 @@ export default function Analytics() {
   );
 
   const nbMois = nbMoisSelectionne;
+  // Suffixe de titre pour les sections calculées sur la période sélectionnée
+  // (par opposition à LABEL_MOIS_ACTUEL, pour celles sur le mois en cours).
+  const labelPeriode = `${nbMois} derniers mois`;
 
   const moisAffiches = Array.from({ length: nbMois }, (_, i) => {
     const d = new Date(ANNEE_ACTUELLE, MOIS_ACTUEL - nbMois + 1 + i, 1);
@@ -979,6 +987,27 @@ export default function Analytics() {
     return envsFiltrees.reduce((acc, e) => acc + e.budget, 0);
   };
 
+  // Montant d'une enveloppe précise pour un mois donné, quel que soit son
+  // type — contrairement à getDepenseMois/getBudgetMois ci-dessus, qui
+  // excluent volontairement les entrées d'argent. Utilisé pour tracer
+  // l'évolution mois par mois d'une entrée d'argent sélectionnée dans le
+  // filtre (voir seriesEntrees plus bas).
+  const getMontantEnveloppeMois = (
+    mois: number,
+    annee: number,
+    enveloppeId: string,
+  ): number => {
+    if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
+      return (
+        objStore.enveloppes.find((e) => e.id === enveloppeId)?.depense ?? 0
+      );
+    }
+    const snap = objStore.historiquesMois.find(
+      (s) => s.mois === mois && s.annee === annee,
+    );
+    return snap?.enveloppes.find((e) => e.id === enveloppeId)?.depense ?? 0;
+  };
+
   const getEpargneMois = (mois: number, annee: number) => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE)
       return objStore.epargneMois;
@@ -1001,6 +1030,17 @@ export default function Analytics() {
 
   const enveloppesFiltrees =
     categoriesSelectionnees.length > 0 ? categoriesSelectionnees : undefined;
+
+  // Vrai uniquement quand toutes les catégories sélectionnées dans le
+  // filtre sont des entrées d'argent — les graphiques de dépenses n'ont
+  // alors plus de sens et laissent place au graphique dédié "Évolution de
+  // tes entrées d'argent" (voir seriesEntrees plus bas).
+  const categoriesSelectionneesObj = objStore.enveloppes.filter((e) =>
+    categoriesSelectionnees.includes(e.id),
+  );
+  const filtreEstEntreesUniquement =
+    categoriesSelectionneesObj.length > 0 &&
+    categoriesSelectionneesObj.every((e) => e.type === "Entrée");
 
   // Nom affiché par l'indicateur entonnoir posé à côté des sections
   // réellement recalculées à partir de enveloppesFiltrees ci-dessus (pas
@@ -1072,6 +1112,20 @@ export default function Analytics() {
         : 0;
   const labels = moisAffiches.map(({ mois }) => MOIS_LABELS[mois]);
 
+  // Une courbe par entrée d'argent sélectionnée dans le filtre, dans sa
+  // propre couleur — alimente "Évolution de tes entrées d'argent",
+  // affiché uniquement quand filtreEstEntreesUniquement est vrai.
+  const seriesEntrees: SerieEvolution[] = categoriesSelectionneesObj.map(
+    (env) => ({
+      cle: env.id,
+      label: env.nom,
+      couleur: env.couleur,
+      donnees: moisAffiches.map(({ mois, annee }) =>
+        getMontantEnveloppeMois(mois, annee, env.id),
+      ),
+    }),
+  );
+
   const moisAvecDonnees = moisAffiches.filter(({ mois, annee }) => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) return true;
     return objStore.historiquesMois.some(
@@ -1120,12 +1174,20 @@ export default function Analytics() {
     { nom: string; montant: number; couleur: string }
   >();
   moisAffiches.forEach(({ mois, annee }) => {
-    const enveloppesMois =
+    // Pour le mois en cours, déduplique par nom avant de sommer : deux
+    // enveloppes vivantes portant le même nom (catégorie supprimée puis
+    // recréée sans que l'ancienne ait été retirée de Supabase) sinon
+    // additionnent deux fois la même dépense réelle dans le classement.
+    const enveloppesMoisBrutes =
       mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
         ? objStore.enveloppes
         : (objStore.historiquesMois.find(
             (s) => s.mois === mois && s.annee === annee,
           )?.enveloppes ?? []);
+    const enveloppesMois =
+      mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
+        ? [...new Map(enveloppesMoisBrutes.map((e) => [e.nom, e])).values()]
+        : enveloppesMoisBrutes;
     enveloppesMois.forEach((e) => {
       if (e.type === "Entrée" || e.depense <= 0) return;
       const existante = topDepensesParCategorie.get(e.nom);
@@ -1240,6 +1302,38 @@ export default function Analytics() {
     );
   };
 
+  const depensesFiltre = objStore.enveloppes.filter(
+    (e) => e.type !== "Entrée",
+  );
+  const entreesFiltre = objStore.enveloppes.filter(
+    (e) => e.type === "Entrée",
+  );
+
+  const renderPastilleCategorie = (env: Enveloppe) => {
+    const sel = categoriesSelectionnees.includes(env.id);
+    return (
+      <TouchableOpacity
+        key={env.id}
+        style={[
+          styles.tiroirPastille,
+          { backgroundColor: theme === "sombre" ? C.fondPage : "#FFFFFF", borderColor: C.separateur },
+          sel && { backgroundColor: env.couleur + "22", borderColor: env.couleur },
+        ]}
+        onPress={() => toggleCategorie(env.id)}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.tiroirRond, { backgroundColor: env.couleur }]} />
+        <Text
+          style={[styles.tiroirNomGrille, { color: C.texte }]}
+          numberOfLines={1}
+        >
+          {env.nom}
+        </Text>
+        {sel && <Ionicons name="checkmark" size={13} color={env.couleur} />}
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -1335,37 +1429,26 @@ export default function Analytics() {
               },
             ]}
           >
-            {objStore.enveloppes.map((env) => {
-              const sel = categoriesSelectionnees.includes(env.id);
-              return (
-                <TouchableOpacity
-                  key={env.id}
-                  style={[
-                    styles.tiroirItem,
-                    { borderBottomColor: C.separateur },
-                    sel && { backgroundColor: env.couleur + "22" },
-                  ]}
-                  onPress={() => toggleCategorie(env.id)}
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[
-                      styles.tiroirRond,
-                      { backgroundColor: env.couleur },
-                    ]}
-                  />
-                  <Text
-                    style={[styles.tiroirNom, { color: C.texte }]}
-                    numberOfLines={1}
-                  >
-                    {env.nom}
-                  </Text>
-                  {sel && (
-                    <Ionicons name="checkmark" size={16} color={env.couleur} />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
+            {depensesFiltre.length > 0 && (
+              <>
+                <Text style={[styles.tiroirGroupeLabel, { color: C.texteMuted }]}>
+                  DÉPENSES
+                </Text>
+                <View style={styles.tiroirGrille}>
+                  {depensesFiltre.map(renderPastilleCategorie)}
+                </View>
+              </>
+            )}
+            {entreesFiltre.length > 0 && (
+              <>
+                <Text style={[styles.tiroirGroupeLabel, { color: C.texteMuted }]}>
+                  ENTRÉES D&apos;ARGENT
+                </Text>
+                <View style={styles.tiroirGrille}>
+                  {entreesFiltre.map(renderPastilleCategorie)}
+                </View>
+              </>
+            )}
             {categoriesSelectionnees.length > 0 && (
               <TouchableOpacity
                 style={styles.tiroirReset}
@@ -1481,7 +1564,7 @@ export default function Analytics() {
         )}
 
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-          Vue d'ensemble
+          Vue d&apos;ensemble — {LABEL_MOIS_ACTUEL}
         </Text>
         <View style={styles.kpiGrid}>
           <View
@@ -1624,7 +1707,7 @@ export default function Analytics() {
                     { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
                   ]}
                 >
-                  Évolution
+                  Évolution — {labelPeriode}
                 </Text>
               </View>
               {renderIndicateurFiltre()}
@@ -1676,7 +1759,7 @@ export default function Analytics() {
             { color: C.texteMuted, marginTop: 8 },
           ]}
         >
-          Épargne dans le temps
+          Épargne dans le temps — {labelPeriode}
         </Text>
         <View
           style={[
@@ -1779,7 +1862,7 @@ export default function Analytics() {
             { color: C.texteMuted, marginTop: 8 },
           ]}
         >
-          Ce qu'il faut retenir
+          Ce qu&apos;il faut retenir — {labelPeriode}
         </Text>
         <View
           style={[
@@ -1810,78 +1893,120 @@ export default function Analytics() {
           ))}
         </View>
 
-        <View
-          style={[
-            styles.sectionLabelRow,
-            { justifyContent: "space-between", alignItems: "flex-start" },
-          ]}
-        >
-          <View>
-            <Text
+        {!filtreEstEntreesUniquement && (
+          <>
+            <View
               style={[
-                styles.sectionLabel,
-                { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                styles.sectionLabelRow,
+                { justifyContent: "space-between", alignItems: "flex-start" },
               ]}
             >
-              Dépensé vs dépenses prévues
-            </Text>
-            <TouchableOpacity
-              onPress={() => setDepenseVsPrevuEnPourcentage((v) => !v)}
-              activeOpacity={0.6}
-              hitSlop={{ top: 4, bottom: 4, left: 0, right: 8 }}
+              <View>
+                <Text
+                  style={[
+                    styles.sectionLabel,
+                    { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                  ]}
+                >
+                  Dépensé vs dépenses prévues — {labelPeriode}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setDepenseVsPrevuEnPourcentage((v) => !v)}
+                  activeOpacity={0.6}
+                  hitSlop={{ top: 4, bottom: 4, left: 0, right: 8 }}
+                >
+                  <Text
+                    style={[
+                      styles.depensePrevuDelta,
+                      {
+                        color:
+                          deltaPeriodeEuros <= 0 ? C.accentText : C.peachText,
+                      },
+                    ]}
+                  >
+                    {depenseVsPrevuEnPourcentage
+                      ? `${deltaPeriodePct > 0 ? "+" : ""}${deltaPeriodePct}%`
+                      : `${deltaPeriodeEuros > 0 ? "+" : ""}${formaterMontant(deltaPeriodeEuros)} €`}{" "}
+                    vs prévu
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {renderIndicateurFiltre()}
+            </View>
+            <View
+              style={[
+                styles.chartCard,
+                {
+                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                  borderColor: C.carteBorder,
+                },
+              ]}
+            >
+              <GraphiqueLignes
+                donneesReelles={donneesReelles}
+                donneesPrevisionnelles={donneesPrevisionnelles}
+                labels={labels}
+                couleurs={C}
+              />
+              <View style={styles.legendeRow}>
+                <View style={styles.legendeItem}>
+                  <View
+                    style={[styles.legendeDot, { backgroundColor: C.accent }]}
+                  />
+                  <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
+                    Dépensé
+                  </Text>
+                </View>
+                <View style={styles.legendeItem}>
+                  <View
+                    style={[styles.legendeDot, { backgroundColor: C.peach }]}
+                  />
+                  <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
+                    Dépenses prévues
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </>
+        )}
+
+        {filtreEstEntreesUniquement && (
+          <>
+            <View
+              style={[
+                styles.sectionLabelRow,
+                { justifyContent: "space-between", alignItems: "flex-start" },
+              ]}
             >
               <Text
                 style={[
-                  styles.depensePrevuDelta,
-                  {
-                    color:
-                      deltaPeriodeEuros <= 0 ? C.accentText : C.peachText,
-                  },
+                  styles.sectionLabel,
+                  { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
                 ]}
               >
-                {depenseVsPrevuEnPourcentage
-                  ? `${deltaPeriodePct > 0 ? "+" : ""}${deltaPeriodePct}%`
-                  : `${deltaPeriodeEuros > 0 ? "+" : ""}${formaterMontant(deltaPeriodeEuros)} €`}{" "}
-                vs prévu
+                Évolution de tes entrées d&apos;argent — {labelPeriode}
               </Text>
-            </TouchableOpacity>
-          </View>
-          {renderIndicateurFiltre()}
-        </View>
-        <View
-          style={[
-            styles.chartCard,
-            {
-              backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-              borderColor: C.carteBorder,
-            },
-          ]}
-        >
-          <GraphiqueLignes
-            donneesReelles={donneesReelles}
-            donneesPrevisionnelles={donneesPrevisionnelles}
-            labels={labels}
-            couleurs={C}
-          />
-          <View style={styles.legendeRow}>
-            <View style={styles.legendeItem}>
-              <View
-                style={[styles.legendeDot, { backgroundColor: C.accent }]}
-              />
-              <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
-                Dépensé
-              </Text>
+              {renderIndicateurFiltre()}
             </View>
-            <View style={styles.legendeItem}>
-              <View
-                style={[styles.legendeDot, { backgroundColor: C.peach }]}
+            <View
+              style={[
+                styles.chartCard,
+                {
+                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                  borderColor: C.carteBorder,
+                },
+              ]}
+            >
+              <GraphiqueEvolutionMulti
+                key={nbMoisSelectionne}
+                series={seriesEntrees}
+                labels={labels}
+                couleurs={C}
+                fondCarte={theme === "sombre" ? C.carte : "#FAFAFA"}
               />
-              <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
-                Dépenses prévues
-              </Text>
             </View>
-          </View>
-        </View>
+          </>
+        )}
 
         <View
           style={[
@@ -2101,10 +2226,10 @@ export default function Analytics() {
           </>
         )}
 
-        {repartitionDepenses.length > 0 && (
+        {!filtreEstEntreesUniquement && repartitionDepenses.length > 0 && (
           <>
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-              Répartition des dépenses
+              Répartition des dépenses — {LABEL_MOIS_ACTUEL}
             </Text>
             <View
               style={[
@@ -2120,7 +2245,7 @@ export default function Analytics() {
           </>
         )}
 
-        {repartitionEntrees.length > 0 && (
+        {!filtreEstEntreesUniquement && repartitionEntrees.length > 0 && (
           <>
             <Text
               style={[
@@ -2128,7 +2253,7 @@ export default function Analytics() {
                 { color: C.texteMuted, marginTop: 8 },
               ]}
             >
-              Entrées d&apos;argent
+              Entrées d&apos;argent — {LABEL_MOIS_ACTUEL}
             </Text>
             <View
               style={[
@@ -2144,7 +2269,7 @@ export default function Analytics() {
           </>
         )}
 
-        {topDepensesTri.length > 0 && (
+        {!filtreEstEntreesUniquement && topDepensesTri.length > 0 && (
           <>
             <Text
               style={[
@@ -3392,6 +3517,37 @@ const styles = StyleSheet.create({
   tiroirNom: { flex: 1, fontSize: 14, color: "#1A1A1A", fontWeight: "500" },
   tiroirReset: { padding: 14, alignItems: "center" },
   tiroirResetTexte: { fontSize: 13, color: "#999", fontWeight: "600" },
+  tiroirGroupeLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 6,
+  },
+  // Grille de pastilles (3 par ligne) — width en % plutôt que gap seul, pour
+  // garantir exactement 3 par ligne quelle que soit la largeur de l'écran
+  // (un simple flexWrap+gap laisserait le nombre par ligne varier).
+  tiroirGrille: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    rowGap: 8,
+  },
+  tiroirPastille: {
+    width: "31%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  tiroirNomGrille: { flexShrink: 1, fontSize: 12, fontWeight: "500" },
   simulateurBudgetActuelTexte: { fontSize: 12, fontWeight: "500" },
   simulateurBudgetLigne: {
     flexDirection: "row",
