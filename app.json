@@ -55,7 +55,32 @@
       "expo-image",
       "expo-sharing",
       "expo-web-browser",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-widgets",
+        {
+          "groupIdentifier": "group.com.maelyspasgvista.vista",
+          "widgets": [
+            {
+              "name": "PlanningWidget",
+              "displayName": "Planning du jour",
+              "description": "Affiche le prochain événement de ta journée.",
+              "ios": {
+                "supportedFamilies": ["systemSmall"]
+              }
+            },
+            {
+              "name": "AjoutRapideWidget",
+              "displayName": "Ajout rapide",
+              "description": "Ajoute une dépense en un tap depuis l'écran d'accueil.",
+              "ios": {
+                "supportedFamilies": ["systemSmall"]
+              }
+            }
+          ]
+        }
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

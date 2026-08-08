@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
 import { annulerToutesNotifications } from "./notifications";
+import {
+  synchroniserWidgetAjoutRapide,
+  synchroniserWidgetPlanning,
+} from "../utils/widgetsSync";
 
 // Couleur de secours si une ligne existante a `couleur` vide/null en base
 // (donnée legacy, colonne nullable côté Supabase malgré le type non-null ici)
@@ -1528,7 +1532,13 @@ export function useObjectifs() {
           return;
         }
 
-        setEtat({ evenements: (data ?? []).map(evenementDepuisLigne) });
+        const evenementsCharges = (data ?? []).map(evenementDepuisLigne);
+        setEtat({ evenements: evenementsCharges });
+        // "L'app met à jour ces données à chaque ouverture" — chargerEvenements
+        // est l'appel fait au montage de (tabs)/_layout.tsx, donc le point
+        // naturel pour synchroniser les deux widgets à l'ouverture de l'app.
+        synchroniserWidgetPlanning(evenementsCharges);
+        synchroniserWidgetAjoutRapide();
       } catch (e) {
         console.error("Chargement des événements a échoué :", e);
         signalerErreurSync(
@@ -2134,6 +2144,7 @@ export function useObjectifs() {
 
         const nouvel = evenementDepuisLigne(data);
         setEtat({ evenements: [...etat.evenements, nouvel] });
+        synchroniserWidgetPlanning(etat.evenements);
 
         if (
           nouvel.estFinancier &&
@@ -2157,6 +2168,7 @@ export function useObjectifs() {
     supprimerEvenement: (id: string) => {
       const ev = etat.evenements.find((e) => e.id === id);
       setEtat({ evenements: etat.evenements.filter((e) => e.id !== id) });
+      synchroniserWidgetPlanning(etat.evenements);
 
       if (
         ev?.estFinancier &&
@@ -2195,6 +2207,7 @@ export function useObjectifs() {
           e.id === id ? { ...e, ...champs } : e,
         ),
       });
+      synchroniserWidgetPlanning(etat.evenements);
 
       const colonnes: Record<string, unknown> = {};
       if ("nom" in champs) colonnes.nom = champs.nom;
