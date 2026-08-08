@@ -24,6 +24,7 @@ import { useTheme } from "../ThemeContext";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
 import { PALETTE_COULEURS } from "../ColorPicker";
+import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import {
   depenseEnveloppeDansSnapshot,
@@ -628,18 +629,11 @@ export default function Budget() {
   // Création de catégorie à la volée depuis "Nouvelle dépense" — même
   // mécanisme que Planning (choisirCouleurAutomatique + ajouterEnveloppe),
   // pour une expérience cohérente peu importe l'écran de création.
-  const choisirCouleurAutomatique = () => {
-    const couleursUtilisees = new Set(
+  const choisirCouleurAutomatique = () =>
+    couleurLaPlusDistincte(
+      PALETTE_COULEURS,
       objStore.enveloppes.map((env) => env.couleur),
     );
-    const disponible = PALETTE_COULEURS.find(
-      (c) => !couleursUtilisees.has(c),
-    );
-    return (
-      disponible ??
-      PALETTE_COULEURS[objStore.enveloppes.length % PALETTE_COULEURS.length]
-    );
-  };
 
   const creerNouvelleCategorieInline = async () => {
     const nom = nomNouvelleCategorie.trim();

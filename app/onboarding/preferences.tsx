@@ -14,6 +14,7 @@ import { supabase } from "../../supabaseClient";
 import { parseMontant, sanitizeMontantInput, formaterMontant } from "../../utils/montant";
 import { messageErreurAuth } from "../authErrors";
 import { PALETTE_COULEURS } from "../ColorPicker";
+import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { signalerOnboardingTermine } from "../onboardingCompletion";
 import { useObjectifs } from "../store";
 import { Text } from "../Texte";
@@ -110,17 +111,10 @@ export default function Preferences() {
   // "Autres dépenses") liraient toutes le même instantané et pourraient
   // s'attribuer deux fois la même couleur.
   const choisirCouleurAutomatique = () => {
-    const utilisees = new Set([
+    const choisie = couleurLaPlusDistincte(PALETTE_COULEURS, [
       ...objStore.enveloppes.map((e) => e.couleur),
       ...couleursUtiliseesRef.current,
     ]);
-    const disponible = PALETTE_COULEURS.find((c) => !utilisees.has(c));
-    const choisie =
-      disponible ??
-      PALETTE_COULEURS[
-        (objStore.enveloppes.length + couleursUtiliseesRef.current.length) %
-          PALETTE_COULEURS.length
-      ];
     couleursUtiliseesRef.current.push(choisie);
     return choisie;
   };

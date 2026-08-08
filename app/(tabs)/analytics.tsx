@@ -211,12 +211,21 @@ const PADDING_LEFT = 34;
 // permanence au-dessus du dernier point de chaque courbe (jamais coupée,
 // même quand ce point touche le maximum de l'échelle).
 const PADDING_HAUT = 20;
-// Hauteur totale du <Svg> de GraphiqueLignes (voir son `height` prop) —
-// fixe, jamais recalculée à partir des données. Utilisée pour réserver un
-// espace identique autour du composant (ex: Simulateur) afin qu'aucun
-// contenu voisin (légende, etc.) ne puisse bouger verticalement pendant un
-// re-render déclenché par un changement de valeurs (glissement de curseur).
-const HAUTEUR_GRAPHIQUE_LIGNES = CHART_H + 24 + PADDING_HAUT;
+// Hauteur totale par défaut du <Svg> de GraphiqueLignes (CHART_H 160 + 24 +
+// PADDING_HAUT 20), utilisée par "Dépensé vs dépenses prévues" (page pleine,
+// aucun override). Le Simulateur (ci-dessous) passe une hauteur réduite via
+// la prop `hauteurGraphique` de GraphiqueLignes, en dur, jamais recalculée
+// depuis les données — la structure ne doit jamais bouger pendant le
+// glissement du curseur, quelle que soit l'amplitude des courbes.
+//
+// Variante réduite pour le Simulateur (modale "Ton bilan", hauteur fixe à
+// 80% de l'écran) : sur un petit écran (iPhone SE), la hauteur standard
+// (204) laissait le curseur, la légende et les labels de mois déborder de
+// la zone scrollable visible. 150 (littéral, comme demandé — CHART_H
+// réduit à 106 + mêmes marges) redonne de la marge sans affecter le
+// graphique "Dépensé vs dépenses prévues".
+const HAUTEUR_GRAPHIQUE_SIMULATEUR = 150;
+const CHART_H_SIMULATEUR = HAUTEUR_GRAPHIQUE_SIMULATEUR - 24 - PADDING_HAUT;
 
 // Étale verticalement les libellés de "dernier point" pour éviter qu'ils se
 // chevauchent quand plusieurs courbes ont des valeurs proches à la fin de
@@ -330,12 +339,20 @@ function GraphiqueLignes({
   donneesPrevisionnelles,
   labels,
   couleurs: C,
+  hauteurGraphique,
 }: {
   donneesReelles: number[];
   donneesPrevisionnelles: number[];
   labels: string[];
   couleurs: typeof COULEURS.clair;
+  // Override optionnel de CHART_H, en dur côté appelant (jamais dérivé des
+  // données) — utilisé par le Simulateur pour tenir dans la modale "Ton
+  // bilan" (hauteur fixe à 80% de l'écran) sans affecter la taille du
+  // graphique "Dépensé vs dépenses prévues", qui garde CHART_H par défaut.
+  hauteurGraphique?: number;
 }) {
+  const chartH = hauteurGraphique ?? CHART_H;
+  const hauteurSvg = chartH + 24 + PADDING_HAUT;
   const toutes = [...donneesReelles, ...donneesPrevisionnelles];
   const maxBrut = Math.max(...toutes, 1);
   const ticks = calculerTicksY(maxBrut);
@@ -346,11 +363,11 @@ function GraphiqueLignes({
 
   const pointsReels = donneesReelles.map((v, i) => ({
     x: PADDING_LEFT + i * espacement,
-    y: PADDING_HAUT + CHART_H - (v / max) * (CHART_H - 10) + 5,
+    y: PADDING_HAUT + chartH - (v / max) * (chartH - 10) + 5,
   }));
   const pointsPrevus = donneesPrevisionnelles.map((v, i) => ({
     x: PADDING_LEFT + i * espacement,
-    y: PADDING_HAUT + CHART_H - (v / max) * (CHART_H - 10) + 5,
+    y: PADDING_HAUT + chartH - (v / max) * (chartH - 10) + 5,
   }));
 
   const pathReels = pointsReels
@@ -377,9 +394,9 @@ function GraphiqueLignes({
   }));
 
   return (
-    <Svg width={CHART_W} height={HAUTEUR_GRAPHIQUE_LIGNES}>
+    <Svg width={CHART_W} height={hauteurSvg} style={{ overflow: "hidden" }}>
       {ticks.map((t) => {
-        const y = PADDING_HAUT + CHART_H - (t / max) * (CHART_H - 10) + 5;
+        const y = PADDING_HAUT + chartH - (t / max) * (chartH - 10) + 5;
         return (
           <Fragment key={t}>
             <Line
@@ -442,7 +459,7 @@ function GraphiqueLignes({
         <SvgText
           key={`l${i}`}
           x={PADDING_LEFT + i * espacement}
-          y={PADDING_HAUT + CHART_H + 18}
+          y={PADDING_HAUT + chartH + 18}
           fontSize={10}
           fill={C.texteMuted}
           textAnchor="middle"
@@ -1086,12 +1103,18 @@ export default function Analytics() {
   const deltaTotal = calculerDeltaTotal(depenseMoisActuel, depenseMoisPrec);
   const deltaTotalEuros = depenseMoisActuel - depenseMoisPrec;
 
-  // Regroupé par catégorie (id, identité stable d'un mois à l'autre — même
-  // convention que categoriesComparees plus bas) et sommé sur toute la
-  // période affichée : une catégorie qui dépense sur plusieurs mois ne doit
-  // apparaître qu'une seule fois dans le classement, avec son total, pas une
-  // ligne par mois (ce qui biaisait le classement en laissant une même
-  // catégorie occuper plusieurs rangs du top).
+  // Regroupé par NOM de catégorie, pas par id — contrairement à
+  // categoriesComparees plus bas (qui compare un mois précis à SON mois
+  // précédent immédiat, où l'id est fiable), le Top dépenses cumule sur
+  // plusieurs mois potentiellement non consécutifs : si une catégorie a été
+  // supprimée puis recréée entre-temps (ex: "Loyer" supprimé puis rajouté),
+  // l'ancienne et la nouvelle enveloppe ont des id différents pour le même
+  // nom, et regrouper par id la faisait apparaître deux fois dans le
+  // classement — sur des rangs distincts — au lieu d'une fois avec son vrai
+  // total cumulé. nom/couleur sont ceux du mois le plus RÉCENT rencontré
+  // (moisAffiches va du plus ancien au plus récent, donc la dernière
+  // écriture gagne) : le classement reflète la couleur actuelle de la
+  // catégorie, pas celle d'une ancienne version supprimée.
   const topDepensesParCategorie = new Map<
     string,
     { nom: string; montant: number; couleur: string }
@@ -1105,16 +1128,12 @@ export default function Analytics() {
           )?.enveloppes ?? []);
     enveloppesMois.forEach((e) => {
       if (e.type === "Entrée" || e.depense <= 0) return;
-      const existante = topDepensesParCategorie.get(e.id);
-      if (existante) {
-        existante.montant += e.depense;
-      } else {
-        topDepensesParCategorie.set(e.id, {
-          nom: e.nom,
-          montant: e.depense,
-          couleur: e.couleur,
-        });
-      }
+      const existante = topDepensesParCategorie.get(e.nom);
+      topDepensesParCategorie.set(e.nom, {
+        nom: e.nom,
+        couleur: e.couleur,
+        montant: (existante?.montant ?? 0) + e.depense,
+      });
     });
   });
   const topDepensesTri = [...topDepensesParCategorie.values()]
@@ -2673,6 +2692,14 @@ export default function Analytics() {
                 <View
                   style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
                 >
+                  {/* ScrollView dédié en plus du ScrollView englobant déjà les
+                      3 onglets (scrollStatsRef juste au-dessus) : filet
+                      supplémentaire pour que le contenu du Simulateur reste
+                      toujours atteignable en scrollant, même si sa hauteur
+                      dépasse l'espace visible de la modale "Ton bilan"
+                      (hauteur fixe à 80% de l'écran, petits écrans en
+                      particulier). */}
+                  <ScrollView showsVerticalScrollIndicator={false}>
                   <View style={styles.serieEnTete}>
                     <View
                       style={[styles.serieIconeFond, { backgroundColor: C.purpleLight }]}
@@ -2912,9 +2939,9 @@ export default function Analytics() {
                             </View>
                           </View>
 
-                          {/* Hauteur fixée en dur (HAUTEUR_GRAPHIQUE_LIGNES,
-                              identique à celle du <Svg> interne, jamais
-                              recalculée depuis les données) et overflow
+                          {/* Hauteur fixée en dur (HAUTEUR_GRAPHIQUE_SIMULATEUR
+                              = 150, littéral, identique à celle du <Svg>
+                              interne via hauteurGraphique) et overflow
                               hidden : quelle que soit l'amplitude des
                               courbes au fil du glissement du curseur, ce
                               conteneur n'est jamais redimensionné, donc la
@@ -2922,7 +2949,7 @@ export default function Analytics() {
                               poussée hors de l'écran. */}
                           <View
                             style={{
-                              height: HAUTEUR_GRAPHIQUE_LIGNES,
+                              height: HAUTEUR_GRAPHIQUE_SIMULATEUR,
                               overflow: "hidden",
                             }}
                           >
@@ -2931,6 +2958,7 @@ export default function Analytics() {
                               donneesPrevisionnelles={donneesPrevisionnellesSimulation}
                               labels={labelsSimulation}
                               couleurs={C}
+                              hauteurGraphique={CHART_H_SIMULATEUR}
                             />
                           </View>
                           <View style={styles.simulateurLegende}>
@@ -2971,6 +2999,7 @@ export default function Analytics() {
                       )}
                     </>
                   )}
+                  </ScrollView>
                 </View>
               )}
 

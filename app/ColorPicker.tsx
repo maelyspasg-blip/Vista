@@ -1,4 +1,5 @@
 import { StyleSheet, TouchableOpacity, View } from "react-native";
+import { trierParDistinction } from "../utils/couleurs";
 
 export const PALETTE_COULEURS = [
   "#E63946",
@@ -35,14 +36,23 @@ export function ColorPicker({
   value,
   onChange,
   borderColor,
+  couleursUtilisees,
 }: {
   value: string;
   onChange: (couleur: string) => void;
   borderColor: string;
+  // Couleurs déjà prises par d'autres catégories — quand fourni, la palette
+  // affichée est réordonnée pour proposer en premier les couleurs les plus
+  // distinctes de celles-ci, plutôt que l'ordre fixe de PALETTE_COULEURS.
+  couleursUtilisees?: string[];
 }) {
+  const palette = couleursUtilisees
+    ? trierParDistinction(PALETTE_COULEURS, couleursUtilisees)
+    : PALETTE_COULEURS;
+
   return (
     <View style={styles.grid}>
-      {PALETTE_COULEURS.map((c) => (
+      {palette.map((c) => (
         <TouchableOpacity
           key={c}
           style={[
