@@ -55,38 +55,7 @@
       "expo-image",
       "expo-sharing",
       "expo-web-browser",
-      "expo-status-bar",
-      [
-        "expo-widgets",
-        {
-          "groupIdentifier": "group.com.maelyspasgvista.vista",
-          "widgets": [
-            {
-              "name": "PlanningWidget",
-              "displayName": "Planning du jour",
-              "description": "Les événements de ta journée, en un coup d'œil.",
-              "ios": {
-                "supportedFamilies": [
-                  "systemMedium"
-                ],
-                "initialLayout": "widgets/PlanningWidget.tsx"
-              }
-            },
-            {
-              "name": "AjoutRapideWidget",
-              "displayName": "Ajout rapide",
-              "description": "Ajoute une dépense en un tap, sans ouvrir l'app.",
-              "ios": {
-                "supportedFamilies": [
-                  "systemMedium"
-                ],
-                "initialLayout": "widgets/AjoutRapideWidget.tsx"
-              }
-            }
-          ]
-        }
-      ],
-      "expo-asset"
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true,

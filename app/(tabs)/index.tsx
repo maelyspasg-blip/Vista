@@ -28,7 +28,6 @@ import { NombreAnime } from "../NombreAnime";
 import { CocheAnimee } from "../CocheAnimee";
 import { SegmentHachure } from "../SegmentHachure";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
-import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { Enveloppe, Objectif, useObjectifs } from "../store";
 import { genererConseils } from "../../utils/conseils";
 import { COULEURS, useTheme } from "../ThemeContext";
@@ -615,12 +614,7 @@ export default function Dashboard() {
     if (!nouvelle) return;
     setNouveauNom("");
     setNouveauBudget("");
-    setNouvelleCouleur(
-      couleurLaPlusDistincte(
-        PALETTE_COULEURS,
-        enveloppes.map((e) => e.couleur),
-      ),
-    );
+    setNouvelleCouleur(PALETTE_COULEURS[0]);
     setPaletteOuverteNouvelle(false);
     setNouveauType("Variable");
     setEstRecurrente(false);
@@ -1493,12 +1487,6 @@ export default function Dashboard() {
             ]}
             onPress={() => {
               setNouvelleDate(dateVersISO(new Date()));
-              setNouvelleCouleur(
-                couleurLaPlusDistincte(
-                  PALETTE_COULEURS,
-                  enveloppes.map((e) => e.couleur),
-                ),
-              );
               setModalAjoutVisible(true);
             }}
             activeOpacity={0.7}
@@ -2008,9 +1996,6 @@ export default function Dashboard() {
                       setPaletteOuverteTemp(false);
                     }}
                     borderColor={C.texte}
-                    couleursUtilisees={enveloppes
-                      .filter((e) => e.id !== enveloppeEnEdition?.id)
-                      .map((e) => e.couleur)}
                   />
                 )}
 
@@ -2318,7 +2303,6 @@ export default function Dashboard() {
                       setPaletteOuverteNouvelle(false);
                     }}
                     borderColor={C.texte}
-                    couleursUtilisees={enveloppes.map((e) => e.couleur)}
                   />
                 )}
 

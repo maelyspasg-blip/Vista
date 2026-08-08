@@ -3,8 +3,8 @@ import {
   createMaterialTopTabNavigator,
   MaterialTopTabNavigationEventMap,
   MaterialTopTabNavigationOptions,
-} from "expo-router/js-top-tabs";
-import { ParamListBase, TabNavigationState } from "expo-router/react-navigation";
+} from "@react-navigation/material-top-tabs";
+import { ParamListBase, TabNavigationState } from "@react-navigation/native";
 import { withLayoutContext } from "expo-router";
 import { useEffect } from "react";
 import { AppState, View } from "react-native";
@@ -110,7 +110,6 @@ export default function TabLayout() {
       objStore.verifierEvenementsFinanciers();
       objStore.verifierArchivageMois();
       objStore.verifierMotifsRecurrents();
-      objStore.synchroniserWidgets();
     };
 
     (async () => {
