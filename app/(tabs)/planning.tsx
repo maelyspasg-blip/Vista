@@ -501,6 +501,15 @@ export default function Planning() {
   // possible, mais uniquement sur le sélecteur dédié (tabsRow, geste
   // ci-dessous), une zone étroite qui ne dispute jamais le swipe d'onglet
   // fait sur le reste de l'écran.
+  // RÈGLE À NE JAMAIS CASSER : ce onBegin/onFinalize doit toujours
+  // désactiver puis réactiver swipeOngletsActif (via usePagerSwipe, cf.
+  // PagerSwipeContext.tsx) autour du geste. Sans le onBegin, le pager natif
+  // de material-top-tabs (app/(tabs)/_layout.tsx, swipeEnabled) capte le
+  // même geste horizontal en parallèle de ce Gesture.Pan — les deux
+  // reconnaisseurs se disputent le toucher. Sans le onFinalize (qui se
+  // déclenche aussi bien en cas de succès que d'annulation du geste), le
+  // swipe entre onglets resterait bloqué en permanence après le premier
+  // swipe de vue.
   const gesteSwipeVue = Gesture.Pan()
     .runOnJS(true)
     .activeOffsetX([-40, 40])
@@ -616,7 +625,7 @@ export default function Planning() {
     }, [params.editEventId]),
   );
 
-  const sauvegarderModificationEvenement = () => {
+  const sauvegarderModificationEvenement = async () => {
     if (!nomEvent || evenementEnEditionId === null) return;
     const montant = estFinancierEvent ? parseMontant(montantEvent) || 0 : undefined;
     objStore.modifierEvenement(evenementEnEditionId, {
@@ -634,6 +643,26 @@ export default function Planning() {
       frequence: recurrentEvent ? frequenceEvent : undefined,
       notifierActif: notifierEvent,
     });
+    // Les notifications déjà programmées pour cet événement (sous son
+    // ancien type/date/heure) sont toujours annulées, même si notifierEvent
+    // est maintenant false — sinon une notification obsolète (mauvaise
+    // heure, mauvais texte "toute la journée" vs horaire précis) partirait
+    // quand même. Reprogrammées ensuite seulement si notifierActif est vrai
+    // sur le nouvel état — mêmes conditions que finaliserCreationEvenement
+    // (pas d'événement récurrent, notifications globales activées).
+    await annulerNotificationsEvenement(evenementEnEditionId);
+    if (notifierEvent && !recurrentEvent && objStore.notificationsActives) {
+      const autorise = await demanderPermissionNotifications();
+      if (autorise) {
+        await programmerNotificationsEvenement(
+          evenementEnEditionId,
+          nomEvent,
+          dateEvent,
+          heureEvent,
+          journeeEntiereEvent || multiJoursEvent,
+        );
+      }
+    }
     setModalCreationVisible(false);
   };
 

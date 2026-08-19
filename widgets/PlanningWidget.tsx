@@ -34,6 +34,14 @@ export type PlanningWidgetProps = {
 export const PlanningWidget = createWidget<PlanningWidgetProps>(
   "PlanningWidget",
   (props, environment) => {
+    // RÈGLE À NE JAMAIS CASSER : la directive "widget" doit rester la toute
+    // première instruction du corps de cette fonction — c'est le marqueur
+    // que le plugin babel expo-widgets/widgets-plugin utilise pour repérer
+    // et extraire ce corps de fonction afin de le sérialiser pour
+    // l'extension widget (même rôle que "worklet" pour react-native-
+    // reanimated). Sans elle en première position, le plugin ne reconnaît
+    // pas la fonction comme un widget et la sérialisation échoue ou prend
+    // le mauvais corps.
     "widget";
 
     const navy = "#2D3A4A";

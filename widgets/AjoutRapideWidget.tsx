@@ -20,6 +20,10 @@ export type AjoutRapideWidgetProps = {
 export const AjoutRapideWidget = createWidget<AjoutRapideWidgetProps>(
   "AjoutRapideWidget",
   (props, environment) => {
+    // RÈGLE À NE JAMAIS CASSER : voir la même règle dans
+    // widgets/PlanningWidget.tsx — "widget" doit rester la toute première
+    // instruction du corps de cette fonction (marqueur pour le plugin babel
+    // expo-widgets/widgets-plugin).
     "widget";
 
     const navy = "#2D3A4A";

@@ -81,6 +81,15 @@ export function budgetDuMoisArchive(snapshot: SnapshotMois): number {
  * répète pas, donc fiable comme "mois auquel elle appartient"), Variable via
  * moisComptage (fixé à la création, pas de date naturelle sinon).
  */
+// RÈGLE À NE JAMAIS CASSER : toute liste qui affiche "les catégories du mois
+// courant" (Aperçu "Tes catégories", Budget) doit filtrer avec CETTE
+// fonction, pas avec un simple `.filter(e => e.type !== "Entrée")` — ce
+// dernier laisserait passer des catégories Variable/Fixe ponctuelles dont le
+// mois est déjà passé ou pas encore arrivé. À l'inverse, ne PAS l'appliquer
+// aux agrégations qui portent volontairement sur toute une période
+// (analytics.tsx séries/comparaisons, score.ts, conseils.ts, series.ts) :
+// ces calculs ont besoin de voir les catégories de tous les mois concernés,
+// pas seulement celles actives "aujourd'hui".
 export function estCategorieActiveCeMois(
   env: Enveloppe,
   annee: number,

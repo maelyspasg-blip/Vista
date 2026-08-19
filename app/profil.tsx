@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import * as XLSX from "xlsx";
 import { captureRef } from "react-native-view-shot";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../supabaseClient";
 import { Text } from "./Texte";
 import { TextInput } from "./TexteInput";
@@ -120,6 +121,7 @@ function styleCarte(
 
 export default function Profil() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { theme, couleurs: C, toggleTheme } = useTheme();
   const { reinitialiser: reinitialiserTutoriel } = useTutoriel();
   const {
@@ -1144,100 +1146,97 @@ export default function Profil() {
           onPress={() => setModalRapportVisible(false)}
         >
           <TouchableOpacity
-            style={[styles.modalCardCalculs, { backgroundColor: C.carte }]}
+            style={[styles.modalCard, { backgroundColor: C.carte }]}
             activeOpacity={1}
             onPress={() => {}}
           >
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-              <Text style={[styles.modalTitre, { color: C.texte }]}>
-                Exporter un résumé visuel
-              </Text>
-              <Text style={[styles.exportSousTitre, { color: C.texteMuted }]}>
-                Une image unique et lisible d&apos;un coup d&apos;œil, à
-                partager facilement — pas un fichier à analyser.
-              </Text>
+            <Text style={[styles.modalTitre, { color: C.texte }]}>
+              Exporter un résumé visuel
+            </Text>
+            <Text style={[styles.exportSousTitre, { color: C.texteMuted }]}>
+              Une image unique et lisible d&apos;un coup d&apos;œil, à
+              partager facilement — pas un fichier à analyser.
+            </Text>
 
+            <Text
+              style={[styles.champLabel, { color: C.texteMuted, marginTop: 8 }]}
+            >
+              Du
+            </Text>
+            <Picker
+              selectedValue={moisDebutRapport}
+              onValueChange={(valeur) => setMoisDebutRapport(String(valeur))}
+              itemStyle={{ color: C.texte }}
+            >
+              {optionsMoisExport.map((o) => (
+                <Picker.Item key={o.valeur} label={o.label} value={o.valeur} />
+              ))}
+            </Picker>
+
+            <Text
+              style={[styles.champLabel, { color: C.texteMuted, marginTop: 8 }]}
+            >
+              Au
+            </Text>
+            <Picker
+              selectedValue={moisFinRapport}
+              onValueChange={(valeur) => setMoisFinRapport(String(valeur))}
+              itemStyle={{ color: C.texte }}
+            >
+              {optionsMoisExport.map((o) => (
+                <Picker.Item key={o.valeur} label={o.label} value={o.valeur} />
+              ))}
+            </Picker>
+
+            {periodeRapport && resumeRapport ? (
+              <View style={styles.apercuRapport}>
+                <RapportVisuelCarte
+                  ref={rapportCarteRef}
+                  periodeLabel={libellePeriode(periodeRapport)}
+                  resume={resumeRapport}
+                  score={scoreRapport}
+                />
+              </View>
+            ) : (
               <Text
-                style={[styles.champLabel, { color: C.texteMuted, marginTop: 8 }]}
-              >
-                Du
-              </Text>
-              <Picker
-                selectedValue={moisDebutRapport}
-                onValueChange={(valeur) => setMoisDebutRapport(String(valeur))}
-                itemStyle={{ color: C.texte }}
-              >
-                {optionsMoisExport.map((o) => (
-                  <Picker.Item key={o.valeur} label={o.label} value={o.valeur} />
-                ))}
-              </Picker>
-
-              <Text
-                style={[styles.champLabel, { color: C.texteMuted, marginTop: 8 }]}
-              >
-                Au
-              </Text>
-              <Picker
-                selectedValue={moisFinRapport}
-                onValueChange={(valeur) => setMoisFinRapport(String(valeur))}
-                itemStyle={{ color: C.texte }}
-              >
-                {optionsMoisExport.map((o) => (
-                  <Picker.Item key={o.valeur} label={o.label} value={o.valeur} />
-                ))}
-              </Picker>
-
-              {periodeRapport && resumeRapport ? (
-                <View style={styles.apercuRapport}>
-                  <RapportVisuelCarte
-                    ref={rapportCarteRef}
-                    periodeLabel={libellePeriode(periodeRapport)}
-                    resume={resumeRapport}
-                    score={scoreRapport}
-                  />
-                </View>
-              ) : (
-                <Text
-                  style={[
-                    styles.champLabel,
-                    { color: C.texteMuted, marginTop: 18, fontWeight: "400" },
-                  ]}
-                >
-                  Le mois de début doit être avant (ou égal à) le mois de fin.
-                </Text>
-              )}
-
-              <BoutonPrincipal
                 style={[
-                  styles.btnPrincipal,
-                  {
-                    backgroundColor: C.purple,
-                    opacity: partageRapportEnCours || !periodeRapport ? 0.6 : 1,
-                    marginTop: 18,
-                  },
+                  styles.champLabel,
+                  { color: C.texteMuted, marginTop: 18, fontWeight: "400" },
                 ]}
-                onPress={partagerResumeVisuel}
-                disabled={partageRapportEnCours || !periodeRapport}
               >
-                {partageRapportEnCours ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.btnPrincipalTexte}>Partager</Text>
-                )}
-              </BoutonPrincipal>
+                Le mois de début doit être avant (ou égal à) le mois de fin.
+              </Text>
+            )}
 
-              <TouchableOpacity
-                style={styles.btnAnnuler}
-                onPress={() => setModalRapportVisible(false)}
-                activeOpacity={0.7}
-                disabled={partageRapportEnCours}
-              >
-                <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
-                  Annuler
-                </Text>
-              </TouchableOpacity>
-              <View style={{ height: 20 }} />
-            </ScrollView>
+            <BoutonPrincipal
+              style={[
+                styles.btnPrincipal,
+                {
+                  backgroundColor: C.purple,
+                  opacity: partageRapportEnCours || !periodeRapport ? 0.6 : 1,
+                  marginTop: 18,
+                },
+              ]}
+              onPress={partagerResumeVisuel}
+              disabled={partageRapportEnCours || !periodeRapport}
+            >
+              {partageRapportEnCours ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.btnPrincipalTexte}>Partager</Text>
+              )}
+            </BoutonPrincipal>
+
+            <TouchableOpacity
+              style={styles.btnAnnuler}
+              onPress={() => setModalRapportVisible(false)}
+              activeOpacity={0.7}
+              disabled={partageRapportEnCours}
+            >
+              <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                Annuler
+              </Text>
+            </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -1254,7 +1253,10 @@ export default function Profil() {
           onPress={() => setModalCalculsVisible(false)}
         >
           <TouchableOpacity
-            style={[styles.modalCardCalculs, { backgroundColor: C.carte }]}
+            style={[
+              styles.modalCardCalculs,
+              { backgroundColor: C.carte, paddingBottom: insets.bottom + 20 },
+            ]}
             activeOpacity={1}
             onPress={() => {}}
           >

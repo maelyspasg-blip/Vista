@@ -26,20 +26,35 @@ function LigneCategorie({
   couleurTexte: string;
   couleurTexteMuted: string;
 }) {
+  // Protection immédiate contre un champ manquant/mal typé sur UN objet par
+  // ailleurs présent (distinct du filtre sur les éléments null/undefined du
+  // tableau lui-même, appliqué au site d'appel) — Math.round(undefined) et
+  // `${undefined}%` ne plantent pas React Native en eux-mêmes, mais autant
+  // ne jamais laisser une valeur non numérique atteindre un style ("NaN%"
+  // n'est pas un pourcentage valide).
+  const nom = categorie?.nom ?? "—";
+  const couleur = categorie?.couleur ?? "#A0A8C0";
+  const montant = typeof categorie?.montant === "number" ? categorie.montant : 0;
+  const pourcentage =
+    typeof categorie?.pourcentage === "number" ? categorie.pourcentage : 0;
+  const transactions = Array.isArray(categorie?.transactionsPrincipales)
+    ? categorie.transactionsPrincipales.filter((t) => t != null)
+    : [];
+
   return (
     <View style={styles.ligneCategorie}>
       <View style={styles.ligneCategorieEnTete}>
         <View style={styles.ligneCategorieNomBloc}>
-          <View style={[styles.pastille, { backgroundColor: categorie.couleur }]} />
+          <View style={[styles.pastille, { backgroundColor: couleur }]} />
           <Text
             style={[styles.nomCategorie, { color: couleurTexte }]}
             numberOfLines={1}
           >
-            {categorie.nom}
+            {nom}
           </Text>
         </View>
         <Text style={[styles.valeurCategorie, { color: couleurTexte }]}>
-          {Math.round(categorie.montant)} € · {Math.round(categorie.pourcentage)}%
+          {Math.round(montant)} € · {Math.round(pourcentage)}%
         </Text>
       </View>
       <View style={[styles.barreFond, { backgroundColor: couleurTexteMuted + "22" }]}>
@@ -47,26 +62,25 @@ function LigneCategorie({
           style={[
             styles.barreRemplie,
             {
-              width: `${Math.min(100, categorie.pourcentage)}%`,
-              backgroundColor: categorie.couleur,
+              width: `${Math.min(100, Math.max(0, pourcentage))}%`,
+              backgroundColor: couleur,
             },
           ]}
         />
       </View>
-      {categorie.transactionsPrincipales &&
-        categorie.transactionsPrincipales.length > 0 && (
-          <View style={styles.sousTransactions}>
-            {categorie.transactionsPrincipales.map((t, i) => (
-              <Text
-                key={i}
-                style={[styles.sousTransactionTexte, { color: couleurTexteMuted }]}
-                numberOfLines={1}
-              >
-                {t.nom} · {Math.round(t.montant)} €
-              </Text>
-            ))}
-          </View>
-        )}
+      {transactions.length > 0 && (
+        <View style={styles.sousTransactions}>
+          {transactions.map((t, i) => (
+            <Text
+              key={i}
+              style={[styles.sousTransactionTexte, { color: couleurTexteMuted }]}
+              numberOfLines={1}
+            >
+              {t.nom ?? "—"} · {Math.round(typeof t.montant === "number" ? t.montant : 0)} €
+            </Text>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -111,14 +125,21 @@ export const RapportVisuelCarte = forwardRef<View, {
           <Text style={[styles.sectionTitre, { color: C.texteMuted }]}>
             RÉPARTITION DES DÉPENSES
           </Text>
-          {resume.categories.map((c) => (
-            <LigneCategorie
-              key={c.nom}
-              categorie={c}
-              couleurTexte={C.texte}
-              couleurTexteMuted={C.texteMuted}
-            />
-          ))}
+          {/* Protection immédiate : filtre les éléments null/undefined avant
+              de les rendre. Voir la réponse détaillée sur pourquoi
+              calculerResumeVisuel ne devrait normalement jamais en produire
+              — gardé quand même, au cas où une source de données amont
+              (ex: une ligne malformée) en introduirait un jour. */}
+          {resume.categories
+            .filter((c) => c != null)
+            .map((c, i) => (
+              <LigneCategorie
+                key={`${c.nom ?? "categorie"}-${i}`}
+                categorie={c}
+                couleurTexte={C.texte}
+                couleurTexteMuted={C.texteMuted}
+              />
+            ))}
         </View>
       )}
 
