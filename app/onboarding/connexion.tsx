@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Image,
     KeyboardAvoidingView,
     Platform,
@@ -11,7 +12,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../supabaseClient";
+import {
+  CONDITIONS_GENERALES_UTILISATION,
+  POLITIQUE_CONFIDENTIALITE,
+} from "../../utils/documentsLegaux";
 import { messageErreurAuth } from "../authErrors";
+import { ModaleDocumentLegal } from "../ModaleDocumentLegal";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
@@ -25,6 +31,23 @@ export default function Connexion() {
   const [motDePasse, setMotDePasse] = useState("");
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState("");
+  const [documentLegalOuvert, setDocumentLegalOuvert] = useState<
+    "confidentialite" | "cgu" | null
+  >(null);
+
+  const ouvrirMentionsLegales = () => {
+    Alert.alert("Mentions légales", "Quel document veux-tu consulter ?", [
+      {
+        text: "Politique de confidentialité",
+        onPress: () => setDocumentLegalOuvert("confidentialite"),
+      },
+      {
+        text: "Conditions générales d'utilisation",
+        onPress: () => setDocumentLegalOuvert("cgu"),
+      },
+      { text: "Annuler", style: "cancel" },
+    ]);
+  };
 
   const formulaireValide = !!email.trim() && motDePasse.length > 0;
 
@@ -139,6 +162,27 @@ export default function Connexion() {
       >
         <Text style={styles.essaiTexte}>Essayer sans compte</Text>
       </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.mentionsLegalesLien}
+        onPress={ouvrirMentionsLegales}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.mentionsLegalesTexte}>Mentions légales</Text>
+      </TouchableOpacity>
+
+      <ModaleDocumentLegal
+        visible={documentLegalOuvert === "confidentialite"}
+        onClose={() => setDocumentLegalOuvert(null)}
+        titre="Politique de confidentialité"
+        texte={POLITIQUE_CONFIDENTIALITE}
+      />
+      <ModaleDocumentLegal
+        visible={documentLegalOuvert === "cgu"}
+        onClose={() => setDocumentLegalOuvert(null)}
+        titre="Conditions générales d'utilisation"
+        texte={CONDITIONS_GENERALES_UTILISATION}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -224,6 +268,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#888",
+    textDecorationLine: "underline",
+  },
+  mentionsLegalesLien: {
+    alignItems: "center",
+    marginTop: 14,
+  },
+  mentionsLegalesTexte: {
+    fontSize: 12,
+    color: "#AAAAAA",
     textDecorationLine: "underline",
   },
 });

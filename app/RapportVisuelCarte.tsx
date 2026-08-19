@@ -53,6 +53,20 @@ function LigneCategorie({
           ]}
         />
       </View>
+      {categorie.transactionsPrincipales &&
+        categorie.transactionsPrincipales.length > 0 && (
+          <View style={styles.sousTransactions}>
+            {categorie.transactionsPrincipales.map((t, i) => (
+              <Text
+                key={i}
+                style={[styles.sousTransactionTexte, { color: couleurTexteMuted }]}
+                numberOfLines={1}
+              >
+                {t.nom} · {Math.round(t.montant)} €
+              </Text>
+            ))}
+          </View>
+        )}
     </View>
   );
 }
@@ -67,8 +81,8 @@ export const RapportVisuelCarte = forwardRef<View, {
   return (
     <View ref={ref} style={[styles.carte, { backgroundColor: C.carte }]} collapsable={false}>
       <View style={styles.enTete}>
-        <Text style={[styles.marque, { color: C.purple }]}>Vista</Text>
-        <Text style={[styles.periode, { color: C.texteMuted }]}>{periodeLabel}</Text>
+        <Text style={[styles.marque, { color: C.purple }]}>VISTA</Text>
+        <Text style={[styles.periode, { color: C.texte }]}>{periodeLabel}</Text>
       </View>
 
       <View style={styles.tuiles}>
@@ -137,14 +151,17 @@ const styles = StyleSheet.create({
     padding: 24,
     width: 340,
   },
-  enTete: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "baseline",
-    marginBottom: 20,
+  // Colonne plutôt que ligne côte à côte : la période est l'info la plus
+  // importante en haut de la carte, elle a besoin de sa propre ligne pour
+  // rester bien visible plutôt que de partager l'espace avec la marque.
+  enTete: { marginBottom: 20 },
+  marque: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1,
+    marginBottom: 4,
   },
-  marque: { fontSize: 18, fontWeight: "800" },
-  periode: { fontSize: 13, fontWeight: "600" },
+  periode: { fontSize: 20, fontWeight: "800" },
   tuiles: { flexDirection: "row", gap: 10, marginBottom: 24 },
   tuile: {
     flex: 1,
@@ -185,6 +202,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   barreRemplie: { height: 8, borderRadius: 4 },
+  sousTransactions: { marginTop: 6, marginLeft: 17, gap: 2 },
+  sousTransactionTexte: { fontSize: 11, fontWeight: "500" },
   scoreBloc: {
     borderRadius: 14,
     padding: 14,

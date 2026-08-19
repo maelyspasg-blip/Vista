@@ -5,15 +5,18 @@ import { getInitiales } from "../../utils/initiales";
 import { moisPrecedent, totalParType } from "../../utils/exportExcel";
 import { entreesBudgetDuMois, estCategorieActiveCeMois } from "../../utils/budget";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
+  Dimensions,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   ScrollView,
   StyleSheet,
@@ -21,8 +24,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Calendar } from "react-native-calendars";
 import Svg, { Circle } from "react-native-svg";
+import { calculerScrollAutoTutoriel } from "../../utils/tutorielScroll";
 import { BarreProgression, useLargeurAnimee } from "../BarreProgression";
 import { NombreAnime } from "../NombreAnime";
 import { CocheAnimee } from "../CocheAnimee";
@@ -36,27 +41,9 @@ import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { useAccessibilite } from "../AccessibiliteContext";
-import { CibleTutoriel, RectCible } from "../CibleTutoriel";
+import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
-
-const ETAPES_APERCU: EtapeTutoriel[] = [
-  {
-    id: "reste-estime",
-    texte:
-      "C'est ton indicateur principal. Il te dit combien il te restera à la fin du mois si tu continues comme ça.",
-  },
-  {
-    id: "budget",
-    texte:
-      "C'est ton salaire mensuel. Appuie dessus pour le modifier ou ajouter une entrée d'argent.",
-  },
-  {
-    id: "fab",
-    texte:
-      "Appuie ici pour ajouter une dépense ou une entrée d'argent rapidement, depuis n'importe où.",
-  },
-];
 
 function bgClair(couleur: string) {
   return couleur + "22";
@@ -177,11 +164,65 @@ export default function Dashboard() {
   const [fabMenuOuvert, setFabMenuOuvert] = useState(false);
   const { apercu: tutorielApercuVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
-  const [posCiblesTutoriel, setPosCiblesTutoriel] = useState<
-    Record<string, RectCible>
-  >({});
-  const mesurerCibleTutoriel = (id: string, rect: RectCible) =>
-    setPosCiblesTutoriel((p) => ({ ...p, [id]: rect }));
+  const {
+    positions: posCiblesTutoriel,
+    mesurer: mesurerCibleTutoriel,
+    cleFocus: cleFocusTutoriel,
+    forcerRemesure: forcerRemesureTutoriel,
+  } = useCiblesTutoriel();
+  const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  // Offset de scroll courant, tenu à jour via onScroll — utilisé (pas
+  // Dimensions/measureLayout) pour calculer de combien scroller afin
+  // d'amener une cible du tutoriel hors champ dans la zone visible, voir
+  // faireDefilerVersCibleTutoriel plus bas.
+  const scrollOffsetYRef = useRef(0);
+  const gererScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollOffsetYRef.current = e.nativeEvent.contentOffset.y;
+  };
+  // Étape du tutoriel dont la cible peut être hors champ (carte "Budget",
+  // plus bas dans le ScrollView) — scrolle si besoin avant que la bulle ne
+  // s'affiche (déclenché via onAfficher, voir ETAPES_APERCU plus bas), puis
+  // redemande une mesure réelle une fois le scroll terminé pour que le trou
+  // découpé et la bulle se basent sur la position à jour.
+  const faireDefilerVersCibleTutoriel = (id: string) => {
+    const rect = posCiblesTutoriel[id];
+    if (!rect) return;
+    const { height: hauteurEcran } = Dimensions.get("window");
+    const nouveauY = calculerScrollAutoTutoriel(
+      rect,
+      scrollOffsetYRef.current,
+      hauteurEcran,
+      insets.top + 70,
+      insets.bottom + 100,
+    );
+    if (nouveauY === null) return;
+    // animated: false — le tutoriel doit "sauter" instantanément à la
+    // cible, pas glisser (un scroll animé sur une distance parfois longue
+    // donnait l'impression que l'app rame). Le délai de re-mesure suit :
+    // plus besoin d'attendre la fin d'une animation de scroll, juste le
+    // temps qu'un scroll instantané commite réellement côté natif.
+    scrollRef.current?.scrollTo({ y: nouveauY, animated: false });
+    setTimeout(forcerRemesureTutoriel, 50);
+  };
+  const ETAPES_APERCU: EtapeTutoriel[] = [
+    {
+      id: "reste-estime",
+      texte:
+        "C'est ton indicateur principal. Il te dit combien il te restera à la fin du mois si tu continues comme ça.",
+    },
+    {
+      id: "budget",
+      texte:
+        "C'est ton salaire mensuel. Appuie dessus pour le modifier ou ajouter une entrée d'argent.",
+      onAfficher: () => faireDefilerVersCibleTutoriel("budget"),
+    },
+    {
+      id: "fab",
+      texte:
+        "Appuie ici pour ajouter une dépense ou une entrée d'argent rapidement.",
+    },
+  ];
 
   const enveloppes = objStore.enveloppes;
   const setEnveloppes = (nouvellesEnveloppes: Enveloppe[]) =>
@@ -190,7 +231,7 @@ export default function Dashboard() {
   const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(false);
   const [triCategories, setTriCategories] = useState<
     "alpha" | "montantAsc" | "montantDesc"
-  >("alpha");
+  >("montantDesc");
   const cyclerTriCategories = () =>
     setTriCategories((t) =>
       t === "alpha" ? "montantAsc" : t === "montantAsc" ? "montantDesc" : "alpha",
@@ -926,9 +967,12 @@ export default function Dashboard() {
   return (
     <View style={{ flex: 1, backgroundColor: C.fondPage }}>
       <ScrollView
+        ref={scrollRef}
         style={[styles.container, { backgroundColor: C.fondPage }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        onScroll={gererScroll}
+        scrollEventThrottle={16}
       >
         <View style={[styles.header, { backgroundColor: C.fondPage }]}>
           <View>
@@ -984,7 +1028,11 @@ export default function Dashboard() {
           </View>
         </View>
 
-        <CibleTutoriel id="reste-estime" onMesure={mesurerCibleTutoriel}>
+        <CibleTutoriel
+          id="reste-estime"
+          onMesure={mesurerCibleTutoriel}
+          cleFocus={cleFocusTutoriel}
+        >
         <View
           style={[
             styles.hero,
@@ -1273,6 +1321,7 @@ export default function Dashboard() {
           <CibleTutoriel
             id="budget"
             onMesure={mesurerCibleTutoriel}
+            cleFocus={cleFocusTutoriel}
             style={{ flex: 1 }}
           >
           <View
@@ -1638,7 +1687,11 @@ export default function Dashboard() {
             </TouchableOpacity>
           </View>
         )}
-        <CibleTutoriel id="fab" onMesure={mesurerCibleTutoriel}>
+        <CibleTutoriel
+          id="fab"
+          onMesure={mesurerCibleTutoriel}
+          cleFocus={cleFocusTutoriel}
+        >
         <TouchableOpacity
           style={[styles.fab, { backgroundColor: C.purple }]}
           activeOpacity={0.8}
@@ -1652,10 +1705,7 @@ export default function Dashboard() {
       </View>
 
       <TutorielOverlay
-        visible={
-          !tutorielApercuVu &&
-          ETAPES_APERCU.every((e) => !e.id || posCiblesTutoriel[e.id])
-        }
+        actif={!tutorielApercuVu}
         etapes={ETAPES_APERCU}
         positions={posCiblesTutoriel}
         onTerminer={() => {
@@ -1812,7 +1862,7 @@ export default function Dashboard() {
                             selectionne && styles.typeChipTexteActif,
                           ]}
                         >
-                          {d.toLocaleDateString("fr-FR", { month: "short" })}
+                          {d.toLocaleDateString("fr-FR", { month: "long" })}
                         </Text>
                       </TouchableOpacity>
                     );

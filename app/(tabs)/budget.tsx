@@ -10,16 +10,21 @@ import {
   Alert,
   Animated,
   AppState,
+  Dimensions,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { calculerScrollAutoTutoriel } from "../../utils/tutorielScroll";
 import { useTheme } from "../ThemeContext";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
@@ -46,7 +51,7 @@ import { TextInput } from "../TexteInput";
 import { VueMoisArchive } from "../VueMoisArchive";
 import { BarreProgression, useLargeurAnimee } from "../BarreProgression";
 import { BoutonPrincipal } from "../BoutonPrincipal";
-import { CibleTutoriel, RectCible } from "../CibleTutoriel";
+import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
 import {
   CouleursTheme,
   EtapeTutoriel,
@@ -56,7 +61,10 @@ import { useTutoriel } from "../TutorielContext";
 
 const ACCESSORY_ID = "numericDone";
 
-function maquetteAjouterDepense(C: CouleursTheme) {
+// Maquette illustrative de l'étape "categorie" du tutoriel Budget — mini
+// carte de catégorie factice (jamais une vraie capture d'écran), couleurs
+// Vista, format compact pour tenir dans la bulle.
+function maquetteCategorieCourses(C: CouleursTheme) {
   return (
     <View
       style={{
@@ -69,14 +77,25 @@ function maquetteAjouterDepense(C: CouleursTheme) {
       <View
         style={{
           flexDirection: "row",
-          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 6,
           marginBottom: 6,
         }}
       >
-        <Text style={{ fontSize: 12, fontWeight: "700", color: C.texte }}>
+        <View
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: C.purple,
+          }}
+        />
+        <Text
+          style={{ fontSize: 12, fontWeight: "700", color: C.texte, flex: 1 }}
+        >
           Courses
         </Text>
-        <Text style={{ fontSize: 11, color: C.texteMuted }}>77 € / 200 €</Text>
+        <Text style={{ fontSize: 11, color: C.texteMuted }}>265 € / 400 €</Text>
       </View>
       <View
         style={{
@@ -87,83 +106,19 @@ function maquetteAjouterDepense(C: CouleursTheme) {
           marginBottom: 8,
         }}
       >
-        <View style={{ width: "38%", height: "100%", backgroundColor: C.vert }} />
+        <View style={{ width: "66%", height: "100%", backgroundColor: C.vert }} />
       </View>
-      <Text style={{ fontSize: 11, color: C.texteMuted }}>Carrefour · 45 €</Text>
+      <Text style={{ fontSize: 11, color: C.texteMuted }}>Carrefour — 45 €</Text>
       <Text style={{ fontSize: 11, color: C.texteMuted, marginTop: 2 }}>
-        Auchan · 32 €
+        Auchan — 32 €
+      </Text>
+      <Text style={{ fontSize: 11, color: C.texteMuted, marginTop: 2 }}>
+        Marché — 18 €
       </Text>
     </View>
   );
 }
 
-function maquetteRaccourcis(C: CouleursTheme) {
-  const puces = [
-    { label: "Café · 3 €", ajouter: false },
-    { label: "Métro · 2 €", ajouter: false },
-    { label: "+ Raccourci", ajouter: true },
-  ];
-  return (
-    <View
-      style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 }}
-    >
-      {puces.map((p) => (
-        <View
-          key={p.label}
-          style={[
-            {
-              paddingHorizontal: 10,
-              paddingVertical: 6,
-              borderRadius: 14,
-              backgroundColor: p.ajouter ? "transparent" : C.purpleLight,
-            },
-            p.ajouter && {
-              borderWidth: 1,
-              borderStyle: "dashed",
-              borderColor: C.carteBorder,
-            },
-          ]}
-        >
-          <Text
-            style={{
-              fontSize: 11,
-              fontWeight: "600",
-              color: p.ajouter ? C.texteMuted : C.purpleText,
-            }}
-          >
-            {p.label}
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-const ETAPES_BUDGET: EtapeTutoriel[] = [
-  {
-    id: "categorie",
-    texte:
-      "Chaque catégorie a son propre budget. Appuie dessus pour voir le détail des dépenses.",
-  },
-  {
-    texte:
-      "Au fil du mois, rentre chaque dépense dans sa catégorie pour faire progresser ta jauge. Ex: tu as prévu 200€ pour les courses — ajoute Carrefour 45€, Auchan 32€...",
-    maquette: maquetteAjouterDepense,
-  },
-  {
-    id: "ajouter",
-    texte: "Appuie ici pour ajouter une nouvelle dépense dans une catégorie.",
-  },
-  {
-    texte:
-      "Crée des raccourcis pour tes dépenses fréquentes — un tap suffit pour pré-remplir le formulaire.",
-    maquette: maquetteRaccourcis,
-  },
-  {
-    id: "mois",
-    texte: "Change de mois ici pour consulter ton historique ou anticiper le suivant.",
-  },
-];
 
 type LigneDepense = {
   id: string;
@@ -196,7 +151,7 @@ function premierJourMoisISO(date: Date): string {
 function formaterDateCourte(dateISO: string): string {
   const d = new Date(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
-  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
 }
 
 function formaterDateLongue(dateISO: string): string {
@@ -217,11 +172,13 @@ export default function Budget() {
 
   const { budget: tutorielBudgetVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
-  const [posCiblesTutoriel, setPosCiblesTutoriel] = useState<
-    Record<string, RectCible>
-  >({});
-  const mesurerCibleTutoriel = (id: string, rect: RectCible) =>
-    setPosCiblesTutoriel((p) => ({ ...p, [id]: rect }));
+  const {
+    positions: posCiblesTutoriel,
+    mesurer: mesurerCibleTutoriel,
+    cleFocus: cleFocusTutoriel,
+    forcerRemesure: forcerRemesureTutoriel,
+  } = useCiblesTutoriel();
+  const insets = useSafeAreaInsets();
   const [enveloppeOuverte, setEnveloppeOuverte] = useState<string | null>(null);
   const [modalAjoutVisible, setModalAjoutVisible] = useState(false);
   const [nomTx, setNomTx] = useState("");
@@ -257,7 +214,7 @@ export default function Budget() {
     useState(false);
   const [triCategories, setTriCategories] = useState<
     "alpha" | "montantAsc" | "montantDesc"
-  >("alpha");
+  >("montantDesc");
   const cyclerTriCategories = () =>
     setTriCategories((t) =>
       t === "alpha" ? "montantAsc" : t === "montantAsc" ? "montantDesc" : "alpha",
@@ -291,6 +248,56 @@ export default function Budget() {
     categorie?: string;
   } | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  // Offset de scroll courant, tenu à jour via onScroll — utilisé (pas
+  // Dimensions/measureLayout) pour calculer de combien scroller afin
+  // d'amener une cible du tutoriel hors champ dans la zone visible, voir
+  // faireDefilerVersCibleTutoriel plus bas.
+  const scrollOffsetYRef = useRef(0);
+  const gererScrollTutoriel = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollOffsetYRef.current = e.nativeEvent.contentOffset.y;
+  };
+  // Étape du tutoriel dont la cible peut être hors champ (bouton "+
+  // Ajouter", plus bas dans le ScrollView) — scrolle si besoin avant que la
+  // bulle ne s'affiche (déclenché via onAfficher, voir ETAPES_BUDGET plus
+  // bas), puis redemande une mesure réelle une fois le scroll terminé.
+  const faireDefilerVersCibleTutoriel = (id: string) => {
+    const rect = posCiblesTutoriel[id];
+    if (!rect) return;
+    const { height: hauteurEcran } = Dimensions.get("window");
+    const nouveauY = calculerScrollAutoTutoriel(
+      rect,
+      scrollOffsetYRef.current,
+      hauteurEcran,
+      insets.top + 70,
+      insets.bottom + 100,
+    );
+    if (nouveauY === null) return;
+    // animated: false — le tutoriel doit "sauter" instantanément à la
+    // cible, pas glisser (un scroll animé sur une distance parfois longue
+    // donnait l'impression que l'app rame). Le délai de re-mesure suit :
+    // plus besoin d'attendre la fin d'une animation de scroll, juste le
+    // temps qu'un scroll instantané commite réellement côté natif.
+    scrollRef.current?.scrollTo({ y: nouveauY, animated: false });
+    setTimeout(forcerRemesureTutoriel, 50);
+  };
+  const ETAPES_BUDGET: EtapeTutoriel[] = [
+    {
+      id: "categorie",
+      texte:
+        "Appuie sur une catégorie pour voir le détail de tes dépenses et ajouter chaque passage en caisse.",
+      maquette: maquetteCategorieCourses,
+    },
+    {
+      id: "ajouter",
+      texte:
+        "Ajoute chaque dépense dans la bonne catégorie pour garder un suivi précis.",
+      onAfficher: () => faireDefilerVersCibleTutoriel("ajouter"),
+    },
+    {
+      id: "mois",
+      texte: "Consulte les mois passés pour voir l'historique de tes dépenses.",
+    },
+  ];
   const positionAutresDepenses = useRef(0);
   // Garde contre les faux déclenchements : material-top-tabs garde tous les
   // onglets montés, donc cet effet peut se redéclencher sur un focus non
@@ -430,12 +437,14 @@ export default function Budget() {
   // entreesBudgetDuMois, pour rester cohérent avec le total Budget affiché
   // juste au-dessus de cette section.
   const moisActuelISO = `${ANNEE_ACTUELLE}-${String(MOIS_ACTUEL + 1).padStart(2, "0")}-01`;
-  const entreesRecues = objStore.enveloppes.filter(
-    (e) =>
-      e.type === "Entrée" &&
-      e.payee &&
-      moisComptageEffectif(e) === moisActuelISO,
-  );
+  const entreesRecues = objStore.enveloppes
+    .filter(
+      (e) =>
+        e.type === "Entrée" &&
+        e.payee &&
+        moisComptageEffectif(e) === moisActuelISO,
+    )
+    .sort((a, b) => b.budget - a.budget);
 
   const entreesAVenir = objStore.enveloppes.filter((e) => {
     if (e.type !== "Entrée" || e.payee || !e.dateFixe) return false;
@@ -866,6 +875,7 @@ export default function Budget() {
         key={env.id}
         id={idCibleTutoriel}
         onMesure={mesurerCibleTutoriel}
+        cleFocus={cleFocusTutoriel}
       >
       <Animated.View
         style={[
@@ -1243,7 +1253,11 @@ export default function Budget() {
       <View style={[styles.header, { backgroundColor: C.fondPage }]}>
         <View>
           <Text style={[styles.titre, { color: C.texte }]}>Budget</Text>
-          <CibleTutoriel id="mois" onMesure={mesurerCibleTutoriel}>
+          <CibleTutoriel
+            id="mois"
+            onMesure={mesurerCibleTutoriel}
+            cleFocus={cleFocusTutoriel}
+          >
           <View style={styles.selecteurMoisRow}>
             <TouchableOpacity
               onPress={() => allerAuMois(indexMois - 1)}
@@ -1293,7 +1307,12 @@ export default function Budget() {
           <VueMoisArchive mois={moisAffiche.mois} annee={moisAffiche.annee} />
         </ScrollView>
       ) : (
-      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        onScroll={gererScrollTutoriel}
+        scrollEventThrottle={16}
+      >
         <View
           style={[
             styles.heroCard,
@@ -1593,7 +1612,11 @@ export default function Budget() {
               </Text>
             </TouchableOpacity>
           </View>
-          <CibleTutoriel id="ajouter" onMesure={mesurerCibleTutoriel}>
+          <CibleTutoriel
+            id="ajouter"
+            onMesure={mesurerCibleTutoriel}
+            cleFocus={cleFocusTutoriel}
+          >
           <TouchableOpacity
             style={[styles.btnAjouter, { backgroundColor: C.accentLight }]}
             onPress={() => ouvrirAjout()}
@@ -2268,10 +2291,7 @@ export default function Budget() {
       </Modal>
 
       <TutorielOverlay
-        visible={
-          !tutorielBudgetVu &&
-          ETAPES_BUDGET.every((e) => !e.id || posCiblesTutoriel[e.id])
-        }
+        actif={!tutorielBudgetVu}
         etapes={ETAPES_BUDGET}
         positions={posCiblesTutoriel}
         onTerminer={() => {

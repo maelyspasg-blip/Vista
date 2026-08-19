@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import Slider from "@react-native-community/slider";
-import { useRouter } from "expo-router";
-import { Fragment, ReactNode, useEffect, useRef, useState } from "react";
+import { useIsFocused, useRouter } from "expo-router";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -34,9 +34,12 @@ import {
   calculerTauxEpargne,
 } from "../../utils/conseils";
 import { genererInsightsPeriode } from "../../utils/tendancesPeriode";
-// Alias : ce fichier a déjà son propre MOIS_LABELS (abrégé, pour les axes de
-// graphiques) — celui d'exportExcel donne les noms complets, utilisés
-// uniquement pour le titre "Variation d'un mois à l'autre".
+// Alias conservé tel quel malgré le nom : ce fichier utilisait auparavant
+// une version abrégée localement pour les axes de graphiques (Jan/Fév/...),
+// remplacée par les noms complets partout — y compris les axes — sur
+// demande explicite. Le nom _COMPLETS reste pour éviter de renommer tous
+// les usages existants (LABEL_MOIS_ACTUEL, "Variation d'un mois à
+// l'autre", etc.), pas parce qu'il coexiste encore avec une version courte.
 import { MOIS_LABELS as MOIS_LABELS_COMPLETS } from "../../utils/exportExcel";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { BoutonPrincipal } from "../BoutonPrincipal";
@@ -46,134 +49,11 @@ import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { useLargeurAnimee } from "../BarreProgression";
-import { CibleTutoriel, RectCible } from "../CibleTutoriel";
-import {
-  CouleursTheme,
-  EtapeTutoriel,
-  TutorielOverlay,
-} from "../TutorielOverlay";
+import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
+import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
+import { TiroirStats } from "../TiroirStats";
 
-function maquettePeriode(C: CouleursTheme) {
-  const options = ["3 mois", "6 mois", "1 an"];
-  return (
-    <View style={{ flexDirection: "row", gap: 6, marginBottom: 12 }}>
-      {options.map((label, i) => (
-        <View
-          key={label}
-          style={{
-            paddingHorizontal: 10,
-            paddingVertical: 6,
-            borderRadius: 10,
-            backgroundColor: i === 0 ? C.purple : C.fondSecondaire,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 10,
-              fontWeight: "600",
-              color: i === 0 ? "#FFFFFF" : C.texteMuted,
-            }}
-          >
-            {label}
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function maquetteSectionsStats(C: CouleursTheme) {
-  const carte = (contenu: ReactNode, label: string) => (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: C.fondSecondaire,
-        borderRadius: 10,
-        paddingVertical: 8,
-        alignItems: "center",
-      }}
-    >
-      {contenu}
-      <Text style={{ fontSize: 9, color: C.texteMuted, marginTop: 4 }}>
-        {label}
-      </Text>
-    </View>
-  );
-  return (
-    <View style={{ flexDirection: "row", gap: 6, marginBottom: 12 }}>
-      {carte(
-        <Svg width={40} height={20}>
-          <Path
-            d="M2 16 L12 8 L22 12 L38 4"
-            stroke={C.purple}
-            strokeWidth={2}
-            fill="none"
-          />
-        </Svg>,
-        "Évolution",
-      )}
-      {carte(
-        <View
-          style={{
-            flexDirection: "row",
-            gap: 3,
-            height: 20,
-            alignItems: "flex-end",
-          }}
-        >
-          <View style={{ width: 5, height: 10, backgroundColor: C.accent, borderRadius: 2 }} />
-          <View style={{ width: 5, height: 18, backgroundColor: C.peach, borderRadius: 2 }} />
-          <View style={{ width: 5, height: 6, backgroundColor: C.bleuGris, borderRadius: 2 }} />
-        </View>,
-        "Répartition",
-      )}
-      {carte(
-        <Text style={{ fontSize: 14, fontWeight: "800", color: C.purple }}>
-          82<Text style={{ fontSize: 9, fontWeight: "600" }}>/100</Text>
-        </Text>,
-        "Ton bilan",
-      )}
-    </View>
-  );
-}
-
-const ETAPES_STATS: EtapeTutoriel[] = [
-  {
-    texte:
-      "Explore tes finances en détail : évolution dans le temps, répartition par catégorie, et dans Ton bilan — ton score de santé financière et le simulateur.",
-    maquette: maquetteSectionsStats,
-  },
-  {
-    id: "periode",
-    texte:
-      "Choisis la période à analyser — de 3 mois jusqu'à tout ton historique disponible.",
-    maquette: maquettePeriode,
-  },
-  {
-    id: "graphique",
-    texte: "Ce graphique montre l'évolution de ton budget, ton épargne et tes dépenses dans le temps.",
-  },
-  {
-    id: "bilan",
-    texte: "Retrouve ici ton score financier et tes séries de suivi.",
-  },
-];
-
-const MOIS_LABELS = [
-  "Jan",
-  "Fév",
-  "Mar",
-  "Avr",
-  "Mai",
-  "Jun",
-  "Jul",
-  "Aoû",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Déc",
-];
 const MOIS_ACTUEL = new Date().getMonth();
 const ANNEE_ACTUELLE = new Date().getFullYear();
 // Suffixe de titre pour les sections calculées sur le mois en cours (ex:
@@ -731,6 +611,186 @@ function GraphiqueEvolutionMulti({
   );
 }
 
+type SegmentBarreEmpilee = {
+  cle: string;
+  label: string;
+  couleur: string;
+  donnees: number[];
+};
+
+// Couleur de texte lisible sur un fond `hex` (#RRGGBB) donné — formule YIQ
+// standard (poids perceptuels par canal), pas de dépendance au thème
+// clair/sombre de l'app : c'est la couleur de la CATÉGORIE qui détermine le
+// contraste, jamais le thème.
+function couleurTexteSurFond(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 128 ? "#2D3A4A" : "#FFFFFF";
+}
+
+// Hauteur minimale d'un segment pour y afficher son label en son centre —
+// en dessous, le texte déborderait du segment ou serait illisible.
+const HAUTEUR_MIN_LABEL_SEGMENT = 30;
+
+// Barres empilées par mois, un segment par catégorie. En mode "pct", la
+// barre reste toujours à pleine hauteur (100% stacked bar chart) : chaque
+// segment est dimensionné en proportion du total du mois. Retirer une
+// catégorie du filtre redistribue donc automatiquement les segments
+// restants sans code dédié — pure conséquence de diviser par le total des
+// séries REÇUES (déjà filtrées par l'appelant), jamais par un total fixe.
+// En mode "euro", la hauteur de la barre est proportionnelle au montant
+// total du mois, comme les autres graphiques de la page.
+function GraphiqueBarresEmpilees({
+  series,
+  labels,
+  couleurs: C,
+  mode,
+  onTapLegende,
+}: {
+  series: SegmentBarreEmpilee[];
+  labels: string[];
+  couleurs: typeof COULEURS.clair;
+  mode: "pct" | "euro";
+  // Tap sur une entrée de légende (pastille + nom) — optionnel, l'appelant
+  // garde le contrôle de ce qui se passe (ex: ouvrir un détail par mois).
+  onTapLegende?: (cle: string) => void;
+}) {
+  const n = labels.length;
+  const largeurUtile = CHART_W - PADDING_LEFT - PADDING_X;
+  const espacement = n > 0 ? largeurUtile / n : largeurUtile;
+  const largeurBarre = Math.min(28, espacement * 0.55);
+  const hauteurUtile = CHART_H - 10;
+
+  const totauxParMois = labels.map((_, i) =>
+    series.reduce((acc, s) => acc + s.donnees[i], 0),
+  );
+  const maxTotal = Math.max(...totauxParMois, 1);
+  const ticks =
+    mode === "pct" ? [0, 25, 50, 75, 100] : calculerTicksY(maxTotal);
+  const maxAxe = mode === "pct" ? 100 : ticks[ticks.length - 1];
+
+  return (
+    <View>
+      <Svg width={CHART_W} height={CHART_H + 24 + PADDING_HAUT}>
+        {ticks.map((t) => {
+          const y = PADDING_HAUT + CHART_H - (t / maxAxe) * hauteurUtile + 5;
+          return (
+            <Fragment key={t}>
+              <Line
+                x1={PADDING_LEFT}
+                y1={y}
+                x2={CHART_W - PADDING_X}
+                y2={y}
+                stroke={C.separateur}
+                strokeWidth={1}
+              />
+              <SvgText
+                x={PADDING_LEFT - 6}
+                y={y + 3}
+                fontSize={9}
+                fill={C.texteMuted}
+                textAnchor="end"
+              >
+                {mode === "pct" ? `${t}%` : `${t}€`}
+              </SvgText>
+            </Fragment>
+          );
+        })}
+        {labels.map((_, i) => {
+          const total = totauxParMois[i];
+          if (total <= 0) return null;
+          const xBarre =
+            PADDING_LEFT + espacement * i + (espacement - largeurBarre) / 2;
+          let yCumul = PADDING_HAUT + CHART_H + 5;
+          return (
+            <Fragment key={i}>
+              {series.map((s) => {
+                const valeur = s.donnees[i];
+                if (valeur <= 0) return null;
+                const hauteurSegment =
+                  mode === "pct"
+                    ? (valeur / total) * hauteurUtile
+                    : (valeur / maxAxe) * hauteurUtile;
+                yCumul -= hauteurSegment;
+                const texteSegment =
+                  mode === "pct"
+                    ? `${Math.round((valeur / total) * 100)}%`
+                    : `${Math.round(valeur)}€`;
+                return (
+                  <Fragment key={s.cle}>
+                    <Rect
+                      x={xBarre}
+                      y={yCumul}
+                      width={largeurBarre}
+                      height={hauteurSegment}
+                      fill={s.couleur}
+                      rx={2}
+                    />
+                    {hauteurSegment >= HAUTEUR_MIN_LABEL_SEGMENT && (
+                      <SvgText
+                        x={xBarre + largeurBarre / 2}
+                        y={yCumul + hauteurSegment / 2 + 3}
+                        fontSize={9}
+                        fontWeight="700"
+                        fill={couleurTexteSurFond(s.couleur)}
+                        textAnchor="middle"
+                      >
+                        {texteSegment}
+                      </SvgText>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </Fragment>
+          );
+        })}
+        {labels.map((lbl, i) => (
+          <SvgText
+            key={`l${i}`}
+            x={PADDING_LEFT + espacement * i + espacement / 2}
+            y={PADDING_HAUT + CHART_H + 18}
+            fontSize={10}
+            fill={C.texteMuted}
+            textAnchor="middle"
+          >
+            {lbl}
+          </SvgText>
+        ))}
+      </Svg>
+      <View style={styles.legendeRow}>
+        {series.map((s) => {
+          const contenu = (
+            <>
+              <View
+                style={[styles.legendeDot, { backgroundColor: s.couleur }]}
+              />
+              <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
+                {s.label}
+              </Text>
+            </>
+          );
+          return onTapLegende ? (
+            <TouchableOpacity
+              key={s.cle}
+              style={styles.legendeItem}
+              activeOpacity={0.6}
+              onPress={() => onTapLegende(s.cle)}
+            >
+              {contenu}
+            </TouchableOpacity>
+          ) : (
+            <View key={s.cle} style={styles.legendeItem}>
+              {contenu}
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 function JaugeRepartition({
   segments,
   couleurs: C,
@@ -773,17 +833,97 @@ function JaugeRepartition({
 
 export default function Analytics() {
   const router = useRouter();
+  const estFocusDebug = useIsFocused();
   const objStore = useObjectifs();
   const { theme, couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const { isGuest } = useGuest();
   const { stats: tutorielStatsVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
-  const [posCiblesTutoriel, setPosCiblesTutoriel] = useState<
-    Record<string, RectCible>
-  >({});
-  const mesurerCibleTutoriel = (id: string, rect: RectCible) =>
-    setPosCiblesTutoriel((p) => ({ ...p, [id]: rect }));
+  const {
+    positions: posCiblesTutoriel,
+    mesurer: mesurerCibleTutoriel,
+    cleFocus: cleFocusTutoriel,
+  } = useCiblesTutoriel();
+  const scrollRef = useRef<ScrollView>(null);
+  // Tiroirs ouverts de force par le tutoriel (voir la prop forcerOuvert de
+  // TiroirStats) — une fois ouvert, un tiroir le reste même après que
+  // l'étape correspondante n'est plus active.
+  const [tiroirsForcesOuverts, setTiroirsForcesOuverts] = useState<
+    Set<string>
+  >(new Set());
+  // RÈGLE À NE JAMAIS CASSER : tiroirsOuvertsPourTutorielRef est OBLIGATOIRE
+  // ici, pas juste une optimisation. ETAPES_STATS est un tableau recréé à
+  // CHAQUE rendu d'Analytics (comme ETAPES_BUDGET dans budget.tsx) ; le
+  // useEffect de TutorielOverlay dépend de `etapes`, donc il se
+  // redéclenche à chaque rendu tant que l'étape "periode" est active, et
+  // rappelle onAfficher à chaque fois. Sans ce ref, setTiroirsForcesOuverts
+  // recevait un new Set(...) à CHAQUE appel (même avec un contenu
+  // identique) — une nouvelle référence suffit à déclencher un re-render,
+  // qui recrée ETAPES_STATS, qui redéclenche l'effet, qui rappelle
+  // onAfficher : boucle infinie ("Maximum update depth exceeded"),
+  // observée en pratique. Avec le ref, setTiroirsForcesOuverts n'est
+  // appelé qu'une seule fois — la boucle ne peut plus s'amorcer.
+  const tiroirsOuvertsPourTutorielRef = useRef(false);
+  const ouvrirTousLesTiroirsTutoriel = () => {
+    if (tiroirsOuvertsPourTutorielRef.current) return;
+    tiroirsOuvertsPourTutorielRef.current = true;
+    // Noms sans préfixe "tiroir-" : ce sont les clés lues par
+    // tiroirsForcesOuverts.has(...) dans les 5 props forcerOuvert plus bas
+    // (ex: forcerOuvert={tiroirsForcesOuverts.has("vue-ensemble")}) — à ne
+    // pas confondre avec les ids "tiroir-vue-ensemble" etc. des étapes
+    // ETAPES_STATS, qui identifient les CibleTutoriel, pas ces clés.
+    setTiroirsForcesOuverts(
+      new Set([
+        "vue-ensemble",
+        "evolution",
+        "repartition",
+        "par-categorie",
+        "ce-mois",
+      ]),
+    );
+  };
+  // Offset de scroll (contentOffset.y) correspondant à la DERNIÈRE position
+  // vers laquelle allerVersCibleTutoriel a scrollé — transmis à
+  // TutorielOverlay (prop scrollOffset) pour qu'il recale le trou/la bulle
+  // sur la position réellement affichée à l'écran, puisque rect.y
+  // (measureInWindow) n'est mesuré qu'une fois, avant tout scroll, jamais
+  // remis à jour ensuite (voir la règle sur allerVersCibleTutoriel
+  // ci-dessous). État plutôt que ref : sans re-render au moment du scroll,
+  // TutorielOverlay recevrait la valeur de scrollOffset d'un rendu
+  // antérieur (les refs ne déclenchent pas de re-render), donc dessinerait
+  // le trou avec un décalage périmé.
+  const [scrollOffsetStats, setScrollOffsetStats] = useState(0);
+  // RÈGLE À NE JAMAIS CASSER : scroll instantané vers la cible de l'étape
+  // courante, appelé depuis onAfficher — SANS re-mesure après coup (c'est
+  // cette combinaison scroll → re-mesure → nouveau scroll qui causait la
+  // boucle infinie précédente). rect.y (measureInWindow, donc relatif à
+  // l'écran) reste fiable comme position ABSOLUE de contenu ici : tous les
+  // tiroirs sont ouverts d'un coup au tout début
+  // (ouvrirTousLesTiroirsTutoriel), et chaque CibleTutoriel se remesure
+  // alors naturellement via son propre onLayout — déclenché par le
+  // changement de mise en page réel (LayoutAnimation), pas par un
+  // cleFocus qu'on redéclencherait nous-mêmes — donc rect.y de CHAQUE
+  // cible reflète déjà la mise en page finale (tiroirs ouverts) au moment
+  // où ce scroll s'exécute, avant tout scroll ultérieur. Comme aucun
+  // scroll ne redéclenche jamais de re-mesure, ces valeurs restent
+  // valables du début à la fin du tutoriel pour calculer VERS OÙ scroller
+  // — mais rect.y ne représente alors PLUS la position réellement affichée
+  // à l'écran une fois qu'on a scrollé (measureInWindow avait mesuré la
+  // position AVANT ce scroll) : c'est tout le rôle de scrollOffsetStats,
+  // transmis à TutorielOverlay, de corriger cet écart pour le trou/la
+  // bulle.
+  const allerVersCibleTutoriel = (id: string) => {
+    const rect = posCiblesTutoriel[id];
+    if (!rect || !scrollRef.current) return;
+    const y = Math.max(0, rect.y - 150);
+    // RÈGLE À NE JAMAIS CASSER : animated: false, jamais true. Un scroll
+    // animé donnait l'impression que l'app rame (glissement visible sur
+    // une distance parfois longue) ; le tutoriel doit "sauter" directement
+    // à la cible.
+    scrollRef.current.scrollTo({ y, animated: false });
+    setScrollOffsetStats(y);
+  };
   const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
   const [deltaDepMoyPourcentage, setDeltaDepMoyPourcentage] = useState(true);
   // Comparaison mensuelle par catégorie : un seul état pour toute la
@@ -797,6 +937,15 @@ export default function Analytics() {
   // graphique "Dépensé vs dépenses prévues".
   const [depenseVsPrevuEnPourcentage, setDepenseVsPrevuEnPourcentage] =
     useState(false);
+  // Toggle €/% du tiroir "Par catégorie" — un état par graphique (Dépenses
+  // / Entrées d'argent), indépendants l'un de l'autre. "pct" par défaut, cf.
+  // demande explicite (barres 100% empilées par défaut).
+  const [modeDepensesCategorie, setModeDepensesCategorie] = useState<
+    "pct" | "euro"
+  >("pct");
+  const [modeEntreesCategorie, setModeEntreesCategorie] = useState<
+    "pct" | "euro"
+  >("pct");
   const [categoriesInchangeesOuvert, setCategoriesInchangeesOuvert] =
     useState(false);
   const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
@@ -805,6 +954,22 @@ export default function Analytics() {
   const [categoriesSelectionnees, setCategoriesSelectionnees] = useState<
     string[]
   >([]);
+  // Panel de détail par catégorie ouvert au tap sur une légende de
+  // "Dépensé vs dépenses prévues" quand un filtre catégorie est actif —
+  // null = fermé, "reel" = détail du Dépensé, "prevu" = détail des
+  // Dépenses prévues.
+  const [detailFiltreType, setDetailFiltreType] = useState<
+    "reel" | "prevu" | null
+  >(null);
+  // Panel de détail par mois ouvert au tap sur une légende des graphiques
+  // en barres empilées du tiroir "Entrées d'argent et dépenses par
+  // catégorie" — null = fermé. `lignes` ne contient déjà que les mois où
+  // le montant est non nul (filtré à la construction, pas ici).
+  const [detailCategorieParMois, setDetailCategorieParMois] = useState<{
+    label: string;
+    couleur: string;
+    lignes: { moisLabel: string; montant: number }[];
+  } | null>(null);
   const [modalSeriesVisible, setModalSeriesVisible] = useState(false);
   const [vueModalStats, setVueModalStats] = useState<
     "score" | "series" | "simulateur"
@@ -877,7 +1042,7 @@ export default function Analytics() {
     pointsRecentsEpargne.length;
   const labelsSimulation = Array.from(
     { length: NB_MOIS_PROJECTION },
-    (_, i) => MOIS_LABELS[(MOIS_ACTUEL + i + 1) % 12],
+    (_, i) => MOIS_LABELS_COMPLETS[(MOIS_ACTUEL + i + 1) % 12],
   );
   const donneesReellesSimulation = Array.from(
     { length: NB_MOIS_PROJECTION },
@@ -1041,6 +1206,18 @@ export default function Analytics() {
   const filtreEstEntreesUniquement =
     categoriesSelectionneesObj.length > 0 &&
     categoriesSelectionneesObj.every((e) => e.type === "Entrée");
+  // Symétrique de filtreEstEntreesUniquement, pour "Évolution de tes
+  // dépenses" (voir seriesDepenses plus bas) — vrai uniquement quand TOUTES
+  // les catégories sélectionnées sont des dépenses (Fixe ou Variable),
+  // jamais un mélange dépenses+entrées ni une sélection vide. Ces deux
+  // booléens sont mutuellement exclusifs par construction (une catégorie
+  // est soit "Entrée", soit "Fixe"/"Variable", jamais les deux), mais
+  // aucun des deux n'est vrai pour une sélection vide ou mixte — dans ces
+  // cas-là, "Dépensé vs dépenses prévues" (le graphique par défaut) reste
+  // affiché, voir plus bas.
+  const filtreEstDepensesUniquement =
+    categoriesSelectionneesObj.length > 0 &&
+    categoriesSelectionneesObj.every((e) => e.type !== "Entrée");
 
   // Nom affiché par l'indicateur entonnoir posé à côté des sections
   // réellement recalculées à partir de enveloppesFiltrees ci-dessus (pas
@@ -1103,6 +1280,43 @@ export default function Analytics() {
     (acc, v) => acc + v,
     0,
   );
+
+  // Détail par catégorie pour le panel ouvert au tap sur une légende de
+  // "Dépensé vs dépenses prévues" (voir detailFiltreType) — mêmes
+  // catégories et même période que donneesReelles/donneesPrevisionnelles
+  // ci-dessus, dont les totaux affichés dans ce panel doivent rester la
+  // somme exacte des lignes affichées. .filter(type !== "Entrée") reproduit
+  // volontairement le même filtre que getDepenseMois/getBudgetMois (qui
+  // excluent toujours les entrées d'argent de ces totaux, même si une
+  // entrée fait partie de la sélection) — sinon une sélection mixte
+  // dépenses+entrées ferait apparaître ici une catégorie qui ne contribue
+  // en réalité pas au total affiché.
+  const detailParCategorieReel = categoriesSelectionneesObj
+    .filter((e) => e.type !== "Entrée")
+    .map((env) => ({
+      id: env.id,
+      nom: env.nom,
+      couleur: env.couleur,
+      montant: moisAffiches.reduce(
+        (acc, { mois, annee }) =>
+          acc + (getDepenseMois(mois, annee, [env.id]) ?? 0),
+        0,
+      ),
+    }))
+    .sort((a, b) => b.montant - a.montant);
+  const detailParCategoriePrevu = categoriesSelectionneesObj
+    .filter((e) => e.type !== "Entrée")
+    .map((env) => ({
+      id: env.id,
+      nom: env.nom,
+      couleur: env.couleur,
+      montant: moisAffiches.reduce(
+        (acc, { mois, annee }) =>
+          acc + (getBudgetMois(mois, annee, [env.id]) ?? 0),
+        0,
+      ),
+    }))
+    .sort((a, b) => b.montant - a.montant);
   const deltaPeriodeEuros = totalReelPeriode - totalPrevuPeriode;
   const deltaPeriodePct =
     totalPrevuPeriode > 0
@@ -1110,7 +1324,33 @@ export default function Analytics() {
       : totalReelPeriode > 0
         ? 100
         : 0;
-  const labels = moisAffiches.map(({ mois }) => MOIS_LABELS[mois]);
+  const labels = moisAffiches.map(({ mois }) => MOIS_LABELS_COMPLETS[mois]);
+  // Mois + année, pour le panel de détail par catégorie du tiroir "Entrées
+  // d'argent et dépenses par catégorie" (labels seuls seraient ambigus dès
+  // que la période couvre un changement d'année).
+  const labelsAvecAnnee = moisAffiches.map(
+    ({ mois, annee }) => `${MOIS_LABELS_COMPLETS[mois]} ${annee}`,
+  );
+
+  // Ouvre le panel de détail par mois pour la catégorie `cle` au sein de
+  // `series` (l'un des deux tableaux du tiroir "Entrées d'argent et
+  // dépenses par catégorie") — ne garde que les mois à montant non nul,
+  // l'idée du panel étant justement de repérer les mois où la catégorie
+  // était active.
+  const ouvrirDetailCategorieParMois = (
+    series: SegmentBarreEmpilee[],
+    cle: string,
+  ) => {
+    const s = series.find((x) => x.cle === cle);
+    if (!s) return;
+    setDetailCategorieParMois({
+      label: s.label,
+      couleur: s.couleur,
+      lignes: labelsAvecAnnee
+        .map((moisLabel, i) => ({ moisLabel, montant: s.donnees[i] }))
+        .filter((l) => l.montant > 0),
+    });
+  };
 
   // Une courbe par entrée d'argent sélectionnée dans le filtre, dans sa
   // propre couleur — alimente "Évolution de tes entrées d'argent",
@@ -1125,6 +1365,54 @@ export default function Analytics() {
       ),
     }),
   );
+  // Symétrique de seriesEntrees ci-dessus — même helper type-agnostic
+  // (getMontantEnveloppeMois), seule la source de la sélection change
+  // (des catégories de dépenses au lieu d'entrées d'argent). Alimente
+  // "Évolution de tes dépenses", affiché uniquement quand
+  // filtreEstDepensesUniquement est vrai.
+  const seriesDepenses: SerieEvolution[] = categoriesSelectionneesObj.map(
+    (env) => ({
+      cle: env.id,
+      label: env.nom,
+      couleur: env.couleur,
+      donnees: moisAffiches.map(({ mois, annee }) =>
+        getMontantEnveloppeMois(mois, annee, env.id),
+      ),
+    }),
+  );
+
+  // Catégories du tiroir "Par catégorie" : toutes les catégories du type
+  // concerné sans filtre actif, ou uniquement celles sélectionnées (déjà
+  // intersectées par type) quand un filtre l'est — c'est ce même filtrage
+  // qui fait disparaître/redistribuer les segments des graphiques en
+  // barres empilées, sans logique supplémentaire côté composant.
+  const categoriesDepensesParCategorie =
+    categoriesSelectionnees.length > 0
+      ? categoriesSelectionneesObj.filter((e) => e.type !== "Entrée")
+      : objStore.enveloppes.filter((e) => e.type !== "Entrée");
+  const categoriesEntreesParCategorie =
+    categoriesSelectionnees.length > 0
+      ? categoriesSelectionneesObj.filter((e) => e.type === "Entrée")
+      : objStore.enveloppes.filter((e) => e.type === "Entrée");
+
+  const seriesDepensesParCategorie: SegmentBarreEmpilee[] =
+    categoriesDepensesParCategorie.map((env) => ({
+      cle: env.id,
+      label: env.nom,
+      couleur: env.couleur,
+      donnees: moisAffiches.map(({ mois, annee }) =>
+        getMontantEnveloppeMois(mois, annee, env.id),
+      ),
+    }));
+  const seriesEntreesParCategorie: SegmentBarreEmpilee[] =
+    categoriesEntreesParCategorie.map((env) => ({
+      cle: env.id,
+      label: env.nom,
+      couleur: env.couleur,
+      donnees: moisAffiches.map(({ mois, annee }) =>
+        getMontantEnveloppeMois(mois, annee, env.id),
+      ),
+    }));
 
   const moisAvecDonnees = moisAffiches.filter(({ mois, annee }) => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) return true;
@@ -1273,7 +1561,8 @@ export default function Analytics() {
       label: e.nom,
       couleur: e.couleur,
       montant: e.depense,
-    }));
+    }))
+    .sort((a, b) => b.montant - a.montant);
 
   const repartitionEntrees = objStore.enveloppes
     // "Budget" est le nom réservé de l'entrée créée par la migration de
@@ -1294,7 +1583,95 @@ export default function Analytics() {
       label: e.nom,
       couleur: e.couleur,
       montant: e.depense,
-    }));
+    }))
+    .sort((a, b) => b.montant - a.montant);
+
+  // RÈGLE À NE JAMAIS CASSER : même condition que le rendu du tiroir
+  // "Répartition" plus bas — extraite ici pour être réutilisable par
+  // ETAPES_STATS (filtrage de l'étape "tiroir-repartition" quand ce tiroir
+  // ne s'affiche pas du tout, ex: un compte flambant neuf sans aucune
+  // dépense/entrée). Sans ce filtrage, toutesCiblesActivesMesurees dans
+  // TutorielOverlay resterait bloqué en attendant une cible qui ne sera
+  // jamais montée, et AUCUNE étape du tutoriel Stats — pas seulement
+  // celle-ci — ne pourrait jamais s'afficher.
+  const repartitionTiroirVisible =
+    !filtreEstEntreesUniquement &&
+    (repartitionDepenses.length > 0 ||
+      repartitionEntrees.length > 0 ||
+      topDepensesTri.length > 0);
+
+  // Défini ici (état de la page, pas au niveau module comme les autres
+  // pages) car la première étape doit ouvrir tous les tiroirs d'un coup via
+  // ouvrirTousLesTiroirsTutoriel plus haut, avant que la bulle ne s'affiche
+  // (cf. onAfficher dans TutorielOverlay.tsx) — et parce que le filtrage de
+  // "tiroir-repartition" et "tiroir-ce-mois" (juste en dessous) dépend de
+  // repartitionTiroirVisible/objectifsAvecDelta, calculés seulement à ce
+  // point du composant.
+  // Même structure que ETAPES_BUDGET dans budget.tsx : un tableau simple
+  // passé tel quel à <TutorielOverlay etapes={...}>, sans expression
+  // supplémentaire au site d'appel JSX.
+  const ETAPES_STATS: EtapeTutoriel[] = [
+    {
+      id: "periode",
+      texte:
+        "Choisis la période à analyser — de 3 mois jusqu'à tout ton historique disponible.",
+      onAfficher: () => {
+        ouvrirTousLesTiroirsTutoriel();
+        allerVersCibleTutoriel("periode");
+      },
+    },
+    {
+      id: "filtre",
+      texte: "Filtre par catégorie pour analyser une dépense précise.",
+      onAfficher: () => allerVersCibleTutoriel("filtre"),
+    },
+    {
+      id: "tiroir-vue-ensemble",
+      texte:
+        "Tes indicateurs clés du mois : dépense moyenne, taux d'épargne et variation vs mois précédent.",
+      onAfficher: () => allerVersCibleTutoriel("tiroir-vue-ensemble"),
+    },
+    {
+      id: "tiroir-evolution",
+      texte: "Suis l'évolution de ton budget et tes dépenses mois après mois.",
+      onAfficher: () => allerVersCibleTutoriel("tiroir-evolution"),
+    },
+    {
+      id: "tiroir-repartition",
+      texte: "Visualise la répartition de tes dépenses par catégorie.",
+      onAfficher: () => allerVersCibleTutoriel("tiroir-repartition"),
+    },
+    {
+      id: "tiroir-par-categorie",
+      texte: "Compare chaque catégorie dans le temps.",
+      onAfficher: () => allerVersCibleTutoriel("tiroir-par-categorie"),
+    },
+    {
+      id: "tiroir-ce-mois",
+      texte: "Suis la progression de tes objectifs d'épargne.",
+      onAfficher: () => allerVersCibleTutoriel("tiroir-ce-mois"),
+    },
+    {
+      id: "bilan",
+      texte: "Accède à ton score, tes séries et le simulateur.",
+      onAfficher: () => allerVersCibleTutoriel("bilan"),
+    },
+  ]
+    // RÈGLE À NE JAMAIS CASSER (les deux .filter() ci-dessous) : chaque
+    // nouvelle étape ETAPES_STATS ciblant un tiroir dont le montage dépend
+    // de données (pas juste de son état ouvert/fermé) doit avoir un filtre
+    // symétrique à celui-ci — sinon un compte sans les données correspon-
+    // dantes bloque tout le tutoriel Stats, pas seulement cette étape.
+    .filter((e) => e.id !== "tiroir-repartition" || repartitionTiroirVisible)
+    // Même raisonnement que pour "tiroir-repartition" : le tiroir "Ce
+    // mois-ci" (header ET contenu) n'est monté du tout que si
+    // objectifsAvecDelta.length > 0 (voir le JSX plus bas, gated par
+    // {objectifsAvecDelta.length > 0 && (<CibleTutoriel id="tiroir-ce-mois"
+    // ...)}) — un compte sans aucun objectif d'épargne ne rend jamais ce
+    // header, donc sa cible n'est jamais mesurée. Sans ce filtre,
+    // toutesCiblesActivesMesurees reste bloqué indéfiniment sur cette
+    // seule étape et aucune étape du tutoriel Stats ne s'affiche jamais.
+    .filter((e) => e.id !== "tiroir-ce-mois" || objectifsAvecDelta.length > 0);
 
   const toggleCategorie = (id: string) => {
     setCategoriesSelectionnees((prev) =>
@@ -1334,17 +1711,28 @@ export default function Analytics() {
     );
   };
 
+  console.log("[TUTORIEL Stats]", {
+    tutorielStatsVu,
+    estFocus: estFocusDebug,
+    nbCibles: Object.keys(posCiblesTutoriel).length,
+    ciblesPresentes: Object.keys(posCiblesTutoriel),
+  });
+
   return (
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <View style={[styles.header, styles.headerRow]}>
           <View>
             <Text style={[styles.titre, { color: C.texte }]}>Statistiques</Text>
             <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
-              {MOIS_LABELS[MOIS_ACTUEL]} {ANNEE_ACTUELLE}
+              {MOIS_LABELS_COMPLETS[MOIS_ACTUEL]} {ANNEE_ACTUELLE}
             </Text>
           </View>
-          <CibleTutoriel id="bilan" onMesure={mesurerCibleTutoriel}>
+          <CibleTutoriel
+            id="bilan"
+            onMesure={mesurerCibleTutoriel}
+            cleFocus={cleFocusTutoriel}
+          >
           <TouchableOpacity
             style={[
               styles.btnMenu,
@@ -1365,6 +1753,11 @@ export default function Analytics() {
           </CibleTutoriel>
         </View>
 
+        <CibleTutoriel
+          id="filtre"
+          onMesure={mesurerCibleTutoriel}
+          cleFocus={cleFocusTutoriel}
+        >
         <View style={styles.chipRow}>
           {(["global", "categorie"] as Vue[]).map((v) => (
             <TouchableOpacity
@@ -1398,6 +1791,7 @@ export default function Analytics() {
             </TouchableOpacity>
           ))}
         </View>
+        </CibleTutoriel>
 
         {vue === "categorie" && (
           <TouchableOpacity
@@ -1463,7 +1857,23 @@ export default function Analytics() {
           </View>
         )}
 
-        <CibleTutoriel id="periode" onMesure={mesurerCibleTutoriel}>
+        {/* Seul le tiroir "Évolution dans le temps" recalcule réellement
+            son contenu à partir de categoriesSelectionnees (via
+            enveloppesFiltrees, cf. donneesReelles/donneesPrevisionnelles
+            plus bas) — Répartition/Top dépenses ne filtrent pas par
+            catégorie aujourd'hui, donc ne sont volontairement pas listés
+            ici : l'annoncer serait trompeur tant que ce n'est pas vrai. */}
+        {nomFiltreActif && (
+          <Text style={[styles.filtreImpactTexte, { color: C.texteMuted }]}>
+            Filtre appliqué sur : Évolution dans le temps
+          </Text>
+        )}
+
+        <CibleTutoriel
+          id="periode"
+          onMesure={mesurerCibleTutoriel}
+          cleFocus={cleFocusTutoriel}
+        >
         <TouchableOpacity
           style={[
             styles.periodeBouton,
@@ -1563,603 +1973,926 @@ export default function Analytics() {
           </View>
         )}
 
-        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-          Vue d&apos;ensemble — {LABEL_MOIS_ACTUEL}
-        </Text>
-        <View style={styles.kpiGrid}>
-          <View
-            style={[
-              styles.kpiCard,
-              theme === "sombre"
-                ? {
-                    backgroundColor: C.carte,
-                    borderWidth: 0.5,
-                    borderColor: C.carteBorder,
-                    borderLeftWidth: 3,
-                    borderLeftColor: C.accent,
-                  }
-                : {
-                    backgroundColor: "#FFFFFF",
-                    borderWidth: 0.5,
-                    borderColor: "#E4E6EA",
-                    borderLeftWidth: 3,
-                    borderLeftColor: C.accent,
-                  },
-            ]}
-          >
-            <View style={styles.kpiLabelRow}>
+        <CibleTutoriel
+          id="tiroir-vue-ensemble"
+          onMesure={mesurerCibleTutoriel}
+          cleFocus={cleFocusTutoriel}
+        >
+        <TiroirStats
+          titre="Vue d'ensemble"
+          labelTemporel={LABEL_MOIS_ACTUEL}
+          ouvertParDefaut
+          forcerOuvert={tiroirsForcesOuverts.has("vue-ensemble")}
+        >
+          <View style={styles.kpiGrid}>
+            <View
+              style={[
+                styles.kpiCard,
+                theme === "sombre"
+                  ? {
+                      backgroundColor: C.carte,
+                      borderWidth: 0.5,
+                      borderColor: C.carteBorder,
+                      borderLeftWidth: 3,
+                      borderLeftColor: C.accent,
+                    }
+                  : {
+                      backgroundColor: "#FFFFFF",
+                      borderWidth: 0.5,
+                      borderColor: "#E4E6EA",
+                      borderLeftWidth: 3,
+                      borderLeftColor: C.accent,
+                    },
+              ]}
+            >
+              <View style={styles.kpiLabelRow}>
+                <Text
+                  style={[
+                    styles.kpiLabel,
+                    {
+                      marginBottom: 0,
+                      color: theme === "sombre" ? C.accent : C.texteMuted,
+                    },
+                  ]}
+                >
+                  DÉPENSE MOY. / JOUR
+                </Text>
+                <InfoBulle
+                  titre="Dépense moyenne par jour"
+                  texte="Calculée en divisant tes dépenses totales par le nombre de jours écoulés depuis le début du mois. En début de mois, ce chiffre peut paraître élevé — il s'étale et se stabilise naturellement au fil des jours."
+                  taille={12}
+                  couleur={theme === "sombre" ? C.accent : C.texteMuted}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.kpiVal,
+                  { color: theme === "sombre" ? C.accentText : C.texte },
+                ]}
+              >
+                {depenseMoyJour} €
+              </Text>
+              <View style={styles.kpiDeltaRow}>
+                <Ionicons
+                  name={deltaDepMoy > 0 ? "arrow-up" : "arrow-down"}
+                  size={11}
+                  color={deltaDepMoy <= 0 ? C.accentText : C.peachText}
+                />
+                <TouchableOpacity
+                  activeOpacity={0.6}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  onPress={() => setDeltaDepMoyPourcentage((v) => !v)}
+                >
+                  <Text
+                    style={[
+                      styles.kpiDelta,
+                      { color: deltaDepMoy <= 0 ? C.accentText : C.peachText },
+                    ]}
+                  >
+                    {deltaDepMoyPourcentage
+                      ? `${Math.abs(deltaDepMoy)}%`
+                      : `${deltaDepMoyEuros > 0 ? "+" : ""}${deltaDepMoyEuros} €`}
+                    {" vs mois dernier"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View
+              style={[
+                styles.kpiCard,
+                theme === "sombre"
+                  ? {
+                      backgroundColor: C.carte,
+                      borderWidth: 0.5,
+                      borderColor: C.carteBorder,
+                      borderLeftWidth: 3,
+                      borderLeftColor: C.peach,
+                    }
+                  : {
+                      backgroundColor: "#FFFFFF",
+                      borderWidth: 0.5,
+                      borderColor: "#E4E6EA",
+                      borderLeftWidth: 3,
+                      borderLeftColor: C.peach,
+                    },
+              ]}
+            >
               <Text
                 style={[
                   styles.kpiLabel,
-                  {
-                    marginBottom: 0,
-                    color: theme === "sombre" ? C.accent : C.texteMuted,
-                  },
+                  { color: theme === "sombre" ? C.peach : C.texteMuted },
                 ]}
               >
-                DÉPENSE MOY. / JOUR
+                TAUX D'ÉPARGNE
               </Text>
-              <InfoBulle
-                titre="Dépense moyenne par jour"
-                texte="Calculée en divisant tes dépenses totales par le nombre de jours écoulés depuis le début du mois. En début de mois, ce chiffre peut paraître élevé — il s'étale et se stabilise naturellement au fil des jours."
-                taille={12}
-                couleur={theme === "sombre" ? C.accent : C.texteMuted}
-              />
+              <Text
+                style={[
+                  styles.kpiVal,
+                  { color: theme === "sombre" ? C.peachText : C.texte },
+                ]}
+              >
+                {tauxEpargne}%
+              </Text>
+              <Text
+                style={[
+                  styles.kpiDelta,
+                  { color: theme === "sombre" ? C.peachText : C.texteMuted },
+                ]}
+              >
+                Ce mois-ci
+              </Text>
             </View>
-            <Text
-              style={[
-                styles.kpiVal,
-                { color: theme === "sombre" ? C.accentText : C.texte },
-              ]}
-            >
-              {depenseMoyJour} €
-            </Text>
-            <View style={styles.kpiDeltaRow}>
-              <Ionicons
-                name={deltaDepMoy > 0 ? "arrow-up" : "arrow-down"}
-                size={11}
-                color={deltaDepMoy <= 0 ? C.accentText : C.peachText}
-              />
+          </View>
+
+          <View
+            style={[
+              styles.compareCard,
+              {
+                backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                borderColor: C.carteBorder,
+                marginTop: 12,
+              },
+            ]}
+          >
+            <View style={{ marginBottom: 14 }}>
+              <Text style={[styles.compareTitle, { color: C.texte }]}>
+                Variation d&apos;un mois à l&apos;autre — {MOIS_LABELS_COMPLETS[MOIS_ACTUEL]}{" "}
+                vs {MOIS_LABELS_COMPLETS[moisPrecedent.getMonth()]}
+              </Text>
               <TouchableOpacity
+                style={{ alignSelf: "flex-end", marginTop: 8 }}
+                onPress={() => setComparaisonEnPourcentage((v) => !v)}
                 activeOpacity={0.6}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                onPress={() => setDeltaDepMoyPourcentage((v) => !v)}
               >
                 <Text
                   style={[
-                    styles.kpiDelta,
-                    { color: deltaDepMoy <= 0 ? C.accentText : C.peachText },
+                    styles.compareDelta,
+                    { color: deltaTotal <= 0 ? C.accentText : C.peachText },
                   ]}
                 >
-                  {deltaDepMoyPourcentage
-                    ? `${Math.abs(deltaDepMoy)}%`
-                    : `${deltaDepMoyEuros > 0 ? "+" : ""}${deltaDepMoyEuros} €`}
-                  {" vs mois dernier"}
+                  {comparaisonEnPourcentage
+                    ? `${deltaTotal > 0 ? "+" : ""}${deltaTotal}%`
+                    : `${deltaTotalEuros > 0 ? "+" : ""}${formaterMontant(deltaTotalEuros)} €`}
                 </Text>
               </TouchableOpacity>
             </View>
-          </View>
-          <View
-            style={[
-              styles.kpiCard,
-              theme === "sombre"
-                ? {
-                    backgroundColor: C.carte,
-                    borderWidth: 0.5,
-                    borderColor: C.carteBorder,
-                    borderLeftWidth: 3,
-                    borderLeftColor: C.peach,
-                  }
-                : {
-                    backgroundColor: "#FFFFFF",
-                    borderWidth: 0.5,
-                    borderColor: "#E4E6EA",
-                    borderLeftWidth: 3,
-                    borderLeftColor: C.peach,
-                  },
-            ]}
-          >
-            <Text
-              style={[
-                styles.kpiLabel,
-                { color: theme === "sombre" ? C.peach : C.texteMuted },
-              ]}
-            >
-              TAUX D'ÉPARGNE
-            </Text>
-            <Text
-              style={[
-                styles.kpiVal,
-                { color: theme === "sombre" ? C.peachText : C.texte },
-              ]}
-            >
-              {tauxEpargne}%
-            </Text>
-            <Text
-              style={[
-                styles.kpiDelta,
-                { color: theme === "sombre" ? C.peachText : C.texteMuted },
-              ]}
-            >
-              Ce mois-ci
-            </Text>
-          </View>
-        </View>
-
-        {/* Masqué quand un filtre "Par catégorie" est actif : Budget et
-            Épargne ne varient pas selon la catégorie sélectionnée, donc ce
-            graphique n'apporte plus d'information pertinente dans ce
-            contexte — seul "Dépensé vs dépenses prévues" (plus bas) reste
-            recalculé et utile avec un filtre catégorie. */}
-        {!nomFiltreActif && (
-          <>
-            <View
-              style={[
-                styles.sectionLabelRow,
-                { marginTop: 8, justifyContent: "space-between" },
-              ]}
-            >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Ionicons name="trending-up" size={13} color={C.texteMuted} />
-                <Text
-                  style={[
-                    styles.sectionLabel,
-                    { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
-                  ]}
-                >
-                  Évolution — {labelPeriode}
-                </Text>
-              </View>
-              {renderIndicateurFiltre()}
-            </View>
-            <CibleTutoriel
-              id="graphique"
-              onMesure={mesurerCibleTutoriel}
-              style={[
-                styles.chartCard,
-                {
-                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-                  borderColor: C.carteBorder,
-                },
-              ]}
-            >
-              <GraphiqueEvolutionMulti
-                key={nbMoisSelectionne}
-                series={[
-                  {
-                    cle: "disponible",
-                    label: "Budget",
-                    couleur: C.purple,
-                    donnees: donneesDisponible,
-                  },
-                  {
-                    cle: "epargne",
-                    label: "Épargne",
-                    couleur: C.bleuGris,
-                    donnees: donneesEpargne,
-                  },
-                  {
-                    cle: "depenses",
-                    label: "Dépenses",
-                    couleur: C.accent,
-                    donnees: donneesReelles,
-                  },
-                ]}
-                labels={labels}
-                couleurs={C}
-                fondCarte={theme === "sombre" ? C.carte : "#FAFAFA"}
-              />
-            </CibleTutoriel>
-          </>
-        )}
-
-        <Text
-          style={[
-            styles.sectionLabel,
-            { color: C.texteMuted, marginTop: 8 },
-          ]}
-        >
-          Épargne dans le temps — {labelPeriode}
-        </Text>
-        <View
-          style={[
-            styles.chartCard,
-            {
-              backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-              borderColor: C.carteBorder,
-            },
-          ]}
-        >
-          {(() => {
-            const maxBrutEpargne = Math.max(...donneesEpargne, 1);
-            const ticksEpargne = calculerTicksY(maxBrutEpargne);
-            const maxEpargne = ticksEpargne[ticksEpargne.length - 1];
-            const indicesAffichesEpargne = indicesLabelsAffiches(
-              donneesEpargne.length,
-            );
-            return (
-              <View style={styles.epargneChartRow}>
-                <View style={[styles.epargneAxeY, { height: HAUTEUR_TRACK_EPARGNE }]}>
-                  {[...ticksEpargne].reverse().map((t) => (
-                    <Text
-                      key={t}
-                      style={[styles.epargneAxeYTexte, { color: C.texteMuted }]}
-                    >
-                      {t}€
-                    </Text>
-                  ))}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.barresEpargneValeursRow}>
-                    {donneesEpargne.map((val, i) => (
-                      <Text
-                        key={i}
-                        style={[styles.barreEpargneVal, { color: C.bleuGris }]}
-                      >
-                        {val !== 0 && indicesAffichesEpargne.includes(i)
-                          ? `${formaterMontant(val)}€`
-                          : ""}
-                      </Text>
-                    ))}
-                  </View>
-                  <View
-                    style={[
-                      styles.epargnePlotZone,
-                      { height: HAUTEUR_TRACK_EPARGNE },
-                    ]}
-                  >
-                    {ticksEpargne.map((t) => (
-                      <View
-                        key={t}
-                        style={[
-                          styles.epargneGridline,
-                          {
-                            top:
-                              HAUTEUR_TRACK_EPARGNE -
-                              (t / maxEpargne) * HAUTEUR_TRACK_EPARGNE,
-                            backgroundColor: C.separateur,
-                          },
-                        ]}
-                      />
-                    ))}
-                    <View style={styles.barresEpargne}>
-                      {donneesEpargne.map((val, i) => {
-                        const h = Math.round(
-                          (val / maxEpargne) * HAUTEUR_TRACK_EPARGNE,
-                        );
-                        return (
-                          <View key={i} style={styles.barreEpargneCol}>
-                            <View
-                              style={[
-                                styles.barreEpargneRemplissage,
-                                { height: h, backgroundColor: C.bleuGris },
-                              ]}
-                            />
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </View>
-                  <View style={styles.barresEpargneValeursRow}>
-                    {labels.map((lbl, i) => (
-                      <Text
-                        key={i}
-                        style={[styles.barreEpargneLabel, { color: C.texteMuted }]}
-                      >
-                        {lbl}
-                      </Text>
-                    ))}
-                  </View>
-                </View>
-              </View>
-            );
-          })()}
-        </View>
-
-        <Text
-          style={[
-            styles.sectionLabel,
-            { color: C.texteMuted, marginTop: 8 },
-          ]}
-        >
-          Ce qu&apos;il faut retenir — {labelPeriode}
-        </Text>
-        <View
-          style={[
-            styles.insightCard,
-            {
-              backgroundColor: theme === "sombre" ? C.carte : C.purpleLight,
-              borderWidth: theme === "sombre" ? 0.5 : 0,
-              borderColor: C.carteBorder,
-            },
-          ]}
-        >
-          {insights.map((txt, i) => (
-            <View
-              key={i}
-              style={[
-                styles.insightItem,
-                i > 0 && [
-                  styles.insightItemBorder,
-                  { borderTopColor: C.separateur },
-                ],
-              ]}
-            >
-              <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
-              <Text style={[styles.insightTexte, { color: C.purpleText }]}>
-                {txt}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        {!filtreEstEntreesUniquement && (
-          <>
-            <View
-              style={[
-                styles.sectionLabelRow,
-                { justifyContent: "space-between", alignItems: "flex-start" },
-              ]}
-            >
-              <View>
-                <Text
-                  style={[
-                    styles.sectionLabel,
-                    { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
-                  ]}
-                >
-                  Dépensé vs dépenses prévues — {labelPeriode}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setDepenseVsPrevuEnPourcentage((v) => !v)}
-                  activeOpacity={0.6}
-                  hitSlop={{ top: 4, bottom: 4, left: 0, right: 8 }}
-                >
+            {categoriesCompareesChangees.map(({ env, depensePrec, delta }) => {
+              const pct =
+                env.budget > 0 ? Math.round((env.depense / env.budget) * 100) : 0;
+              const deltaPct =
+                depensePrec !== 0
+                  ? Math.round((delta / Math.abs(depensePrec)) * 100)
+                  : env.depense > 0
+                    ? 100
+                    : 0;
+              const texteDelta = comparaisonEnPourcentage
+                ? `${deltaPct > 0 ? "+" : ""}${deltaPct}%`
+                : `${delta > 0 ? "+" : ""}${formaterMontant(delta)} €`;
+              return (
+                <View key={env.id} style={styles.cbarRow}>
                   <Text
-                    style={[
-                      styles.depensePrevuDelta,
-                      {
-                        color:
-                          deltaPeriodeEuros <= 0 ? C.accentText : C.peachText,
-                      },
-                    ]}
+                    style={[styles.cbarLabel, { color: C.texte }]}
+                    numberOfLines={1}
                   >
-                    {depenseVsPrevuEnPourcentage
-                      ? `${deltaPeriodePct > 0 ? "+" : ""}${deltaPeriodePct}%`
-                      : `${deltaPeriodeEuros > 0 ? "+" : ""}${formaterMontant(deltaPeriodeEuros)} €`}{" "}
-                    vs prévu
+                    {env.nom}
+                  </Text>
+                  <View
+                    style={[styles.cbarTrack, { backgroundColor: C.separateur }]}
+                  >
+                    <BarreCbarAnimee
+                      pourcentage={Math.min(pct, 100)}
+                      couleur={env.couleur}
+                      style={styles.cbarFill}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setComparaisonEnPourcentage((v) => !v)}
+                    activeOpacity={0.6}
+                  >
+                    <Text
+                      style={[
+                        styles.cbarVal,
+                        { color: delta <= 0 ? C.accentText : C.peachText },
+                      ]}
+                    >
+                      {texteDelta}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+
+            {categoriesCompareesInchangees.length > 0 && (
+              <View style={{ marginTop: categoriesCompareesChangees.length > 0 ? 4 : 0 }}>
+                <TouchableOpacity
+                  style={[styles.tiroirBouton, { backgroundColor: C.fondSecondaire }]}
+                  onPress={() =>
+                    setCategoriesInchangeesOuvert(!categoriesInchangeesOuvert)
+                  }
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.tiroirBoutonTexte, { color: C.texte }]}>
+                    Voir les catégories sans changement (
+                    {categoriesCompareesInchangees.length})
+                  </Text>
+                  <Text style={[styles.tiroirChevron, { color: C.texteMuted }]}>
+                    {categoriesInchangeesOuvert ? "▾" : "▸"}
                   </Text>
                 </TouchableOpacity>
+                {categoriesInchangeesOuvert &&
+                  categoriesCompareesInchangees.map(({ env }) => {
+                    const pct =
+                      env.budget > 0
+                        ? Math.round((env.depense / env.budget) * 100)
+                        : 0;
+                    return (
+                      <View
+                        key={env.id}
+                        style={[styles.cbarRow, { marginTop: 10 }]}
+                      >
+                        <Text
+                          style={[styles.cbarLabel, { color: C.texte }]}
+                          numberOfLines={1}
+                        >
+                          {env.nom}
+                        </Text>
+                        <View
+                          style={[
+                            styles.cbarTrack,
+                            { backgroundColor: C.separateur },
+                          ]}
+                        >
+                          <BarreCbarAnimee
+                            pourcentage={Math.min(pct, 100)}
+                            couleur={env.couleur}
+                            style={styles.cbarFill}
+                          />
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => setComparaisonEnPourcentage((v) => !v)}
+                          activeOpacity={0.6}
+                        >
+                          <Text
+                            style={[styles.cbarVal, { color: C.texteMuted }]}
+                          >
+                            {comparaisonEnPourcentage ? "0%" : "0 €"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
               </View>
-              {renderIndicateurFiltre()}
-            </View>
-            <View
-              style={[
-                styles.chartCard,
-                {
-                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-                  borderColor: C.carteBorder,
-                },
-              ]}
-            >
-              <GraphiqueLignes
-                donneesReelles={donneesReelles}
-                donneesPrevisionnelles={donneesPrevisionnelles}
-                labels={labels}
-                couleurs={C}
-              />
-              <View style={styles.legendeRow}>
-                <View style={styles.legendeItem}>
-                  <View
-                    style={[styles.legendeDot, { backgroundColor: C.accent }]}
-                  />
-                  <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
-                    Dépensé
-                  </Text>
-                </View>
-                <View style={styles.legendeItem}>
-                  <View
-                    style={[styles.legendeDot, { backgroundColor: C.peach }]}
-                  />
-                  <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
-                    Dépenses prévues
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </>
-        )}
+            )}
 
-        {filtreEstEntreesUniquement && (
-          <>
-            <View
-              style={[
-                styles.sectionLabelRow,
-                { justifyContent: "space-between", alignItems: "flex-start" },
-              ]}
-            >
+            {depenseMoisPrec > 0 && (
+              <Text style={[styles.compareFooter, { color: C.texteMuted }]}>
+                Total ce mois : {formaterMontant(depenseMoisActuel)} € vs {formaterMontant(depenseMoisPrec)} € le
+                mois dernier
+              </Text>
+            )}
+          </View>
+        </TiroirStats>
+        </CibleTutoriel>
+
+        <CibleTutoriel
+          id="tiroir-evolution"
+          onMesure={mesurerCibleTutoriel}
+          cleFocus={cleFocusTutoriel}
+        >
+        <TiroirStats
+          titre="Évolution dans le temps"
+          labelTemporel={labelPeriode}
+          indicateurFiltre={nomFiltreActif ? renderIndicateurFiltre() : undefined}
+          forcerOuvert={tiroirsForcesOuverts.has("evolution")}
+        >
+          {/* Masqué quand un filtre "Par catégorie" est actif : Budget et
+              Épargne ne varient pas selon la catégorie sélectionnée, donc ce
+              graphique n'apporte plus d'information pertinente dans ce
+              contexte — seul "Dépensé vs dépenses prévues" (plus bas) reste
+              recalculé et utile avec un filtre catégorie. */}
+          {!nomFiltreActif && (
+            <>
+              <View
+                style={[
+                  styles.sectionLabelRow,
+                  { marginTop: 0, justifyContent: "space-between" },
+                ]}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Ionicons name="trending-up" size={13} color={C.texteMuted} />
+                  <Text
+                    style={[
+                      styles.sectionLabel,
+                      { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                    ]}
+                  >
+                    Évolution
+                  </Text>
+                </View>
+              </View>
+              <View
+                style={[
+                  styles.chartCard,
+                  {
+                    backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                    borderColor: C.carteBorder,
+                  },
+                ]}
+              >
+                <GraphiqueEvolutionMulti
+                  key={nbMoisSelectionne}
+                  series={[
+                    {
+                      cle: "disponible",
+                      label: "Budget",
+                      couleur: C.purple,
+                      donnees: donneesDisponible,
+                    },
+                    {
+                      cle: "epargne",
+                      label: "Épargne",
+                      couleur: C.bleuGris,
+                      donnees: donneesEpargne,
+                    },
+                    {
+                      cle: "depenses",
+                      label: "Dépenses",
+                      couleur: C.accent,
+                      donnees: donneesReelles,
+                    },
+                  ]}
+                  labels={labels}
+                  couleurs={C}
+                  fondCarte={theme === "sombre" ? C.carte : "#FAFAFA"}
+                />
+              </View>
+            </>
+          )}
+
+          <Text
+            style={[
+              styles.sectionLabel,
+              { color: C.texteMuted, marginTop: 8 },
+            ]}
+          >
+            Épargne dans le temps
+          </Text>
+          <View
+            style={[
+              styles.chartCard,
+              {
+                backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                borderColor: C.carteBorder,
+              },
+            ]}
+          >
+            {(() => {
+              const maxBrutEpargne = Math.max(...donneesEpargne, 1);
+              const ticksEpargne = calculerTicksY(maxBrutEpargne);
+              const maxEpargne = ticksEpargne[ticksEpargne.length - 1];
+              const indicesAffichesEpargne = indicesLabelsAffiches(
+                donneesEpargne.length,
+              );
+              return (
+                <View style={styles.epargneChartRow}>
+                  <View style={[styles.epargneAxeY, { height: HAUTEUR_TRACK_EPARGNE }]}>
+                    {[...ticksEpargne].reverse().map((t) => (
+                      <Text
+                        key={t}
+                        style={[styles.epargneAxeYTexte, { color: C.texteMuted }]}
+                      >
+                        {t}€
+                      </Text>
+                    ))}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.barresEpargneValeursRow}>
+                      {donneesEpargne.map((val, i) => (
+                        <Text
+                          key={i}
+                          style={[styles.barreEpargneVal, { color: C.bleuGris }]}
+                        >
+                          {val !== 0 && indicesAffichesEpargne.includes(i)
+                            ? `${formaterMontant(val)}€`
+                            : ""}
+                        </Text>
+                      ))}
+                    </View>
+                    <View
+                      style={[
+                        styles.epargnePlotZone,
+                        { height: HAUTEUR_TRACK_EPARGNE },
+                      ]}
+                    >
+                      {ticksEpargne.map((t) => (
+                        <View
+                          key={t}
+                          style={[
+                            styles.epargneGridline,
+                            {
+                              top:
+                                HAUTEUR_TRACK_EPARGNE -
+                                (t / maxEpargne) * HAUTEUR_TRACK_EPARGNE,
+                              backgroundColor: C.separateur,
+                            },
+                          ]}
+                        />
+                      ))}
+                      <View style={styles.barresEpargne}>
+                        {donneesEpargne.map((val, i) => {
+                          const h = Math.round(
+                            (val / maxEpargne) * HAUTEUR_TRACK_EPARGNE,
+                          );
+                          return (
+                            <View key={i} style={styles.barreEpargneCol}>
+                              <View
+                                style={[
+                                  styles.barreEpargneRemplissage,
+                                  { height: h, backgroundColor: C.bleuGris },
+                                ]}
+                              />
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                    <View style={styles.barresEpargneValeursRow}>
+                      {labels.map((lbl, i) => (
+                        <Text
+                          key={i}
+                          style={[styles.barreEpargneLabel, { color: C.texteMuted }]}
+                        >
+                          {lbl}
+                        </Text>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+              );
+            })()}
+          </View>
+
+          {!filtreEstEntreesUniquement && !filtreEstDepensesUniquement && (
+            <>
+              <View
+                style={[
+                  styles.sectionLabelRow,
+                  { justifyContent: "space-between", alignItems: "flex-start" },
+                ]}
+              >
+                <View>
+                  <Text
+                    style={[
+                      styles.sectionLabel,
+                      { color: C.texteMuted, marginTop: 8, marginBottom: 0 },
+                    ]}
+                  >
+                    Dépensé vs dépenses prévues
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setDepenseVsPrevuEnPourcentage((v) => !v)}
+                    activeOpacity={0.6}
+                    hitSlop={{ top: 4, bottom: 4, left: 0, right: 8 }}
+                  >
+                    <Text
+                      style={[
+                        styles.depensePrevuDelta,
+                        {
+                          color:
+                            deltaPeriodeEuros <= 0 ? C.accentText : C.peachText,
+                        },
+                      ]}
+                    >
+                      {depenseVsPrevuEnPourcentage
+                        ? `${deltaPeriodePct > 0 ? "+" : ""}${deltaPeriodePct}%`
+                        : `${deltaPeriodeEuros > 0 ? "+" : ""}${formaterMontant(deltaPeriodeEuros)} €`}{" "}
+                      vs prévu
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <View
+                style={[
+                  styles.chartCard,
+                  {
+                    backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                    borderColor: C.carteBorder,
+                  },
+                ]}
+              >
+                <GraphiqueLignes
+                  donneesReelles={donneesReelles}
+                  donneesPrevisionnelles={donneesPrevisionnelles}
+                  labels={labels}
+                  couleurs={C}
+                />
+                <View style={styles.legendeRow}>
+                  {/* Détail par catégorie tapable uniquement quand un
+                      filtre est actif : sans filtre, le total EST déjà le
+                      détail (une seule "catégorie" implicite : tout), donc
+                      il n'y a rien de plus pertinent à montrer. */}
+                  {nomFiltreActif ? (
+                    <TouchableOpacity
+                      style={styles.legendeItem}
+                      onPress={() => setDetailFiltreType("reel")}
+                      activeOpacity={0.6}
+                    >
+                      <View
+                        style={[styles.legendeDot, { backgroundColor: C.accent }]}
+                      />
+                      <Text
+                        style={[
+                          styles.legendeTexte,
+                          { color: C.texteMuted, textDecorationLine: "underline" },
+                        ]}
+                      >
+                        Dépensé
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.legendeItem}>
+                      <View
+                        style={[styles.legendeDot, { backgroundColor: C.accent }]}
+                      />
+                      <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
+                        Dépensé
+                      </Text>
+                    </View>
+                  )}
+                  {nomFiltreActif ? (
+                    <TouchableOpacity
+                      style={styles.legendeItem}
+                      onPress={() => setDetailFiltreType("prevu")}
+                      activeOpacity={0.6}
+                    >
+                      <View
+                        style={[styles.legendeDot, { backgroundColor: C.peach }]}
+                      />
+                      <Text
+                        style={[
+                          styles.legendeTexte,
+                          { color: C.texteMuted, textDecorationLine: "underline" },
+                        ]}
+                      >
+                        Dépenses prévues
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.legendeItem}>
+                      <View
+                        style={[styles.legendeDot, { backgroundColor: C.peach }]}
+                      />
+                      <Text style={[styles.legendeTexte, { color: C.texteMuted }]}>
+                        Dépenses prévues
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </>
+          )}
+
+          {filtreEstEntreesUniquement && (
+            <>
               <Text
                 style={[
                   styles.sectionLabel,
-                  { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                  { color: C.texteMuted, marginTop: 8, marginBottom: 0 },
                 ]}
               >
-                Évolution de tes entrées d&apos;argent — {labelPeriode}
+                Évolution de tes entrées d&apos;argent
               </Text>
-              {renderIndicateurFiltre()}
-            </View>
-            <View
-              style={[
-                styles.chartCard,
-                {
-                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-                  borderColor: C.carteBorder,
-                },
-              ]}
-            >
-              <GraphiqueEvolutionMulti
-                key={nbMoisSelectionne}
-                series={seriesEntrees}
-                labels={labels}
-                couleurs={C}
-                fondCarte={theme === "sombre" ? C.carte : "#FAFAFA"}
-              />
-            </View>
-          </>
-        )}
+              <View
+                style={[
+                  styles.chartCard,
+                  {
+                    backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                    borderColor: C.carteBorder,
+                  },
+                ]}
+              >
+                <GraphiqueEvolutionMulti
+                  key={nbMoisSelectionne}
+                  series={seriesEntrees}
+                  labels={labels}
+                  couleurs={C}
+                  fondCarte={theme === "sombre" ? C.carte : "#FAFAFA"}
+                />
+              </View>
+            </>
+          )}
 
-        <View
-          style={[
-            styles.compareCard,
-            {
-              backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-              borderColor: C.carteBorder,
-            },
-          ]}
-        >
-          <View style={{ marginBottom: 14 }}>
-            <Text style={[styles.compareTitle, { color: C.texte }]}>
-              Variation d&apos;un mois à l&apos;autre — {MOIS_LABELS_COMPLETS[MOIS_ACTUEL]}{" "}
-              vs {MOIS_LABELS_COMPLETS[moisPrecedent.getMonth()]}
-            </Text>
-            <TouchableOpacity
-              style={{ alignSelf: "flex-end", marginTop: 8 }}
-              onPress={() => setComparaisonEnPourcentage((v) => !v)}
-              activeOpacity={0.6}
-            >
+          {filtreEstDepensesUniquement && (
+            <>
               <Text
                 style={[
-                  styles.compareDelta,
-                  { color: deltaTotal <= 0 ? C.accentText : C.peachText },
+                  styles.sectionLabel,
+                  { color: C.texteMuted, marginTop: 8, marginBottom: 0 },
                 ]}
               >
-                {comparaisonEnPourcentage
-                  ? `${deltaTotal > 0 ? "+" : ""}${deltaTotal}%`
-                  : `${deltaTotalEuros > 0 ? "+" : ""}${formaterMontant(deltaTotalEuros)} €`}
+                Évolution de tes dépenses
               </Text>
-            </TouchableOpacity>
-          </View>
-          {categoriesCompareesChangees.map(({ env, depensePrec, delta }) => {
-            const pct =
-              env.budget > 0 ? Math.round((env.depense / env.budget) * 100) : 0;
-            const deltaPct =
-              depensePrec !== 0
-                ? Math.round((delta / Math.abs(depensePrec)) * 100)
-                : env.depense > 0
-                  ? 100
-                  : 0;
-            const texteDelta = comparaisonEnPourcentage
-              ? `${deltaPct > 0 ? "+" : ""}${deltaPct}%`
-              : `${delta > 0 ? "+" : ""}${formaterMontant(delta)} €`;
-            return (
-              <View key={env.id} style={styles.cbarRow}>
-                <Text
-                  style={[styles.cbarLabel, { color: C.texte }]}
-                  numberOfLines={1}
-                >
-                  {env.nom}
-                </Text>
-                <View
-                  style={[styles.cbarTrack, { backgroundColor: C.separateur }]}
-                >
-                  <BarreCbarAnimee
-                    pourcentage={Math.min(pct, 100)}
-                    couleur={env.couleur}
-                    style={styles.cbarFill}
-                  />
-                </View>
-                <TouchableOpacity
-                  onPress={() => setComparaisonEnPourcentage((v) => !v)}
-                  activeOpacity={0.6}
-                >
-                  <Text
+              <View
+                style={[
+                  styles.chartCard,
+                  {
+                    backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                    borderColor: C.carteBorder,
+                  },
+                ]}
+              >
+                <GraphiqueEvolutionMulti
+                  key={nbMoisSelectionne}
+                  series={seriesDepenses}
+                  labels={labels}
+                  couleurs={C}
+                  fondCarte={theme === "sombre" ? C.carte : "#FAFAFA"}
+                />
+              </View>
+            </>
+          )}
+        </TiroirStats>
+        </CibleTutoriel>
+
+        {repartitionTiroirVisible && (
+          <CibleTutoriel
+            id="tiroir-repartition"
+            onMesure={mesurerCibleTutoriel}
+            cleFocus={cleFocusTutoriel}
+          >
+            <TiroirStats
+              titre="Répartition"
+              labelTemporel={labelPeriode}
+              forcerOuvert={tiroirsForcesOuverts.has("repartition")}
+            >
+              {repartitionDepenses.length > 0 && (
+                <>
+                  <Text style={[styles.sectionLabel, { color: C.texteMuted, marginTop: 0 }]}>
+                    Répartition des dépenses
+                  </Text>
+                  <View
                     style={[
-                      styles.cbarVal,
-                      { color: delta <= 0 ? C.accentText : C.peachText },
+                      styles.chartCard,
+                      {
+                        backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                        borderColor: C.carteBorder,
+                      },
                     ]}
                   >
-                    {texteDelta}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            );
-          })}
+                    <JaugeRepartition segments={repartitionDepenses} couleurs={C} />
+                  </View>
+                </>
+              )}
 
-          {categoriesCompareesInchangees.length > 0 && (
-            <View style={{ marginTop: categoriesCompareesChangees.length > 0 ? 4 : 0 }}>
-              <TouchableOpacity
-                style={[styles.tiroirBouton, { backgroundColor: C.fondSecondaire }]}
-                onPress={() =>
-                  setCategoriesInchangeesOuvert(!categoriesInchangeesOuvert)
-                }
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.tiroirBoutonTexte, { color: C.texte }]}>
-                  Voir les catégories sans changement (
-                  {categoriesCompareesInchangees.length})
-                </Text>
-                <Text style={[styles.tiroirChevron, { color: C.texteMuted }]}>
-                  {categoriesInchangeesOuvert ? "▾" : "▸"}
-                </Text>
-              </TouchableOpacity>
-              {categoriesInchangeesOuvert &&
-                categoriesCompareesInchangees.map(({ env }) => {
-                  const pct =
-                    env.budget > 0
-                      ? Math.round((env.depense / env.budget) * 100)
-                      : 0;
-                  return (
+              {repartitionEntrees.length > 0 && (
+                <>
+                  <Text
+                    style={[
+                      styles.sectionLabel,
+                      { color: C.texteMuted, marginTop: 8 },
+                    ]}
+                  >
+                    Entrées d&apos;argent
+                  </Text>
+                  <View
+                    style={[
+                      styles.chartCard,
+                      {
+                        backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                        borderColor: C.vertLight,
+                      },
+                    ]}
+                  >
+                    <JaugeRepartition segments={repartitionEntrees} couleurs={C} />
+                  </View>
+                </>
+              )}
+
+              {topDepensesTri.length > 0 && (
+                <>
+                  <Text
+                    style={[
+                      styles.sectionLabel,
+                      { color: C.texteMuted, marginTop: 8 },
+                    ]}
+                  >
+                    Top dépenses
+                  </Text>
+                  {topDepensesTri.map((dep, i) => (
                     <View
-                      key={env.id}
-                      style={[styles.cbarRow, { marginTop: 10 }]}
+                      key={i}
+                      style={[styles.topItem, { borderBottomColor: C.separateur }]}
                     >
+                      <View
+                        style={[styles.topRank, { backgroundColor: dep.couleur }]}
+                      >
+                        <Text style={styles.topRankTexte}>{i + 1}</Text>
+                      </View>
                       <Text
-                        style={[styles.cbarLabel, { color: C.texte }]}
+                        style={[styles.topNom, { color: C.texte }]}
                         numberOfLines={1}
                       >
-                        {env.nom}
+                        {dep.nom}
                       </Text>
-                      <View
-                        style={[
-                          styles.cbarTrack,
-                          { backgroundColor: C.separateur },
-                        ]}
-                      >
-                        <BarreCbarAnimee
-                          pourcentage={Math.min(pct, 100)}
-                          couleur={env.couleur}
-                          style={styles.cbarFill}
-                        />
-                      </View>
-                      <TouchableOpacity
-                        onPress={() => setComparaisonEnPourcentage((v) => !v)}
-                        activeOpacity={0.6}
-                      >
-                        <Text
-                          style={[styles.cbarVal, { color: C.texteMuted }]}
-                        >
-                          {comparaisonEnPourcentage ? "0%" : "0 €"}
-                        </Text>
-                      </TouchableOpacity>
+                      <Text style={[styles.topMontant, { color: C.texte }]}>
+                        {formaterMontant(dep.montant)} €
+                      </Text>
                     </View>
-                  );
-                })}
-            </View>
+                  ))}
+                </>
+              )}
+            </TiroirStats>
+          </CibleTutoriel>
+        )}
+
+        <CibleTutoriel
+          id="tiroir-par-categorie"
+          onMesure={mesurerCibleTutoriel}
+          cleFocus={cleFocusTutoriel}
+        >
+        <TiroirStats
+          titre="Entrées et dépenses par catégorie"
+          labelTemporel={labelPeriode}
+          indicateurFiltre={nomFiltreActif ? renderIndicateurFiltre() : undefined}
+          forcerOuvert={tiroirsForcesOuverts.has("par-categorie")}
+        >
+          {seriesDepensesParCategorie.length > 0 && (
+            <>
+              <View
+                style={[
+                  styles.sectionLabelRow,
+                  {
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginTop: 0,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.sectionLabel,
+                    { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                  ]}
+                >
+                  Dépenses par catégorie
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <TouchableOpacity
+                    onPress={() => setModeDepensesCategorie("pct")}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 2 }}
+                  >
+                    <Text
+                      style={[
+                        styles.toggleModeTexte,
+                        {
+                          color:
+                            modeDepensesCategorie === "pct"
+                              ? C.accent
+                              : C.texteMuted,
+                        },
+                      ]}
+                    >
+                      %
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: C.texteMuted, fontSize: 12 }}>/</Text>
+                  <TouchableOpacity
+                    onPress={() => setModeDepensesCategorie("euro")}
+                    hitSlop={{ top: 6, bottom: 6, left: 2, right: 6 }}
+                  >
+                    <Text
+                      style={[
+                        styles.toggleModeTexte,
+                        {
+                          color:
+                            modeDepensesCategorie === "euro"
+                              ? C.accent
+                              : C.texteMuted,
+                        },
+                      ]}
+                    >
+                      €
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <View
+                style={[
+                  styles.chartCard,
+                  {
+                    backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                    borderColor: C.carteBorder,
+                  },
+                ]}
+              >
+                <GraphiqueBarresEmpilees
+                  series={seriesDepensesParCategorie}
+                  labels={labels}
+                  couleurs={C}
+                  mode={modeDepensesCategorie}
+                  onTapLegende={(cle) =>
+                    ouvrirDetailCategorieParMois(seriesDepensesParCategorie, cle)
+                  }
+                />
+              </View>
+            </>
           )}
 
-          {depenseMoisPrec > 0 && (
-            <Text style={[styles.compareFooter, { color: C.texteMuted }]}>
-              Total ce mois : {formaterMontant(depenseMoisActuel)} € vs {formaterMontant(depenseMoisPrec)} € le
-              mois dernier
-            </Text>
+          {seriesEntreesParCategorie.length > 0 && (
+            <>
+              <View
+                style={[
+                  styles.sectionLabelRow,
+                  {
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginTop: 8,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.sectionLabel,
+                    { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                  ]}
+                >
+                  Entrées d&apos;argent par catégorie
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <TouchableOpacity
+                    onPress={() => setModeEntreesCategorie("pct")}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 2 }}
+                  >
+                    <Text
+                      style={[
+                        styles.toggleModeTexte,
+                        {
+                          color:
+                            modeEntreesCategorie === "pct"
+                              ? C.accent
+                              : C.texteMuted,
+                        },
+                      ]}
+                    >
+                      %
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: C.texteMuted, fontSize: 12 }}>/</Text>
+                  <TouchableOpacity
+                    onPress={() => setModeEntreesCategorie("euro")}
+                    hitSlop={{ top: 6, bottom: 6, left: 2, right: 6 }}
+                  >
+                    <Text
+                      style={[
+                        styles.toggleModeTexte,
+                        {
+                          color:
+                            modeEntreesCategorie === "euro"
+                              ? C.accent
+                              : C.texteMuted,
+                        },
+                      ]}
+                    >
+                      €
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <View
+                style={[
+                  styles.chartCard,
+                  {
+                    backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                    borderColor: C.vertLight,
+                  },
+                ]}
+              >
+                <GraphiqueBarresEmpilees
+                  series={seriesEntreesParCategorie}
+                  labels={labels}
+                  couleurs={C}
+                  mode={modeEntreesCategorie}
+                  onTapLegende={(cle) =>
+                    ouvrirDetailCategorieParMois(seriesEntreesParCategorie, cle)
+                  }
+                />
+              </View>
+            </>
           )}
-        </View>
+        </TiroirStats>
+        </CibleTutoriel>
 
         {objectifsAvecDelta.length > 0 && (
-          <>
-            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-              Objectifs d'épargne
-            </Text>
+          <CibleTutoriel
+            id="tiroir-ce-mois"
+            onMesure={mesurerCibleTutoriel}
+            cleFocus={cleFocusTutoriel}
+          >
+          <TiroirStats
+            titre="Ce mois-ci"
+            labelTemporel={LABEL_MOIS_ACTUEL}
+            forcerOuvert={tiroirsForcesOuverts.has("ce-mois")}
+          >
             {objectifsAvecDelta.map((obj) => (
               <View
                 key={obj.id}
@@ -2223,85 +2956,44 @@ export default function Analytics() {
                 </View>
               </View>
             ))}
-          </>
+          </TiroirStats>
+          </CibleTutoriel>
         )}
 
-        {!filtreEstEntreesUniquement && repartitionDepenses.length > 0 && (
-          <>
-            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-              Répartition des dépenses — {LABEL_MOIS_ACTUEL}
-            </Text>
-            <View
-              style={[
-                styles.chartCard,
-                {
-                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-                  borderColor: C.carteBorder,
-                },
-              ]}
-            >
-              <JaugeRepartition segments={repartitionDepenses} couleurs={C} />
-            </View>
-          </>
-        )}
-
-        {!filtreEstEntreesUniquement && repartitionEntrees.length > 0 && (
-          <>
-            <Text
-              style={[
-                styles.sectionLabel,
-                { color: C.texteMuted, marginTop: 8 },
-              ]}
-            >
-              Entrées d&apos;argent — {LABEL_MOIS_ACTUEL}
-            </Text>
-            <View
-              style={[
-                styles.chartCard,
-                {
-                  backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-                  borderColor: C.vertLight,
-                },
-              ]}
-            >
-              <JaugeRepartition segments={repartitionEntrees} couleurs={C} />
-            </View>
-          </>
-        )}
-
-        {!filtreEstEntreesUniquement && topDepensesTri.length > 0 && (
-          <>
-            <Text
-              style={[
-                styles.sectionLabel,
-                { color: C.texteMuted, marginTop: 8 },
-              ]}
-            >
-              Top dépenses — {nbMois} derniers mois
-            </Text>
-            {topDepensesTri.map((dep, i) => (
+        <TiroirStats
+          titre="Ce qu'il faut retenir"
+          labelTemporel={labelPeriode}
+          ouvertParDefaut
+        >
+          <View
+            style={[
+              styles.insightCard,
+              {
+                backgroundColor: theme === "sombre" ? C.carte : C.purpleLight,
+                borderWidth: theme === "sombre" ? 0.5 : 0,
+                borderColor: C.carteBorder,
+              },
+            ]}
+          >
+            {insights.map((txt, i) => (
               <View
                 key={i}
-                style={[styles.topItem, { borderBottomColor: C.separateur }]}
+                style={[
+                  styles.insightItem,
+                  i > 0 && [
+                    styles.insightItemBorder,
+                    { borderTopColor: C.separateur },
+                  ],
+                ]}
               >
-                <View
-                  style={[styles.topRank, { backgroundColor: dep.couleur }]}
-                >
-                  <Text style={styles.topRankTexte}>{i + 1}</Text>
-                </View>
-                <Text
-                  style={[styles.topNom, { color: C.texte }]}
-                  numberOfLines={1}
-                >
-                  {dep.nom}
-                </Text>
-                <Text style={[styles.topMontant, { color: C.texte }]}>
-                  {formaterMontant(dep.montant)} €
+                <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
+                <Text style={[styles.insightTexte, { color: C.purpleText }]}>
+                  {txt}
                 </Text>
               </View>
             ))}
-          </>
-        )}
+          </View>
+        </TiroirStats>
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -3154,14 +3846,148 @@ export default function Analytics() {
         </TouchableOpacity>
       </Modal>
 
+      <Modal
+        visible={detailFiltreType !== null}
+        transparent
+        animationType={reduireAnimations ? "none" : "fade"}
+        onRequestClose={() => setDetailFiltreType(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlayTouch}
+          activeOpacity={1}
+          onPress={() => setDetailFiltreType(null)}
+        >
+          <TouchableOpacity
+            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitre, { color: C.texte }]}>
+                Détail — {detailFiltreType === "prevu" ? "Dépenses prévues" : "Dépensé"}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setDetailFiltreType(null)}
+                activeOpacity={0.6}
+                accessibilityRole="button"
+                accessibilityLabel="Fermer"
+              >
+                <Ionicons name="close" size={22} color={C.texteMuted} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.detailFiltreSousTitre, { color: C.texteMuted }]}>
+              {labelPeriode} · Total {formaterMontant(
+                detailFiltreType === "prevu" ? totalPrevuPeriode : totalReelPeriode,
+              )}{" "}
+              €
+            </Text>
+            <ScrollView
+              style={styles.detailFiltreListe}
+              showsVerticalScrollIndicator={false}
+            >
+              {(detailFiltreType === "prevu"
+                ? detailParCategoriePrevu
+                : detailParCategorieReel
+              ).map((c) => (
+                <View key={c.id} style={styles.detailFiltreLigne}>
+                  <View
+                    style={[styles.legendeDot, { backgroundColor: c.couleur }]}
+                  />
+                  <Text
+                    style={[styles.detailFiltreNom, { color: C.texte }]}
+                    numberOfLines={1}
+                  >
+                    {c.nom}
+                  </Text>
+                  <Text style={[styles.detailFiltreMontant, { color: C.texte }]}>
+                    {formaterMontant(c.montant)} €
+                  </Text>
+                </View>
+              ))}
+              <View style={{ height: 12 }} />
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={detailCategorieParMois !== null}
+        transparent
+        animationType={reduireAnimations ? "none" : "fade"}
+        onRequestClose={() => setDetailCategorieParMois(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlayTouch}
+          activeOpacity={1}
+          onPress={() => setDetailCategorieParMois(null)}
+        >
+          <TouchableOpacity
+            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View
+                  style={[
+                    styles.legendeDot,
+                    { backgroundColor: detailCategorieParMois?.couleur },
+                  ]}
+                />
+                <Text style={[styles.modalTitre, { color: C.texte }]}>
+                  {detailCategorieParMois?.label}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setDetailCategorieParMois(null)}
+                activeOpacity={0.6}
+                accessibilityRole="button"
+                accessibilityLabel="Fermer"
+              >
+                <Ionicons name="close" size={22} color={C.texteMuted} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.detailFiltreSousTitre, { color: C.texteMuted }]}>
+              Mois où cette catégorie a eu des données
+            </Text>
+            <ScrollView
+              style={styles.detailFiltreListe}
+              showsVerticalScrollIndicator={false}
+            >
+              {detailCategorieParMois?.lignes.map((l) => (
+                <View key={l.moisLabel} style={styles.detailFiltreLigne}>
+                  <Text
+                    style={[styles.detailFiltreNom, { color: C.texte }]}
+                    numberOfLines={1}
+                  >
+                    {l.moisLabel}
+                  </Text>
+                  <Text style={[styles.detailFiltreMontant, { color: C.texte }]}>
+                    {formaterMontant(l.montant)} €
+                  </Text>
+                </View>
+              ))}
+              <View style={{ height: 12 }} />
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <TutorielOverlay
-        visible={
-          !tutorielStatsVu &&
-          ETAPES_STATS.every((e) => !e.id || posCiblesTutoriel[e.id])
-        }
+        actif={!tutorielStatsVu}
         etapes={ETAPES_STATS}
         positions={posCiblesTutoriel}
-        onTerminer={() => marquerTutorielVu("stats")}
+        scrollOffset={scrollOffsetStats}
+        onTerminer={() => {
+          marquerTutorielVu("stats");
+          tiroirsOuvertsPourTutorielRef.current = false;
+          setScrollOffsetStats(0);
+        }}
+        onFermer={() => {
+          marquerTutorielVu("stats");
+          tiroirsOuvertsPourTutorielRef.current = false;
+          setScrollOffsetStats(0);
+        }}
       />
     </View>
   );
@@ -3337,6 +4163,16 @@ const styles = StyleSheet.create({
   },
   modalTitre: { fontSize: 18, fontWeight: "700" },
   modalTermine: { fontSize: 16, fontWeight: "600" },
+  detailFiltreSousTitre: { fontSize: 13, marginTop: 4, marginBottom: 14 },
+  detailFiltreListe: { maxHeight: 340 },
+  detailFiltreLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+  },
+  detailFiltreNom: { flex: 1, fontSize: 14, fontWeight: "600" },
+  detailFiltreMontant: { fontSize: 14, fontWeight: "700" },
   modalCardBadges: {
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
@@ -3517,6 +4353,11 @@ const styles = StyleSheet.create({
   tiroirNom: { flex: 1, fontSize: 14, color: "#1A1A1A", fontWeight: "500" },
   tiroirReset: { padding: 14, alignItems: "center" },
   tiroirResetTexte: { fontSize: 13, color: "#999", fontWeight: "600" },
+  filtreImpactTexte: {
+    fontSize: 12,
+    marginBottom: 10,
+    fontStyle: "italic",
+  },
   tiroirGroupeLabel: {
     fontSize: 11,
     fontWeight: "700",
@@ -3668,6 +4509,7 @@ const styles = StyleSheet.create({
   compareTitle: { fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
   compareDelta: { fontSize: 13, fontWeight: "700" },
   depensePrevuDelta: { fontSize: 12, fontWeight: "600", marginTop: 2 },
+  toggleModeTexte: { fontSize: 12, fontWeight: "700" },
   cbarRow: {
     flexDirection: "row",
     alignItems: "center",

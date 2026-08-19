@@ -246,9 +246,6 @@ function feuilleMatriceCategories(
       .filter((e) => (e.type === "Entrée") === estEntree)
       .forEach((e) => categories.set(e.id, e.nom));
   });
-  const lignesCategories = [...categories.entries()].sort((a, b) =>
-    a[1].localeCompare(b[1]),
-  );
 
   const entetes = [
     "Catégorie",
@@ -258,20 +255,28 @@ function feuilleMatriceCategories(
   ];
   const lignes: (string | number)[][] = [entetes];
 
-  lignesCategories.forEach(([id, nom]) => {
-    const valeurs = envsParMois.map((envs) => {
-      if (!envs) return "";
-      const cat = envs.find((e) => e.id === id);
-      return formaterMontant(cat ? cat.depense : 0);
-    });
-    const valeursNum = valeurs.filter(
-      (v): v is number => typeof v === "number",
-    );
-    const total = valeursNum.reduce((acc, v) => acc + v, 0);
-    const moyenne =
-      valeursNum.length > 0
-        ? Math.round((total / valeursNum.length) * 100) / 100
-        : 0;
+  // Tri décroissant par total période (et non plus alphabétique) — les
+  // catégories qui pèsent le plus dans le budget apparaissent en premier.
+  const lignesCategories = [...categories.entries()]
+    .map(([id, nom]) => {
+      const valeurs = envsParMois.map((envs) => {
+        if (!envs) return "";
+        const cat = envs.find((e) => e.id === id);
+        return formaterMontant(cat ? cat.depense : 0);
+      });
+      const valeursNum = valeurs.filter(
+        (v): v is number => typeof v === "number",
+      );
+      const total = valeursNum.reduce((acc, v) => acc + v, 0);
+      const moyenne =
+        valeursNum.length > 0
+          ? Math.round((total / valeursNum.length) * 100) / 100
+          : 0;
+      return { nom, valeurs, total, moyenne };
+    })
+    .sort((a, b) => b.total - a.total);
+
+  lignesCategories.forEach(({ nom, valeurs, total, moyenne }) => {
     lignes.push([nom, ...valeurs, formaterMontant(total), moyenne]);
   });
 
@@ -282,42 +287,135 @@ function feuilleMatriceCategories(
   return XLSX.utils.aoa_to_sheet(lignes);
 }
 
-function feuilleTransactions(donnees: DonneesExport, periode: PeriodeExport) {
-  const d = new Date();
-  const inclutMoisActuel = listeMois(periode).some(
-    ({ mois, annee }) => mois === d.getMonth() && annee === d.getFullYear(),
-  );
-
+// Une ligne "catégorie" (nom, type, budget prévu, montant dépensé cumulés
+// sur toute la période) suivie d'une ligne par transaction qui la compose
+// (nom, montant, date) — au lieu d'une simple liste plate de transactions.
+// donnees.transactions contient tout l'historique de l'utilisateur (plus
+// aucun tri par mois côté store depuis la correction de l'archivage), donc
+// on peut désormais couvrir TOUTE la période sélectionnée, pas seulement le
+// mois en cours.
+function feuilleTransactionsDetaillees(
+  donnees: DonneesExport,
+  periode: PeriodeExport,
+) {
   const lignes: (string | number)[][] = [
-    ["Date", "Nom", "Catégorie", "Montant (€)"],
+    [
+      "Catégorie",
+      "Type",
+      "Budget prévu (€)",
+      "Montant dépensé (€)",
+      "Transaction",
+      "Montant (€)",
+      "Date",
+    ],
   ];
 
-  if (!inclutMoisActuel) {
-    lignes.push([
-      "Le détail des transactions n'est disponible que pour le mois en cours : les mois archivés ne conservent que des totaux par catégorie.",
-    ]);
+  const mois = listeMois(periode);
+
+  const totauxParCategorie = new Map<
+    string,
+    { nom: string; type: CategorieExport["type"]; budget: number; depense: number }
+  >();
+  mois.forEach(({ mois: m, annee }) => {
+    const envs = categoriesDuMois(donnees, m, annee);
+    if (!envs) return;
+    envs.forEach((e) => {
+      const existant = totauxParCategorie.get(e.id);
+      totauxParCategorie.set(e.id, {
+        nom: e.nom,
+        type: e.type,
+        budget: (existant?.budget ?? 0) + e.budget,
+        depense: (existant?.depense ?? 0) + e.depense,
+      });
+    });
+  });
+
+  const transactionsParCategorie = new Map<string, TransactionExport[]>();
+  donnees.transactions
+    .filter((t) =>
+      mois.some(({ mois: m, annee }) => estDansMois(t.date, m, annee)),
+    )
+    .forEach((t) => {
+      const liste = transactionsParCategorie.get(t.enveloppeId) ?? [];
+      liste.push(t);
+      transactionsParCategorie.set(t.enveloppeId, liste);
+    });
+
+  // Tri décroissant par montant dépensé — la catégorie la plus dépensière
+  // en premier.
+  const categoriesTriees = [...totauxParCategorie.entries()]
+    .map(([id, c]) => ({ id, ...c }))
+    .filter(
+      (c) =>
+        c.depense > 0 || (transactionsParCategorie.get(c.id)?.length ?? 0) > 0,
+    )
+    .sort((a, b) => b.depense - a.depense);
+
+  if (categoriesTriees.length === 0) {
+    lignes.push(["Aucune catégorie active sur cette période."]);
     return XLSX.utils.aoa_to_sheet(lignes);
   }
 
-  const nomParEnveloppeId = new Map(
-    donnees.enveloppes.map((e) => [e.id, e.nom]),
-  );
-  // donnees.transactions contient tout l'historique de l'utilisateur (plus
-  // aucun tri par mois côté store depuis la correction de l'archivage) —
-  // on ne garde ici que le mois en cours, pour préserver le comportement
-  // déjà annoncé par le message ci-dessus ("disponible que pour le mois en
-  // cours").
-  const transactionsTriees = donnees.transactions
-    .filter((t) => estDansMois(t.date, d.getMonth(), d.getFullYear()))
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  transactionsTriees.forEach((t) => {
-    lignes.push([t.date, t.nom, nomParEnveloppeId.get(t.enveloppeId) ?? "—", formaterMontant(t.montant)]);
+  categoriesTriees.forEach((cat) => {
+    lignes.push([
+      cat.nom,
+      cat.type,
+      formaterMontant(cat.budget),
+      formaterMontant(cat.depense),
+      "",
+      "",
+      "",
+    ]);
+    // Date décroissante : la transaction la plus récente en premier.
+    const transactions = (transactionsParCategorie.get(cat.id) ?? []).sort(
+      (a, b) => b.date.localeCompare(a.date),
+    );
+    if (transactions.length === 0) {
+      lignes.push([
+        cat.nom,
+        "",
+        "",
+        "",
+        "Aucune transaction enregistrée sur cette période.",
+        "",
+        "",
+      ]);
+    } else {
+      transactions.forEach((t) => {
+        lignes.push([cat.nom, "", "", "", t.nom, formaterMontant(t.montant), t.date]);
+      });
+    }
   });
 
-  if (transactionsTriees.length === 0) {
-    lignes.push(["Aucune transaction enregistrée ce mois-ci."]);
-  }
+  return XLSX.utils.aoa_to_sheet(lignes);
+}
+
+// Une ligne par (mois, catégorie) — dépenses uniquement, triées par montant
+// décroissant à l'intérieur de chaque mois — pour lire le détail mois par
+// mois plutôt que la vue matricielle de feuilleMatriceCategories.
+function feuilleResumeParMois(donnees: DonneesExport, periode: PeriodeExport) {
+  const lignes: (string | number)[][] = [
+    ["Mois", "Catégorie", "Type", "Montant dépensé (€)"],
+  ];
+
+  listeMois(periode).forEach(({ mois: m, annee }) => {
+    const label = `${MOIS_LABELS[m]} ${annee}`;
+    const envs = categoriesDuMois(donnees, m, annee);
+    if (!envs) {
+      lignes.push([label, "Données non disponibles pour ce mois", "", ""]);
+      return;
+    }
+    const categoriesTriees = envs
+      .filter((e) => e.type !== "Entrée" && e.depense > 0)
+      .sort((a, b) => b.depense - a.depense);
+    if (categoriesTriees.length === 0) {
+      lignes.push([label, "Aucune dépense", "", ""]);
+      return;
+    }
+    categoriesTriees.forEach((cat) => {
+      lignes.push([label, cat.nom, cat.type, formaterMontant(cat.depense)]);
+    });
+  });
 
   return XLSX.utils.aoa_to_sheet(lignes);
 }
@@ -342,9 +440,19 @@ export function genererClasseurExport(
     feuilleMatriceCategories(donnees, periode, true),
     "Entrées par catégorie",
   );
+  // Feuille supplémentaire uniquement quand la période couvre plusieurs
+  // mois — sur un seul mois, elle ferait doublon avec les colonnes uniques
+  // de feuilleMatriceCategories.
+  if (listeMois(periode).length > 1) {
+    XLSX.utils.book_append_sheet(
+      wb,
+      feuilleResumeParMois(donnees, periode),
+      "Résumé par mois",
+    );
+  }
   XLSX.utils.book_append_sheet(
     wb,
-    feuilleTransactions(donnees, periode),
+    feuilleTransactionsDetaillees(donnees, periode),
     "Transactions détaillées",
   );
   return wb;

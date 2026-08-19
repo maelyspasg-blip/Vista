@@ -95,6 +95,13 @@ export default function RootLayout() {
       });
   };
 
+  // RÈGLE À NE JAMAIS CASSER : "Revoir le tutoriel" (profil.tsx) doit
+  // remettre les 4 flags à false À LA FOIS en local (setTutoriel, pour que
+  // l'UI reflète le changement immédiatement, sans attendre un aller-retour
+  // réseau) ET côté Supabase (pour que ça survive à un refresh/reconnexion).
+  // Les deux updates ci-dessous doivent toujours porter sur les 4 mêmes
+  // pages — en ajouter une cinquième (nouvelle page avec tutoriel) sans
+  // l'ajouter ICI AUSSI la laisserait invisible à "Revoir le tutoriel".
   const reinitialiserTutoriel = () => {
     setTutoriel({ apercu: false, budget: false, planning: false, stats: false });
     const userId = dernierUserIdRef.current;

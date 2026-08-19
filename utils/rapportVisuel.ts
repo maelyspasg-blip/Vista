@@ -2,6 +2,7 @@ import {
   categoriesDuMois,
   disponibleDuMois,
   DonneesExport,
+  estDansMois,
   listeMois,
   MOIS_LABELS,
   PeriodeExport,
@@ -15,11 +16,22 @@ import {
 // le rendu visuel, qui en a besoin.
 type CategorieAvecCouleur = { id: string; nom: string; couleur: string };
 
+export type TransactionResumeVisuel = {
+  nom: string;
+  montant: number;
+  date: string;
+};
+
 export type CategorieResumeVisuel = {
   nom: string;
   couleur: string;
   montant: number;
   pourcentage: number;
+  // Uniquement pour les NB_CATEGORIES_AVEC_TRANSACTIONS catégories les plus
+  // dépensières — ses transactions les plus importantes (par montant) sur
+  // la période, jamais des données fictives : directement filtrées depuis
+  // donnees.transactions.
+  transactionsPrincipales?: TransactionResumeVisuel[];
 };
 
 export type ResumeVisuel = {
@@ -31,6 +43,11 @@ export type ResumeVisuel = {
 };
 
 const NB_CATEGORIES_AFFICHEES = 6;
+// Parmi les catégories affichées, seules les NB_CATEGORIES_AVEC_TRANSACTIONS
+// premières (déjà triées par montant décroissant) reçoivent le détail de
+// leurs transactions principales — au-delà, la carte deviendrait illisible.
+const NB_CATEGORIES_AVEC_TRANSACTIONS = 3;
+const NB_TRANSACTIONS_PAR_CATEGORIE = 3;
 const COULEUR_AUTRES = "#A0A8C0";
 
 export function calculerResumeVisuel(
@@ -87,7 +104,8 @@ export function calculerResumeVisuel(
     if (epargne !== undefined) totalEpargne += epargne;
   });
 
-  const categoriesTriees = [...montantParCategorie.values()]
+  const categoriesTriees = [...montantParCategorie.entries()]
+    .map(([id, c]) => ({ id, ...c }))
     .filter((c) => c.montant > 0)
     .sort((a, b) => b.montant - a.montant);
 
@@ -95,11 +113,25 @@ export function calculerResumeVisuel(
   const reste = categoriesTriees.slice(NB_CATEGORIES_AFFICHEES);
   const montantReste = reste.reduce((acc, c) => acc + c.montant, 0);
 
-  const categories: CategorieResumeVisuel[] = principales.map((c) => ({
+  // Toute la période (pas seulement le mois en cours) : donnees.transactions
+  // conserve tout l'historique de l'utilisateur, jamais purgé à l'archivage.
+  const transactionsDansPeriode = donnees.transactions.filter((t) =>
+    mois.some(({ mois: m, annee }) => estDansMois(t.date, m, annee)),
+  );
+
+  const categories: CategorieResumeVisuel[] = principales.map((c, index) => ({
     nom: c.nom,
     couleur: c.couleur,
     montant: c.montant,
     pourcentage: totalDepense > 0 ? (c.montant / totalDepense) * 100 : 0,
+    transactionsPrincipales:
+      index < NB_CATEGORIES_AVEC_TRANSACTIONS
+        ? transactionsDansPeriode
+            .filter((t) => t.enveloppeId === c.id)
+            .sort((a, b) => b.montant - a.montant)
+            .slice(0, NB_TRANSACTIONS_PAR_CATEGORIE)
+            .map((t) => ({ nom: t.nom, montant: t.montant, date: t.date }))
+        : undefined,
   }));
 
   if (montantReste > 0) {

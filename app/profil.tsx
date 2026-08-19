@@ -34,6 +34,11 @@ import { calculerResumeVisuel, libellePeriode } from "../utils/rapportVisuel";
 import { calculerScoreSante, ScoreSante } from "../utils/score";
 import { getInitiales } from "../utils/initiales";
 import { CALCULS_DOC } from "../utils/calculsDoc";
+import {
+  CONDITIONS_GENERALES_UTILISATION,
+  POLITIQUE_CONFIDENTIALITE,
+} from "../utils/documentsLegaux";
+import { ModaleDocumentLegal } from "./ModaleDocumentLegal";
 import { messageErreurAuth } from "./authErrors";
 import { demanderPermissionNotifications } from "./notifications";
 import { AccordionItem } from "./AccordionItem";
@@ -369,6 +374,10 @@ export default function Profil() {
     CALCULS_DOC[0].page,
   );
 
+  const [documentLegalOuvert, setDocumentLegalOuvert] = useState<
+    "confidentialite" | "cgu" | null
+  >(null);
+
   const [modalMotDePasseVisible, setModalMotDePasseVisible] = useState(false);
   const [nouveauMotDePasse, setNouveauMotDePasse] = useState("");
   const [confirmationMotDePasse, setConfirmationMotDePasse] = useState("");
@@ -461,19 +470,59 @@ export default function Profil() {
   const confirmerSuppressionCompte = async () => {
     if (suppressionEnCours) return;
     setSuppressionEnCours(true);
-    const { error } = await supabase.functions.invoke("delete-account");
-    setSuppressionEnCours(false);
 
-    if (error) {
+    try {
+      // TEMPORAIRE — diagnostic "impossible de supprimer" : log le résultat
+      // complet de l'appel (data/error/status), et le corps de la réponse
+      // d'erreur si disponible (error.context est le Response brut pour un
+      // FunctionsHttpError — c'est là que se trouve le message JSON
+      // {error: "..."} réellement renvoyé par la fonction). À retirer une
+      // fois le vrai message d'erreur identifié.
+      const resultat = await supabase.functions.invoke("delete-account");
+      const { data, error } = resultat;
+      console.log("[delete-account] résultat complet :", {
+        data,
+        error,
+        status: (error as { context?: { status?: number } })?.context?.status,
+      });
+      if (
+        error &&
+        (error as { context?: unknown }).context instanceof Response
+      ) {
+        try {
+          const corps = await (
+            error as { context: Response }
+          ).context.clone().text();
+          console.log("[delete-account] corps de la réponse d'erreur :", corps);
+        } catch (e) {
+          console.log("[delete-account] corps de l'erreur illisible :", e);
+        }
+      }
+      if (error) {
+        console.error("Supabase delete-account a échoué :", error);
+        Alert.alert(
+          "Erreur",
+          "Impossible de supprimer le compte pour le moment. Réessaie plus tard.",
+        );
+        return;
+      }
+    } catch (e) {
+      console.error("Appel à delete-account a échoué :", e);
       Alert.alert(
         "Erreur",
         "Impossible de supprimer le compte pour le moment. Réessaie plus tard.",
       );
       return;
+    } finally {
+      setSuppressionEnCours(false);
     }
 
     await supabase.auth.signOut();
     router.replace("/onboarding/connexion");
+    Alert.alert(
+      "Compte supprimé",
+      "Ton compte et toutes tes données ont bien été supprimés.",
+    );
   };
 
   const supprimerCompte = () => {
@@ -814,6 +863,40 @@ export default function Profil() {
             </View>
           </>
         )}
+
+        <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+          LÉGAL
+        </Text>
+        <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.lavande, contrasteRenforce)]}>
+          <TouchableOpacity
+            style={[styles.btnSecondaire, { borderColor: C.separateur }]}
+            onPress={() => setDocumentLegalOuvert("confidentialite")}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={16}
+              color={C.texte}
+            />
+            <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+              Politique de confidentialité
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.btnSecondaire,
+              { borderColor: C.separateur, marginTop: 12 },
+            ]}
+            onPress={() => setDocumentLegalOuvert("cgu")}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="document-text-outline" size={16} color={C.texte} />
+            <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+              Conditions générales d&apos;utilisation
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           COMPTE
@@ -1241,6 +1324,19 @@ export default function Profil() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <ModaleDocumentLegal
+        visible={documentLegalOuvert === "confidentialite"}
+        onClose={() => setDocumentLegalOuvert(null)}
+        titre="Politique de confidentialité"
+        texte={POLITIQUE_CONFIDENTIALITE}
+      />
+      <ModaleDocumentLegal
+        visible={documentLegalOuvert === "cgu"}
+        onClose={() => setDocumentLegalOuvert(null)}
+        titre="Conditions générales d'utilisation"
+        texte={CONDITIONS_GENERALES_UTILISATION}
+      />
     </View>
   );
 }

@@ -28,6 +28,7 @@ import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { usePagerSwipe } from "../PagerSwipeContext";
 import {
+  annulerNotificationsEvenement,
   demanderPermissionNotifications,
   programmerNotificationsEvenement,
 } from "../notifications";
@@ -37,12 +38,8 @@ import { useAccessibilite } from "../AccessibiliteContext";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
-import { CibleTutoriel, RectCible } from "../CibleTutoriel";
-import {
-  CouleursTheme,
-  EtapeTutoriel,
-  TutorielOverlay,
-} from "../TutorielOverlay";
+import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
+import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
 
 type FrequenceEvenement = "jour" | "semaine" | "mois" | "an";
@@ -53,58 +50,6 @@ const HEURE_DEBUT = 0;
 const HAUTEUR_HEURE = 56;
 const ORDRE_VUES = ["jour", "semaine", "mois"] as const;
 
-function maquetteFormulaireEvenement(C: CouleursTheme) {
-  const champs = [
-    { label: "Nom", valeur: "Facture électricité" },
-    { label: "Date", valeur: "28 août" },
-    { label: "Montant", valeur: "65 €" },
-    { label: "Catégorie", valeur: "Factures" },
-  ];
-  return (
-    <View
-      style={{
-        backgroundColor: C.fondSecondaire,
-        borderRadius: 12,
-        padding: 10,
-        gap: 6,
-        marginBottom: 12,
-      }}
-    >
-      {champs.map((champ) => (
-        <View
-          key={champ.label}
-          style={{ flexDirection: "row", justifyContent: "space-between" }}
-        >
-          <Text style={{ fontSize: 11, color: C.texteMuted }}>{champ.label}</Text>
-          <Text style={{ fontSize: 11, fontWeight: "600", color: C.texte }}>
-            {champ.valeur}
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-const ETAPES_PLANNING_BASE: EtapeTutoriel[] = [
-  {
-    id: "grille",
-    texte:
-      "Appuie sur un créneau pour ajouter rapidement un événement ou une dépense à cette heure.",
-  },
-  {
-    texte:
-      "Planifie une dépense à venir — elle se déduira automatiquement de ton budget le jour J, et apparaîtra dans Aperçu comme dépense prévue.",
-    maquette: maquetteFormulaireEvenement,
-  },
-  {
-    id: "vue",
-    texte: "Change de vue — jour, semaine ou mois — selon ce que tu veux voir.",
-  },
-  {
-    id: "evenement",
-    texte: "Appuie sur un événement pour le modifier ou le supprimer.",
-  },
-];
 // Décalage de défilement initial pour ouvrir la grille sur les heures de
 // la journée plutôt qu'à minuit — la grille reste entièrement scrollable
 // vers 0h-8h et 20h-23h59.
@@ -160,7 +105,7 @@ function genererOccurrencesEvenement(
 function formaterDateCourte(date: Date): string {
   const texte = date.toLocaleDateString("fr-FR", {
     day: "numeric",
-    month: "short",
+    month: "long",
     year: "numeric",
   });
   return texte.charAt(0).toUpperCase() + texte.slice(1);
@@ -320,11 +265,11 @@ export default function Planning() {
   const params = useLocalSearchParams<{ editEventId?: string }>();
   const { planning: tutorielPlanningVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
-  const [posCiblesTutoriel, setPosCiblesTutoriel] = useState<
-    Record<string, RectCible>
-  >({});
-  const mesurerCibleTutoriel = (id: string, rect: RectCible) =>
-    setPosCiblesTutoriel((p) => ({ ...p, [id]: rect }));
+  const {
+    positions: posCiblesTutoriel,
+    mesurer: mesurerCibleTutoriel,
+    cleFocus: cleFocusTutoriel,
+  } = useCiblesTutoriel();
   const { setSwipeOngletsActif } = usePagerSwipe();
 
   const [vue, setVue] = useState<"jour" | "semaine" | "mois">("jour");
@@ -604,7 +549,9 @@ export default function Planning() {
     setRecurrentEvent(false);
     setFrequenceEvent("semaine");
     setJourneeEntiereEvent(false);
-    setNotifierEvent(false);
+    // Activé par défaut si les notifications globales le sont — l'utilisateur
+    // reste libre de désactiver pour CET événement précis via le switch.
+    setNotifierEvent(objStore.notificationsActives);
     setEvenementEnEditionId(null);
     setModalCreationVisible(true);
   };
@@ -627,7 +574,7 @@ export default function Planning() {
     setRecurrentEvent(false);
     setFrequenceEvent("semaine");
     setJourneeEntiereEvent(false);
-    setNotifierEvent(false);
+    setNotifierEvent(objStore.notificationsActives);
     setEvenementEnEditionId(null);
     setModalCreationVisible(true);
   };
@@ -918,14 +865,23 @@ export default function Planning() {
   const teinteAujourdhui =
     theme === "sombre" ? "rgba(139,111,232,0.3)" : "#E3DDFB";
 
-  // "evenement" n'est une cible valable que si le jour affiché a au moins un
-  // événement à montrer — sinon l'étape est simplement omise (pas de
-  // placeholder vide) plutôt que de bloquer le tutoriel sur une cible qui
-  // n'existera jamais.
-  const aUnEvenementAujourdhui = evsHorairesJour(dateActuelle).length > 0;
-  const ETAPES_PLANNING = ETAPES_PLANNING_BASE.filter(
-    (e) => e.id !== "evenement" || aUnEvenementAujourdhui,
-  );
+  // "vue" et "grille" sont toutes deux TOUJOURS montées (contrairement à
+  // l'ancienne étape "evenement", retirée : elle dépendait de la présence
+  // d'un événement le jour affiché, un cas absent dès qu'un compte est
+  // fraîchement créé) — le tutoriel Planning fonctionne donc sans exception
+  // dès la première visite, aucun filtrage nécessaire.
+  const ETAPES_PLANNING_ACTIVES: EtapeTutoriel[] = [
+    {
+      id: "vue",
+      texte:
+        "Change de vue selon ce que tu veux voir : ta journée, ta semaine ou ton mois.",
+    },
+    {
+      id: "grille",
+      texte:
+        "Appuie sur un créneau pour créer un événement. Les événements financiers se déduiront automatiquement de ton budget.",
+    },
+  ];
 
   return (
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
@@ -948,7 +904,19 @@ export default function Planning() {
           TouchableOpacity ordinaire ignore gesteSwipeVue (ancien système de
           responder RN) et peut déclencher onPress même après un swipe net —
           exactement le conflit qui a bloqué cette fonctionnalité jusqu'ici. */}
-      <CibleTutoriel id="vue" onMesure={mesurerCibleTutoriel}>
+      {/* RÈGLE À NE JAMAIS CASSER : id="vue" est une cible du tutoriel
+          Planning (étape "Change de vue"). Si ce CibleTutoriel est retiré,
+          déplacé, ou son id changé, sa position n'est plus jamais mesurée
+          (posCiblesTutoriel["vue"] reste undefined) — TutorielOverlay
+          attend cette position pour TOUTES les étapes
+          (ETAPES_PLANNING_ACTIVES.every(...) dans le <TutorielOverlay>
+          plus bas), donc le tutoriel entier de Planning ne s'affiche plus
+          du tout, silencieusement, sans erreur visible. */}
+      <CibleTutoriel
+        id="vue"
+        onMesure={mesurerCibleTutoriel}
+        cleFocus={cleFocusTutoriel}
+      >
         <GestureDetector gesture={gesteSwipeVue}>
           <View style={[styles.tabsRow, { backgroundColor: C.fondSecondaire }]}>
             {(["jour", "semaine", "mois"] as const).map((v) => (
@@ -1053,10 +1021,20 @@ export default function Planning() {
                   pas la zone réellement visible à l'écran — d'où un trou et
                   une bulle complètement mal placés. Mesurer le ScrollView
                   contourne le problème : sa propre boîte ne bouge jamais,
-                  quel que soit le défilement de son contenu interne. */}
+                  quel que soit le défilement de son contenu interne.
+
+                  RÈGLE À NE JAMAIS CASSER : id="grille" est une cible du
+                  tutoriel Planning (étape "Appuie sur un créneau..."). La
+                  retirer, la déplacer, ou changer son id fait que
+                  posCiblesTutoriel["grille"] ne se met plus jamais à jour —
+                  comme "vue", c'est une condition requise par
+                  ETAPES_PLANNING_ACTIVES.every(...) pour que
+                  <TutorielOverlay> devienne visible : le tutoriel entier de
+                  Planning disparaît, silencieusement. */}
               <CibleTutoriel
                 id="grille"
                 onMesure={mesurerCibleTutoriel}
+                cleFocus={cleFocusTutoriel}
                 style={{ flex: 1 }}
               >
               <ScrollView
@@ -1084,79 +1062,50 @@ export default function Planning() {
                       />
                     ))}
                     {calculerPositions(evsHorairesJour(dateActuelle)).map(
-                      ({ ev, top, height, left, width }, index) => {
-                        const carteEvenement = (
-                          <TouchableOpacity
-                            style={[
-                              styles.eventCard,
-                              index === 0
-                                ? { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }
-                                : {
-                                    top,
-                                    height,
-                                    left: left as any,
-                                    width: width as any,
-                                  },
-                              {
-                                backgroundColor: ev.couleur + "22",
-                                borderLeftColor: ev.couleur,
-                              },
-                            ]}
-                            activeOpacity={0.7}
-                            onPress={() => gererClicEvenement(ev)}
-                          >
-                            <View style={styles.eventTopRow}>
-                              <Text
-                                style={[styles.eventTitre, { color: ev.couleur }]}
-                                numberOfLines={1}
-                              >
-                                {ev.nom}
-                              </Text>
-                              {ev.estFinancier && (
-                                <View
-                                  style={[
-                                    styles.badgeFinancier,
-                                    { backgroundColor: ev.couleur },
-                                  ]}
-                                >
-                                  <Text style={styles.badgeFinancierTexte}>
-                                    {formaterMontant(ev.montant ?? 0)}€
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                            <Text style={[styles.eventHeure, { color: C.texteMuted }]}>
-                              {ev.heure}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                        // Le premier événement du jour sert de cible tutoriel :
-                        // c'est CibleTutoriel qui porte alors le positionnement
-                        // absolu (top/left/width/height calculés), pas TapZone
-                        // — TapZone se contente de remplir cette boîte (0/0/0/0).
-                        // Voir CibleTutoriel.tsx : sans ça, TapZone (position
-                        // "relative" par défaut de React Native) deviendrait le
-                        // référentiel de son propre position:absolute et
-                        // casserait le calcul de calculerPositions.
-                        return index === 0 ? (
-                          <CibleTutoriel
-                            key={ev.id}
-                            id="evenement"
-                            onMesure={mesurerCibleTutoriel}
-                            style={{
-                              position: "absolute",
+                      ({ ev, top, height, left, width }) => (
+                        <TouchableOpacity
+                          key={ev.id}
+                          style={[
+                            styles.eventCard,
+                            {
                               top,
                               height,
                               left: left as any,
                               width: width as any,
-                            }}
-                          >
-                            {carteEvenement}
-                          </CibleTutoriel>
-                        ) : (
-                          <View key={ev.id}>{carteEvenement}</View>
-                        );
-                      },
+                            },
+                            {
+                              backgroundColor: ev.couleur + "22",
+                              borderLeftColor: ev.couleur,
+                            },
+                          ]}
+                          activeOpacity={0.7}
+                          onPress={() => gererClicEvenement(ev)}
+                        >
+                          <View style={styles.eventTopRow}>
+                            <Text
+                              style={[styles.eventTitre, { color: ev.couleur }]}
+                              numberOfLines={1}
+                            >
+                              {ev.nom}
+                            </Text>
+                            {ev.estFinancier && (
+                              <View
+                                style={[
+                                  styles.badgeFinancier,
+                                  { backgroundColor: ev.couleur },
+                                ]}
+                              >
+                                <Text style={styles.badgeFinancierTexte}>
+                                  {formaterMontant(ev.montant ?? 0)}€
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                          <Text style={[styles.eventHeure, { color: C.texteMuted }]}>
+                            {ev.heure}
+                          </Text>
+                        </TouchableOpacity>
+                      ),
                     )}
                     {memeJour(dateActuelle, AUJOURDHUI) &&
                       ligneActuelleVisible && (
@@ -2115,22 +2064,36 @@ export default function Planning() {
                     )}
 
                     {!recurrentEvent && (
-                      <View style={styles.switchRow}>
-                        <View>
-                          <Text style={[styles.switchLabel, { color: C.texte }]}>
-                            Me le rappeler
-                          </Text>
-                          <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                            Notification la veille et le jour même à 9h
-                          </Text>
+                      <>
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Notifications
+                        </Text>
+                        <View style={styles.switchRow}>
+                          <View>
+                            <Text style={[styles.switchLabel, { color: C.texte }]}>
+                              Activer les notifications pour cet événement
+                            </Text>
+                            {/* RÈGLE À NE JAMAIS CASSER : ce texte doit rester
+                                synchronisé avec les règles réelles de
+                                app/notifications.ts (programmerNotificationsEvenement)
+                                — c'est une promesse faite à l'utilisateur sur ce
+                                qu'il va recevoir, pas juste une décoration. */}
+                            <Text
+                              style={[styles.switchSub, { color: C.texteMuted }]}
+                            >
+                              {journeeEntiereEvent || multiJoursEvent
+                                ? "Tu seras notifié la veille à 20h et le jour même à 9h"
+                                : "Tu seras notifié 15 min avant et au moment du début"}
+                            </Text>
+                          </View>
+                          <Switch
+                            value={notifierEvent}
+                            onValueChange={setNotifierEvent}
+                            trackColor={{ false: C.separateur, true: C.purpleLight }}
+                            thumbColor={notifierEvent ? C.purple : "#FFF"}
+                          />
                         </View>
-                        <Switch
-                          value={notifierEvent}
-                          onValueChange={setNotifierEvent}
-                          trackColor={{ false: C.separateur, true: C.purpleLight }}
-                          thumbColor={notifierEvent ? C.purple : "#FFF"}
-                        />
-                      </View>
+                      </>
                     )}
 
                     <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
@@ -2203,14 +2166,11 @@ export default function Planning() {
       </Modal>
 
       <TutorielOverlay
-        visible={
-          !tutorielPlanningVu &&
-          ETAPES_PLANNING.length > 0 &&
-          ETAPES_PLANNING.every((e) => !e.id || posCiblesTutoriel[e.id])
-        }
-        etapes={ETAPES_PLANNING}
+        actif={!tutorielPlanningVu}
+        etapes={ETAPES_PLANNING_ACTIVES}
         positions={posCiblesTutoriel}
         onTerminer={() => {
+          console.log("[TUTORIEL] Planning terminé, navigation vers Stats");
           marquerTutorielVu("planning");
           router.push("/(tabs)/analytics");
         }}

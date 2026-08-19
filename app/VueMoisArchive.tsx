@@ -22,7 +22,7 @@ import {
 function formaterDateCourte(dateISO: string): string {
   const d = new Date(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
-  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
 }
 
 export function VueMoisArchive({ mois, annee }: { mois: number; annee: number }) {
