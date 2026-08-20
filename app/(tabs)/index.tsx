@@ -2,8 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { getInitiales } from "../../utils/initiales";
-import { moisPrecedent, totalParType } from "../../utils/exportExcel";
-import { entreesBudgetDuMois, estCategorieActiveCeMois } from "../../utils/budget";
+import { calculerResteEstimeArchive, moisPrecedent } from "../../utils/exportExcel";
+import {
+  calculerResteEstimeCourant,
+  entreesBudgetDuMois,
+  estCategorieActiveCeMois,
+} from "../../utils/budget";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -37,14 +41,18 @@ import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { Enveloppe, Objectif, useObjectifs } from "../store";
 import {
   chargerEtatsInsights,
+  chargerNbAmeliorations,
   Conseil,
   EtatInsight,
   EtatsInsightsMap,
   genererConseils,
   LIBELLES_ETAT_INSIGHT,
   sauvegarderEtatsInsights,
+  sauvegarderNbAmeliorations,
 } from "../../utils/conseils";
 import { supabase } from "../../supabaseClient";
+import { usePremium } from "../PremiumContext";
+import { estComptePremium } from "../../utils/premium";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
@@ -248,6 +256,7 @@ const ACCESSORY_ID = "numericDone";
 
 export default function Dashboard() {
   const objStore = useObjectifs();
+  const { estPremium, simulerNonPremium } = usePremium();
   const { theme, couleurs, toggleTheme } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const C = couleurs;
@@ -267,15 +276,20 @@ export default function Dashboard() {
   // lectures/écritures concurrentes sur la même clé.
   const [etatsInsights, setEtatsInsights] = useState<EtatsInsightsMap>({});
   const [userIdInsights, setUserIdInsights] = useState<string | null>(null);
+  const [nbAmeliorations, setNbAmeliorations] = useState(0);
   const derniersEtatsSauvegardesRef = useRef<string>("{}");
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
       const userId = data.user?.id;
       if (!userId) return;
-      const etats = await chargerEtatsInsights(userId);
+      const [etats, ameliorations] = await Promise.all([
+        chargerEtatsInsights(userId),
+        chargerNbAmeliorations(userId),
+      ]);
       derniersEtatsSauvegardesRef.current = JSON.stringify(etats);
       setEtatsInsights(etats);
+      setNbAmeliorations(ameliorations);
       setUserIdInsights(userId);
     })();
   }, []);
@@ -464,10 +478,6 @@ export default function Dashboard() {
   const enveloppesActivesSansEntree = enveloppesTriees.filter(
     (e) => e.type !== "Entrée",
   );
-  const totalDepenseEnveloppes = enveloppesActivesSansEntree.reduce(
-    (acc, e) => acc + e.depense,
-    0,
-  );
   const budgetMois = entreesBudgetDuMois(
     enveloppes,
     maintenant.getFullYear(),
@@ -494,22 +504,6 @@ export default function Dashboard() {
     })
     .reduce((acc, e) => acc + (e.montant ?? 0), 0);
 
-  const disponibleEffectif = budgetMois.total;
-  // Montant encore budgété mais non dépensé dans chaque catégorie de
-  // dépense — le "forecast" restant. Avec totalDepenseEnveloppes, couvre le
-  // budget complet de chaque catégorie (dépensé + à venir), sans jamais
-  // sous-compter un dépassement : une catégorie déjà en dépassement (depense
-  // > budget) contribue 0 ici, mais son dépassement réel reste compté dans
-  // totalDepenseEnveloppes.
-  // ⚠️ Doit toujours produire le segment "Dépense prévue" (hachures oranges)
-  // sur la jauge "Reste estimé" ci-dessous dès que ce total est > 0 — voir
-  // `{totalDepensePrevue > 0 && <SegmentHachure ...>}` plus bas (x2 : barre +
-  // légende). Si le segment semble manquer alors que ce total est bien > 0,
-  // le bug est côté rendu SVG natif (cf. SegmentHachure.tsx), pas ici.
-  const totalDepensePrevue = enveloppesActivesSansEntree.reduce(
-    (acc, e) => acc + Math.max(0, e.budget - e.depense),
-    0,
-  );
   // "Reste estimé en fin de mois" : une vraie projection de fin de mois —
   // Budget (disponible saisi + entrées reçues + entrées encore attendues)
   // moins tout ce qui est prévu d'être dépensé ce mois-ci (déjà dépensé +
@@ -518,11 +512,23 @@ export default function Dashboard() {
   // montant reporté au mois suivant via "Reporter le reste non dépensé au
   // mois prochain" (qui ne reporte que les flux déjà réalisés, voir
   // archiverMoisActuelInterne dans store.ts) — voir "Détail des calculs".
-  const resteEstime =
-    disponibleEffectif -
-    totalDepenseEnveloppes -
-    totalDepensePrevue -
-    objStore.epargneMois;
+  // ⚠️ Doit toujours produire le segment "Dépense prévue" (hachures oranges)
+  // sur la jauge "Reste estimé" ci-dessous dès que totalDepensePrevue est >
+  // 0 — voir `{totalDepensePrevue > 0 && <SegmentHachure ...>}` plus bas (x2
+  // : barre + légende). Si le segment semble manquer alors que ce total est
+  // bien > 0, le bug est côté rendu SVG natif (cf. SegmentHachure.tsx), pas
+  // ici.
+  // RÈGLE À NE JAMAIS CASSER : SEULE source de ces 4 valeurs — ne jamais
+  // recalculer resteEstime/disponibleEffectif/totalDepenseEnveloppes/
+  // totalDepensePrevue localement ailleurs (ex. le bloc coach de Stats,
+  // app/(tabs)/analytics.tsx) ; toujours appeler calculerResteEstimeCourant.
+  const { disponibleEffectif, totalDepenseEnveloppes, totalDepensePrevue, resteEstime } =
+    calculerResteEstimeCourant(
+      enveloppes,
+      objStore.epargneMois,
+      maintenant.getFullYear(),
+      maintenant.getMonth(),
+    );
   const pctDepenseEstime =
     disponibleEffectif > 0
       ? Math.min((totalDepenseEnveloppes / disponibleEffectif) * 100, 100)
@@ -552,19 +558,11 @@ export default function Dashboard() {
   const snapshotMoisPrecedent = objStore.historiquesMois.find(
     (s) => s.mois === moisPrec && s.annee === anneePrec,
   );
-  // Même logique "Dépensé + Prévues" que ci-dessus, rejouée sur le snapshot
-  // du mois précédent pour une comparaison à formule identique.
-  const totalPrevuPrecedent = snapshotMoisPrecedent
-    ? snapshotMoisPrecedent.enveloppes
-        .filter((e) => e.type !== "Entrée")
-        .reduce((acc, e) => acc + Math.max(0, e.budget - e.depense), 0)
-    : 0;
+  // RÈGLE À NE JAMAIS CASSER : SEULE source du "Reste estimé" d'un mois déjà
+  // archivé — ne jamais reconstruire cette formule localement (voir
+  // utils/exportExcel.ts::calculerResteEstimeArchive).
   const resteEstimePrecedent = snapshotMoisPrecedent
-    ? snapshotMoisPrecedent.disponible +
-      totalParType(snapshotMoisPrecedent.enveloppes, true) -
-      totalParType(snapshotMoisPrecedent.enveloppes, false) -
-      totalPrevuPrecedent -
-      snapshotMoisPrecedent.epargne
+    ? calculerResteEstimeArchive(snapshotMoisPrecedent)
     : null;
   const deltaReste =
     resteEstimePrecedent !== null ? resteEstime - resteEstimePrecedent : null;
@@ -648,7 +646,7 @@ export default function Dashboard() {
   // construction de "Ce qu'il faut retenir" (Stats), qui analyse la période
   // sélectionnée plutôt que le mois en cours. Voir utils/conseils.ts pour la
   // liste des règles et leur ordre de priorité.
-  const { conseils, etatsAJour } = genererConseils({
+  const { conseils, etatsAJour, nouvellesResolutions } = genererConseils({
     enveloppes: objStore.enveloppes,
     objectifs: objStore.objectifs,
     historiquesMois: objStore.historiquesMois,
@@ -674,13 +672,16 @@ export default function Dashboard() {
     derniersEtatsSauvegardesRef.current = serialise;
     setEtatsInsights(etatsAJour);
     sauvegarderEtatsInsights(userIdInsights, etatsAJour);
-  }, [etatsAJour, userIdInsights]);
-  // RÈGLE À NE JAMAIS CASSER : isAdmin voit toujours tous les conseils sans
-  // pub — il n'existe pas encore de compte Premium dans l'app (pas de
-  // colonne Supabase, pas de flag), donc pas de bypass Premium ici pour
-  // l'instant. Le jour où Premium existera réellement, l'ajouter à cette
-  // même condition.
-  const conseilsTousVisibles = objStore.isAdmin || conseilsDebloques;
+    if (nouvellesResolutions > 0) {
+      const total = nbAmeliorations + nouvellesResolutions;
+      setNbAmeliorations(total);
+      sauvegarderNbAmeliorations(userIdInsights, total);
+    }
+  }, [etatsAJour, userIdInsights, nouvellesResolutions, nbAmeliorations]);
+  // RÈGLE À NE JAMAIS CASSER : premium (isAdmin ou estPremium, cf.
+  // estComptePremium) voit toujours tous les conseils sans pub.
+  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium);
+  const conseilsTousVisibles = premium || conseilsDebloques;
 
   const ouvrirEditionEnveloppe = (env: Enveloppe) => {
     setEnveloppeEnEdition(env);
@@ -1146,7 +1147,26 @@ export default function Dashboard() {
               />
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.avatar, { backgroundColor: C.hero }]}
+              style={[
+                styles.avatar,
+                { backgroundColor: C.hero },
+                // RÈGLE À NE JAMAIS CASSER : la visibilité de l'anneau suit
+                // TOUJOURS `premium` (estComptePremium), jamais isAdmin/
+                // estPremium directement — sinon simulerNonPremium ne
+                // masque rien. La COULEUR distingue ensuite deux cas :
+                // admin "par défaut" (isAdmin vrai, "Simuler Premium" PAS
+                // actif) → anneau admin lavande ; toute autre situation
+                // premium (admin avec "Simuler Premium" actif, ou vrai
+                // compte Premium non-admin) → anneau doré. Avant ce
+                // correctif, la branche isAdmin passait en premier
+                // inconditionnellement et cachait le doré même quand
+                // l'admin activait "Simuler Premium".
+                premium
+                  ? objStore.isAdmin && !estPremium
+                    ? { borderWidth: 2.5, borderColor: "#7C6FAD" }
+                    : { borderWidth: 2, borderColor: "#C9A84C" }
+                  : null,
+              ]}
               onPress={() => router.push("/profil")}
               activeOpacity={0.7}
             >
@@ -1431,7 +1451,6 @@ export default function Dashboard() {
               <InsightVerrouille
                 deverrouille={conseilsTousVisibles}
                 onDeverrouille={() => setConseilsDebloques(true)}
-                couleurFond={C.fondSecondaire}
               >
                 {conseils.slice(1).map((conseil, i) => ligneConseil(conseil, i + 1, C))}
               </InsightVerrouille>

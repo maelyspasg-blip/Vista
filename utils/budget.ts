@@ -104,3 +104,44 @@ export function estCategorieActiveCeMois(
   if (estPermanente) return true;
   return moisComptageEffectif(env) === moisISO;
 }
+
+export type ResteEstimeCourant = {
+  disponibleEffectif: number;
+  totalDepenseEnveloppes: number;
+  totalDepensePrevue: number;
+  resteEstime: number;
+};
+
+// RÈGLE À NE JAMAIS CASSER : SEULE source du "Reste estimé en fin de mois"
+// du mois en cours — Aperçu (app/(tabs)/index.tsx) et le bloc coach de
+// Stats ("Ce que Vista a remarqué"/"Ta prochaine décision",
+// app/(tabs)/analytics.tsx) doivent TOUS LES DEUX appeler cette fonction,
+// jamais reconstruire la formule indépendamment. Deux copies de la même
+// formule finissent toujours par diverger silencieusement au premier
+// changement fait dans une seule des deux — c'est exactement ce qui
+// produisait des chiffres incohérents entre Aperçu et les conseils de
+// Stats. Même filtre que "Tes catégories" (estCategorieActiveCeMois) :
+// une catégorie ponctuelle d'un autre mois ne doit compter ni dans les
+// totaux financiers, ni fausser "Reste estimé".
+export function calculerResteEstimeCourant(
+  enveloppes: Enveloppe[],
+  epargneMois: number,
+  annee: number,
+  mois: number,
+): ResteEstimeCourant {
+  const enveloppesActivesSansEntree = enveloppes.filter(
+    (e) => e.type !== "Entrée" && estCategorieActiveCeMois(e, annee, mois),
+  );
+  const totalDepenseEnveloppes = enveloppesActivesSansEntree.reduce(
+    (acc, e) => acc + e.depense,
+    0,
+  );
+  const totalDepensePrevue = enveloppesActivesSansEntree.reduce(
+    (acc, e) => acc + Math.max(0, e.budget - e.depense),
+    0,
+  );
+  const disponibleEffectif = entreesBudgetDuMois(enveloppes, annee, mois).total;
+  const resteEstime =
+    disponibleEffectif - totalDepenseEnveloppes - totalDepensePrevue - epargneMois;
+  return { disponibleEffectif, totalDepenseEnveloppes, totalDepensePrevue, resteEstime };
+}

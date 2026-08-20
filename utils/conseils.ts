@@ -1,3 +1,17 @@
+// RÈGLE À NE JAMAIS CASSER : tous les chiffres affichés dans un conseil
+// (reste estimé, montant/pourcentage dépensé d'une catégorie, budget
+// prévu, moyenne historique, rythme d'objectif...) doivent venir des
+// paramètres reçus en entrée de genererConseils — enveloppe.depense /
+// enveloppe.budget depuis le store, resteEstime/disponibleEffectif passés
+// en paramètre depuis app/(tabs)/index.tsx (voir
+// utils/budget.ts::calculerResteEstimeCourant, la seule source), historique
+// depuis historiquesMois uniquement. Jamais recalculés localement ici avec
+// une formule dupliquée — une seule formule qui diverge en silence est
+// exactement ce qui produit des chiffres incohérents entre Aperçu, Stats et
+// les conseils. validerConseil (plus bas) est le filet de sécurité qui
+// retire silencieusement un conseil si cette règle est violée par erreur —
+// mais elle ne remplace pas la discipline : ne recalculez rien ici,
+// utilisez ce qui est passé en paramètre.
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   Enveloppe,
@@ -8,6 +22,7 @@ import {
   Transaction,
 } from "../app/store";
 import { depenseCumuleeAuJour, joursDansMois, MOIS_LABELS, moisPrecedent } from "./exportExcel";
+import { estCategorieActiveCeMois } from "./budget";
 
 export type NiveauConseil = "bon" | "attention" | "alerte";
 
@@ -45,6 +60,16 @@ export type Conseil = {
   // null uniquement pour les 2 replis "tout va bien" / "données
   // insuffisantes" — ce ne sont pas des situations suivies dans le temps.
   etat: EtatInsight | null;
+  // Renseigné uniquement pour les situations qui portent sur UNE catégorie
+  // précise (budget/tendance/dépense inhabituelle/récurrente/nouvelle
+  // catégorie) — permet à un bouton "Simuler" de présélectionner
+  // directement la bonne catégorie dans l'onglet Simulateur de "Ton bilan"
+  // sans avoir à reparser le texte du conseil.
+  categorieId?: string;
+  // Même principe que categorieId, pour les situations qui portent sur UN
+  // objectif précis — utilisé par validerConseil pour vérifier que
+  // l'objectif mentionné existe toujours (cf. RÈGLE en tête de fichier).
+  objectifId?: string;
 };
 
 export type EtatInsightPersiste = {
@@ -120,18 +145,26 @@ export function trouverDepenseDominante(
 // d'historique.
 const NB_MOIS_MOYENNE_RYTHME = 3;
 
-export function calculerRythmeObjectif(
-  obj: Objectif,
-  historiquesMois: SnapshotMois[],
-  snapshotMoisPrecedent: SnapshotMois | undefined,
-): {
+export type RythmeObjectif = {
   pct: number;
   delta: number | null;
   moisRestants: number | null;
   rythmeInsuffisant: boolean;
   rythmeMensuel: number;
   objectifAtteint: boolean;
-} {
+};
+
+// Objectif actif accompagné de son rythme — c'est CETTE forme que
+// validerConseil attend dans params.objectifsAvecRythme (cf. RÈGLE en tête
+// de fichier) : ne jamais valider un conseil contre `objectifs` brut, qui
+// contient aussi les objectifs fermés/inactifs.
+export type ObjectifAvecRythme = { objectif: Objectif; rythme: RythmeObjectif };
+
+export function calculerRythmeObjectif(
+  obj: Objectif,
+  historiquesMois: SnapshotMois[],
+  snapshotMoisPrecedent: SnapshotMois | undefined,
+): RythmeObjectif {
   const pct = obj.cible > 0 ? Math.min((obj.actuel / obj.cible) * 100, 100) : 0;
   const objPrecedent = snapshotMoisPrecedent?.objectifs.find(
     (o) => o.id === obj.id,
@@ -204,6 +237,34 @@ export async function sauvegarderEtatsInsights(
   }
 }
 
+// Compteur cumulatif du nombre de situations passées par RESOLU/STABLE au
+// moins une fois — alimente les trophées "Insight en action"/"Discipline
+// douce" (utils/trophees.ts). Contrairement à EtatsInsightsMap (qui purge
+// les entrées résolues, cf. RÈGLE #3 plus bas), ce compteur ne fait
+// qu'augmenter : c'est un historique de "combien de fois", pas un état
+// courant.
+const PREFIXE_CLE_AMELIORATIONS = "vista_ameliorations_count_";
+
+export async function chargerNbAmeliorations(userId: string): Promise<number> {
+  try {
+    const brut = await AsyncStorage.getItem(`${PREFIXE_CLE_AMELIORATIONS}${userId}`);
+    return brut ? Number(brut) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function sauvegarderNbAmeliorations(
+  userId: string,
+  total: number,
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(`${PREFIXE_CLE_AMELIORATIONS}${userId}`, String(total));
+  } catch {
+    // Best-effort, même logique que sauvegarderEtatsInsights ci-dessus.
+  }
+}
+
 // --- Moteur de coaching "Nos conseils" (Aperçu) ----------------------------
 //
 // RÈGLE À NE JAMAIS CASSER — à lire avant de toucher à ce qui suit :
@@ -263,6 +324,18 @@ type SituationDetectee = {
   etat: EtatInsight | null;
   texteParEtat: (etat: EtatInsight) => string;
   niveauConseil: (etat: EtatInsight) => NiveauConseil;
+  // Voir Conseil.categorieId/objectifId — propagés tels quels jusqu'au
+  // Conseil final.
+  categorieId?: string;
+  objectifId?: string;
+  // Champs "témoins" utilisés uniquement par validerConseil (jamais exposés
+  // sur le Conseil final) : la valeur exacte de resteEstime affichée dans le
+  // texte de cette situation (uniquement pour les familles qui l'affichent
+  // littéralement), et les pourcentages affichés. Comme ce sont les mêmes
+  // variables que celles passées à texteParEtat (pas une resaisie), une
+  // divergence ne peut apparaître qu'en cas de vraie régression de calcul.
+  resteEstimeAffiche?: number;
+  pourcentagesAffiches?: number[];
 };
 
 function journeeISO(date: Date): string {
@@ -386,13 +459,23 @@ function ajouterSituationSuivie(
     aujourdHui: string;
     texteParEtat: (etat: EtatInsight) => string;
     niveauConseil?: (etat: EtatInsight) => NiveauConseil;
+    categorieId?: string;
+    objectifId?: string;
+    resteEstimeAffiche?: number;
+    pourcentagesAffiches?: number[];
+    // Muté (compteur.count++) chaque fois qu'une situation atteint
+    // RESOLU/STABLE pour la première fois — alimente le trophée "Insight en
+    // action"/"Discipline douce" (utils/trophees.ts). Optionnel : les
+    // appelants qui ne suivent pas ce compteur peuvent l'omettre.
+    compteurResolutions?: { count: number };
   },
 ): void {
+  const etatPrecedentAvant = args.etatsPrecedents[args.situationId];
   const resultat = determinerEtatInsight(
     args.estActive,
     args.valeurGravite,
     args.vocabulaire,
-    args.etatsPrecedents[args.situationId],
+    etatPrecedentAvant,
     args.situationId,
     args.aujourdHui,
   );
@@ -401,12 +484,24 @@ function ajouterSituationSuivie(
     return;
   }
   etatsAJour[args.situationId] = resultat;
+
+  const etaitDejaResolu =
+    etatPrecedentAvant?.etat === "RESOLU" || etatPrecedentAvant?.etat === "STABLE";
+  const estMaintenantResolu = resultat.etat === "RESOLU" || resultat.etat === "STABLE";
+  if (estMaintenantResolu && !etaitDejaResolu && args.compteurResolutions) {
+    args.compteurResolutions.count += 1;
+  }
+
   situations.push({
     cle: args.situationId,
     priorite: args.priorite,
     etat: resultat.etat,
     texteParEtat: args.texteParEtat,
     niveauConseil: args.niveauConseil ?? niveauConseilParDefaut,
+    categorieId: args.categorieId,
+    objectifId: args.objectifId,
+    resteEstimeAffiche: args.resteEstimeAffiche,
+    pourcentagesAffiches: args.pourcentagesAffiches,
   });
 }
 
@@ -425,6 +520,10 @@ function ajouterSituationPonctuelle(
     aujourdHui: string;
     texte: string;
     niveauConseil?: NiveauConseil;
+    categorieId?: string;
+    objectifId?: string;
+    resteEstimeAffiche?: number;
+    pourcentagesAffiches?: number[];
   },
 ): void {
   if (!args.estActive) {
@@ -447,6 +546,10 @@ function ajouterSituationPonctuelle(
     etat: resultat.etat,
     texteParEtat: () => args.texte,
     niveauConseil: () => args.niveauConseil ?? "bon",
+    categorieId: args.categorieId,
+    objectifId: args.objectifId,
+    resteEstimeAffiche: args.resteEstimeAffiche,
+    pourcentagesAffiches: args.pourcentagesAffiches,
   });
 }
 
@@ -603,7 +706,12 @@ function detecterSituations(
     anneeActuelle: number;
   },
   etatsPrecedents: EtatsInsightsMap,
-): { situations: SituationDetectee[]; etatsAJour: EtatsInsightsMap } {
+): {
+  situations: SituationDetectee[];
+  etatsAJour: EtatsInsightsMap;
+  nouvellesResolutions: number;
+  objectifsAvecRythme: ObjectifAvecRythme[];
+} {
   const {
     enveloppes,
     objectifs,
@@ -643,6 +751,9 @@ function detecterSituations(
   const categoriesDejaCitees = new Set<string>();
   const objectifsDejaCites = new Set<string>();
   const situations: SituationDetectee[] = [];
+  // Compte les transitions RESOLU/STABLE de ce rendu — alimente les
+  // trophées "Insight en action"/"Discipline douce" (utils/trophees.ts).
+  const compteurResolutions = { count: 0 };
 
   const snapshotEnv = (
     snap: SnapshotMois,
@@ -680,6 +791,9 @@ function detecterSituations(
       aujourdHui,
       texteParEtat: (etat) =>
         texteBudgetCategorie(e, jourActuel, joursRestantsDansMois, moisActuel, anneeActuelle, etat),
+      categorieId: e.id,
+      pourcentagesAffiches: [Math.round(ratio * 100)],
+      compteurResolutions,
     });
   }
 
@@ -693,6 +807,8 @@ function detecterSituations(
     etatsPrecedents,
     aujourdHui,
     texteParEtat: (etat) => texteDeficitGlobal(resteEstime, joursRestantsDansMois, etat),
+    resteEstimeAffiche: resteEstime,
+    compteurResolutions,
   });
 
   // === Objectifs : trajectoire dégradée (arc complet) =========================
@@ -720,6 +836,8 @@ function detecterSituations(
       etatsPrecedents,
       aujourdHui,
       texteParEtat: (etat) => texteObjectifTrajectoire(objectif, etat),
+      objectifId: objectif.id,
+      compteurResolutions,
     });
   }
 
@@ -807,6 +925,9 @@ function detecterSituations(
       etatsPrecedents,
       aujourdHui,
       texteParEtat: (etat) => texteTendanceCategorie(e, pctProjete, etat),
+      categorieId: e.id,
+      pourcentagesAffiches: [Math.round(Math.max(0, pctProjete))],
+      compteurResolutions,
     });
   }
 
@@ -830,6 +951,7 @@ function detecterSituations(
         etatsPrecedents,
         aujourdHui,
         texte: `Vos dépenses ${candidatBaisse.e.nom} ont baissé de ${Math.round(candidatBaisse.pct * 100)}% par rapport à ${MOIS_LABELS[moisPrec]}, soit environ ${Math.round(candidatBaisse.delta)}€ économisés ce mois-ci.`,
+        categorieId: candidatBaisse.e.id,
       });
     }
   }
@@ -863,6 +985,7 @@ function detecterSituations(
       aujourdHui,
       texte: `${candidatSpike.e.nom} est nettement plus élevé ce mois-ci (${Math.round(candidatSpike.e.depense)}€ vs ${Math.round(candidatSpike.moyenne)}€ en moyenne sur ${NB_MOIS_MOYENNE_CATEGORIE} mois). Si c'est une dépense exceptionnelle, rien à faire — sinon, c'est un poste à surveiller le mois prochain.`,
       niveauConseil: "attention",
+      categorieId: candidatSpike.e.id,
     });
   }
 
@@ -893,6 +1016,7 @@ function detecterSituations(
       etatsPrecedents,
       aujourdHui,
       texte: `${candidatRecurrente.e.nom} revient à un montant très stable depuis ${candidatRecurrente.montants.length} mois (environ ${moyenne}€). Vous pourriez la marquer comme récurrente pour un suivi plus précis.`,
+      categorieId: candidatRecurrente.e.id,
     });
   }
 
@@ -913,6 +1037,7 @@ function detecterSituations(
       etatsPrecedents,
       aujourdHui,
       texte: `${candidatNouvelle.nom} est une nouvelle catégorie ce mois-ci, avec déjà ${Math.round(candidatNouvelle.depense)}€ dépensés. Elle sera intégrée à vos comparaisons dès le mois prochain.`,
+      categorieId: candidatNouvelle.id,
     });
   }
 
@@ -932,6 +1057,7 @@ function detecterSituations(
       etatsPrecedents,
       aujourdHui,
       texte: `Objectif atteint : ${objectif.nom} est à ${Math.round(objectif.actuel)}€ sur ${Math.round(objectif.cible)}€. Vous pourriez définir un nouvel objectif pour donner une direction à vos prochaines économies.`,
+      objectifId: objectif.id,
     });
   }
 
@@ -956,6 +1082,7 @@ function detecterSituations(
         etatsPrecedents,
         aujourdHui,
         texte: `La cible de ${objectif.nom} a été ${sens} (${Math.round(precedent.cible)}€ → ${Math.round(objectif.cible)}€). Nouvelle trajectoire recalculée${trajectoire}.`,
+        objectifId: objectif.id,
       });
     }
   }
@@ -980,6 +1107,8 @@ function detecterSituations(
       etatsPrecedents,
       aujourdHui,
       texte: `${objectif.nom} est à ${Math.round(rythme.pct)}% de sa cible — il ne manque que ${Math.round(objectif.cible - objectif.actuel)}€ pour l'atteindre.`,
+      objectifId: objectif.id,
+      pourcentagesAffiches: [Math.round(rythme.pct)],
     });
   }
 
@@ -1005,6 +1134,8 @@ function detecterSituations(
       etatsPrecedents,
       aujourdHui,
       texte: `Vous avez ${Math.round(resteEstime)}€ de marge ce mois-ci. Un versement de ${montant}€ sur ${objectif.nom} l'amènerait à ${nouveauPct}% de la cible.`,
+      objectifId: objectif.id,
+      resteEstimeAffiche: resteEstime,
     });
   }
 
@@ -1037,6 +1168,8 @@ function detecterSituations(
       aujourdHui,
       texteParEtat: (etat) => texteMargeEvolution(resteEstime, resteEstimePrecedent, moisPrec, etat),
       niveauConseil: (etat) => (etat === "CONFIRME" ? "alerte" : niveauConseilParDefaut(etat)),
+      resteEstimeAffiche: resteEstime,
+      compteurResolutions,
     });
   }
 
@@ -1066,6 +1199,7 @@ function detecterSituations(
         etatsPrecedents,
         aujourdHui,
         texteParEtat: (etat) => texteComportementDegradation(NB_MOIS_MOYENNE_CATEGORIE, etat),
+        compteurResolutions,
       });
       if (!enDegradation) {
         const dernierMois = derniersMoisArchives[derniersMoisArchives.length - 1];
@@ -1141,6 +1275,7 @@ function detecterSituations(
       etatsPrecedents,
       aujourdHui,
       texte: `Si vous continuez à ce rythme, vous devriez terminer le mois avec environ ${Math.round(resteEstime)}€ de marge — soit ${Math.round(allocationJour)}€/jour disponibles jusqu'à la fin du mois.${comparaison}`,
+      resteEstimeAffiche: resteEstime,
     });
   }
 
@@ -1176,7 +1311,94 @@ function detecterSituations(
     if (etatsAJour[id].dateDerniereMiseAJour < seuilOubliISO) delete etatsAJour[id];
   });
 
-  return { situations, etatsAJour };
+  return {
+    situations,
+    etatsAJour,
+    nouvellesResolutions: compteurResolutions.count,
+    objectifsAvecRythme,
+  };
+}
+
+// --- Garde-fou anti-incohérence -------------------------------------------
+//
+// RÈGLE À NE JAMAIS CASSER : validerConseil est le dernier filet avant
+// affichage. Un conseil ne doit JAMAIS montrer à l'utilisateur un chiffre
+// qui ne correspond plus à la réalité (catégorie supprimée/expirée entre la
+// détection et l'affichage, objectif clôturé, pourcentage aberrant issu
+// d'une régression de calcul...). En cas de doute, on retire silencieusement
+// le conseil plutôt que de risquer d'afficher une incohérence — jamais de
+// crash, jamais d'exception qui remonte à l'appelant.
+
+type ConseilValidable = {
+  categorieId?: string;
+  objectifId?: string;
+  resteEstimeMentionne?: number;
+  pourcentages?: number[];
+};
+
+export type ParamsValidationConseil = {
+  resteEstime: number;
+  enveloppes: Enveloppe[];
+  objectifsAvecRythme: ObjectifAvecRythme[];
+  moisActuel: number;
+  anneeActuelle: number;
+};
+
+export function validerConseil(
+  conseil: ConseilValidable,
+  params: ParamsValidationConseil,
+): boolean {
+  try {
+    if (conseil.categorieId !== undefined) {
+      const enveloppe = params.enveloppes.find((e) => e.id === conseil.categorieId);
+      if (!enveloppe || !estCategorieActiveCeMois(enveloppe, params.anneeActuelle, params.moisActuel)) {
+        console.warn(
+          `[conseils] Conseil retiré : catégorie "${conseil.categorieId}" inactive ou introuvable ce mois-ci.`,
+        );
+        return false;
+      }
+    }
+
+    if (conseil.objectifId !== undefined) {
+      const existe = params.objectifsAvecRythme.some((o) => o.objectif.id === conseil.objectifId);
+      if (!existe) {
+        console.warn(
+          `[conseils] Conseil retiré : objectif "${conseil.objectifId}" introuvable dans objectifsAvecRythme.`,
+        );
+        return false;
+      }
+    }
+
+    if (conseil.resteEstimeMentionne !== undefined) {
+      if (!Number.isFinite(conseil.resteEstimeMentionne) || !Number.isFinite(params.resteEstime)) {
+        console.warn("[conseils] Conseil retiré : reste estimé non numérique (division par zéro suspectée).");
+        return false;
+      }
+      if (Math.abs(conseil.resteEstimeMentionne - params.resteEstime) > 5) {
+        console.warn(
+          `[conseils] Conseil retiré : reste estimé incohérent (${conseil.resteEstimeMentionne}€ affiché vs ${params.resteEstime}€ attendu).`,
+        );
+        return false;
+      }
+    }
+
+    if (conseil.pourcentages) {
+      const invalide = conseil.pourcentages.some(
+        (p) => !Number.isFinite(p) || p < 0 || p > 300,
+      );
+      if (invalide) {
+        console.warn(
+          `[conseils] Conseil retiré : pourcentage hors plage 0-300% (${JSON.stringify(conseil.pourcentages)}).`,
+        );
+        return false;
+      }
+    }
+
+    return true;
+  } catch (err) {
+    console.warn("[conseils] validerConseil a levé une exception, conseil retiré par sécurité.", err);
+    return false;
+  }
 }
 
 // Orchestre detecterSituations → genererTexteConseil, applique l'ordre de
@@ -1199,10 +1421,13 @@ export function genererConseils(params: {
   anneeActuelle: number;
   maxConseils?: number;
   etatsPrecedents: EtatsInsightsMap;
-}): { conseils: Conseil[]; etatsAJour: EtatsInsightsMap } {
+}): { conseils: Conseil[]; etatsAJour: EtatsInsightsMap; nouvellesResolutions: number } {
   const { maxConseils = 3, etatsPrecedents } = params;
 
-  const { situations, etatsAJour } = detecterSituations(params, etatsPrecedents);
+  const { situations, etatsAJour, nouvellesResolutions, objectifsAvecRythme } = detecterSituations(
+    params,
+    etatsPrecedents,
+  );
 
   const prioriteScore: Record<PrioriteSituation, number> = {
     critique: 0,
@@ -1218,7 +1443,24 @@ export function genererConseils(params: {
       clesVues.add(s.cle);
       return true;
     })
-    .sort((a, b) => prioriteScore[a.priorite] - prioriteScore[b.priorite]);
+    .sort((a, b) => prioriteScore[a.priorite] - prioriteScore[b.priorite])
+    .filter((s) =>
+      validerConseil(
+        {
+          categorieId: s.categorieId,
+          objectifId: s.objectifId,
+          resteEstimeMentionne: s.resteEstimeAffiche,
+          pourcentages: s.pourcentagesAffiches,
+        },
+        {
+          resteEstime: params.resteEstime,
+          enveloppes: params.enveloppes,
+          objectifsAvecRythme,
+          moisActuel: params.moisActuel,
+          anneeActuelle: params.anneeActuelle,
+        },
+      ),
+    );
 
   const conseils: Conseil[] = situationsUniques.slice(0, maxConseils).map((s) => {
     const etat = s.etat ?? "NOUVEAU";
@@ -1226,8 +1468,10 @@ export function genererConseils(params: {
       texte: genererTexteConseil(s, etat),
       niveau: s.niveauConseil(etat),
       etat: s.etat,
+      categorieId: s.categorieId,
+      objectifId: s.objectifId,
     };
   });
 
-  return { conseils, etatsAJour };
+  return { conseils, etatsAJour, nouvellesResolutions };
 }

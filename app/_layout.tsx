@@ -10,6 +10,7 @@ import {
   useAccessibilite,
 } from "./AccessibiliteContext";
 import { GuestContext } from "./GuestContext";
+import { PremiumProvider } from "./PremiumContext";
 import { supabase } from "../supabaseClient";
 import "./calendarLocale";
 import { ecouterOnboardingTermine } from "./onboardingCompletion";
@@ -339,7 +340,9 @@ export default function RootLayout() {
                 reinitialiser: reinitialiserTutoriel,
               }}
             >
-              <Navigateur />
+              <PremiumProvider>
+                <Navigateur />
+              </PremiumProvider>
             </TutorielContext.Provider>
           </GuestContext.Provider>
         </ThemeProvider>

@@ -1,3 +1,17 @@
+// RÈGLE À NE JAMAIS CASSER : tous les chiffres affichés dans un insight
+// doivent venir des paramètres reçus en entrée de genererInsightsPeriode
+// (donneesReelles/donneesEpargne/donneesPrevisionnelles/depensesParCategorie/
+// objectifs, déjà alignés sur la période sélectionnée par l'appelant) —
+// jamais relus depuis le store ou recalculés à partir d'une autre source.
+// Les fonctions locales (moyenne, ecartType, tendance, streakHausseConsecutive)
+// sont de pures agrégations statistiques SUR ces paramètres, pas une
+// resaisie d'une valeur qui existe déjà ailleurs (ex: resteEstime,
+// enveloppe.depense) : ça reste conforme à la règle. Le risque à éviter est
+// d'introduire un accès direct à objStore ou une formule qui duplique un
+// calcul déjà fait côté Aperçu (utils/conseils.ts) ou Stats
+// (app/(tabs)/analytics.tsx) — toute nouvelle famille d'insight doit rester
+// ancrée sur les tableaux déjà tronqués à la période, jamais sur un
+// recalcul indépendant du mois en cours.
 import { Serie } from "./series";
 
 // Moyenne simple, protégée contre les tableaux vides (appelant responsable

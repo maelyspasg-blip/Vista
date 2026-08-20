@@ -2,8 +2,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import Slider from "@react-native-community/slider";
 import { useIsFocused, useRouter } from "expo-router";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   Dimensions,
   Modal,
@@ -19,11 +20,13 @@ import { COULEURS, useTheme } from "../ThemeContext";
 import { calculerSeries, Serie, TypeSerie } from "../../utils/series";
 import {
   budgetDuMoisArchive,
+  calculerResteEstimeCourant,
   entreesBudgetDuMois,
-  estCategorieActiveCeMois,
 } from "../../utils/budget";
 import {
+  calculerScoreHistorique,
   calculerScoreSante,
+  DecompositionScore,
   genererExplicationsScore,
   MotCleScore,
 } from "../../utils/score";
@@ -32,7 +35,14 @@ import {
   calculerDeltaTotal,
   calculerRythmeObjectif,
   calculerTauxEpargne,
+  chargerNbAmeliorations,
+  Conseil,
+  genererConseils,
 } from "../../utils/conseils";
+import { calculerTrophees, Trophee } from "../../utils/trophees";
+import { supabase } from "../../supabaseClient";
+import { PALETTE_COULEURS } from "../ColorPicker";
+import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { genererInsightsPeriode } from "../../utils/tendancesPeriode";
 // Alias conservé tel quel malgré le nom : ce fichier utilisait auparavant
 // une version abrégée localement pour les axes de graphiques (Jan/Fév/...),
@@ -40,7 +50,10 @@ import { genererInsightsPeriode } from "../../utils/tendancesPeriode";
 // demande explicite. Le nom _COMPLETS reste pour éviter de renommer tous
 // les usages existants (LABEL_MOIS_ACTUEL, "Variation d'un mois à
 // l'autre", etc.), pas parce qu'il coexiste encore avec une version courte.
-import { MOIS_LABELS as MOIS_LABELS_COMPLETS } from "../../utils/exportExcel";
+import {
+  calculerResteEstimeArchive,
+  MOIS_LABELS as MOIS_LABELS_COMPLETS,
+} from "../../utils/exportExcel";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useGuest } from "../GuestContext";
@@ -51,6 +64,9 @@ import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { useLargeurAnimee } from "../BarreProgression";
 import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
 import { InsightVerrouille } from "../InsightVerrouille";
+import { PremiumVerrou } from "../PremiumVerrou";
+import { usePremium } from "../PremiumContext";
+import { estComptePremium } from "../../utils/premium";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
 import { TiroirStats } from "../TiroirStats";
@@ -194,6 +210,9 @@ function formaterPeriode(nbMois: number): string {
 }
 
 const PERIODE_MAX_MOIS = 120; // plafond fixe (10 ans), indépendant des données de l'utilisateur
+// Nombre de mois consultables par un compte non-premium sur Stats — cf.
+// estComptePremium (utils/premium.ts) pour qui est concerné.
+const LIMITE_MOIS_GRATUIT_STATS = 2;
 const HAUTEUR_TRACK_EPARGNE = 90; // hauteur de la zone de tracé du graphique "Épargne dans le temps"
 
 type OptionPeriode = {
@@ -214,7 +233,7 @@ function genererOptionsPeriode(nbMoisDisponibles: number): OptionPeriode[] {
     options.push({ valeur, label: formaterPeriode(valeur), disponible, prochaine });
   };
 
-  for (let m = 3; m <= 12; m++) ajouter(m);
+  for (let m = 2; m <= 12; m++) ajouter(m);
   for (let a = 2; a * 12 <= PERIODE_MAX_MOIS; a++) ajouter(a * 12);
 
   return options;
@@ -836,6 +855,10 @@ export default function Analytics() {
   const router = useRouter();
   const estFocusDebug = useIsFocused();
   const objStore = useObjectifs();
+  const { estPremium, simulerNonPremium } = usePremium();
+  // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Stats — voir
+  // estComptePremium (utils/premium.ts) pour ce qu'il combine.
+  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium);
   const { theme, couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const { isGuest } = useGuest();
@@ -978,17 +1001,28 @@ export default function Analytics() {
   } | null>(null);
   const [modalSeriesVisible, setModalSeriesVisible] = useState(false);
   const [vueModalStats, setVueModalStats] = useState<
-    "score" | "series" | "simulateur"
+    "score" | "series" | "simulateur" | "trophees"
   >("score");
-  // Les 3 onglets (Score/Séries/Simulateur) partagent le même ScrollView —
-  // sans reset explicite, changer d'onglet garde l'ancien contentOffset, qui
-  // peut dépasser la hauteur du nouveau contenu et donner l'impression que le
-  // scroll est bloqué (impossible d'atteindre le bas des cartes Séries après
-  // avoir consulté un autre onglet plus court).
+  // Les 4 onglets (Score/Séries/Simulateur/Trophées) partagent le même
+  // ScrollView — sans reset explicite, changer d'onglet garde l'ancien
+  // contentOffset, qui peut dépasser la hauteur du nouveau contenu et
+  // donner l'impression que le scroll est bloqué (impossible d'atteindre le
+  // bas des cartes Séries après avoir consulté un autre onglet plus court).
   const scrollStatsRef = useRef<ScrollView>(null);
-  const changerVueModalStats = (v: "score" | "series" | "simulateur") => {
+  const changerVueModalStats = (
+    v: "score" | "series" | "simulateur" | "trophees",
+  ) => {
     setVueModalStats(v);
     scrollStatsRef.current?.scrollTo({ y: 0, animated: false });
+  };
+  // RÈGLE À NE JAMAIS CASSER : deep-link "Simuler" — utilisé par "Ta
+  // prochaine meilleure décision", "Ce qui fait bouger ta note" (leviers) et
+  // "Ce que Vista a remarqué" pour ouvrir directement l'onglet Simulateur
+  // avec la bonne catégorie déjà sélectionnée, plutôt que de laisser
+  // l'utilisateur la rechercher lui-même.
+  const ouvrirSimulateurPour = (categorieId?: string) => {
+    if (categorieId) setCategorieSimulee(categorieId);
+    changerVueModalStats("simulateur");
   };
   const [historiqueOuvert, setHistoriqueOuvert] = useState<
     Partial<Record<TypeSerie, boolean>>
@@ -1001,6 +1035,24 @@ export default function Analytics() {
   );
   const [budgetSimule, setBudgetSimule] = useState(0);
   const [tiroirSimulateurOuvert, setTiroirSimulateurOuvert] = useState(false);
+  // Sous-section A du Simulateur : période de projection choisie par
+  // l'utilisateur (remplace l'ancien NB_MOIS_PROJECTION fixe à 6).
+  const [periodeSimulationMois, setPeriodeSimulationMois] = useState(6);
+  // Sous-section B : simulation inverse ("Combien veux-tu économiser ?").
+  const [montantCibleInverse, setMontantCibleInverse] = useState("");
+  const [periodeInverseMois, setPeriodeInverseMois] = useState(6);
+  // Onglet Trophées : compteur cumulé "Insight en action"/"Discipline
+  // douce" (utils/conseils.ts::chargerNbAmeliorations) — chargé une fois au
+  // montage, en lecture seule ici (c'est Aperçu qui l'incrémente).
+  const [nbAmeliorations, setNbAmeliorations] = useState(0);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const userId = data.user?.id;
+      if (!userId) return;
+      setNbAmeliorations(await chargerNbAmeliorations(userId));
+    })();
+  }, []);
   const categoriesSimulables = objStore.enveloppes.filter(
     (e) => e.type !== "Entrée",
   );
@@ -1024,6 +1076,8 @@ export default function Analytics() {
     historiquesMois: objStore.historiquesMois,
     seuilEpargneConstante: objStore.seuilEpargneConstante,
     objectifs: objStore.objectifs,
+    transactions: objStore.transactions,
+    historiquePaiements: objStore.historiquePaiements,
   });
   const explicationsScore = genererExplicationsScore(
     {
@@ -1035,8 +1089,25 @@ export default function Analytics() {
     },
     scoreSante.details,
   );
+  // Note B/C/E : score "tel qu'il était" pour chaque mois archivé, avec la
+  // même formule que le score live (utils/score.ts::calculerScoreHistorique)
+  // — sert au delta "vs mois précédent" ET à la timeline (section E).
+  const scoreTimeline = objStore.historiquesMois.map((snap, i) => ({
+    mois: snap.mois,
+    annee: snap.annee,
+    score: calculerScoreHistorique(
+      i,
+      objStore.historiquesMois,
+      objStore.transactions,
+      objStore.historiquePaiements,
+    ),
+  }));
+  const scoreSanteMoisPrecedent =
+    scoreTimeline.length > 0 ? scoreTimeline[scoreTimeline.length - 1].score : null;
 
-  const NB_MOIS_PROJECTION = 6;
+  // Sous-section A : période de projection choisie (1/3/6/12/24 mois),
+  // remplace l'ancien NB_MOIS_PROJECTION fixé à 6.
+  const NB_MOIS_PROJECTION = periodeSimulationMois;
   const budgetActuelSimule = enveloppeSimulee?.budget ?? 0;
   const ecartMensuelSimule = budgetActuelSimule - budgetSimule;
   const pointsRecentsEpargne = [
@@ -1060,12 +1131,265 @@ export default function Analytics() {
   const impactTotal6MoisSimulation = Math.round(
     ecartMensuelSimule * NB_MOIS_PROJECTION,
   );
+  // Objectif accéléré par la simulation : rythme actuel + économie
+  // mensuelle simulée, comparé au rythme sans changement — "environ N mois
+  // plus tôt", jamais une date précise (projection, cf. RÈGLE formulations
+  // prudentes).
+  const moisPrecedentPourSimulation = new Date(ANNEE_ACTUELLE, MOIS_ACTUEL - 1, 1);
+  const snapshotMoisPrecedentPourSimulation = objStore.historiquesMois.find(
+    (s) =>
+      s.mois === moisPrecedentPourSimulation.getMonth() &&
+      s.annee === moisPrecedentPourSimulation.getFullYear(),
+  );
+  const objectifPourSimulation = objStore.objectifs
+    .filter((o) => !o.ferme && o.cible > 0)
+    .sort((a, b) => a.cible - a.actuel - (b.cible - b.actuel))[0];
+  const rythmeObjectifSimulation = objectifPourSimulation
+    ? calculerRythmeObjectif(
+        objectifPourSimulation,
+        objStore.historiquesMois,
+        snapshotMoisPrecedentPourSimulation,
+      )
+    : null;
+  const moisGagnesSimulation =
+    objectifPourSimulation && rythmeObjectifSimulation && ecartMensuelSimule > 0
+      ? (() => {
+          const manque = objectifPourSimulation.cible - objectifPourSimulation.actuel;
+          const rythmeActuel = rythmeObjectifSimulation.rythmeMensuel;
+          const rythmeBoost = rythmeActuel + ecartMensuelSimule;
+          if (rythmeActuel <= 0 || rythmeBoost <= 0) return null;
+          const moisActuels = Math.ceil(manque / rythmeActuel);
+          const moisBoostes = Math.ceil(manque / rythmeBoost);
+          return Math.max(0, moisActuels - moisBoostes);
+        })()
+      : null;
+
+  // === Sous-section B : simulation inverse ("Combien veux-tu économiser ?") ===
+  const montantCibleInverseNum = parseMontant(montantCibleInverse) || 0;
+  const manqueParMoisInverse =
+    montantCibleInverseNum > 0 && periodeInverseMois > 0
+      ? Math.max(0, montantCibleInverseNum / periodeInverseMois - epargneMoyenneMensuelle)
+      : 0;
+  const categoriesVariablesTriees = [...categoriesSimulables]
+    .filter((e) => e.type === "Variable" && e.budget > 0)
+    .sort((a, b) => b.budget - a.budget);
+  const categorieInverseA = categoriesVariablesTriees[0];
+  const categorieInverseB = categoriesVariablesTriees[1];
+  const categoriesInverseCombinaison = categoriesVariablesTriees.slice(0, 3);
+  const budgetVariableTotalInverse = categoriesInverseCombinaison.reduce(
+    (acc, e) => acc + e.budget,
+    0,
+  );
+
+  const creerObjectifDepuisSimulationInverse = async () => {
+    if (montantCibleInverseNum <= 0) return;
+    const couleur = couleurLaPlusDistincte(
+      PALETTE_COULEURS,
+      objStore.objectifs.map((o) => o.couleur),
+    );
+    await objStore.ajouterObjectif(
+      `Objectif ${Math.round(montantCibleInverseNum)}€`,
+      montantCibleInverseNum,
+      0,
+      couleur,
+      false,
+    );
+  };
+
+  // === Sous-section C : scénarios comparatifs (Prudent/Intermédiaire/Ambitieux) ===
+  const SCENARIOS_COMPARATIFS = [
+    { id: "prudent" as const, titre: "Prudent", pct: 0.1 },
+    { id: "intermediaire" as const, titre: "Intermédiaire", pct: 0.2 },
+    { id: "ambitieux" as const, titre: "Ambitieux", pct: 0.35 },
+  ];
+  const categoriesPourScenarios = [...categoriesSimulables]
+    .filter((e) => e.type === "Variable" && e.budget > 0)
+    .sort((a, b) => b.budget - a.budget)
+    .slice(0, 3);
+  const scenariosComparatifs = SCENARIOS_COMPARATIFS.map(({ id, titre, pct }) => {
+    const reductions = categoriesPourScenarios.map((e) => ({
+      enveloppe: e,
+      reduction: Math.round(e.budget * pct),
+    }));
+    const economieMensuelle = reductions.reduce((acc, r) => acc + r.reduction, 0);
+    const economie12Mois = economieMensuelle * 12;
+    const moisGagnesScenario =
+      objectifPourSimulation && rythmeObjectifSimulation && economieMensuelle > 0
+        ? (() => {
+            const manque = objectifPourSimulation.cible - objectifPourSimulation.actuel;
+            const rythmeActuel = rythmeObjectifSimulation.rythmeMensuel;
+            const rythmeBoost = rythmeActuel + economieMensuelle;
+            if (rythmeActuel <= 0 || rythmeBoost <= 0) return null;
+            return Math.max(
+              0,
+              Math.ceil(manque / rythmeActuel) - Math.ceil(manque / rythmeBoost),
+            );
+          })()
+        : null;
+    return { id, titre, reductions, economieMensuelle, economie12Mois, moisGagnesScenario };
+  });
+
+  // RÈGLE À NE JAMAIS CASSER : "Adopter ce scénario" effectue une vraie
+  // mutation (budgets réels ou nouvel objectif), jamais une simulation
+  // silencieuse — toujours précédée d'une confirmation explicite (Alert),
+  // cf. appel dans le JSX de l'onglet Simulateur.
+  const adopterScenario = async (scenario: (typeof scenariosComparatifs)[number]) => {
+    const nouvellesEnveloppes = objStore.enveloppes.map((e) => {
+      const reduction = scenario.reductions.find((r) => r.enveloppe.id === e.id);
+      return reduction ? { ...e, budget: Math.max(0, e.budget - reduction.reduction) } : e;
+    });
+    objStore.modifierEnveloppes(nouvellesEnveloppes);
+    if (!objectifPourSimulation && scenario.economie12Mois > 0) {
+      const couleur = couleurLaPlusDistincte(
+        PALETTE_COULEURS,
+        objStore.objectifs.map((o) => o.couleur),
+      );
+      await objStore.ajouterObjectif(
+        `Objectif ${scenario.titre}`,
+        scenario.economie12Mois,
+        0,
+        couleur,
+        false,
+      );
+    }
+  };
+
+  const confirmerAdoptionScenario = (scenario: (typeof scenariosComparatifs)[number]) => {
+    const nomsCategories = scenario.reductions.map((r) => r.enveloppe.nom).join(", ");
+    Alert.alert(
+      `Adopter le scénario ${scenario.titre} ?`,
+      `Le budget de ${nomsCategories || "tes catégories"} sera réduit dès maintenant${!objectifPourSimulation && scenario.economie12Mois > 0 ? `, et un nouvel objectif "Objectif ${scenario.titre}" sera créé.` : "."}`,
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Adopter", onPress: () => adopterScenario(scenario) },
+      ],
+    );
+  };
+
+  // === "Ce que Vista a remarqué" / "Ta prochaine meilleure décision" ==========
+  // RÈGLE À NE JAMAIS CASSER : ne jamais reconstruire la formule "Reste
+  // estimé" ici — toujours passer par les mêmes fonctions partagées
+  // qu'Aperçu (app/(tabs)/index.tsx), sinon les deux écrans finissent par
+  // afficher des chiffres divergents au premier changement fait d'un seul
+  // côté.
+  const {
+    disponibleEffectif: disponibleEffectifCoach,
+    resteEstime: resteEstimeCoach,
+  } = calculerResteEstimeCourant(
+    objStore.enveloppes,
+    objStore.epargneMois,
+    ANNEE_ACTUELLE,
+    MOIS_ACTUEL,
+  );
+  const resteEstimePrecedentCoach = snapshotMoisPrecedentPourSimulation
+    ? calculerResteEstimeArchive(snapshotMoisPrecedentPourSimulation)
+    : null;
+
+  // RÈGLE À NE JAMAIS CASSER : appel volontairement "sans état" (
+  // etatsPrecedents: {}) — contrairement à "Nos conseils" sur Aperçu, ces
+  // deux sections n'ont pas besoin de suivre un arc narratif multi-jours
+  // (badges NOUVEAU/CONFIRME/...), juste des observations factuelles
+  // fraîches à chaque ouverture. On n'agit donc jamais sur l'`etatsAJour`
+  // retourné (jamais persisté depuis cet écran) — utils/conseils.ts reste
+  // le seul moteur (pas de nouveau moteur, cf. demande d'origine).
+  const { conseils: conseilsCoach }: { conseils: Conseil[] } = genererConseils({
+    enveloppes: objStore.enveloppes,
+    objectifs: objStore.objectifs,
+    historiquesMois: objStore.historiquesMois,
+    transactions: objStore.transactions,
+    historiquePaiements: objStore.historiquePaiements,
+    epargneMois: objStore.epargneMois,
+    resteEstime: resteEstimeCoach,
+    resteEstimePrecedent: resteEstimePrecedentCoach,
+    disponibleEffectif: disponibleEffectifCoach,
+    moisActuel: MOIS_ACTUEL,
+    anneeActuelle: ANNEE_ACTUELLE,
+    maxConseils: 4,
+    etatsPrecedents: {},
+  });
+  const decisionPrioritaire = conseilsCoach[0] ?? null;
+  const observationsVista = conseilsCoach.slice(1, 4);
+
+  // Onglet Trophées.
+  const trophees = calculerTrophees({
+    historiquesMois: objStore.historiquesMois,
+    transactions: objStore.transactions,
+    historiquePaiements: objStore.historiquePaiements,
+    objectifs: objStore.objectifs,
+    enveloppes: objStore.enveloppes,
+    nbAmeliorations,
+  });
+
+  // Note, section D : "Comment gagner 5 points" — 2-3 leviers heuristiques
+  // accessibles, jamais de delta de points chiffré ici (c'est une
+  // projection, pas un fait déjà survenu — cf. RÈGLE formulations prudentes
+  // "pourrait améliorer ta note").
+  type LevierScore = { texte: string; categorieId?: string };
+  const leviersScore: LevierScore[] = (() => {
+    const leviers: LevierScore[] = [];
+    const enveloppesSansEntreeScore = objStore.enveloppes.filter((e) => e.type !== "Entrée");
+
+    const pireDepassement = enveloppesSansEntreeScore
+      .filter((e) => e.budget > 0 && e.depense > e.budget)
+      .sort((a, b) => b.depense - b.budget - (a.depense - a.budget))[0];
+    if (pireDepassement) {
+      leviers.push({
+        texte: `Réduire ${pireDepassement.nom} d'environ ${Math.round(pireDepassement.depense - pireDepassement.budget)}€/mois → pourrait améliorer ta note.`,
+        categorieId: pireDepassement.id,
+      });
+    }
+
+    const objectifPlusFaibleRythme = objStore.objectifs
+      .filter((o) => !o.ferme && o.cible > 0)
+      .map((o) => ({
+        o,
+        rythme: calculerRythmeObjectif(o, objStore.historiquesMois, snapshotMoisPrecedentPourSimulation),
+      }))
+      .filter(({ rythme }) => rythme.rythmeMensuel <= 0)
+      .sort((a, b) => a.rythme.rythmeMensuel - b.rythme.rythmeMensuel)[0];
+    if (objectifPlusFaibleRythme) {
+      leviers.push({
+        texte: `Maintenir un versement sur ${objectifPlusFaibleRythme.o.nom} ce mois → pourrait améliorer ta note.`,
+      });
+    }
+
+    let pireVolatilite: { nom: string; id: string; cv: number } | null = null;
+    enveloppesSansEntreeScore.forEach((e) => {
+      const valeurs = objStore.historiquesMois
+        .slice(-3)
+        .map((s) => s.enveloppes.find((x) => x.id === e.id)?.depense ?? 0);
+      if (valeurs.length < 2) return;
+      const moyenne = valeurs.reduce((a, b) => a + b, 0) / valeurs.length;
+      if (moyenne < 20) return;
+      const variance = valeurs.reduce((acc, v) => acc + (v - moyenne) ** 2, 0) / valeurs.length;
+      const cv = (Math.sqrt(variance) / moyenne) * 100;
+      if (cv > 30 && (!pireVolatilite || cv > pireVolatilite.cv)) {
+        pireVolatilite = { nom: e.nom, id: e.id, cv };
+      }
+    });
+    if (pireVolatilite) {
+      const cible = pireVolatilite as { nom: string; id: string; cv: number };
+      leviers.push({
+        texte: `Lisser tes dépenses ${cible.nom} d'un mois sur l'autre → pourrait améliorer ta note.`,
+        categorieId: cible.id,
+      });
+    }
+
+    return leviers.slice(0, 3);
+  })();
+
   // Transition douce de la couleur du curseur/piste du simulateur quand
   // l'impact projeté change de signe, plutôt qu'un changement brutal.
   const impactSimulePositif = impactTotal6MoisSimulation >= 0;
-  const animCouleurSlider = useRef(
-    new Animated.Value(impactSimulePositif ? 1 : 0),
-  ).current;
+  const animCouleurSlider = useMemo(
+    () => new Animated.Value(impactSimulePositif ? 1 : 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- valeur stable
+    // voulue une seule fois au montage (comme l'ancien useRef().current
+    // qu'elle remplace) ; Animated.timing s'occupe déjà de la faire évoluer
+    // ensuite, la recréer à chaque changement de impactSimulePositif casserait
+    // la transition animée.
+    [],
+  );
   useEffect(() => {
     Animated.timing(animCouleurSlider, {
       toValue: impactSimulePositif ? 1 : 0,
@@ -1094,11 +1418,27 @@ export default function Analytics() {
     setEditionSeuilOuverte(false);
   };
 
+  // RÈGLE À NE JAMAIS CASSER : verrouillePremium marque les options
+  // au-delà de LIMITE_MOIS_GRATUIT_STATS pour un compte non-premium — le
+  // Picker natif ne permet pas d'afficher une icône par option ni
+  // d'intercepter un tap avant sélection, donc le verrou passe par un
+  // suffixe de label ("(Premium)", même convention que "(bientôt
+  // disponible)" pour `prochaine`) + une interception dans onValueChange
+  // (cf. Picker plus bas) qui annule la sélection et affiche une alerte au
+  // lieu de laisser passer.
   const optionsPeriode = genererOptionsPeriode(
     objStore.historiquesMois.length + 1,
-  );
+  ).map((o) => ({
+    ...o,
+    verrouillePremium: !premium && o.valeur > LIMITE_MOIS_GRATUIT_STATS,
+  }));
 
-  const nbMois = nbMoisSelectionne;
+  // Clamp indépendant de la sélection courante du Picker : protège aussi
+  // le cas d'un compte redevenu non-premium alors que nbMoisSelectionne
+  // était encore réglé au-delà de la limite gratuite.
+  const nbMois = premium
+    ? nbMoisSelectionne
+    : Math.min(nbMoisSelectionne, LIMITE_MOIS_GRATUIT_STATS);
   // Suffixe de titre pour les sections calculées sur la période sélectionnée
   // (par opposition à LABEL_MOIS_ACTUEL, pour celles sur le mois en cours).
   const labelPeriode = `${nbMois} derniers mois`;
@@ -1531,9 +1871,9 @@ export default function Analytics() {
     depensesParCategorie,
     objectifs: objectifsAvecDelta,
   });
-  // Pas de compte Premium dans l'app pour l'instant (voir la même règle
-  // dans app/(tabs)/index.tsx) — seul isAdmin bypasse le déblocage pub.
-  const retenirTousVisibles = objStore.isAdmin || retenirDebloque;
+  // RÈGLE À NE JAMAIS CASSER : premium voit toujours tous les insights sans
+  // pub — voir la même règle dans app/(tabs)/index.tsx.
+  const retenirTousVisibles = premium || retenirDebloque;
 
   // Comparaison mensuelle par catégorie : uniquement les catégories présentes
   // dans LES DEUX mois comparés (sinon la comparaison n'a pas de sens), plus
@@ -1558,42 +1898,54 @@ export default function Analytics() {
     (c) => c.delta === 0,
   );
 
-  const repartitionDepenses = objStore.enveloppes
-    .filter(
-      (e) =>
-        e.type !== "Entrée" &&
-        e.depense > 0 &&
-        estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
-    )
-    .map((e) => ({
-      cle: e.id,
-      label: e.nom,
-      couleur: e.couleur,
-      montant: e.depense,
-    }))
-    .sort((a, b) => b.montant - a.montant);
+  // RÈGLE À NE JAMAIS CASSER : Répartition doit refléter TOUTE la période
+  // sélectionnée (moisAffiches), exactement comme Top dépenses juste en
+  // dessous — jamais le seul mois en cours (objStore.enveloppes seul). Même
+  // technique que topDepensesParCategorie : pour chaque mois de la période,
+  // mois en cours → objStore.enveloppes (dédupliqué par nom), mois archivé
+  // → le snapshot correspondant, puis on cumule par nom de catégorie.
+  const construireRepartitionSurPeriode = (
+    predicat: (e: { type: string; depense: number; nom: string }) => boolean,
+  ) => {
+    const parCategorie = new Map<string, { nom: string; couleur: string; montant: number }>();
+    moisAffiches.forEach(({ mois, annee }) => {
+      const enveloppesMoisBrutes =
+        mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
+          ? objStore.enveloppes
+          : (objStore.historiquesMois.find((s) => s.mois === mois && s.annee === annee)
+              ?.enveloppes ?? []);
+      const enveloppesMois =
+        mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
+          ? [...new Map(enveloppesMoisBrutes.map((e) => [e.nom, e])).values()]
+          : enveloppesMoisBrutes;
+      enveloppesMois.forEach((e) => {
+        if (!predicat(e)) return;
+        const existante = parCategorie.get(e.nom);
+        parCategorie.set(e.nom, {
+          nom: e.nom,
+          couleur: e.couleur,
+          montant: (existante?.montant ?? 0) + e.depense,
+        });
+      });
+    });
+    return [...parCategorie.entries()]
+      .map(([cle, v]) => ({ cle, label: v.nom, couleur: v.couleur, montant: v.montant }))
+      .sort((a, b) => b.montant - a.montant);
+  };
 
-  const repartitionEntrees = objStore.enveloppes
-    // "Budget" est le nom réservé de l'entrée créée par la migration de
-    // l'ancien montant scalaire (cf. migration
-    // 20260731100100_migrer_budget_vers_entrees.sql) — elle représente le
-    // salaire principal, pas une "vraie" entrée d'argent secondaire au même
-    // titre que Salaire secondaire/Vinted/remboursements, donc on l'exclut
-    // de cette répartition.
-    .filter(
-      (e) =>
-        e.type === "Entrée" &&
-        e.depense > 0 &&
-        e.nom !== "Budget" &&
-        estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
-    )
-    .map((e) => ({
-      cle: e.id,
-      label: e.nom,
-      couleur: e.couleur,
-      montant: e.depense,
-    }))
-    .sort((a, b) => b.montant - a.montant);
+  const repartitionDepenses = construireRepartitionSurPeriode(
+    (e) => e.type !== "Entrée" && e.depense > 0,
+  );
+
+  // "Budget" est le nom réservé de l'entrée créée par la migration de
+  // l'ancien montant scalaire (cf. migration
+  // 20260731100100_migrer_budget_vers_entrees.sql) — elle représente le
+  // salaire principal, pas une "vraie" entrée d'argent secondaire au même
+  // titre que Salaire secondaire/Vinted/remboursements, donc on l'exclut de
+  // cette répartition.
+  const repartitionEntrees = construireRepartitionSurPeriode(
+    (e) => e.type === "Entrée" && e.depense > 0 && e.nom !== "Budget",
+  );
 
   // RÈGLE À NE JAMAIS CASSER : même condition que le rendu du tiroir
   // "Répartition" plus bas — extraite ici pour être réutilisable par
@@ -1931,20 +2283,36 @@ export default function Analytics() {
               </View>
               <Picker
                 selectedValue={nbMoisSelectionne}
-                onValueChange={(valeur) =>
-                  setNbMoisSelectionne(Number(valeur))
-                }
+                onValueChange={(valeur) => {
+                  const option = optionsPeriode.find(
+                    (o) => o.valeur === Number(valeur),
+                  );
+                  if (option?.verrouillePremium) {
+                    Alert.alert(
+                      "Premium",
+                      "Accédez à tout votre historique avec Premium.",
+                    );
+                    return;
+                  }
+                  setNbMoisSelectionne(Number(valeur));
+                }}
                 itemStyle={{ color: C.texte }}
               >
                 {optionsPeriode.map((o) => (
                   <Picker.Item
                     key={o.valeur}
-                    label={o.prochaine ? `${o.label} (bientôt disponible)` : o.label}
+                    label={
+                      o.prochaine
+                        ? `${o.label} (bientôt disponible)`
+                        : o.verrouillePremium
+                          ? `${o.label} (Premium)`
+                          : o.label
+                    }
                     value={o.valeur}
                     enabled={o.disponible}
                     color={
                       Platform.OS === "android"
-                        ? o.disponible
+                        ? o.disponible && !o.verrouillePremium
                           ? C.texte
                           : C.texteMuted
                         : undefined
@@ -3000,7 +3368,6 @@ export default function Analytics() {
               <InsightVerrouille
                 deverrouille={retenirTousVisibles}
                 onDeverrouille={() => setRetenirDebloque(true)}
-                couleurFond={theme === "sombre" ? C.lavande : C.purpleLight}
               >
                 {insights.slice(1).map((txt, i) => (
                   <View
@@ -3040,18 +3407,16 @@ export default function Analytics() {
             <View style={styles.modalHeader}>
               <View>
                 <Text style={[styles.modalTitre, { color: C.texte }]}>
-                  {vueModalStats === "score"
-                    ? "Santé financière"
-                    : vueModalStats === "series"
-                      ? "Séries"
-                      : "Simulateur"}
+                  Ton bilan
                 </Text>
                 <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
                   {vueModalStats === "score"
                     ? "Vue d'ensemble de ta situation"
                     : vueModalStats === "series"
                       ? "Régularité mois après mois"
-                      : "Et si tu ajustais un budget ?"}
+                      : vueModalStats === "simulateur"
+                        ? "Et si tu ajustais un budget ?"
+                        : "Tes réussites, débloquées au fil du temps"}
                 </Text>
               </View>
               <TouchableOpacity
@@ -3064,8 +3429,70 @@ export default function Analytics() {
               </TouchableOpacity>
             </View>
 
+            {/* RÈGLE À NE JAMAIS CASSER : TOUT le contenu qui suit le
+                header (sections coach + chips + contenu de l'onglet actif)
+                vit dans CE SEUL ScrollView, jamais dans un second
+                ScrollView imbriqué ni dans une View à hauteur fixe — c'est
+                ce qui garantit qu'aucune section n'est jamais coupée/
+                écrasée quelle que soit la longueur du contenu. La carte
+                (styles.modalCardBadges) utilise maxHeight, pas height : elle
+                s'adapte au contenu court et plafonne pour le contenu long,
+                que ce seul ScrollView fait alors défiler. */}
+            <ScrollView ref={scrollStatsRef} showsVerticalScrollIndicator={false}>
+            {/* RÈGLE À NE JAMAIS CASSER : "Ce que Vista a remarqué" et "Ta
+                prochaine meilleure décision" restent visibles pour TOUS les
+                comptes (contrairement aux 3 onglets détaillés ci-dessous,
+                Premium uniquement) — même logique qu'un aperçu gratuit sur
+                "Nos conseils" d'Aperçu. */}
+            {decisionPrioritaire && (
+              <View
+                style={[
+                  styles.decisionBloc,
+                  { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                ]}
+              >
+                <Text style={[styles.decisionLabel, { color: C.texteMuted }]}>
+                  TA PROCHAINE MEILLEURE DÉCISION
+                </Text>
+                <Text style={[styles.decisionTexte, { color: C.texte }]}>
+                  {decisionPrioritaire.texte}
+                </Text>
+                <TouchableOpacity
+                  style={[styles.decisionBouton, { backgroundColor: C.purple }]}
+                  onPress={() => ouvrirSimulateurPour(decisionPrioritaire.categorieId)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.decisionBoutonTexte}>Simuler</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {observationsVista.length > 0 && (
+              <View
+                style={[
+                  styles.decisionBloc,
+                  { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                ]}
+              >
+                <Text style={[styles.decisionLabel, { color: C.texteMuted }]}>
+                  CE QUE VISTA A REMARQUÉ
+                </Text>
+                {observationsVista.map((c, i) => (
+                  <View
+                    key={i}
+                    style={[styles.observationLigne, i > 0 && { marginTop: 6 }]}
+                  >
+                    <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
+                    <Text style={[styles.observationTexte, { color: C.texte }]}>
+                      {c.texte}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
             <View style={styles.chipRow}>
-              {(["score", "series", "simulateur"] as const).map((v) => (
+              {(["score", "series", "simulateur", "trophees"] as const).map((v) => (
                 <TouchableOpacity
                   key={v}
                   style={[
@@ -3090,22 +3517,27 @@ export default function Analytics() {
                       ? "Score"
                       : v === "series"
                         ? "Séries"
-                        : "Simulateur"}
+                        : v === "simulateur"
+                          ? "Simulateur"
+                          : "Trophées"}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <View style={{ flex: 1 }}>
-            <ScrollView
-              ref={scrollStatsRef}
-              style={{ flex: 1 }}
-              showsVerticalScrollIndicator={false}
-            >
+              {/* RÈGLE À NE JAMAIS CASSER : "Ton bilan" (Score/Séries/
+                  Simulateur) est Premium uniquement — pas de déblocage par
+                  pub (contrairement à InsightVerrouille). Un seul
+                  PremiumVerrou couvre les 3 onglets à la fois (le titre en
+                  tête de modale, lui, reste toujours visible) plutôt que de
+                  dupliquer le verrou dans chacun des 3 blocs ci-dessous. */}
+              {premium ? (
+                <>
               {vueModalStats === "score" && (
                 <View
                   style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
                 >
+                  {/* A. Score principal + delta + phrase de contexte */}
                   <View style={styles.serieEnTete}>
                     <View
                       style={[
@@ -3124,7 +3556,7 @@ export default function Analytics() {
                     </Text>
                     <InfoBulle
                       titre="Comment ce score est calculé"
-                      texte={`Ton score combine 3 signaux, pondérés puis ramenés sur 100 :\n\n• Budget du mois (40%) : dépenses réelles vs budget total de tes catégories.\n• Tendance d'épargne (30%) : le streak "Épargne croissante" des Séries — jusqu'à 6 mois consécutifs pour le score maximum.\n• Objectifs actifs (30%) : ta progression moyenne vers tes objectifs d'épargne en cours.\n\nSi un signal n'est pas disponible (pas de budget défini, aucun objectif actif...), son poids est redistribué sur les autres.`}
+                      texte={`Ton score combine 5 signaux, pondérés puis ramenés sur 100 :\n\n• Maîtrise des dépenses (25 pts) : dépenses réelles vs budget total de tes catégories.\n• Régularité de suivi (20 pts) : la part de tes derniers jours où tu as enregistré une dépense.\n• Capacité d'épargne (20 pts) : ton rythme d'épargne récent.\n• Respect des objectifs (25 pts) : ta progression moyenne vers tes objectifs d'épargne en cours — ignoré si tu n'as aucun objectif actif, ses points sont alors répartis sur les autres critères.\n• Stabilité des dépenses (10 pts) : la régularité de tes dépenses totales d'un mois sur l'autre.\n\nUn signal indisponible ne pénalise jamais ta note, son poids est redistribué sur les autres.`}
                     />
                   </View>
 
@@ -3158,59 +3590,46 @@ export default function Analytics() {
                       </Text>
                     </View>
                   </View>
+                  {scoreSanteMoisPrecedent && (
+                    <Text
+                      style={[
+                        styles.scoreDeltaTexte,
+                        {
+                          color:
+                            scoreSante.score >= scoreSanteMoisPrecedent.score
+                              ? C.vertText
+                              : C.peachText,
+                        },
+                      ]}
+                    >
+                      {scoreSante.score >= scoreSanteMoisPrecedent.score ? "+" : ""}
+                      {scoreSante.score - scoreSanteMoisPrecedent.score} pts ce mois
+                    </Text>
+                  )}
+                  <Text style={[styles.scoreContexteTexte, { color: C.texteMuted }]}>
+                    {scoreSante.score >= 75
+                      ? "Situation globalement saine."
+                      : scoreSante.score >= 50
+                        ? "Quelques points à surveiller."
+                        : "Plusieurs points méritent ton attention."}
+                  </Text>
 
+                  {/* B. Décomposition du score, 5 critères */}
                   <View style={styles.scoreDetailsBloc}>
-                    <View style={styles.scoreDetailLigne}>
-                      <Text
-                        style={[
-                          styles.scoreDetailLabel,
-                          { color: C.texteMuted },
-                        ]}
-                      >
-                        Budget du mois
-                      </Text>
-                      <Text
-                        style={[styles.scoreDetailValeur, { color: C.texte }]}
-                      >
-                        {scoreSante.details.budget !== null
-                          ? `${Math.round(scoreSante.details.budget)}/100`
-                          : "Non disponible"}
-                      </Text>
-                    </View>
-                    <View style={styles.scoreDetailLigne}>
-                      <Text
-                        style={[
-                          styles.scoreDetailLabel,
-                          { color: C.texteMuted },
-                        ]}
-                      >
-                        Tendance d&apos;épargne
-                      </Text>
-                      <Text
-                        style={[styles.scoreDetailValeur, { color: C.texte }]}
-                      >
-                        {scoreSante.details.tendanceEpargne !== null
-                          ? `${Math.round(scoreSante.details.tendanceEpargne)}/100`
-                          : "Non disponible"}
-                      </Text>
-                    </View>
-                    <View style={styles.scoreDetailLigne}>
-                      <Text
-                        style={[
-                          styles.scoreDetailLabel,
-                          { color: C.texteMuted },
-                        ]}
-                      >
-                        Objectifs actifs
-                      </Text>
-                      <Text
-                        style={[styles.scoreDetailValeur, { color: C.texte }]}
-                      >
-                        {scoreSante.details.objectifs !== null
-                          ? `${Math.round(scoreSante.details.objectifs)}/100`
-                          : "Non disponible"}
-                      </Text>
-                    </View>
+                    {CRITERES_SCORE.map((cle) => (
+                      <View key={cle} style={styles.scoreDetailLigne}>
+                        <Text
+                          style={[styles.scoreDetailLabel, { color: C.texteMuted }]}
+                        >
+                          {LIBELLES_CRITERE_SCORE[cle]}
+                        </Text>
+                        <Text style={[styles.scoreDetailValeur, { color: C.texte }]}>
+                          {scoreSante.details[cle] !== null
+                            ? `${Math.round(scoreSante.details[cle] as number)}/${POIDS_CRITERE_SCORE[cle]}`
+                            : "Non disponible"}
+                        </Text>
+                      </View>
+                    ))}
                   </View>
 
                   {explicationsScore.length > 0 && (
@@ -3241,6 +3660,108 @@ export default function Analytics() {
                           </Text>
                         </View>
                       ))}
+                    </View>
+                  )}
+
+                  {/* C. Ce qui fait bouger ta note — deltas exacts (faits déjà
+                      survenus), pas une projection. */}
+                  {scoreSanteMoisPrecedent && (
+                    <View style={styles.scoreExplicationsBloc}>
+                      <Text
+                        style={[styles.scoreExplicationsLabel, { color: C.texteMuted }]}
+                      >
+                        Ce qui fait bouger ta note
+                      </Text>
+                      {CRITERES_SCORE.filter(
+                        (cle) =>
+                          scoreSante.details[cle] !== null &&
+                          scoreSanteMoisPrecedent.details[cle] !== null &&
+                          Math.round(
+                            (scoreSante.details[cle] as number) -
+                              (scoreSanteMoisPrecedent.details[cle] as number),
+                          ) !== 0,
+                      ).map((cle) => {
+                        const delta = Math.round(
+                          (scoreSante.details[cle] as number) -
+                            (scoreSanteMoisPrecedent.details[cle] as number),
+                        );
+                        return (
+                          <View key={cle} style={styles.scoreExplicationItem}>
+                            <View
+                              style={[
+                                styles.scoreExplicationDot,
+                                { backgroundColor: delta > 0 ? C.vert : C.rouge },
+                              ]}
+                            />
+                            <Text
+                              style={[styles.scoreExplicationTexte, { color: C.texte }]}
+                            >
+                              {delta > 0 ? "+" : ""}
+                              {delta} pts — {libellePourEvolutionCritere(cle, delta > 0)}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+
+                  {/* D. Comment gagner des points — toujours "pourrait", jamais
+                      de delta de points chiffré (projection). */}
+                  {leviersScore.length > 0 && (
+                    <View style={styles.scoreExplicationsBloc}>
+                      <Text
+                        style={[styles.scoreExplicationsLabel, { color: C.texteMuted }]}
+                      >
+                        Comment gagner des points
+                      </Text>
+                      {leviersScore.map((levier, i) => (
+                        <View key={i} style={styles.levierLigne}>
+                          <Text style={[styles.levierTexte, { color: C.texte }]}>
+                            {i + 1}. {levier.texte}
+                          </Text>
+                          <TouchableOpacity
+                            style={[styles.levierBouton, { borderColor: C.purple }]}
+                            onPress={() => ouvrirSimulateurPour(levier.categorieId)}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[styles.levierBoutonTexte, { color: C.purple }]}>
+                              Simuler
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* E. Évolution dans le temps */}
+                  {scoreTimeline.length > 0 && (
+                    <View style={styles.scoreExplicationsBloc}>
+                      <Text
+                        style={[styles.scoreExplicationsLabel, { color: C.texteMuted }]}
+                      >
+                        Évolution dans le temps
+                      </Text>
+                      {scoreTimeline.map((point, i) => {
+                        const precedent = i > 0 ? scoreTimeline[i - 1].score : null;
+                        const raison = precedent
+                          ? raisonPrincipaleVariation(point.score.details, precedent.details)
+                          : null;
+                        return (
+                          <View key={`${point.annee}-${point.mois}`} style={styles.timelineLigne}>
+                            <Text style={[styles.timelineMois, { color: C.texteMuted }]}>
+                              {MOIS_LABELS_COMPLETS[point.mois]}
+                            </Text>
+                            <Text style={[styles.timelineScoreTexte, { color: C.texte }]}>
+                              {point.score.score}/100
+                            </Text>
+                            {raison && (
+                              <Text style={[styles.timelineRaisonTexte, { color: C.texteMuted }]}>
+                                {raison}
+                              </Text>
+                            )}
+                          </View>
+                        );
+                      })}
                     </View>
                   )}
                 </View>
@@ -3686,6 +4207,35 @@ export default function Analytics() {
                             style={styles.simulateurSlider}
                           />
 
+                          {/* Barre de temporalité : période de projection. */}
+                          <View style={styles.periodeSimulationRow}>
+                            {[1, 3, 6, 12, 24].map((mois) => (
+                              <TouchableOpacity
+                                key={mois}
+                                style={[
+                                  styles.chip,
+                                  { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                                  periodeSimulationMois === mois && {
+                                    backgroundColor: C.purple,
+                                    borderColor: C.purple,
+                                  },
+                                ]}
+                                onPress={() => setPeriodeSimulationMois(mois)}
+                                activeOpacity={0.7}
+                              >
+                                <Text
+                                  style={[
+                                    styles.chipTexte,
+                                    { color: C.texteMuted },
+                                    periodeSimulationMois === mois && styles.chipTexteActif,
+                                  ]}
+                                >
+                                  {mois < 12 ? `${mois} mois` : mois === 12 ? "1 an" : "2 ans"}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+
                           <View style={styles.simulateurExplicationsBloc}>
                             <View style={styles.serieExplicationLigne}>
                               <View
@@ -3776,6 +4326,25 @@ export default function Analytics() {
                                   projetée.
                                 </Text>
                               </View>
+                              <View style={styles.serieExplicationLigne}>
+                                <View
+                                  style={[
+                                    styles.serieExplicationDot,
+                                    { backgroundColor: ecartMensuelSimule > 0 ? C.vert : C.peach },
+                                  ]}
+                                />
+                                <Text
+                                  style={[styles.serieExplicationTexte, { color: C.texte }]}
+                                >
+                                  {ecartMensuelSimule > 0
+                                    ? objectifPourSimulation && moisGagnesSimulation
+                                      ? `Cela te permettrait d'atteindre ${objectifPourSimulation.nom} environ ${moisGagnesSimulation} mois plus tôt.`
+                                      : !objectifPourSimulation
+                                        ? `Cela représente ${formaterMontant(Math.abs(impactTotal6MoisSimulation))}€ d'épargne supplémentaire sur ${NB_MOIS_PROJECTION} mois — de quoi démarrer un objectif ou constituer une réserve.`
+                                        : `Cette modification libère ${formaterMontant(ecartMensuelSimule)}€/mois sur cette catégorie.`
+                                    : `Cette modification coûte ${formaterMontant(Math.abs(ecartMensuelSimule))}€/mois de plus sur cette catégorie.`}
+                                </Text>
+                              </View>
                             </View>
                           </View>
 
@@ -3839,8 +4408,208 @@ export default function Analytics() {
                       )}
                     </>
                   )}
+
+                  {/* B. Simulation inverse */}
+                  <View style={[styles.simulateurSousSection, { borderTopColor: C.separateur }]}>
+                    <Text style={[styles.serieTitre, { color: C.texte, fontSize: 15 }]}>
+                      Combien veux-tu économiser ?
+                    </Text>
+                    <TextInput
+                      style={[styles.inputSeuil, { color: C.texte, backgroundColor: C.carte, marginTop: 10 }]}
+                      placeholder="Montant en €"
+                      placeholderTextColor={C.texteMuted}
+                      keyboardType="numeric"
+                      value={montantCibleInverse}
+                      onChangeText={(t) => setMontantCibleInverse(sanitizeMontantInput(t))}
+                    />
+                    <View style={styles.periodeSimulationRow}>
+                      {[3, 6, 12, 24].map((mois) => (
+                        <TouchableOpacity
+                          key={mois}
+                          style={[
+                            styles.chip,
+                            { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                            periodeInverseMois === mois && {
+                              backgroundColor: C.purple,
+                              borderColor: C.purple,
+                            },
+                          ]}
+                          onPress={() => setPeriodeInverseMois(mois)}
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[
+                              styles.chipTexte,
+                              { color: C.texteMuted },
+                              periodeInverseMois === mois && styles.chipTexteActif,
+                            ]}
+                          >
+                            {mois < 12 ? `${mois} mois` : mois === 12 ? "1 an" : "2 ans"}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    {montantCibleInverseNum > 0 &&
+                      (manqueParMoisInverse <= 0 ? (
+                        <Text
+                          style={[styles.serieExplicationTexte, { color: C.texte, marginTop: 10 }]}
+                        >
+                          Ton rythme d&apos;épargne actuel suffit déjà pour atteindre{" "}
+                          {formaterMontant(montantCibleInverseNum)}€ sur {periodeInverseMois} mois.
+                        </Text>
+                      ) : (
+                        <>
+                          <Text
+                            style={[
+                              styles.serieExplicationTexte,
+                              { color: C.texte, marginTop: 10, fontWeight: "700" },
+                            ]}
+                          >
+                            Il te manque environ {formaterMontant(manqueParMoisInverse)}€/mois.
+                          </Text>
+                          {categorieInverseA && (
+                            <Text
+                              style={[
+                                styles.serieExplicationTexte,
+                                { color: C.texteMuted, marginTop: 6 },
+                              ]}
+                            >
+                              Option A : réduire {categorieInverseA.nom} de{" "}
+                              {formaterMontant(Math.min(manqueParMoisInverse, categorieInverseA.budget))}€
+                            </Text>
+                          )}
+                          {categorieInverseB && (
+                            <Text
+                              style={[styles.serieExplicationTexte, { color: C.texteMuted }]}
+                            >
+                              Option B : réduire {categorieInverseB.nom} de{" "}
+                              {formaterMontant(Math.min(manqueParMoisInverse, categorieInverseB.budget))}€
+                            </Text>
+                          )}
+                          {categoriesInverseCombinaison.length > 1 && (
+                            <Text
+                              style={[styles.serieExplicationTexte, { color: C.texteMuted }]}
+                            >
+                              Option C : combiner {categoriesInverseCombinaison.map((e) => e.nom).join(", ")}{" "}
+                              pour {formaterMontant(Math.min(manqueParMoisInverse, budgetVariableTotalInverse))}€ au total
+                            </Text>
+                          )}
+                          {objStore.objectifs.filter((o) => !o.ferme).length === 0 && (
+                            <TouchableOpacity
+                              style={[styles.tiroirBouton, { backgroundColor: C.purpleLight, borderColor: C.purple, marginTop: 10 }]}
+                              onPress={creerObjectifDepuisSimulationInverse}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[styles.tiroirBoutonTexte, { color: C.purple }]}>
+                                Créer un objectif à partir de cette simulation
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </>
+                      ))}
+                  </View>
+
+                  {/* C. Scénarios comparatifs */}
+                  <View style={[styles.simulateurSousSection, { borderTopColor: C.separateur }]}>
+                    <Text style={[styles.serieTitre, { color: C.texte, fontSize: 15 }]}>
+                      Scénarios comparatifs
+                    </Text>
+                    {scenariosComparatifs.map((scenario) => (
+                      <View
+                        key={scenario.id}
+                        style={[styles.scenarioCarte, { borderColor: C.carteBorder }]}
+                      >
+                        <Text style={[styles.scenarioTitre, { color: C.texte }]}>
+                          {scenario.titre}
+                        </Text>
+                        <Text style={[styles.scenarioDetail, { color: C.texteMuted }]}>
+                          {scenario.reductions.length > 0
+                            ? scenario.reductions.map((r) => r.enveloppe.nom).join(", ")
+                            : "Aucune catégorie éligible"}
+                        </Text>
+                        <Text style={[styles.scenarioDetail, { color: C.texte }]}>
+                          Économie sur 12 mois : environ {formaterMontant(scenario.economie12Mois)}€
+                        </Text>
+                        {scenario.moisGagnesScenario !== null && scenario.moisGagnesScenario > 0 && (
+                          <Text style={[styles.scenarioDetail, { color: C.vertText }]}>
+                            Objectif atteint environ {scenario.moisGagnesScenario} mois plus tôt
+                          </Text>
+                        )}
+                        <TouchableOpacity
+                          style={[styles.btnAdopterScenario, { backgroundColor: C.purple }]}
+                          onPress={() => confirmerAdoptionScenario(scenario)}
+                          activeOpacity={0.8}
+                          disabled={scenario.reductions.length === 0}
+                        >
+                          <Text style={styles.btnAdopterScenarioTexte}>Adopter ce scénario</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
                   </ScrollView>
                 </View>
+              )}
+
+              {vueModalStats === "trophees" && (
+                <View style={styles.trophesGrille}>
+                  {trophees.map((trophee) => (
+                    <View
+                      key={trophee.id}
+                      style={[
+                        styles.tropheeCarte,
+                        { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                        !trophee.debloque && { opacity: 0.55 },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.tropheeIconeFond,
+                          { backgroundColor: trophee.debloque ? C.vertLight : C.carte },
+                        ]}
+                      >
+                        <Ionicons
+                          name={trophee.debloque ? "trophy" : "lock-closed-outline"}
+                          size={18}
+                          color={trophee.debloque ? C.vertText : C.texteMuted}
+                        />
+                      </View>
+                      <Text
+                        style={[
+                          styles.tropheeTitre,
+                          { color: trophee.debloque ? C.texte : C.texteMuted },
+                        ]}
+                      >
+                        {trophee.titre}
+                      </Text>
+                      <Text
+                        style={[styles.tropheeDescription, { color: C.texteMuted }]}
+                        numberOfLines={3}
+                      >
+                        {trophee.description}
+                      </Text>
+                      {trophee.niveau && (
+                        <View
+                          style={[
+                            styles.tropheeNiveauPill,
+                            { backgroundColor: couleurNiveauTrophee(trophee.niveau) },
+                          ]}
+                        >
+                          <Text style={styles.tropheeNiveauTexte}>
+                            {trophee.niveau === "bronze"
+                              ? "Bronze"
+                              : trophee.niveau === "argent"
+                                ? "Argent"
+                                : "Or"}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+                </>
+              ) : (
+                <PremiumVerrou />
               )}
 
               <View style={{ height: 20 }} />
@@ -3864,7 +4633,6 @@ export default function Analytics() {
                 </BoutonPrincipal>
               </View>
             )}
-            </View>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -4097,6 +4865,79 @@ function couleurScoreForte(
   return "#FFFFFF";
 }
 
+// Couleurs "médaille" simples pour le trophée à paliers "Régularité" — pas
+// de dépendance au thème, un bronze/argent/or reste reconnaissable dans les
+// deux modes.
+function couleurNiveauTrophee(niveau: "bronze" | "argent" | "or"): string {
+  if (niveau === "or") return "#D4AF37";
+  if (niveau === "argent") return "#A8A8B3";
+  return "#CD7F32";
+}
+
+const CRITERES_SCORE = ["budget", "regularite", "epargne", "objectifs", "stabilite"] as const;
+
+const LIBELLES_CRITERE_SCORE: Record<(typeof CRITERES_SCORE)[number], string> = {
+  budget: "Maîtrise des dépenses",
+  regularite: "Régularité de suivi",
+  epargne: "Capacité d'épargne",
+  objectifs: "Respect des objectifs",
+  stabilite: "Stabilité des dépenses",
+};
+
+// Échelle d'affichage de chaque critère — doit rester synchronisée avec
+// POIDS dans utils/score.ts (non exporté, ce sont ici uniquement les
+// libellés "/25", "/20"... affichés, pas la logique de calcul elle-même).
+const POIDS_CRITERE_SCORE: Record<(typeof CRITERES_SCORE)[number], number> = {
+  budget: 25,
+  regularite: 20,
+  epargne: 25,
+  objectifs: 20,
+  stabilite: 10,
+};
+
+// Note, section C : phrase courte associée à l'évolution d'un critère —
+// jamais le nom brut du critère seul, une vraie narration ("Budget mieux
+// respecté" plutôt que "Maîtrise des dépenses : +8").
+function libellePourEvolutionCritere(
+  cle: (typeof CRITERES_SCORE)[number],
+  positif: boolean,
+): string {
+  switch (cle) {
+    case "budget":
+      return positif ? "Budget respecté ce mois" : "Dépassements plus marqués";
+    case "regularite":
+      return positif ? "Suivi plus régulier" : "Suivi moins régulier";
+    case "epargne":
+      return positif ? "Épargne plus régulière" : "Épargne moins régulière";
+    case "objectifs":
+      return positif ? "Objectifs mieux tenus" : "Objectifs qui ralentissent";
+    case "stabilite":
+      return positif ? "Dépenses plus stables" : "Dépenses plus irrégulières";
+  }
+}
+
+// Note, section E : le critère qui explique le mieux la variation d'un
+// mois à l'autre (le plus gros |delta|), pour donner une "raison
+// principale" à chaque point de la timeline sans avoir à tout détailler.
+function raisonPrincipaleVariation(
+  actuel: DecompositionScore,
+  precedent: DecompositionScore,
+): string | null {
+  let meilleur: { cle: (typeof CRITERES_SCORE)[number]; delta: number } | null = null;
+  CRITERES_SCORE.forEach((cle) => {
+    const a = actuel[cle];
+    const p = precedent[cle];
+    if (a === null || p === null) return;
+    const delta = a - p;
+    if (!meilleur || Math.abs(delta) > Math.abs(meilleur.delta)) {
+      meilleur = { cle, delta };
+    }
+  });
+  if (!meilleur || Math.abs((meilleur as { delta: number }).delta) < 1) return null;
+  const { cle, delta } = meilleur as { cle: (typeof CRITERES_SCORE)[number]; delta: number };
+  return libellePourEvolutionCritere(cle, delta > 0);
+}
+
 const styles = StyleSheet.create({
   overlayGuestStats: {
     position: "absolute",
@@ -4201,13 +5042,16 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 26,
     paddingHorizontal: 26,
     paddingBottom: 20,
-    // Hauteur fixe (pas un maxHeight) : les 3 onglets (Score/Séries/
-    // Simulateur) ont des contenus de longueurs très différentes — une
-    // hauteur qui s'adapte au contenu ferait sauter la fenêtre en changeant
-    // d'onglet. Le ScrollView interne (flex: 1) gère le défilement pour les
-    // contenus plus longs que cette hauteur, et laisse simplement de
-    // l'espace pour les contenus plus courts.
-    height: "80%",
+    // RÈGLE À NE JAMAIS CASSER : maxHeight (pas height fixe) — la carte
+    // s'adapte au contenu quand il est court (évite l'espace vide géant
+    // observé avec les sections "Ce que Vista a remarqué"/"Ta prochaine
+    // décision" + les onglets) et plafonne à 85% de l'écran pour le contenu
+    // long, que le SEUL ScrollView à l'intérieur (voir la règle juste avant
+    // son ouverture dans le JSX) fait alors défiler. Tout le contenu doit
+    // rester DANS ce ScrollView unique — jamais un second ScrollView
+    // imbriqué ni une View à hauteur fixe, sous peine de retrouver le
+    // problème "tiroirs/onglets écrasés en bas de page" déjà rencontré.
+    maxHeight: "85%",
   },
   serieCarte: {
     borderRadius: 16,
@@ -4263,6 +5107,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   scoreMotTexte: { fontSize: 13, fontWeight: "700" },
+  scoreDeltaTexte: { fontSize: 13, fontWeight: "700", marginTop: -8, marginBottom: 6 },
+  scoreContexteTexte: { fontSize: 13, marginBottom: 14 },
   scoreDetailsBloc: { gap: 8 },
   scoreDetailLigne: {
     flexDirection: "row",
@@ -4288,6 +5134,30 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   scoreExplicationTexte: { flex: 1, fontSize: 13, lineHeight: 19 },
+  levierLigne: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 6,
+  },
+  levierTexte: { flex: 1, fontSize: 13, lineHeight: 19 },
+  levierBouton: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  levierBoutonTexte: { fontSize: 12, fontWeight: "700" },
+  timelineLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 6,
+  },
+  timelineMois: { fontSize: 12, width: 72 },
+  timelineScoreTexte: { fontSize: 13, fontWeight: "700", width: 52 },
+  timelineRaisonTexte: { flex: 1, fontSize: 12 },
   serieExplicationLigne: {
     flexDirection: "row",
     gap: 8,
@@ -4432,6 +5302,48 @@ const styles = StyleSheet.create({
   simulateurLegendeItem: { flexDirection: "row", alignItems: "center", gap: 6 },
   simulateurLegendePastille: { width: 10, height: 10, borderRadius: 5 },
   simulateurLegendeTexte: { fontSize: 12, fontWeight: "500" },
+  periodeSimulationRow: { flexDirection: "row", gap: 6, marginTop: 10, flexWrap: "wrap" },
+  simulateurSousSection: { borderTopWidth: 0.5, marginTop: 20, paddingTop: 16 },
+  scenarioCarte: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+  },
+  scenarioTitre: { fontSize: 14, fontWeight: "700", marginBottom: 4 },
+  scenarioDetail: { fontSize: 12, lineHeight: 18 },
+  btnAdopterScenario: {
+    borderRadius: 10,
+    paddingVertical: 9,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  btnAdopterScenarioTexte: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
+  trophesGrille: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  tropheeCarte: {
+    width: "47%",
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+  },
+  tropheeIconeFond: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  tropheeTitre: { fontSize: 13, fontWeight: "700", marginBottom: 4 },
+  tropheeDescription: { fontSize: 11, lineHeight: 15 },
+  tropheeNiveauPill: {
+    alignSelf: "flex-start",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 8,
+  },
+  tropheeNiveauTexte: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
   banniereInfo: {
     backgroundColor: "#F0EEFF",
     borderRadius: 13,
@@ -4616,6 +5528,30 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   insightTexte: { flex: 1, fontSize: 13, color: "#26215C", lineHeight: 19 },
+  decisionBloc: {
+    borderRadius: 14,
+    borderWidth: 0.5,
+    padding: 14,
+    marginBottom: 10,
+  },
+  decisionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  decisionTexte: { fontSize: 13, lineHeight: 19 },
+  decisionBouton: {
+    alignSelf: "flex-start",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    marginTop: 10,
+  },
+  decisionBoutonTexte: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
+  observationLigne: { flexDirection: "row", gap: 8, alignItems: "flex-start" },
+  observationTexte: { flex: 1, fontSize: 13, lineHeight: 19 },
   topItem: {
     flexDirection: "row",
     alignItems: "center",

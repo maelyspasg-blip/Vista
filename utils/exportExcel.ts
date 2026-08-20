@@ -189,6 +189,30 @@ export function totalParType(envs: CategorieExport[], estEntree: boolean): numbe
     .reduce((acc, e) => acc + e.depense, 0);
 }
 
+// RÈGLE À NE JAMAIS CASSER : SEULE source du "Reste estimé" reconstruit
+// pour un mois DÉJÀ ARCHIVÉ — même principe que
+// utils/budget.ts::calculerResteEstimeCourant (mois en cours) : Aperçu et
+// le bloc coach de Stats doivent tous les deux appeler cette fonction pour
+// la comparaison "vs mois précédent", jamais reconstruire la formule
+// indépendamment. Accepte n'importe quel snapshot structurellement
+// compatible (SnapshotMois de app/store.ts comme SnapshotExport ci-dessus).
+export function calculerResteEstimeArchive(snapshot: {
+  enveloppes: CategorieExport[];
+  epargne: number;
+  disponible: number;
+}): number {
+  const totalPrevu = snapshot.enveloppes
+    .filter((e) => e.type !== "Entrée")
+    .reduce((acc, e) => acc + Math.max(0, e.budget - e.depense), 0);
+  return (
+    snapshot.disponible +
+    totalParType(snapshot.enveloppes, true) -
+    totalParType(snapshot.enveloppes, false) -
+    totalPrevu -
+    snapshot.epargne
+  );
+}
+
 function feuilleResume(donnees: DonneesExport, periode: PeriodeExport) {
   const lignes: (string | number)[][] = [
     [

@@ -50,6 +50,8 @@ import { useGuest } from "./GuestContext";
 import { SyncErrorBanner } from "./SyncErrorBanner";
 import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { useObjectifs } from "./store";
+import { usePremium } from "./PremiumContext";
+import { estComptePremium } from "../utils/premium";
 import { Theme, useTheme } from "./ThemeContext";
 import { useTutoriel } from "./TutorielContext";
 
@@ -134,6 +136,13 @@ export default function Profil() {
   } = useAccessibilite();
   const objStore = useObjectifs();
   const { isGuest } = useGuest();
+  const { estPremium, definirPremium, simulerNonPremium, definirSimulerNonPremium } =
+    usePremium();
+  // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Profil —
+  // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
+  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium);
+  const scrollProfilRef = useRef<ScrollView>(null);
+  const [yPasserPremium, setYPasserPremium] = useState(0);
 
   const [email, setEmail] = useState("");
   const [prenomTemp, setPrenomTemp] = useState(objStore.prenom);
@@ -332,6 +341,8 @@ export default function Profil() {
           historiquesMois: objStore.historiquesMois,
           seuilEpargneConstante: objStore.seuilEpargneConstante,
           objectifs: objStore.objectifs,
+          transactions: objStore.transactions,
+          historiquePaiements: objStore.historiquePaiements,
         })
       : null;
 
@@ -448,6 +459,28 @@ export default function Profil() {
     router.replace("/onboarding/connexion");
   };
 
+  const demanderPassagePremium = () => {
+    Alert.alert(
+      "Passer Premium",
+      "Fonctionnalité bientôt disponible — RevenueCat sera intégré prochainement.",
+    );
+  };
+
+  const gererTapFonctionVerrouillee = () => {
+    Alert.alert(
+      "Cette fonctionnalité est réservée aux comptes Premium",
+      undefined,
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Découvrir Premium",
+          onPress: () =>
+            scrollProfilRef.current?.scrollTo({ y: yPasserPremium, animated: true }),
+        },
+      ],
+    );
+  };
+
   const seDeconnecter = () => {
     if (!isGuest) {
       confirmerDeconnexion();
@@ -562,6 +595,7 @@ export default function Profil() {
       <SyncErrorBanner />
 
       <ScrollView
+        ref={scrollProfilRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled"
@@ -598,7 +632,14 @@ export default function Profil() {
                 Changer la photo
               </Text>
             </TouchableOpacity>
-            {objStore.isAdmin && (
+            {/* RÈGLE À NE JAMAIS CASSER : simulerNonPremium masque les deux
+                badges, même pour un vrai admin — c'est le but du toggle
+                "Simuler compte non-premium" (voir OUTILS ADMIN plus bas).
+                Le badge Administrateur ne s'affiche que pour un admin qui
+                n'a PAS activé "Simuler Premium" (!estPremium) — sinon
+                l'admin doit voir le badge Premium comme un vrai compte
+                Premium le verrait, cf. bloc ci-dessous. */}
+            {objStore.isAdmin && !simulerNonPremium && !estPremium ? (
               <View
                 style={[
                   styles.badgeAdmin,
@@ -614,6 +655,16 @@ export default function Profil() {
                   Administrateur
                 </Text>
               </View>
+            ) : (
+              !simulerNonPremium &&
+              estPremium && (
+                <View style={[styles.badgeAdmin, { backgroundColor: "#FFF8E7" }]}>
+                  <Ionicons name="diamond-outline" size={12} color="#C9A84C" />
+                  <Text style={[styles.badgeAdminTexte, { color: "#C9A84C" }]}>
+                    Premium
+                  </Text>
+                </View>
+              )
             )}
           </View>
 
@@ -811,33 +862,100 @@ export default function Profil() {
         </Text>
         <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.vert, contrasteRenforce)]}>
           <TouchableOpacity
-            style={[styles.btnSecondaire, { borderColor: C.separateur }]}
-            onPress={() => setModalExportVisible(true)}
+            style={[
+              styles.btnSecondaire,
+              { borderColor: C.separateur, justifyContent: "space-between" },
+            ]}
+            onPress={() =>
+              premium ? setModalExportVisible(true) : gererTapFonctionVerrouillee()
+            }
             activeOpacity={0.7}
           >
-            <Ionicons name="download-outline" size={16} color={C.texte} />
-            <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
-              Exporter mes données (Excel)
-            </Text>
+            <View style={styles.btnSecondaireGauche}>
+              <Ionicons name="download-outline" size={16} color={C.texte} />
+              <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+                Exporter mes données (Excel)
+              </Text>
+            </View>
+            {!premium && (
+              <Ionicons name="lock-closed" size={14} color={C.texteMuted} />
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[
               styles.btnSecondaire,
-              { borderColor: C.separateur, marginTop: 12 },
+              { borderColor: C.separateur, marginTop: 12, justifyContent: "space-between" },
             ]}
-            onPress={() => setModalRapportVisible(true)}
+            onPress={() =>
+              premium ? setModalRapportVisible(true) : gererTapFonctionVerrouillee()
+            }
             activeOpacity={0.7}
           >
-            <Ionicons name="image-outline" size={16} color={C.texte} />
-            <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
-              Exporter un résumé visuel
-            </Text>
+            <View style={styles.btnSecondaireGauche}>
+              <Ionicons name="image-outline" size={16} color={C.texte} />
+              <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+                Exporter un résumé visuel
+              </Text>
+            </View>
+            {!premium && (
+              <Ionicons name="lock-closed" size={14} color={C.texteMuted} />
+            )}
           </TouchableOpacity>
         </View>
 
         {objStore.isAdmin && (
           <>
+            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+              OUTILS ADMIN
+            </Text>
+            <View
+              style={[
+                styles.carte,
+                { backgroundColor: C.carte, borderColor: C.carteBorder },
+                styleCarte(theme, C.lavande, contrasteRenforce),
+              ]}
+            >
+              <View style={styles.switchRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.switchLabel, { color: C.texte }]}>
+                    Simuler Premium
+                  </Text>
+                  <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                    Prévisualise le rendu Premium (aucun abonnement réel —
+                    RevenueCat pas encore branché)
+                  </Text>
+                </View>
+                <Switch
+                  value={estPremium}
+                  onValueChange={definirPremium}
+                  trackColor={{ false: C.separateur, true: "#FFF0C2" }}
+                  thumbColor={estPremium ? "#C9A84C" : "#FFF"}
+                  accessibilityLabel="Simuler Premium"
+                />
+              </View>
+
+              <View style={[styles.switchRow, { marginTop: 18 }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.switchLabel, { color: C.texte }]}>
+                    Simuler compte non-premium
+                  </Text>
+                  <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                    Voir exactement ce que voit un compte gratuit — prend le
+                    dessus sur ton statut admin, revient à false à chaque
+                    redémarrage de l&apos;app
+                  </Text>
+                </View>
+                <Switch
+                  value={simulerNonPremium}
+                  onValueChange={definirSimulerNonPremium}
+                  trackColor={{ false: C.separateur, true: C.purpleLight }}
+                  thumbColor={simulerNonPremium ? C.purple : "#FFF"}
+                  accessibilityLabel="Simuler compte non-premium"
+                />
+              </View>
+            </View>
+
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
               DÉTAIL DES CALCULS
             </Text>
@@ -900,12 +1018,84 @@ export default function Profil() {
           </TouchableOpacity>
         </View>
 
+        {/* RÈGLE À NE JAMAIS CASSER : visible uniquement pour les comptes
+            non-premium (jamais affiché à quelqu'un qui a déjà accès à
+            tout) — `premium` respecte déjà simulerNonPremium, donc un admin
+            en train de "Simuler compte non-premium" revoit cette section
+            comme un vrai utilisateur gratuit la verrait. */}
+        {!premium && (
+          <View onLayout={(e) => setYPasserPremium(e.nativeEvent.layout.y)}>
+            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+              PASSER PREMIUM
+            </Text>
+            <View
+              style={[
+                styles.carte,
+                { backgroundColor: C.carte, borderColor: C.carteBorder },
+                styleCarte(theme, "#C9A84C", contrasteRenforce),
+              ]}
+            >
+              {[
+                "Analyses et conseils personnalisés illimités, sans publicité",
+                "Historique complet de vos budgets et dépenses",
+                "Export de vos données (Excel et résumé visuel)",
+                "Accès complet à Ton bilan (Score, Séries, Simulateur)",
+              ].map((avantage, i) => (
+                <View
+                  key={avantage}
+                  style={[styles.premiumAvantageRow, i > 0 && { marginTop: 8 }]}
+                >
+                  <Text style={{ color: C.texteMuted, fontSize: 14 }}>•</Text>
+                  <Text style={[styles.premiumAvantageTexte, { color: C.texte }]}>
+                    {avantage}
+                  </Text>
+                </View>
+              ))}
+              <BoutonPrincipal
+                style={[
+                  styles.btnPrincipal,
+                  { backgroundColor: "#C9A84C", marginTop: 16 },
+                ]}
+                onPress={demanderPassagePremium}
+              >
+                <Text style={styles.btnPrincipalTexte}>Découvrir Premium</Text>
+              </BoutonPrincipal>
+            </View>
+          </View>
+        )}
+
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           COMPTE
         </Text>
         <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.peach, contrasteRenforce)]}>
+          {/* RÈGLE À NE JAMAIS CASSER : visible uniquement pour un vrai
+              abonnement Premium (estPremium sans être admin) — pour un
+              admin, estPremium ne représente qu'une simulation locale
+              (utils/premium.ts), jamais un abonnement réel à résilier. */}
+          {estPremium && !objStore.isAdmin && (
+            <TouchableOpacity
+              style={[styles.btnSecondaire, { borderColor: C.separateur }]}
+              onPress={() =>
+                Alert.alert(
+                  "Gérer mon abonnement",
+                  "Votre abonnement Premium est géré par l'App Store. Pour le résilier : ouvrez Réglages > [votre nom] > Abonnements, sélectionnez Vista, puis appuyez sur \"Annuler l'abonnement\". L'accès Premium reste actif jusqu'à la fin de la période déjà payée.",
+                  [{ text: "Compris" }],
+                )
+              }
+              activeOpacity={0.7}
+            >
+              <Ionicons name="card-outline" size={16} color={C.texte} />
+              <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+                Gérer mon abonnement
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
-            style={[styles.btnSecondaire, { borderColor: C.separateur }]}
+            style={[
+              styles.btnSecondaire,
+              { borderColor: C.separateur, marginTop: estPremium && !objStore.isAdmin ? 12 : 0 },
+            ]}
             onPress={seDeconnecter}
             activeOpacity={0.7}
           >
@@ -1416,6 +1606,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
+  premiumAvantageRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  premiumAvantageTexte: { fontSize: 13, flex: 1 },
   champValeurStatique: {
     fontSize: 15,
     fontWeight: "600",
@@ -1435,6 +1627,7 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     paddingHorizontal: 10,
   },
+  btnSecondaireGauche: { flexDirection: "row", alignItems: "center", gap: 8 },
   btnSecondaireTexte: {
     fontSize: 14,
     fontWeight: "600",
