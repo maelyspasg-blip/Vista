@@ -50,6 +50,7 @@ import { TextInput } from "../TexteInput";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { useLargeurAnimee } from "../BarreProgression";
 import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
+import { InsightVerrouille } from "../InsightVerrouille";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
 import { TiroirStats } from "../TiroirStats";
@@ -926,6 +927,11 @@ export default function Analytics() {
   };
   const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
   const [deltaDepMoyPourcentage, setDeltaDepMoyPourcentage] = useState(true);
+  // RÈGLE À NE JAMAIS CASSER : state local (pas persisté) — "pour la
+  // session en cours" signifie qu'il revient à false à la prochaine
+  // ouverture de l'app. Même mécanisme que conseilsDebloques dans
+  // app/(tabs)/index.tsx, voir InsightVerrouille pour le composant partagé.
+  const [retenirDebloque, setRetenirDebloque] = useState(false);
   // Comparaison mensuelle par catégorie : un seul état pour toute la
   // section (pas de toggle par ligne) — taper n'importe quelle valeur
   // affichée (une ligne ou le delta total en haut) bascule tout d'un coup.
@@ -1525,6 +1531,9 @@ export default function Analytics() {
     depensesParCategorie,
     objectifs: objectifsAvecDelta,
   });
+  // Pas de compte Premium dans l'app pour l'instant (voir la même règle
+  // dans app/(tabs)/index.tsx) — seul isAdmin bypasse le déblocage pub.
+  const retenirTousVisibles = objStore.isAdmin || retenirDebloque;
 
   // Comparaison mensuelle par catégorie : uniquement les catégories présentes
   // dans LES DEUX mois comparés (sinon la comparaison n'a pas de sens), plus
@@ -2975,23 +2984,37 @@ export default function Analytics() {
               },
             ]}
           >
-            {insights.map((txt, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.insightItem,
-                  i > 0 && [
-                    styles.insightItemBorder,
-                    { borderTopColor: C.separateur },
-                  ],
-                ]}
-              >
+            {/* RÈGLE À NE JAMAIS CASSER : le tout premier insight reste
+                toujours gratuit, quel que soit retenirTousVisibles — les
+                suivants sont regroupés derrière un seul bloc verrouillé
+                (InsightVerrouille), pas un par insight. */}
+            {insights.length > 0 && (
+              <View style={styles.insightItem}>
                 <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
                 <Text style={[styles.insightTexte, { color: C.purpleText }]}>
-                  {txt}
+                  {insights[0]}
                 </Text>
               </View>
-            ))}
+            )}
+            {insights.length > 1 && (
+              <InsightVerrouille
+                deverrouille={retenirTousVisibles}
+                onDeverrouille={() => setRetenirDebloque(true)}
+                couleurFond={theme === "sombre" ? C.lavande : C.purpleLight}
+              >
+                {insights.slice(1).map((txt, i) => (
+                  <View
+                    key={i + 1}
+                    style={[styles.insightItem, styles.insightItemBorder, { borderTopColor: C.separateur }]}
+                  >
+                    <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
+                    <Text style={[styles.insightTexte, { color: C.purpleText }]}>
+                      {txt}
+                    </Text>
+                  </View>
+                ))}
+              </InsightVerrouille>
+            )}
           </View>
         </TiroirStats>
 

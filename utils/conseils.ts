@@ -1,12 +1,67 @@
-import { Enveloppe, Objectif, PaiementHistorique, SnapshotMois, Transaction } from "../app/store";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  Enveloppe,
+  Objectif,
+  PaiementHistorique,
+  SnapshotEnveloppe,
+  SnapshotMois,
+  Transaction,
+} from "../app/store";
 import { depenseCumuleeAuJour, joursDansMois, MOIS_LABELS, moisPrecedent } from "./exportExcel";
 
 export type NiveauConseil = "bon" | "attention" | "alerte";
 
+// --- États persistés (voir section "Moteur de coaching" plus bas pour le
+// détail de leur logique) --------------------------------------------------
+
+export type EtatInsight =
+  | "NOUVEAU"
+  | "A_SURVEILLER"
+  | "CONFIRME"
+  | "AMELIORATION"
+  | "RESOLU"
+  | "STABLE"
+  | "DEGRADATION"
+  | "RISQUE"
+  | "ACTION"
+  | "RETABLISSEMENT";
+
+export const LIBELLES_ETAT_INSIGHT: Record<EtatInsight, string> = {
+  NOUVEAU: "Nouveau",
+  A_SURVEILLER: "À surveiller",
+  CONFIRME: "Confirmé",
+  AMELIORATION: "Amélioration",
+  RESOLU: "Résolu",
+  STABLE: "Stable",
+  DEGRADATION: "Dégradation",
+  RISQUE: "Risque",
+  ACTION: "Action",
+  RETABLISSEMENT: "Rétablissement",
+};
+
 export type Conseil = {
   texte: string;
   niveau: NiveauConseil;
+  // null uniquement pour les 2 replis "tout va bien" / "données
+  // insuffisantes" — ce ne sont pas des situations suivies dans le temps.
+  etat: EtatInsight | null;
 };
+
+export type EtatInsightPersiste = {
+  situationId: string;
+  etat: EtatInsight;
+  // Valeur de gravité (voir plus bas) au moment de la toute première
+  // détection — conservée pour référence, jamais réécrite ensuite.
+  valeurReference: number;
+  // Valeur de gravité à la dernière mise à jour — c'est elle qui sert à
+  // détecter une amélioration (comparée à la valeur du jour).
+  derniereValeur: number;
+  nbPointsConfirmes: number;
+  datePremiereDetection: string; // "AAAA-MM-JJ"
+  dateDerniereMiseAJour: string; // "AAAA-MM-JJ"
+};
+
+export type EtatsInsightsMap = Record<string, EtatInsightPersiste>;
 
 // --- Signaux réutilisés tels quels par le moteur de conseils d'Aperçu et
 // par les KPI de Stats, pour ne garder qu'un seul endroit qui sait calculer
@@ -111,104 +166,473 @@ export function calculerRythmeObjectif(
   return { pct, delta, moisRestants, rythmeInsuffisant, rythmeMensuel, objectifAtteint };
 }
 
-// --- Signaux spécifiques au bloc "Nos conseils" (Aperçu).
+// --- Persistance des états (AsyncStorage) ----------------------------------
 //
-// Moteur "coach financier" conscient du jour du mois, comparant
-// systématiquement au mois précédent quand c'est disponible et pertinent.
-// Distinct par construction de genererInsightsPeriode (Stats,
-// utils/tendancesPeriode.ts), qui analyse la PÉRIODE sélectionnée par
-// l'utilisateur (tendances sur plusieurs mois, régularité, volatilité,
-// pics) — jamais le seul mois en cours au jour près :
-//  - R1-R3/R4-R5/R15/R18 (position dans le mois, projection de fin de mois,
-//    allocation quotidienne restante) n'ont aucun équivalent dans Stats,
-//    qui ne raisonne jamais "jours restants du mois en cours".
-//  - R7 (catégorie >130% de SON PROPRE budget ce mois-ci) vs S1 Stats
-//    (catégorie dont la MOYENNE augmente le plus vite d'une moitié à
-//    l'autre de la période sélectionnée) : l'un compare une catégorie à son
-//    propre budget du mois, l'autre compare des moyennes de plusieurs mois
-//    entre elles — signaux différents.
-//  - R12 (catégorie >200% de sa moyenne sur 3 mois glissants, ancrée sur le
-//    mois en cours) vs S1/S4 Stats (tendance/pic sur la période choisie,
-//    potentiellement 6/12/24 mois) : ancrage et seuils différents.
-//  - R13 (meilleur mois "depuis X mois" au même jour du mois, comparaison
-//    jour-à-jour via depenseCumuleeAuJour) vs S5 Stats (baisse confirmée
-//    sur ≥3 mois complets, régression 1ère/2e moitié de la période) :
-//    l'un compare un mois partiel à d'autres mois au même jour, l'autre
-//    une tendance sur des mois entièrement clos.
-//  - R9 (objectif à 75-95% de sa cible, état ponctuel) vs S3 Stats (rythme
-//    d'épargne mesuré sur un streak de mois consécutifs) : état vs rythme.
-//  - R10 (aucun objectif actif + marge positive répétée → en créer un) n'a
-//    pas d'équivalent dans Stats, qui ne parle que d'objectifs existants.
+// RÈGLE À NE JAMAIS CASSER : les états d'insights sont des métadonnées
+// locales à l'appareil (AsyncStorage), pas une table Supabase — elles ne
+// changent la trajectoire d'aucun calcul financier (budgets, transactions,
+// objectifs restent la seule source de vérité, toujours en base), elles ne
+// font que se souvenir "depuis quand on suit tel sujet" pour raconter une
+// évolution. Perdre ce fichier (désinstallation, changement d'appareil) est
+// donc sans risque réel : au pire, l'historique narratif repart de NOUVEAU,
+// rien d'autre n'est affecté. Ne jamais promouvoir ces données vers
+// Supabase sans réévaluer cette hypothèse.
 
-const SEUIL_MARGE_FIN_MOIS = 0.15; // ratioReste, R1
-const SEUIL_MARGE_MI_MOIS = 0.25; // ratioReste, R2
-const SEUIL_MARGE_DEBUT_MOIS = 0.4; // ratioReste, R3
-const SEUIL_RATIO_ENTREE_EXCEPTIONNELLE = 0.2; // entrée reçue / budget, R14
-const SEUIL_DEPASSEMENT_CATEGORIE = 1.3; // dépense / budget de la catégorie, R7
-const SEUIL_CATEGORIE_ATTENTION_MIN = 0.8; // dépense / budget de la catégorie, R6
-const SEUIL_MARGE_VERSEMENT = 0.25; // ratioReste, R8
-const SEUIL_OBJECTIF_PROCHE_MIN = 75; // %, R9
-const SEUIL_OBJECTIF_PROCHE_MAX = 95; // %, R9
-const NB_MOIS_MOYENNE_CATEGORIE = 3; // R12
-const SEUIL_SPIKE_CATEGORIE = 2; // ×moyenne, R12
-const MONTANT_MIN_MOYENNE_CATEGORIE = 20; // € — évite le bruit sur des montants négligeables, R12
-const NB_MOIS_MEILLEUR_MOIS = 3; // R13
-const SEUIL_JOUR_MIN_MEILLEUR_MOIS = 5; // évite un "meilleur mois" trivial dès le 1er jour, R13
-const SEUIL_JOURS_R16 = 10; // "beaucoup de jours restants", R16
-const SEUIL_EURJOUR_R16 = 5; // €/jour, R16
+const PREFIXE_CLE_ETATS_INSIGHTS = "vista_etats_insights_";
 
-export function genererConseils(params: {
-  enveloppes: Enveloppe[];
-  objectifs: Objectif[];
-  historiquesMois: SnapshotMois[];
-  transactions: Transaction[];
-  historiquePaiements: PaiementHistorique[];
-  epargneMois: number;
-  resteEstime: number;
-  // Même formule que resteEstime, déjà calculée dans app/(tabs)/index.tsx
-  // sur le snapshot du mois précédent — recalculée ici donnerait un second
-  // moyen d'obtenir le même chiffre, avec un risque de divergence.
-  resteEstimePrecedent: number | null;
-  disponibleEffectif: number;
-  moisActuel: number;
-  anneeActuelle: number;
-  maxConseils?: number;
-}): Conseil[] {
+export async function chargerEtatsInsights(userId: string): Promise<EtatsInsightsMap> {
+  try {
+    const brut = await AsyncStorage.getItem(`${PREFIXE_CLE_ETATS_INSIGHTS}${userId}`);
+    return brut ? (JSON.parse(brut) as EtatsInsightsMap) : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function sauvegarderEtatsInsights(
+  userId: string,
+  etats: EtatsInsightsMap,
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      `${PREFIXE_CLE_ETATS_INSIGHTS}${userId}`,
+      JSON.stringify(etats),
+    );
+  } catch {
+    // Best-effort : une erreur d'écriture ne doit jamais empêcher l'affichage
+    // des conseils, juste faire perdre l'historique d'état la prochaine fois.
+  }
+}
+
+// --- Moteur de coaching "Nos conseils" (Aperçu) ----------------------------
+//
+// RÈGLE À NE JAMAIS CASSER — à lire avant de toucher à ce qui suit :
+//
+// 1. SUIVRE UNE SITUATION, PAS SEULEMENT LA DÉTECTER. Chaque sujet suivi
+//    (une catégorie qui dérive, un objectif qui décroche, une marge qui se
+//    dégrade...) a un `situationId` stable (ex: "tendance:idCatégorie",
+//    "objectif:idObjectif") et un état persisté (EtatInsightPersiste,
+//    AsyncStorage) qui survit entre les sessions. determinerEtatInsight
+//    fait progresser cet état à partir de sa "valeur de gravité" du jour
+//    (plus bas = mieux, quelle que soit la famille) : NOUVEAU/DEGRADATION
+//    (1ère détection) → A_SURVEILLER/RISQUE (confirmé une 2e fois) →
+//    CONFIRME/ACTION (3e fois ou plus) → AMELIORATION/RETABLISSEMENT (la
+//    gravité baisse nettement) → RESOLU/STABLE (la situation n'est plus
+//    active du tout). Les deux vocabulaires (observation vs dégradation)
+//    partagent exactement cette même mécanique à 5 crans — seuls les mots
+//    affichés diffèrent, choisis selon `priorite` de la situation
+//    ("critique" → vocabulaire dégradation, sinon → observation).
+//
+// 2. AU PLUS UNE TRANSITION PAR JOUR CALENDAIRE. determinerEtatInsight
+//    compare `dateDerniereMiseAJour` à la date du jour : si déjà mis à jour
+//    aujourd'hui, l'état persisté est retourné TEL QUEL, sans avancer. Sans
+//    cette garde, rouvrir l'app plusieurs fois dans la même journée ferait
+//    défiler tous les états en quelques minutes — le principe même de
+//    "suivre dans le temps" perdrait son sens. C'est aussi ce qui garantit
+//    qu'un même jour, le texte affiché reste identique à chaque ouverture.
+//
+// 3. RÉSOLUTION EXPLICITE, PAS UN SILENCE. Quand une situation suivie
+//    n'est plus active, on l'annonce une fois (RESOLU/STABLE) puis on
+//    arrête de la suivre (l'entrée est supprimée de la map persistée) —
+//    une réapparition ultérieure du même sujet repart de zéro (NOUVEAU),
+//    volontairement : on ne fait pas semblant de se souvenir d'un épisode
+//    clos pour ne pas fausser une nouvelle observation avec un vieux
+//    contexte. Seules les familles qui représentent un vrai "problème
+//    réversible" (budget de catégorie, tendance à la hausse, déficit
+//    global, trajectoire d'objectif, marge qui se dégrade, comportement en
+//    dégradation — via ajouterSituationSuivie) suivent cet arc complet
+//    jusqu'à la résolution ; les situations ponctuelles/informatives (ex:
+//    nouvelle catégorie, objectif atteint — via ajouterSituationPonctuelle)
+//    n'ont pas de notion de "résolution" et disparaissent simplement quand
+//    elles ne sont plus vraies, sans message de clôture.
+//
+// 4. TON JAMAIS MORALISATEUR. Aucun texte ci-dessous ne doit contenir de
+//    jugement ("vous dépensez trop", "vous devez arrêter") ni d'impératif
+//    culpabilisant — observation factuelle → explication chiffrée → impact
+//    chiffré → action formulée comme un choix, jamais un ordre.
+
+type PrioriteSituation = "critique" | "evolutive" | "positive" | "neutre";
+type VocabulaireEtat = "observation" | "degradation";
+
+type SituationDetectee = {
+  // Sert à la fois de clé de dédoublonnage (categoriesDejaCitees s'appuie
+  // sur l'id de catégorie/objectif, pas sur `cle`) et de situationId pour
+  // les situations suivies dans le temps.
+  cle: string;
+  priorite: PrioriteSituation;
+  etat: EtatInsight | null;
+  texteParEtat: (etat: EtatInsight) => string;
+  niveauConseil: (etat: EtatInsight) => NiveauConseil;
+};
+
+function journeeISO(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function libelleEtape(
+  vocabulaire: VocabulaireEtat,
+  etape: "premiere" | "confirmation" | "forte" | "amelioration" | "resolu",
+): EtatInsight {
+  if (etape === "resolu") return vocabulaire === "observation" ? "RESOLU" : "STABLE";
+  if (vocabulaire === "observation") {
+    if (etape === "premiere") return "NOUVEAU";
+    if (etape === "confirmation") return "A_SURVEILLER";
+    if (etape === "forte") return "CONFIRME";
+    return "AMELIORATION";
+  }
+  if (etape === "premiere") return "DEGRADATION";
+  if (etape === "confirmation") return "RISQUE";
+  if (etape === "forte") return "ACTION";
+  return "RETABLISSEMENT";
+}
+
+const SEUIL_AMELIORATION_RELATIVE = 0.15; // baisse relative de gravité pour parler d'amélioration
+const NB_POINTS_POUR_ETAT_FORT = 3; // nb de vérifications (jours distincts) où la situation reste active
+
+// Fait progresser (ou éteint) l'état persisté d'une situation suivie —
+// cf. RÈGLES #1/#2/#3 ci-dessus. `valeurGravite` : plus bas = mieux, quelle
+// que soit la famille appelante (ratio de dépassement, € de déficit, % de
+// hausse projeté...). Retourne null quand il n'y a plus rien à suivre
+// (jamais actif, ou déjà annoncé résolu un jour précédent).
+function determinerEtatInsight(
+  estActive: boolean,
+  valeurGraviteActuelle: number,
+  vocabulaire: VocabulaireEtat,
+  etatPrecedent: EtatInsightPersiste | undefined,
+  situationId: string,
+  aujourdHui: string,
+): EtatInsightPersiste | null {
+  if (!estActive && !etatPrecedent) return null;
+
+  if (!etatPrecedent) {
+    return {
+      situationId,
+      etat: libelleEtape(vocabulaire, "premiere"),
+      valeurReference: valeurGraviteActuelle,
+      derniereValeur: valeurGraviteActuelle,
+      nbPointsConfirmes: 1,
+      datePremiereDetection: aujourdHui,
+      dateDerniereMiseAJour: aujourdHui,
+    };
+  }
+
+  if (etatPrecedent.dateDerniereMiseAJour === aujourdHui) return etatPrecedent;
+
+  if (!estActive) {
+    if (etatPrecedent.etat === "RESOLU" || etatPrecedent.etat === "STABLE") return null;
+    return {
+      ...etatPrecedent,
+      etat: libelleEtape(vocabulaire, "resolu"),
+      derniereValeur: 0,
+      dateDerniereMiseAJour: aujourdHui,
+    };
+  }
+
+  const etaitEnAmelioration =
+    etatPrecedent.etat === "AMELIORATION" || etatPrecedent.etat === "RETABLISSEMENT";
+  if (etaitEnAmelioration) {
+    // Toujours actif après une amélioration : pas fini de se résoudre — on
+    // reste sur ce cran plutôt que de régresser à un stade antérieur à
+    // chaque petite fluctuation.
+    return { ...etatPrecedent, derniereValeur: valeurGraviteActuelle, dateDerniereMiseAJour: aujourdHui };
+  }
+
+  const enAmelioration =
+    etatPrecedent.derniereValeur > 0 &&
+    valeurGraviteActuelle < etatPrecedent.derniereValeur * (1 - SEUIL_AMELIORATION_RELATIVE);
+  if (enAmelioration) {
+    return {
+      ...etatPrecedent,
+      etat: libelleEtape(vocabulaire, "amelioration"),
+      derniereValeur: valeurGraviteActuelle,
+      dateDerniereMiseAJour: aujourdHui,
+    };
+  }
+
+  const nbPointsConfirmes = etatPrecedent.nbPointsConfirmes + 1;
+  return {
+    ...etatPrecedent,
+    etat: libelleEtape(
+      vocabulaire,
+      nbPointsConfirmes >= NB_POINTS_POUR_ETAT_FORT ? "forte" : "confirmation",
+    ),
+    nbPointsConfirmes,
+    derniereValeur: valeurGraviteActuelle,
+    dateDerniereMiseAJour: aujourdHui,
+  };
+}
+
+function niveauConseilParDefaut(etat: EtatInsight): NiveauConseil {
+  if (etat === "ACTION") return "alerte";
+  if (etat === "RESOLU" || etat === "STABLE" || etat === "AMELIORATION" || etat === "RETABLISSEMENT") {
+    return "bon";
+  }
+  return "attention";
+}
+
+// Enregistre une situation avec l'arc complet (détection → confirmation →
+// amélioration → résolution) — réservé aux familles qui représentent un
+// vrai problème réversible, cf. RÈGLE #3.
+function ajouterSituationSuivie(
+  situations: SituationDetectee[],
+  etatsAJour: EtatsInsightsMap,
+  args: {
+    situationId: string;
+    estActive: boolean;
+    valeurGravite: number;
+    vocabulaire: VocabulaireEtat;
+    priorite: PrioriteSituation;
+    etatsPrecedents: EtatsInsightsMap;
+    aujourdHui: string;
+    texteParEtat: (etat: EtatInsight) => string;
+    niveauConseil?: (etat: EtatInsight) => NiveauConseil;
+  },
+): void {
+  const resultat = determinerEtatInsight(
+    args.estActive,
+    args.valeurGravite,
+    args.vocabulaire,
+    args.etatsPrecedents[args.situationId],
+    args.situationId,
+    args.aujourdHui,
+  );
+  if (!resultat) {
+    delete etatsAJour[args.situationId];
+    return;
+  }
+  etatsAJour[args.situationId] = resultat;
+  situations.push({
+    cle: args.situationId,
+    priorite: args.priorite,
+    etat: resultat.etat,
+    texteParEtat: args.texteParEtat,
+    niveauConseil: args.niveauConseil ?? niveauConseilParDefaut,
+  });
+}
+
+// Enregistre une situation ponctuelle/informative, sans notion de
+// résolution — le badge évolue (NOUVEAU → A_SURVEILLER → CONFIRME) si le
+// même sujet reste vrai sur plusieurs vérifications, mais disparaît
+// simplement (pas de message de clôture) dès qu'il ne l'est plus plus.
+function ajouterSituationPonctuelle(
+  situations: SituationDetectee[],
+  etatsAJour: EtatsInsightsMap,
+  args: {
+    situationId: string;
+    estActive: boolean;
+    priorite: PrioriteSituation;
+    etatsPrecedents: EtatsInsightsMap;
+    aujourdHui: string;
+    texte: string;
+    niveauConseil?: NiveauConseil;
+  },
+): void {
+  if (!args.estActive) {
+    delete etatsAJour[args.situationId];
+    return;
+  }
+  const resultat = determinerEtatInsight(
+    true,
+    0,
+    "observation",
+    args.etatsPrecedents[args.situationId],
+    args.situationId,
+    args.aujourdHui,
+  );
+  if (!resultat) return;
+  etatsAJour[args.situationId] = resultat;
+  situations.push({
+    cle: args.situationId,
+    priorite: args.priorite,
+    etat: resultat.etat,
+    texteParEtat: () => args.texte,
+    niveauConseil: () => args.niveauConseil ?? "bon",
+  });
+}
+
+function genererTexteConseil(situation: SituationDetectee, etat: EtatInsight): string {
+  return situation.texteParEtat(etat);
+}
+
+const SEUIL_DEPASSEMENT_CATEGORIE = 1.3; // budget dépassé, ≥30% au-delà
+const SEUIL_CATEGORIE_IMMINENT_MIN = 0.8; // budget imminent, ≥80% consommé
+const SEUIL_HAUSSE_CATEGORIE = 0.15; // tendance catégorie, +15% projeté vs moyenne récente
+const MONTANT_MIN_CATEGORIE = 20; // € — plancher anti-bruit sur les signaux catégorie
+const NB_MOIS_MOYENNE_CATEGORIE = 3;
+const SEUIL_SPIKE_PONCTUEL = 2; // dépense inhabituelle, ×moyenne 3 mois
+const TOLERANCE_RECURRENCE = 0.1; // catégorie récurrente, ±10% considéré "même montant"
+const SEUIL_COMPENSATION_ECART = 0.25; // compensation, tolérance entre écarts opposés
+const SEUIL_MARGE_DEGRADATION = 0.15; // recul du ratio de marge vs mois précédent
+const SEUIL_MARGE_VERSEMENT = 0.25; // ratioReste minimum pour suggérer un versement
+const SEUIL_OBJECTIF_PROCHE_MIN = 75; // %
+const SEUIL_OBJECTIF_PROCHE_MAX = 95; // %
+const NB_MOIS_MEILLEUR_MOIS = 3;
+const SEUIL_JOUR_MIN_MEILLEUR_MOIS = 5; // évite un "meilleur mois" trivial dès le 1er jour
+
+// --- Textes des familles à arc complet (ajouterSituationSuivie) -----------
+
+function texteBudgetCategorie(
+  e: Enveloppe,
+  jourActuel: number,
+  joursRestantsDansMois: number,
+  moisActuel: number,
+  anneeActuelle: number,
+  etat: EtatInsight,
+): string {
+  if (etat === "STABLE" || etat === "RETABLISSEMENT") {
+    return etat === "STABLE"
+      ? `${e.nom} est repassé sous son budget et s'y maintient — situation stabilisée.`
+      : `${e.nom} est repassé sous son budget ce mois-ci après avoir été sous tension récemment. Bon signe, à confirmer.`;
+  }
+  const ratio = e.budget > 0 ? e.depense / e.budget : 0;
+  const pct = Math.round(ratio * 100);
+  const rythmeJournalier = jourActuel > 0 ? e.depense / jourActuel : 0;
+  const projectionFinMois = rythmeJournalier * joursDansMois(moisActuel, anneeActuelle);
+  const depassementProjete = Math.round(projectionFinMois - e.budget);
+  const budgetJournalierRestant =
+    joursRestantsDansMois > 0 ? Math.max(0, (e.budget - e.depense) / joursRestantsDansMois) : 0;
+
+  const constat =
+    ratio >= 1
+      ? `${e.nom} a dépassé son budget de ${Math.round(e.depense - e.budget)}€ ce mois-ci.`
+      : `${e.nom} a déjà consommé ${pct}% de son budget et il reste ${joursRestantsDansMois} jour${joursRestantsDansMois > 1 ? "s" : ""} ce mois-ci.`;
+  const action =
+    depassementProjete > 0
+      ? ` À ce rythme, le dépassement atteindrait ${depassementProjete}€ — limiter ce poste à environ ${budgetJournalierRestant.toFixed(1)}€/jour permettrait de rester dans votre budget.`
+      : "";
+
+  if (etat === "DEGRADATION") return `${constat}${action}`;
+  if (etat === "RISQUE") return `${constat} Cette tension se confirme d'une vérification à l'autre.${action}`;
+  return `${constat} Cette situation dure depuis plusieurs vérifications maintenant.${action} Si votre objectif d'épargne reste prioritaire, ce budget mérite peut-être d'être révisé.`;
+}
+
+function texteTendanceCategorie(e: Enveloppe, pctProjete: number, etat: EtatInsight): string {
+  const pct = Math.round(Math.max(0, pctProjete));
+  if (etat === "NOUVEAU") {
+    return `Votre rythme de dépenses ${e.nom} augmente ce mois-ci (+${pct}% vs votre moyenne).`;
+  }
+  if (etat === "A_SURVEILLER") {
+    return `Cette hausse se confirme. Vous êtes désormais à +${pct}% sur ${e.nom}.`;
+  }
+  if (etat === "CONFIRME") {
+    return `Depuis plusieurs vérifications, vos dépenses ${e.nom} dépassent votre moyenne habituelle (+${pct}% actuellement). Ce poste mérite attention.`;
+  }
+  if (etat === "AMELIORATION") {
+    return `Votre rythme de dépenses ${e.nom} ralentit. L'écart est redescendu à +${pct}%.`;
+  }
+  return `Situation stabilisée — vos dépenses ${e.nom} sont revenues à seulement +${pct}% de votre moyenne.`;
+}
+
+function texteDeficitGlobal(
+  resteEstime: number,
+  joursRestantsDansMois: number,
+  etat: EtatInsight,
+): string {
+  if (etat === "STABLE" || etat === "RETABLISSEMENT") {
+    return etat === "STABLE"
+      ? "Vous êtes revenu dans votre budget — situation stabilisée."
+      : "Vous êtes repassé dans votre budget ce mois-ci après un dépassement récent.";
+  }
+  const montant = Math.round(Math.abs(resteEstime));
+  const base = `Avec vos dépenses actuelles, vous êtes en passe de dépasser votre budget de ${montant}€ ce mois-ci.`;
+  if (etat === "DEGRADATION") return base;
+  if (etat === "RISQUE") {
+    return `${base} Il reste ${joursRestantsDansMois} jour${joursRestantsDansMois > 1 ? "s" : ""} pour corriger le tir.`;
+  }
+  return `Le dépassement se confirme d'une vérification à l'autre (${montant}€ actuellement). Si votre objectif d'épargne reste prioritaire, ce serait le bon moment pour revoir le budget de vos catégories principales.`;
+}
+
+function texteObjectifTrajectoire(objectif: Objectif, etat: EtatInsight): string {
+  if (etat === "STABLE" || etat === "RETABLISSEMENT") {
+    return etat === "STABLE"
+      ? `${objectif.nom} a repris un rythme régulier — situation stabilisée.`
+      : `${objectif.nom} a reçu un nouveau versement ce mois-ci après une période sans progression. Bon signe.`;
+  }
+  const manque = Math.round(objectif.cible - objectif.actuel);
+  if (etat === "DEGRADATION") {
+    return `Aucun versement sur ${objectif.nom} ce mois-ci. Il reste ${manque}€ pour l'atteindre.`;
+  }
+  if (etat === "RISQUE") {
+    return `${objectif.nom} n'avance plus depuis plusieurs vérifications. Il reste ${manque}€ pour l'atteindre.`;
+  }
+  return `${objectif.nom} est à l'arrêt depuis un moment (${manque}€ restants) — sans jugement, ça arrive. Trois options quand vous serez prêt : reprendre un petit versement régulier, réduire temporairement la cible, ou laisser l'objectif de côté encore un peu et y revenir plus tard.`;
+}
+
+function texteMargeEvolution(
+  resteEstime: number,
+  resteEstimePrecedent: number,
+  moisPrec: number,
+  etat: EtatInsight,
+): string {
+  if (etat === "STABLE" || etat === "RETABLISSEMENT") {
+    return etat === "STABLE"
+      ? "Votre marge de fin de mois s'est stabilisée."
+      : "Votre marge de fin de mois s'est redressée récemment — bon signe.";
+  }
+  const base = `Votre marge de fin de mois se réduit par rapport à ${MOIS_LABELS[moisPrec]} (${Math.round(resteEstimePrecedent)}€ contre une projection actuelle de ${Math.round(resteEstime)}€).`;
+  if (etat === "DEGRADATION") return `${base} Rien d'alarmant, mais un signal à surveiller.`;
+  if (etat === "RISQUE") return `${base} Ce recul se confirme d'une vérification à l'autre.`;
+  return `${base} Ce recul dure depuis un moment — un point à regarder de plus près.`;
+}
+
+function texteComportementDegradation(nbMois: number, etat: EtatInsight): string {
+  if (etat === "STABLE" || etat === "RETABLISSEMENT") {
+    return etat === "STABLE"
+      ? "Votre marge de fin de mois s'est stabilisée après une période de recul."
+      : "Votre marge de fin de mois se redresse après plusieurs mois de recul — bon signe.";
+  }
+  return `Votre marge de fin de mois recule depuis ${nbMois} mois consécutifs. Ce n'est pas encore critique, mais ça mérite un point d'attention avant que ça ne s'installe.`;
+}
+
+// Détecte TOUTES les situations pertinentes, fait progresser leur état
+// persisté et retourne le tout — `etatsAJour` part d'une copie de
+// `etatsPrecedents` (les sujets non retouchés cette fois-ci restent
+// inchangés) et les 2 fonctions ajouterSituation* la mettent à jour.
+function detecterSituations(
+  params: {
+    enveloppes: Enveloppe[];
+    objectifs: Objectif[];
+    historiquesMois: SnapshotMois[];
+    transactions: Transaction[];
+    historiquePaiements: PaiementHistorique[];
+    epargneMois: number;
+    resteEstime: number;
+    resteEstimePrecedent: number | null;
+    disponibleEffectif: number;
+    moisActuel: number;
+    anneeActuelle: number;
+  },
+  etatsPrecedents: EtatsInsightsMap,
+): { situations: SituationDetectee[]; etatsAJour: EtatsInsightsMap } {
   const {
     enveloppes,
     objectifs,
     historiquesMois,
     transactions,
     historiquePaiements,
-    epargneMois,
     resteEstime,
     resteEstimePrecedent,
     disponibleEffectif,
     moisActuel,
     anneeActuelle,
-    maxConseils = 3,
   } = params;
 
-  const enveloppesSansEntree = enveloppes.filter((e) => e.type !== "Entrée");
-  const totalDepenses = enveloppesSansEntree.reduce(
-    (acc, e) => acc + e.depense,
-    0,
-  );
-  const jourActuel = new Date().getDate();
-  const joursRestantsDansMois =
-    joursDansMois(moisActuel, anneeActuelle) - jourActuel;
-  const ratioReste =
-    disponibleEffectif > 0 ? resteEstime / disponibleEffectif : 0;
-  const ratioDepense =
-    disponibleEffectif > 0 ? totalDepenses / disponibleEffectif : 0;
+  const aujourdHui = journeeISO(new Date());
+  const etatsAJour: EtatsInsightsMap = { ...etatsPrecedents };
 
-  const { mois: moisPrec, annee: anneePrec } = moisPrecedent(
-    moisActuel,
-    anneeActuelle,
-  );
+  const enveloppesSansEntree = enveloppes.filter((e) => e.type !== "Entrée");
+  const totalDepenses = enveloppesSansEntree.reduce((acc, e) => acc + e.depense, 0);
+  const jourActuel = new Date().getDate();
+  const joursRestantsDansMois = joursDansMois(moisActuel, anneeActuelle) - jourActuel;
+  const ratioReste = disponibleEffectif > 0 ? resteEstime / disponibleEffectif : 0;
+
+  const { mois: moisPrec, annee: anneePrec } = moisPrecedent(moisActuel, anneeActuelle);
   const snapshotMoisPrecedent = historiquesMois.find(
     (s) => s.mois === moisPrec && s.annee === anneePrec,
   );
+
+  const margeSnapshot = (s: SnapshotMois) => s.disponible - s.totalDepense - s.epargne;
+  const derniersMoisArchives = historiquesMois.slice(-NB_MOIS_MOYENNE_CATEGORIE);
 
   const objectifsActifs = objectifs.filter((o) => !o.ferme);
   const objectifsAvecRythme = objectifsActifs.map((o) => ({
@@ -216,230 +640,201 @@ export function genererConseils(params: {
     rythme: calculerRythmeObjectif(o, historiquesMois, snapshotMoisPrecedent),
   }));
 
-  // Dédoublonnage inter-règles au sein de ce même moteur : une catégorie ou
-  // un objectif déjà cité par une règle plus prioritaire n'est pas repris
-  // par une règle moins prioritaire portant sur le même sujet.
   const categoriesDejaCitees = new Set<string>();
   const objectifsDejaCites = new Set<string>();
+  const situations: SituationDetectee[] = [];
 
-  const candidats: (Conseil | undefined)[] = [];
+  const snapshotEnv = (
+    snap: SnapshotMois,
+    id: string,
+  ): SnapshotEnveloppe | undefined => snap.enveloppes.find((e) => e.id === id);
 
-  // --- GROUPE 1 : gestion de fin de mois (position dans le mois + marge) ---
+  const moyenneRecenteCategorie = (id: string) => {
+    if (derniersMoisArchives.length === 0) return 0;
+    return (
+      derniersMoisArchives.reduce((acc, p) => acc + (snapshotEnv(p, id)?.depense ?? 0), 0) /
+      derniersMoisArchives.length
+    );
+  };
 
-  const r1Cond =
-    joursRestantsDansMois >= 0 &&
-    joursRestantsDansMois <= 10 &&
-    ratioReste > SEUIL_MARGE_FIN_MOIS;
-  candidats.push(
-    r1Cond
-      ? {
-          texte: `Il te reste ${joursRestantsDansMois} jour${joursRestantsDansMois > 1 ? "s" : ""} et environ ${Math.round(resteEstime)}€ de marge. Si tu tiens tes dépenses prévues, tu pourrais mettre ${Math.round(resteEstime * 0.2)}€ de côté ce mois-ci sans te priver.`,
-          niveau: "bon",
-        }
-      : undefined,
-  );
-
-  const r2Cond =
-    joursRestantsDansMois >= 11 &&
-    joursRestantsDansMois <= 20 &&
-    ratioReste > SEUIL_MARGE_MI_MOIS;
-  candidats.push(
-    r2Cond
-      ? {
-          texte: `À mi-parcours, tu as encore ${Math.round(resteEstime)}€ de marge. En maintenant ce rythme, tu termineras le mois avec ce solde${
-            resteEstimePrecedent !== null
-              ? ` — ${resteEstime >= resteEstimePrecedent ? "mieux" : "moins bien"} qu'en ${MOIS_LABELS[moisPrec]} où tu avais terminé avec ${Math.round(resteEstimePrecedent)}€`
-              : ""
-          }.`,
-          niveau: "bon",
-        }
-      : undefined,
-  );
-
-  const r3Cond = joursRestantsDansMois > 20 && ratioReste > SEUIL_MARGE_DEBUT_MOIS;
-  candidats.push(
-    r3Cond
-      ? {
-          texte: `Excellent départ — tu n'as utilisé que ${Math.round(ratioDepense * 100)}% de ton budget en ${jourActuel} jour${jourActuel > 1 ? "s" : ""}. À ce rythme, tu pourrais épargner ${Math.round(resteEstime * 0.3)}€ supplémentaires ce mois-ci.`,
-          niveau: "bon",
-        }
-      : undefined,
-  );
-
-  // --- GROUPE 2 : alertes dépassement ---
-
-  const r4Cond =
-    joursRestantsDansMois >= 0 && joursRestantsDansMois <= 10 && resteEstime < 0;
-  candidats.push(
-    r4Cond
-      ? {
-          texte: `Attention — avec tes dépenses prévues, tu risques de dépasser de ${Math.round(Math.abs(resteEstime))}€ d'ici ${joursRestantsDansMois} jour${joursRestantsDansMois > 1 ? "s" : ""}. Évite toute dépense non planifiée cette semaine.`,
-          niveau: "alerte",
-        }
-      : undefined,
-  );
-
-  // Calculée avant R5 (et retenue dans categoriesDejaCitees) pour que R5 ne
-  // cite jamais la même catégorie que R7 juste en dessous — sinon les deux
-  // pourraient toutes les deux pointer "Loyer" comme écart principal, en
-  // termes légèrement différents, ce qui lirait comme une répétition.
-  const categorieDepassement130 = enveloppesSansEntree
-    .filter(
-      (e) => e.budget > 0 && e.depense > e.budget * SEUIL_DEPASSEMENT_CATEGORIE,
-    )
-    .sort((a, b) => b.depense - b.budget - (a.depense - a.budget))[0];
-  if (categorieDepassement130) categoriesDejaCitees.add(categorieDepassement130.id);
-
-  const categoriePlusDepassee = enveloppesSansEntree
-    .filter((e) => e.depense > e.budget && !categoriesDejaCitees.has(e.id))
-    .sort((a, b) => b.depense - b.budget - (a.depense - a.budget))[0];
-  const r5Cond = joursRestantsDansMois > 10 && resteEstime < 0;
-  candidats.push(
-    r5Cond
-      ? {
-          texte: `Tu es parti pour dépasser ton budget de ${Math.round(Math.abs(resteEstime))}€ ce mois-ci. Il te reste ${joursRestantsDansMois} jours pour corriger${
-            categoriePlusDepassee
-              ? ` — commence par réduire sur ${categoriePlusDepassee.nom}`
-              : ""
-          }.${
-            resteEstimePrecedent !== null
-              ? ` Le mois dernier, tu avais ${resteEstimePrecedent >= 0 ? "terminé dans les clous" : `dépassé de ${Math.round(Math.abs(resteEstimePrecedent))}€`}.`
-              : ""
-          }`,
-          niveau: "alerte",
-        }
-      : undefined,
-  );
-
-  const categorieAttention = enveloppesSansEntree
+  // === Budget de catégorie (dépassé/imminent, arc complet) ===================
+  const candidatsBudget = enveloppesSansEntree
     .filter((e) => e.budget > 0 && !categoriesDejaCitees.has(e.id))
-    .map((e) => ({ e, ratio: e.depense / e.budget }))
-    .filter(({ ratio }) => ratio >= SEUIL_CATEGORIE_ATTENTION_MIN && ratio < 1)
-    .sort((a, b) => b.ratio - a.ratio)[0];
-  const r6Cond = categorieAttention !== undefined && joursRestantsDansMois > 0;
-  if (r6Cond && categorieAttention) categoriesDejaCitees.add(categorieAttention.e.id);
-  candidats.push(
-    r6Cond && categorieAttention
-      ? {
-          texte: `${categorieAttention.e.nom} a consommé ${Math.round(categorieAttention.ratio * 100)}% de son budget et le mois n'est pas fini — surveille tes prochaines dépenses ici.`,
-          niveau: "attention",
-        }
-      : undefined,
-  );
+    .map((e) => {
+      const ratio = e.depense / e.budget;
+      const situationId = `budget:${e.id}`;
+      return { e, ratio, estActive: ratio >= SEUIL_CATEGORIE_IMMINENT_MIN, situationId };
+    })
+    .filter(({ estActive, situationId }) => estActive || etatsPrecedents[situationId] !== undefined)
+    .sort((a, b) => b.ratio - a.ratio);
+  if (candidatsBudget.length > 0) {
+    const { e, ratio, estActive, situationId } = candidatsBudget[0];
+    categoriesDejaCitees.add(e.id);
+    ajouterSituationSuivie(situations, etatsAJour, {
+      situationId,
+      estActive,
+      valeurGravite: ratio,
+      vocabulaire: "degradation",
+      priorite: "critique",
+      etatsPrecedents,
+      aujourdHui,
+      texteParEtat: (etat) =>
+        texteBudgetCategorie(e, jourActuel, joursRestantsDansMois, moisActuel, anneeActuelle, etat),
+    });
+  }
 
-  candidats.push(
-    categorieDepassement130
-      ? {
-          texte: `${categorieDepassement130.nom} a dépassé son budget de ${Math.round(categorieDepassement130.depense - categorieDepassement130.budget)}€ — c'est ton principal écart ce mois-ci.${(() => {
-            const precedent = snapshotMoisPrecedent?.enveloppes.find(
-              (e) => e.id === categorieDepassement130.id,
-            );
-            return precedent && precedent.depense <= precedent.budget
-              ? ` En ${MOIS_LABELS[moisPrec]}, cette catégorie était dans les clous à ${Math.round(precedent.depense)}€.`
-              : "";
-          })()}`,
-          niveau: "alerte",
-        }
-      : undefined,
-  );
+  // === Déficit global projeté (toutes catégories confondues) =================
+  ajouterSituationSuivie(situations, etatsAJour, {
+    situationId: "deficit:global",
+    estActive: resteEstime < 0,
+    valeurGravite: Math.max(0, -resteEstime),
+    vocabulaire: "degradation",
+    priorite: "critique",
+    etatsPrecedents,
+    aujourdHui,
+    texteParEtat: (etat) => texteDeficitGlobal(resteEstime, joursRestantsDansMois, etat),
+  });
 
-  // --- GROUPE 3 : épargne proactive ---
-
-  const objectifPourVersement = objectifsAvecRythme
-    .filter(
-      ({ rythme, objectif }) =>
-        !rythme.objectifAtteint && !objectifsDejaCites.has(objectif.id),
-    )
+  // === Objectifs : trajectoire dégradée (arc complet) =========================
+  const candidatsObjectifTrajectoire = objectifsAvecRythme
+    .filter(({ objectif }) => !objectifsDejaCites.has(objectif.id))
+    .map(({ objectif, rythme }) => ({
+      objectif,
+      situationId: `objectif:${objectif.id}`,
+      estActive: !rythme.objectifAtteint && rythme.rythmeInsuffisant,
+    }))
+    .filter(({ estActive, situationId }) => estActive || etatsPrecedents[situationId] !== undefined)
     .sort(
       (a, b) =>
         a.objectif.cible - a.objectif.actuel - (b.objectif.cible - b.objectif.actuel),
-    )[0];
-  const r8Cond =
-    resteEstime > 0 &&
-    ratioReste > SEUIL_MARGE_VERSEMENT &&
-    objectifPourVersement !== undefined;
-  if (r8Cond && objectifPourVersement)
-    objectifsDejaCites.add(objectifPourVersement.objectif.id);
-  candidats.push(
-    r8Cond && objectifPourVersement
-      ? (() => {
-          const montant = Math.min(
-            Math.round(resteEstime * 0.3),
-            Math.round(
-              objectifPourVersement.objectif.cible -
-                objectifPourVersement.objectif.actuel,
-            ),
-          );
-          const nouveauPct = Math.round(
-            ((objectifPourVersement.objectif.actuel + montant) /
-              objectifPourVersement.objectif.cible) *
-              100,
-          );
-          return {
-            texte: `Tu as ${Math.round(resteEstime)}€ de marge ce mois-ci. Un versement de ${montant}€ sur ${objectifPourVersement.objectif.nom} l'amènerait à ${nouveauPct}% — tu serais dans les temps pour l'atteindre.`,
-            niveau: "bon" as const,
-          };
-        })()
-      : undefined,
-  );
+    );
+  if (candidatsObjectifTrajectoire.length > 0) {
+    const { objectif, situationId, estActive } = candidatsObjectifTrajectoire[0];
+    objectifsDejaCites.add(objectif.id);
+    ajouterSituationSuivie(situations, etatsAJour, {
+      situationId,
+      estActive,
+      valeurGravite: estActive ? Math.max(1, objectif.cible - objectif.actuel) : 0,
+      vocabulaire: "degradation",
+      priorite: "critique",
+      etatsPrecedents,
+      aujourdHui,
+      texteParEtat: (etat) => texteObjectifTrajectoire(objectif, etat),
+    });
+  }
 
-  const objectifProche = objectifsAvecRythme
-    .filter(
-      ({ rythme, objectif }) =>
-        !rythme.objectifAtteint &&
-        rythme.pct >= SEUIL_OBJECTIF_PROCHE_MIN &&
-        rythme.pct < SEUIL_OBJECTIF_PROCHE_MAX &&
-        !objectifsDejaCites.has(objectif.id),
-    )
-    .sort((a, b) => b.rythme.pct - a.rythme.pct)[0];
-  if (objectifProche) objectifsDejaCites.add(objectifProche.objectif.id);
-  candidats.push(
-    objectifProche
-      ? {
-          texte: `${objectifProche.objectif.nom} est à ${Math.round(objectifProche.rythme.pct)}% — il ne manque que ${Math.round(objectifProche.objectif.cible - objectifProche.objectif.actuel)}€ pour l'atteindre. Tu as la marge pour le faire ce mois-ci.`,
-          niveau: "bon",
-        }
-      : undefined,
-  );
+  // === Compensation entre catégories ==========================================
+  if (snapshotMoisPrecedent) {
+    const deltasCategories = enveloppesSansEntree
+      .filter((e) => !categoriesDejaCitees.has(e.id))
+      .map((e) => {
+        const prec = snapshotEnv(snapshotMoisPrecedent, e.id);
+        return { e, delta: e.depense - (prec?.depense ?? 0) };
+      })
+      .filter(({ delta }) => Math.abs(delta) >= MONTANT_MIN_CATEGORIE);
+    const hausses = deltasCategories.filter(({ delta }) => delta > 0).sort((a, b) => b.delta - a.delta);
+    const baisses = deltasCategories.filter(({ delta }) => delta < 0).sort((a, b) => a.delta - b.delta);
+    if (hausses.length > 0 && baisses.length > 0) {
+      const hausse = hausses[0];
+      const baisse = baisses.find(
+        (b) => Math.abs(Math.abs(b.delta) - hausse.delta) <= hausse.delta * SEUIL_COMPENSATION_ECART,
+      );
+      if (baisse) {
+        categoriesDejaCitees.add(hausse.e.id);
+        categoriesDejaCitees.add(baisse.e.id);
+        ajouterSituationPonctuelle(situations, etatsAJour, {
+          situationId: `compensation:${hausse.e.id}+${baisse.e.id}`,
+          estActive: true,
+          priorite: "positive",
+          etatsPrecedents,
+          aujourdHui,
+          texte: `${hausse.e.nom} a augmenté de ${Math.round(hausse.delta)}€ ce mois-ci, mais ${baisse.e.nom} a baissé d'à peu près autant (${Math.round(Math.abs(baisse.delta))}€) — votre budget global reste équilibré malgré ce déplacement.`,
+        });
+      }
+    }
+  }
 
-  const margeSnapshot = (s: SnapshotMois) => s.disponible - s.totalDepense - s.epargne;
-  const derniersMoisArchives = historiquesMois.slice(-2);
-  const r10Cond =
-    objectifsActifs.length === 0 &&
-    derniersMoisArchives.length === 2 &&
-    derniersMoisArchives.every((s) => margeSnapshot(s) > 0);
-  candidats.push(
-    r10Cond
-      ? {
-          texte: `Tu termines régulièrement le mois avec de la marge. Envisage de créer un objectif d'épargne — même 50€/mois font une vraie différence sur la durée.`,
-          niveau: "bon",
-        }
-      : undefined,
-  );
+  // === Deux catégories qui évoluent ensemble ==================================
+  if (snapshotMoisPrecedent) {
+    const hausseCorrelees = enveloppesSansEntree
+      .filter((e) => e.depense >= MONTANT_MIN_CATEGORIE && !categoriesDejaCitees.has(e.id))
+      .map((e) => {
+        const depensePrec = snapshotEnv(snapshotMoisPrecedent, e.id)?.depense ?? 0;
+        const pct = depensePrec > 0 ? (e.depense - depensePrec) / depensePrec : 0;
+        return { e, pct, delta: e.depense - depensePrec };
+      })
+      .filter(({ pct, delta }) => pct >= SEUIL_HAUSSE_CATEGORIE && delta >= MONTANT_MIN_CATEGORIE)
+      .sort((a, b) => b.pct - a.pct);
+    if (hausseCorrelees.length >= 2) {
+      const [a, b] = hausseCorrelees;
+      categoriesDejaCitees.add(a.e.id);
+      categoriesDejaCitees.add(b.e.id);
+      ajouterSituationPonctuelle(situations, etatsAJour, {
+        situationId: `correlation:${a.e.id}+${b.e.id}`,
+        estActive: true,
+        priorite: "evolutive",
+        etatsPrecedents,
+        aujourdHui,
+        texte: `${a.e.nom} et ${b.e.nom} augmentent en même temps ce mois-ci (+${Math.round(a.pct * 100)}% et +${Math.round(b.pct * 100)}% vs ${MOIS_LABELS[moisPrec]}) — ensemble, ça représente environ ${Math.round(a.delta + b.delta)}€ de plus qu'habituellement.`,
+        niveauConseil: "attention",
+      });
+    }
+  }
 
-  const objectifPourReserve = objectifsAvecRythme
-    .filter(
-      ({ rythme, objectif }) =>
-        !rythme.objectifAtteint && !objectifsDejaCites.has(objectif.id),
-    )
-    .sort(
-      (a, b) =>
-        a.objectif.cible - a.objectif.actuel - (b.objectif.cible - b.objectif.actuel),
-    )[0];
-  const r11Cond = epargneMois === 0 && resteEstime > 0;
-  if (r11Cond && objectifPourReserve)
-    objectifsDejaCites.add(objectifPourReserve.objectif.id);
-  candidats.push(
-    r11Cond
-      ? {
-          texte: `Tu as ${Math.round(resteEstime)}€ de disponible mais rien mis de côté ce mois-ci. C'est le bon moment pour ${objectifPourReserve ? `un versement sur ${objectifPourReserve.objectif.nom}` : "un versement"} ou pour constituer une réserve.`,
-          niveau: "attention",
-        }
-      : undefined,
-  );
+  // === Tendance individuelle : hausse (arc complet, projection fin de mois) ===
+  const candidatsTendance = enveloppesSansEntree
+    .filter((e) => !categoriesDejaCitees.has(e.id))
+    .map((e) => {
+      const moyenne = moyenneRecenteCategorie(e.id);
+      const rythmeJournalier = jourActuel > 0 ? e.depense / jourActuel : 0;
+      const projection = rythmeJournalier * joursDansMois(moisActuel, anneeActuelle);
+      const pctProjete = moyenne > 0 ? ((projection - moyenne) / moyenne) * 100 : 0;
+      const situationId = `tendance:${e.id}`;
+      const estActive = moyenne >= MONTANT_MIN_CATEGORIE && pctProjete >= SEUIL_HAUSSE_CATEGORIE * 100;
+      return { e, pctProjete, estActive, situationId };
+    })
+    .filter(({ estActive, situationId }) => estActive || etatsPrecedents[situationId] !== undefined)
+    .sort((a, b) => b.pctProjete - a.pctProjete);
+  if (candidatsTendance.length > 0) {
+    const { e, pctProjete, estActive, situationId } = candidatsTendance[0];
+    categoriesDejaCitees.add(e.id);
+    ajouterSituationSuivie(situations, etatsAJour, {
+      situationId,
+      estActive,
+      valeurGravite: Math.max(0, pctProjete),
+      vocabulaire: "observation",
+      priorite: "evolutive",
+      etatsPrecedents,
+      aujourdHui,
+      texteParEtat: (etat) => texteTendanceCategorie(e, pctProjete, etat),
+    });
+  }
 
-  // --- GROUPE 4 : analyse comportementale ---
+  // === Tendance individuelle : baisse (bonne nouvelle, ponctuelle) ============
+  if (snapshotMoisPrecedent) {
+    const candidatBaisse = enveloppesSansEntree
+      .filter((e) => !categoriesDejaCitees.has(e.id))
+      .map((e) => {
+        const depensePrec = snapshotEnv(snapshotMoisPrecedent, e.id)?.depense ?? 0;
+        const pct = depensePrec > 0 ? (depensePrec - e.depense) / depensePrec : 0;
+        return { e, pct, delta: depensePrec - e.depense, depensePrec };
+      })
+      .filter(({ pct, depensePrec }) => pct >= SEUIL_HAUSSE_CATEGORIE && depensePrec >= MONTANT_MIN_CATEGORIE)
+      .sort((a, b) => b.pct - a.pct)[0];
+    if (candidatBaisse) {
+      categoriesDejaCitees.add(candidatBaisse.e.id);
+      ajouterSituationPonctuelle(situations, etatsAJour, {
+        situationId: `baisse:${candidatBaisse.e.id}`,
+        estActive: true,
+        priorite: "positive",
+        etatsPrecedents,
+        aujourdHui,
+        texte: `Vos dépenses ${candidatBaisse.e.nom} ont baissé de ${Math.round(candidatBaisse.pct * 100)}% par rapport à ${MOIS_LABELS[moisPrec]}, soit environ ${Math.round(candidatBaisse.delta)}€ économisés ce mois-ci.`,
+      });
+    }
+  }
 
+  // === Dépense inhabituelle ponctuelle =========================================
   const sommeParCategorie = new Map<string, number>();
   const comptesParCategorie = new Map<string, number>();
   historiquesMois.slice(-NB_MOIS_MOYENNE_CATEGORIE).forEach((snap) => {
@@ -450,34 +845,254 @@ export function genererConseils(params: {
     });
   });
   const candidatSpike = enveloppesSansEntree
-    .filter(
-      (e) =>
-        !categoriesDejaCitees.has(e.id) && (comptesParCategorie.get(e.id) ?? 0) >= 2,
-    )
+    .filter((e) => !categoriesDejaCitees.has(e.id) && (comptesParCategorie.get(e.id) ?? 0) >= 2)
     .map((e) => ({
       e,
-      moyenne:
-        (sommeParCategorie.get(e.id) ?? 0) / (comptesParCategorie.get(e.id) ?? 1),
+      moyenne: (sommeParCategorie.get(e.id) ?? 0) / (comptesParCategorie.get(e.id) ?? 1),
     }))
-    .filter(({ moyenne }) => moyenne >= MONTANT_MIN_MOYENNE_CATEGORIE)
-    .filter(({ e, moyenne }) => e.depense > moyenne * SEUIL_SPIKE_CATEGORIE)
+    .filter(({ moyenne }) => moyenne >= MONTANT_MIN_CATEGORIE)
+    .filter(({ e, moyenne }) => e.depense > moyenne * SEUIL_SPIKE_PONCTUEL)
     .sort((a, b) => b.e.depense - b.moyenne - (a.e.depense - a.moyenne))[0];
-  if (candidatSpike) categoriesDejaCitees.add(candidatSpike.e.id);
-  candidats.push(
-    candidatSpike
-      ? {
-          texte: `${candidatSpike.e.nom} a bondi ce mois-ci (${Math.round(candidatSpike.e.depense)}€ vs ${Math.round(candidatSpike.moyenne)}€ en moyenne sur ${NB_MOIS_MOYENNE_CATEGORIE} mois) — une dépense exceptionnelle ? Si non, c'est un poste à surveiller.`,
-          niveau: "attention",
-        }
-      : undefined,
-  );
+  if (candidatSpike) {
+    categoriesDejaCitees.add(candidatSpike.e.id);
+    ajouterSituationPonctuelle(situations, etatsAJour, {
+      situationId: `inhabituelle:${candidatSpike.e.id}`,
+      estActive: true,
+      priorite: "evolutive",
+      etatsPrecedents,
+      aujourdHui,
+      texte: `${candidatSpike.e.nom} est nettement plus élevé ce mois-ci (${Math.round(candidatSpike.e.depense)}€ vs ${Math.round(candidatSpike.moyenne)}€ en moyenne sur ${NB_MOIS_MOYENNE_CATEGORIE} mois). Si c'est une dépense exceptionnelle, rien à faire — sinon, c'est un poste à surveiller le mois prochain.`,
+      niveauConseil: "attention",
+    });
+  }
 
-  // "Meilleur mois depuis X mois" : compare la dépense cumulée à date de ce
-  // mois-ci à celle des mois précédents ARRIVÉS AU MÊME JOUR (via
-  // depenseCumuleeAuJour, reconstruite depuis les transactions/paiements
-  // individuels, jamais purgés — contrairement aux snapshots mensuels qui
-  // ne conservent qu'un total de fin de mois) — une vraie comparaison "à
-  // date égale", pas une extrapolation.
+  // === Dépense récurrente détectée =============================================
+  const candidatRecurrente = enveloppesSansEntree
+    .filter((e) => !categoriesDejaCitees.has(e.id) && e.type === "Variable" && !e.recurrente)
+    .map((e) => {
+      const montants = historiquesMois
+        .slice(-NB_MOIS_MOYENNE_CATEGORIE)
+        .map((snap) => snapshotEnv(snap, e.id)?.depense)
+        .filter((v): v is number => v !== undefined && v > 0);
+      return { e, montants };
+    })
+    .filter(({ montants }) => montants.length >= NB_MOIS_MOYENNE_CATEGORIE)
+    .filter(({ montants }) => {
+      const moyenne = montants.reduce((a, b) => a + b, 0) / montants.length;
+      return moyenne > 0 && montants.every((m) => Math.abs(m - moyenne) <= moyenne * TOLERANCE_RECURRENCE);
+    })[0];
+  if (candidatRecurrente) {
+    categoriesDejaCitees.add(candidatRecurrente.e.id);
+    const moyenne = Math.round(
+      candidatRecurrente.montants.reduce((a, b) => a + b, 0) / candidatRecurrente.montants.length,
+    );
+    ajouterSituationPonctuelle(situations, etatsAJour, {
+      situationId: `recurrente:${candidatRecurrente.e.id}`,
+      estActive: true,
+      priorite: "neutre",
+      etatsPrecedents,
+      aujourdHui,
+      texte: `${candidatRecurrente.e.nom} revient à un montant très stable depuis ${candidatRecurrente.montants.length} mois (environ ${moyenne}€). Vous pourriez la marquer comme récurrente pour un suivi plus précis.`,
+    });
+  }
+
+  // === Nouvelle catégorie apparue ==============================================
+  const candidatNouvelle = enveloppesSansEntree
+    .filter((e) => !categoriesDejaCitees.has(e.id) && e.depense >= MONTANT_MIN_CATEGORIE)
+    .find(
+      (e) =>
+        historiquesMois.length > 0 &&
+        !historiquesMois.some((snap) => (snapshotEnv(snap, e.id)?.depense ?? 0) > 0),
+    );
+  if (candidatNouvelle) {
+    categoriesDejaCitees.add(candidatNouvelle.id);
+    ajouterSituationPonctuelle(situations, etatsAJour, {
+      situationId: `nouvelle:${candidatNouvelle.id}`,
+      estActive: true,
+      priorite: "neutre",
+      etatsPrecedents,
+      aujourdHui,
+      texte: `${candidatNouvelle.nom} est une nouvelle catégorie ce mois-ci, avec déjà ${Math.round(candidatNouvelle.depense)}€ dépensés. Elle sera intégrée à vos comparaisons dès le mois prochain.`,
+    });
+  }
+
+  // === Objectif atteint =========================================================
+  const objectifNouvellementAtteint = objectifsAvecRythme.find(({ objectif, rythme }) => {
+    if (!rythme.objectifAtteint || objectifsDejaCites.has(objectif.id)) return false;
+    const precedent = snapshotMoisPrecedent?.objectifs.find((o) => o.id === objectif.id);
+    return !precedent || precedent.actuel < objectif.cible;
+  });
+  if (objectifNouvellementAtteint) {
+    objectifsDejaCites.add(objectifNouvellementAtteint.objectif.id);
+    const { objectif } = objectifNouvellementAtteint;
+    ajouterSituationPonctuelle(situations, etatsAJour, {
+      situationId: `atteint:${objectif.id}`,
+      estActive: true,
+      priorite: "positive",
+      etatsPrecedents,
+      aujourdHui,
+      texte: `Objectif atteint : ${objectif.nom} est à ${Math.round(objectif.actuel)}€ sur ${Math.round(objectif.cible)}€. Vous pourriez définir un nouvel objectif pour donner une direction à vos prochaines économies.`,
+    });
+  }
+
+  // === Objectif modifié (cible changée) =========================================
+  if (snapshotMoisPrecedent) {
+    const objectifModifie = objectifsAvecRythme.find(({ objectif }) => {
+      if (objectifsDejaCites.has(objectif.id)) return false;
+      const precedent = snapshotMoisPrecedent.objectifs.find((o) => o.id === objectif.id);
+      return precedent !== undefined && precedent.cible !== objectif.cible;
+    });
+    if (objectifModifie) {
+      objectifsDejaCites.add(objectifModifie.objectif.id);
+      const { objectif, rythme } = objectifModifie;
+      const precedent = snapshotMoisPrecedent.objectifs.find((o) => o.id === objectif.id)!;
+      const sens = objectif.cible > precedent.cible ? "revue à la hausse" : "revue à la baisse";
+      const trajectoire =
+        rythme.moisRestants !== null ? `, environ ${rythme.moisRestants} mois restants à ce rythme` : "";
+      ajouterSituationPonctuelle(situations, etatsAJour, {
+        situationId: `modifie:${objectif.id}`,
+        estActive: true,
+        priorite: "neutre",
+        etatsPrecedents,
+        aujourdHui,
+        texte: `La cible de ${objectif.nom} a été ${sens} (${Math.round(precedent.cible)}€ → ${Math.round(objectif.cible)}€). Nouvelle trajectoire recalculée${trajectoire}.`,
+      });
+    }
+  }
+
+  // === Objectif proche de la cible ==============================================
+  const objectifProche = objectifsAvecRythme
+    .filter(
+      ({ objectif, rythme }) =>
+        !rythme.objectifAtteint &&
+        rythme.pct >= SEUIL_OBJECTIF_PROCHE_MIN &&
+        rythme.pct < SEUIL_OBJECTIF_PROCHE_MAX &&
+        !objectifsDejaCites.has(objectif.id),
+    )
+    .sort((a, b) => b.rythme.pct - a.rythme.pct)[0];
+  if (objectifProche) {
+    objectifsDejaCites.add(objectifProche.objectif.id);
+    const { objectif, rythme } = objectifProche;
+    ajouterSituationPonctuelle(situations, etatsAJour, {
+      situationId: `proche:${objectif.id}`,
+      estActive: true,
+      priorite: "positive",
+      etatsPrecedents,
+      aujourdHui,
+      texte: `${objectif.nom} est à ${Math.round(rythme.pct)}% de sa cible — il ne manque que ${Math.round(objectif.cible - objectif.actuel)}€ pour l'atteindre.`,
+    });
+  }
+
+  // === Marge disponible → versement sur un objectif ==============================
+  const objectifPourVersement = objectifsAvecRythme
+    .filter(({ objectif, rythme }) => !rythme.objectifAtteint && !objectifsDejaCites.has(objectif.id))
+    .sort(
+      (a, b) =>
+        a.objectif.cible - a.objectif.actuel - (b.objectif.cible - b.objectif.actuel),
+    )[0];
+  if (objectifPourVersement && resteEstime > 0 && ratioReste > SEUIL_MARGE_VERSEMENT) {
+    objectifsDejaCites.add(objectifPourVersement.objectif.id);
+    const { objectif } = objectifPourVersement;
+    const montant = Math.min(
+      Math.round(resteEstime * 0.3),
+      Math.round(objectif.cible - objectif.actuel),
+    );
+    const nouveauPct = Math.round(((objectif.actuel + montant) / objectif.cible) * 100);
+    ajouterSituationPonctuelle(situations, etatsAJour, {
+      situationId: `versement:${objectif.id}`,
+      estActive: true,
+      priorite: "positive",
+      etatsPrecedents,
+      aujourdHui,
+      texte: `Vous avez ${Math.round(resteEstime)}€ de marge ce mois-ci. Un versement de ${montant}€ sur ${objectif.nom} l'amènerait à ${nouveauPct}% de la cible.`,
+    });
+  }
+
+  // === Aucun objectif actif, marge positive répétée ===============================
+  if (objectifsActifs.length === 0 && derniersMoisArchives.length >= 2) {
+    const deuxDerniers = derniersMoisArchives.slice(-2);
+    if (deuxDerniers.every((s) => margeSnapshot(s) > 0) && resteEstime > 0) {
+      ajouterSituationPonctuelle(situations, etatsAJour, {
+        situationId: "suggestion:objectif",
+        estActive: true,
+        priorite: "positive",
+        etatsPrecedents,
+        aujourdHui,
+        texte: `Vous terminez régulièrement le mois avec de la marge. Envisagez de créer un objectif d'épargne — même un petit montant mensuel fait une vraie différence sur la durée.`,
+      });
+    }
+  }
+
+  // === Marge qui se dégrade (arc complet) ==========================================
+  if (resteEstimePrecedent !== null && disponibleEffectif > 0) {
+    const ratioRestePrecedent = resteEstimePrecedent / disponibleEffectif;
+    const degradation = ratioRestePrecedent - ratioReste;
+    ajouterSituationSuivie(situations, etatsAJour, {
+      situationId: "marge:global",
+      estActive: degradation >= SEUIL_MARGE_DEGRADATION,
+      valeurGravite: Math.max(0, degradation),
+      vocabulaire: "observation",
+      priorite: "evolutive",
+      etatsPrecedents,
+      aujourdHui,
+      texteParEtat: (etat) => texteMargeEvolution(resteEstime, resteEstimePrecedent, moisPrec, etat),
+      niveauConseil: (etat) => (etat === "CONFIRME" ? "alerte" : niveauConseilParDefaut(etat)),
+    });
+  }
+
+  // === Comportement global : tendance sur plusieurs mois ============================
+  if (derniersMoisArchives.length === NB_MOIS_MOYENNE_CATEGORIE) {
+    const marges = derniersMoisArchives.map(margeSnapshot);
+    const enAmelioration =
+      marges[0] < marges[1] && marges[1] < marges[2] && resteEstime >= marges[2];
+    const enDegradation =
+      marges[0] > marges[1] && marges[1] > marges[2] && resteEstime <= marges[2];
+    if (enAmelioration) {
+      ajouterSituationPonctuelle(situations, etatsAJour, {
+        situationId: "comportement:amelioration",
+        estActive: true,
+        priorite: "positive",
+        etatsPrecedents,
+        aujourdHui,
+        texte: `Votre marge de fin de mois s'améliore depuis ${NB_MOIS_MOYENNE_CATEGORIE} mois consécutifs. Une vraie tendance de fond, pas un hasard ponctuel.`,
+      });
+    } else {
+      ajouterSituationSuivie(situations, etatsAJour, {
+        situationId: "comportement:degradation",
+        estActive: enDegradation,
+        valeurGravite: enDegradation ? Math.max(1, marges[0] - marges[2]) : 0,
+        vocabulaire: "observation",
+        priorite: "evolutive",
+        etatsPrecedents,
+        aujourdHui,
+        texteParEtat: (etat) => texteComportementDegradation(NB_MOIS_MOYENNE_CATEGORIE, etat),
+      });
+      if (!enDegradation) {
+        const dernierMois = derniersMoisArchives[derniersMoisArchives.length - 1];
+        const margeDernierMois = margeSnapshot(dernierMois);
+        const moyenneAnterieure =
+          derniersMoisArchives.slice(0, -1).reduce((acc, s) => acc + margeSnapshot(s), 0) /
+          Math.max(1, derniersMoisArchives.length - 1);
+        if (
+          derniersMoisArchives.length > 1 &&
+          margeDernierMois < 0 &&
+          moyenneAnterieure > 0 &&
+          resteEstime >= moyenneAnterieure * 0.8
+        ) {
+          ajouterSituationPonctuelle(situations, etatsAJour, {
+            situationId: "comportement:retour_normale",
+            estActive: true,
+            priorite: "positive",
+            etatsPrecedents,
+            aujourdHui,
+            texte: `Après un mois plus difficile en ${MOIS_LABELS[dernierMois.mois]}, vous êtes revenu à un rythme proche de votre habitude ce mois-ci.`,
+          });
+        }
+      }
+    }
+  }
+
+  // === Meilleur mois depuis X mois (comparaison à date égale) =======================
   let meilleurMoisDepuis: number | null = null;
   const moisRecentsMeilleur = historiquesMois.slice(-NB_MOIS_MEILLEUR_MOIS);
   if (moisRecentsMeilleur.length >= 2 && jourActuel >= SEUIL_JOUR_MIN_MEILLEUR_MOIS) {
@@ -491,161 +1106,128 @@ export function genererConseils(params: {
         snap.annee,
         jourAligne,
       );
-      if (totalDepenses < depenseSnapAuJour) {
-        nbBattus += 1;
-      } else {
-        break;
-      }
+      if (totalDepenses < depenseSnapAuJour) nbBattus += 1;
+      else break;
     }
     if (nbBattus >= 2) meilleurMoisDepuis = nbBattus;
   }
-  candidats.push(
-    meilleurMoisDepuis !== null
-      ? {
-          texte: `Tu es en train de réaliser ton meilleur mois depuis ${meilleurMoisDepuis} mois. Continue comme ça.`,
-          niveau: "bon",
-        }
-      : undefined,
-  );
-
-  const entreeExceptionnelle = enveloppes
-    .filter(
-      (e) =>
-        e.type === "Entrée" &&
-        !e.recurrente &&
-        e.payee &&
-        disponibleEffectif > 0 &&
-        e.depense > disponibleEffectif * SEUIL_RATIO_ENTREE_EXCEPTIONNELLE,
-    )
-    .sort((a, b) => b.depense - a.depense)[0];
-  const objectifPourEntree = objectifsAvecRythme
-    .filter(
-      ({ rythme, objectif }) =>
-        !rythme.objectifAtteint && !objectifsDejaCites.has(objectif.id),
-    )
-    .sort(
-      (a, b) =>
-        a.objectif.cible - a.objectif.actuel - (b.objectif.cible - b.objectif.actuel),
-    )[0];
-  if (entreeExceptionnelle && objectifPourEntree)
-    objectifsDejaCites.add(objectifPourEntree.objectif.id);
-  candidats.push(
-    entreeExceptionnelle
-      ? {
-          texte: `Tu as reçu ${Math.round(entreeExceptionnelle.depense)}€ en plus ce mois-ci. C'est une bonne occasion d'avancer sur ${objectifPourEntree ? objectifPourEntree.objectif.nom : "tes économies"} ou de constituer une réserve d'urgence.`,
-          niveau: "bon",
-        }
-      : undefined,
-  );
-
-  const r15Cond = resteEstime >= 0 && joursRestantsDansMois > 0;
-  candidats.push(
-    r15Cond
-      ? (() => {
-          const allocationJour = resteEstime / joursRestantsDansMois;
-          let comparaison = "";
-          if (resteEstimePrecedent !== null) {
-            const allocationJourPrec =
-              resteEstimePrecedent / joursDansMois(moisPrec, anneePrec);
-            comparaison = ` En moyenne sur ${MOIS_LABELS[moisPrec]}, tu avais eu ${allocationJourPrec >= allocationJour ? "plus" : "moins"} de marge par jour.`;
-          }
-          return {
-            texte: `Tu peux dépenser environ ${Math.round(allocationJour)}€/jour en moyenne jusqu'à la fin du mois pour rester dans ton budget.${comparaison}`,
-            niveau: "bon" as const,
-          };
-        })()
-      : undefined,
-  );
-
-  const candidatR16 = enveloppesSansEntree
-    .filter(
-      (e) =>
-        e.budget > 0 && e.depense < e.budget && !categoriesDejaCitees.has(e.id),
-    )
-    .map((e) => ({ e, budgetRestant: e.budget - e.depense }))
-    .filter(
-      ({ budgetRestant }) =>
-        joursRestantsDansMois > SEUIL_JOURS_R16 &&
-        budgetRestant / joursRestantsDansMois < SEUIL_EURJOUR_R16,
-    )
-    .sort(
-      (a, b) =>
-        a.budgetRestant / joursRestantsDansMois - b.budgetRestant / joursRestantsDansMois,
-    )[0];
-  if (candidatR16) categoriesDejaCitees.add(candidatR16.e.id);
-  candidats.push(
-    candidatR16
-      ? {
-          texte: `Il reste ${joursRestantsDansMois} jours et seulement ${Math.round(candidatR16.budgetRestant)}€ sur ${candidatR16.e.nom} — soit ${(candidatR16.budgetRestant / joursRestantsDansMois).toFixed(1)}€/jour maximum pour tenir.`,
-          niveau: "attention",
-        }
-      : undefined,
-  );
-
-  // --- GROUPE 5 : replis intelligents ---
-
-  const r17Cond = totalDepenses === 0 && disponibleEffectif > 0;
-  candidats.push(
-    r17Cond
-      ? {
-          texte: `Tu as prévu ${Math.round(disponibleEffectif)}€ ce mois-ci. Enregistre tes dépenses au fil de l'eau pour que tes projections soient précises et tes conseils personnalisés.`,
-          niveau: "bon",
-        }
-      : undefined,
-  );
-
-  // Exclut explicitement le cas déjà couvert par R3 (même position dans le
-  // mois, même message de fond "bon départ") pour ne jamais afficher deux
-  // variantes de la même observation en même temps.
-  const r18Cond =
-    joursRestantsDansMois > 20 && totalDepenses > 0 && ratioDepense < 0.5 && !r3Cond;
-  candidats.push(
-    r18Cond
-      ? (() => {
-          let comparaison = "";
-          if (snapshotMoisPrecedent && snapshotMoisPrecedent.disponible > 0) {
-            const jourAligne = Math.min(jourActuel, joursDansMois(moisPrec, anneePrec));
-            const depensePrecAuJour = depenseCumuleeAuJour(
-              transactions,
-              historiquePaiements,
-              moisPrec,
-              anneePrec,
-              jourAligne,
-            );
-            const pctPrec = Math.round(
-              (depensePrecAuJour / snapshotMoisPrecedent.disponible) * 100,
-            );
-            comparaison = ` À la même date le mois dernier, tu en étais à ${pctPrec}%.`;
-          }
-          return {
-            texte: `Le mois commence bien — ${Math.round(ratioDepense * 100)}% de ton budget utilisé en ${jourActuel} jour${jourActuel > 1 ? "s" : ""}.${comparaison}`,
-            niveau: "bon" as const,
-          };
-        })()
-      : undefined,
-  );
-
-  const conseils = candidats.filter((c): c is Conseil => c !== undefined);
-
-  // Garde-fou "minimum 2 conseils" : les 18 règles ci-dessus couvrent la
-  // quasi-totalité des situations, mais laissent un angle mort réel — une
-  // marge ni assez confortable pour R1/R2/R3, ni négative pour R4/R5 (ex.
-  // ratioReste proche de 0 en tout début de mois). Complète avec un conseil
-  // prescriptif générique plutôt que de risquer de tomber à 1 seul conseil.
-  if (conseils.length < 2 && disponibleEffectif > 0) {
-    conseils.push({
-      texte: `Ton budget est serré ce mois-ci (environ ${Math.round(ratioReste * 100)}% de marge) — priorise tes dépenses essentielles pour rester dans les clous d'ici la fin du mois.`,
-      niveau: ratioReste < 0 ? "alerte" : "attention",
+  if (meilleurMoisDepuis !== null) {
+    ajouterSituationPonctuelle(situations, etatsAJour, {
+      situationId: "meilleurmois:global",
+      estActive: true,
+      priorite: "positive",
+      etatsPrecedents,
+      aujourdHui,
+      texte: `Vous êtes en train de réaliser votre meilleur mois depuis ${meilleurMoisDepuis} mois. Continuez comme ça.`,
     });
   }
 
-  if (conseils.length === 0) {
-    return [
-      {
-        texte: "Commence à enregistrer tes dépenses pour recevoir des conseils personnalisés.",
-        niveau: "bon",
-      },
-    ];
+  // === Projection de fin de mois =====================================================
+  if (resteEstime >= 0 && joursRestantsDansMois > 0) {
+    const allocationJour = resteEstime / joursRestantsDansMois;
+    let comparaison = "";
+    if (resteEstimePrecedent !== null) {
+      const joursMoisPrec = joursDansMois(moisPrec, anneePrec);
+      const allocationJourPrec = joursMoisPrec > 0 ? resteEstimePrecedent / joursMoisPrec : 0;
+      comparaison =
+        allocationJourPrec !== 0
+          ? ` C'est ${allocationJour >= allocationJourPrec ? "mieux" : "un peu moins bien"} qu'en ${MOIS_LABELS[moisPrec]} en moyenne par jour.`
+          : "";
+    }
+    ajouterSituationPonctuelle(situations, etatsAJour, {
+      situationId: "projection:finmois",
+      estActive: true,
+      priorite: "positive",
+      etatsPrecedents,
+      aujourdHui,
+      texte: `Si vous continuez à ce rythme, vous devriez terminer le mois avec environ ${Math.round(resteEstime)}€ de marge — soit ${Math.round(allocationJour)}€/jour disponibles jusqu'à la fin du mois.${comparaison}`,
+    });
   }
-  return conseils.slice(0, maxConseils);
+
+  // === Replis : données insuffisantes / tout va bien (non suivis dans le temps) =====
+  const totalTransactionsHistorique = transactions.length + historiquePaiements.length;
+  if (situations.length === 0 && totalDepenses === 0 && totalTransactionsHistorique === 0) {
+    situations.push({
+      cle: "repli",
+      priorite: "neutre",
+      etat: null,
+      texteParEtat: () =>
+        "Nous avons besoin de davantage de données avant d'identifier une tendance fiable. Enregistrez vos dépenses au fil de l'eau pour des conseils personnalisés.",
+      niveauConseil: () => "bon",
+    });
+  }
+  if (situations.length === 0) {
+    situations.push({
+      cle: "repli",
+      priorite: "neutre",
+      etat: null,
+      texteParEtat: () => "Votre mois est bien maîtrisé, rien de particulier à corriger.",
+      niveauConseil: () => "bon",
+    });
+  }
+
+  // Purge des entrées jamais retouchées depuis longtemps (ex: catégorie
+  // supprimée entre-temps) — hygiène, évite une croissance illimitée du
+  // stockage local.
+  const seuilOubli = new Date();
+  seuilOubli.setDate(seuilOubli.getDate() - 30);
+  const seuilOubliISO = journeeISO(seuilOubli);
+  Object.keys(etatsAJour).forEach((id) => {
+    if (etatsAJour[id].dateDerniereMiseAJour < seuilOubliISO) delete etatsAJour[id];
+  });
+
+  return { situations, etatsAJour };
+}
+
+// Orchestre detecterSituations → genererTexteConseil, applique l'ordre de
+// priorité métier (critique > évolutive > positive > neutre) et dédoublonne
+// par `cle` en dernier recours. Retourne à la fois les conseils à afficher
+// ET la map d'états à jour — c'est à l'appelant (composant React) de la
+// persister (chargerEtatsInsights/sauvegarderEtatsInsights), cette fonction
+// reste pure et synchrone.
+export function genererConseils(params: {
+  enveloppes: Enveloppe[];
+  objectifs: Objectif[];
+  historiquesMois: SnapshotMois[];
+  transactions: Transaction[];
+  historiquePaiements: PaiementHistorique[];
+  epargneMois: number;
+  resteEstime: number;
+  resteEstimePrecedent: number | null;
+  disponibleEffectif: number;
+  moisActuel: number;
+  anneeActuelle: number;
+  maxConseils?: number;
+  etatsPrecedents: EtatsInsightsMap;
+}): { conseils: Conseil[]; etatsAJour: EtatsInsightsMap } {
+  const { maxConseils = 3, etatsPrecedents } = params;
+
+  const { situations, etatsAJour } = detecterSituations(params, etatsPrecedents);
+
+  const prioriteScore: Record<PrioriteSituation, number> = {
+    critique: 0,
+    evolutive: 1,
+    positive: 2,
+    neutre: 3,
+  };
+
+  const clesVues = new Set<string>();
+  const situationsUniques = situations
+    .filter((s) => {
+      if (clesVues.has(s.cle)) return false;
+      clesVues.add(s.cle);
+      return true;
+    })
+    .sort((a, b) => prioriteScore[a.priorite] - prioriteScore[b.priorite]);
+
+  const conseils: Conseil[] = situationsUniques.slice(0, maxConseils).map((s) => {
+    const etat = s.etat ?? "NOUVEAU";
+    return {
+      texte: genererTexteConseil(s, etat),
+      niveau: s.niveauConseil(etat),
+      etat: s.etat,
+    };
+  });
+
+  return { conseils, etatsAJour };
 }

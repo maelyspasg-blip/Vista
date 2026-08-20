@@ -33,19 +33,51 @@ function tendance(valeurs: number[]): number | null {
   return ((moy2 - moy1) / moy1) * 100;
 }
 
-const SEUIL_HAUSSE_CATEGORIE = 20; // % — en dessous, la hausse n'est pas assez marquante pour être signalée
-const MONTANT_MIN_CATEGORIE_SIGNIFICATIVE = 30; // €/mois en moyenne — sous ce seuil, un pourcentage de hausse peut être spectaculaire sur un montant négligeable (ex: 3€ → 6€ = +100%)
-const SEUIL_MOIS_MIN_EPARGNE_STREAK = 2; // "depuis X mois" n'a de sens qu'à partir de 2
-const SEUIL_MOIS_MIN_TENDANCE = 3; // mois — une tendance sur 2 points n'est pas assez fiable
-const SEUIL_BAISSE_CONFIRMEE = 15; // % de baisse entre début et fin de période
-const SEUIL_VOLATILITE = 35; // % — coefficient de variation (écart-type / moyenne)
+// Nombre de mois consécutifs, en partant de la fin de la série, où la
+// valeur a strictement augmenté par rapport au mois précédent — 0 si le
+// dernier mois n'a pas augmenté vs l'avant-dernier. Une "hausse sur 3 mois
+// consécutifs" correspond à un streak de 2 (2 augmentations, donc 3 points
+// de données impliqués : streak + 1).
+function streakHausseConsecutive(valeurs: number[]): number {
+  let streak = 0;
+  for (let i = valeurs.length - 1; i > 0; i--) {
+    if (valeurs[i] > valeurs[i - 1]) streak += 1;
+    else break;
+  }
+  return streak;
+}
 
-// Insights de "Ce qu'il faut retenir" (Stats) — coaching : observation +
-// contexte, jamais une simple statistique brute. Distincts par construction
-// de "Nos conseils" (Aperçu) : ici tout est calculé sur la PÉRIODE
-// sélectionnée (tendances, pics, régularité, volatilité sur plusieurs mois),
-// jamais sur le seul mois en cours isolément — Aperçu couvre déjà ce
-// terrain-là avec sa propre conscience du jour du mois.
+// RÈGLE À NE JAMAIS CASSER : "Ce qu'il faut retenir" (Stats) applique le
+// même principe de coaching évolutif que utils/conseils.ts ("Nos conseils",
+// Aperçu) — observation chiffrée + compréhension + impact + action, jamais
+// une statistique brute non expliquée. La distinction entre les deux reste
+// stricte et volontaire : Aperçu analyse le MOIS EN COURS avec conscience
+// du jour du mois (utils/conseils.ts), Stats analyse la PÉRIODE
+// sélectionnée par l'utilisateur (3/6/12 mois...) — tendances, corrélations
+// entre catégories, projections et bilans qui n'ont de sens que sur
+// plusieurs mois. Ne jamais faire porter un insight ici sur le seul mois en
+// cours isolément (ça, c'est le terrain d'Aperçu) : chaque famille
+// ci-dessous doit rester ancrée sur `reelles`/`depensesParCategorie` (la
+// PÉRIODE, déjà tronquée à nbMoisAvecDonnees), pas sur un seul point. Les
+// insights changent naturellement avec la période choisie puisque tout est
+// dérivé de `reelles.length` et des valeurs mensuelles réellement affichées
+// — aucun état caché, aucun calcul qui ignorerait la période sélectionnée.
+
+const MONTANT_MIN_CATEGORIE_SIGNIFICATIVE = 30; // €/mois en moyenne — sous ce seuil, un % peut être spectaculaire sur un montant négligeable
+const SEUIL_MOIS_MIN_TENDANCE = 3; // mois — un bilan sur 2 points n'est pas assez fiable
+const SEUIL_BILAN_SIGNIFICATIF = 10; // % — delta 1ère/2e moitié de période en dessous duquel on parle de "stable"
+const SEUIL_CV_DOMINANTE = 20; // % — coefficient de variation minimum pour qu'une catégorie soit "la plus variable"
+const SEUIL_HAUSSE_MENSUELLE_EUR = 15; // €/mois — hausse moyenne minimum pour signaler une dérive (corrélation ou point d'attention)
+const SEUIL_PROGRES_EPARGNE_PP = 3; // points de %, taux d'épargne — progression minimum pour être valorisée
+const SEUIL_MOIS_MIN_EPARGNE_STREAK = 2; // "depuis X mois" n'a de sens qu'à partir de 2
+
+type CandidatInsight = {
+  famille: string;
+  cle: string; // dédoublonnage : nom de catégorie, ou clé globale
+  priorite: number; // ordre d'affichage si plusieurs qualifient (0 = en premier)
+  texte: string;
+};
+
 export function genererInsightsPeriode(params: {
   // Dépenses/épargne/budget prévu par mois sur la période affichée, du plus
   // ancien au plus récent, alignés avec `labels` — y compris les mois sans
@@ -75,6 +107,7 @@ export function genererInsightsPeriode(params: {
 }): string[] {
   const {
     donneesReelles,
+    donneesEpargne,
     donneesPrevisionnelles,
     labels,
     nbMoisAvecDonnees,
@@ -87,172 +120,248 @@ export function genererInsightsPeriode(params: {
   const debut = donneesReelles.length - nbMoisAvecDonnees;
   const reelles = donneesReelles.slice(debut);
   const prevues = donneesPrevisionnelles.slice(debut);
+  const epargneUtile = donneesEpargne.slice(debut);
   const labelsUtiles = labels.slice(debut);
 
-  const candidats: (string | undefined)[] = [];
+  const categoriesDejaCitees = new Set<string>();
+  const candidats: CandidatInsight[] = [];
 
-  // S1. Catégorie qui accélère le plus sur la période — parmi celles qui
-  // pèsent assez pour que la hausse soit réelle, pas un artefact de petits
-  // montants.
-  let meilleureAcceleration: { nom: string; hausse: number } | null = null;
+  // === 1. Bilan de la période ==================================================
+  // "S'améliore / se dégrade / stable ?" — comparaison 1ère moitié vs 2e
+  // moitié de la période, avec les vrais montants avant/après (pas
+  // seulement un %), pour rester concret comme dans l'exemple d'origine.
+  if (reelles.length >= SEUIL_MOIS_MIN_TENDANCE) {
+    const milieu = Math.floor(reelles.length / 2);
+    const avant = moyenne(reelles.slice(0, milieu));
+    const apres = moyenne(reelles.slice(milieu));
+    const deltaPct = avant > 0 ? ((apres - avant) / avant) * 100 : 0;
+    let texte: string;
+    if (deltaPct <= -SEUIL_BILAN_SIGNIFICATIF) {
+      texte = `Sur les ${reelles.length} derniers mois, vos dépenses ont diminué progressivement d'environ ${Math.round(avant)}€ à ${Math.round(apres)}€. Cette évolution représente ${Math.round(avant - apres)}€ de moins en moyenne — une amélioration concrète et durable.`;
+    } else if (deltaPct >= SEUIL_BILAN_SIGNIFICATIF) {
+      texte = `Sur les ${reelles.length} derniers mois, vos dépenses sont passées d'environ ${Math.round(avant)}€ à ${Math.round(apres)}€. Cette évolution représente ${Math.round(apres - avant)}€ de plus en moyenne — un point à garder à l'œil sur les prochains mois.`;
+    } else {
+      texte = `Sur les ${reelles.length} derniers mois, vos dépenses sont restées stables (environ ${Math.round(avant)}€ contre ${Math.round(apres)}€) — une régularité qui facilite vos projections.`;
+    }
+    candidats.push({ famille: "bilan_periode", cle: "bilan", priorite: 0, texte });
+  }
+
+  // === 2. Tendance dominante : catégorie la plus variable sur la période ======
+  let dominante: { nom: string; min: number; max: number; cv: number } | null = null;
   for (const cat of depensesParCategorie) {
     const serieCat = cat.parMois.slice(debut);
-    const hausse = tendance(serieCat);
-    if (hausse === null || hausse < SEUIL_HAUSSE_CATEGORIE) continue;
-    if (moyenne(serieCat) < MONTANT_MIN_CATEGORIE_SIGNIFICATIVE) continue;
-    if (!meilleureAcceleration || hausse > meilleureAcceleration.hausse) {
-      meilleureAcceleration = { nom: cat.nom, hausse };
+    if (serieCat.length < SEUIL_MOIS_MIN_TENDANCE) continue;
+    const moy = moyenne(serieCat);
+    if (moy < MONTANT_MIN_CATEGORIE_SIGNIFICATIVE) continue;
+    const cv = moy > 0 ? (ecartType(serieCat, moy) / moy) * 100 : 0;
+    if (cv < SEUIL_CV_DOMINANTE) continue;
+    if (!dominante || cv > dominante.cv) {
+      dominante = { nom: cat.nom, min: Math.min(...serieCat), max: Math.max(...serieCat), cv };
     }
   }
-  candidats.push(
-    meilleureAcceleration
-      ? `${meilleureAcceleration.nom} a augmenté de ${Math.round(meilleureAcceleration.hausse)}% sur cette période — c'est ta dépense qui progresse le plus vite.`
-      : undefined,
-  );
-
-  // S2. Régularité budgétaire sur la période — un bilan sur la durée, pas
-  // une projection du mois en cours (celle-ci existe déjà sur Aperçu).
-  // Parmi les mois où un budget était réellement défini seulement — un mois
-  // sans budget n'est ni un succès ni un échec.
-  const moisAvecBudget = prevues.filter((p) => p > 0).length;
-  const moisRespectes = reelles.filter(
-    (r, i) => prevues[i] > 0 && r <= prevues[i],
-  ).length;
-  const ratioRespect = moisAvecBudget > 0 ? moisRespectes / moisAvecBudget : 0;
-  const commentaireRegularite =
-    ratioRespect >= 0.8
-      ? "une belle régularité à maintenir"
-      : ratioRespect >= 0.5
-        ? "tu progresses, continue comme ça"
-        : "encore de la marge pour mieux cadrer tes dépenses";
-  candidats.push(
-    moisAvecBudget >= 2
-      ? `Tu as respecté ton budget ${moisRespectes} mois sur ${moisAvecBudget} sur cette période — ${commentaireRegularite}.`
-      : undefined,
-  );
-
-  // S3. Épargne qui progresse régulièrement + objectif atteignable au
-  // rythme actuel (calculerRythmeObjectif, calculé par l'appelant). Parmi
-  // les objectifs éligibles, celui dont l'échéance est la plus proche —
-  // l'insight le plus concret à donner en premier. Distinct de R5 (Aperçu),
-  // qui parle d'un état ponctuel (% déjà atteint), pas d'un rythme mesuré
-  // sur plusieurs mois.
-  const serieEpargneCroissante = series.find(
-    (s) => s.type === "epargne-croissante",
-  );
-  let objectifCandidat: { nom: string; moisRestants: number } | null = null;
-  if (
-    serieEpargneCroissante &&
-    serieEpargneCroissante.enCours >= SEUIL_MOIS_MIN_EPARGNE_STREAK
-  ) {
-    const eligibles = objectifs
-      .filter(
-        (o) =>
-          !o.ferme &&
-          o.cible > 0 &&
-          o.moisRestants !== null &&
-          !o.rythmeInsuffisant,
-      )
-      .sort((a, b) => (a.moisRestants ?? Infinity) - (b.moisRestants ?? Infinity));
-    if (eligibles.length > 0) {
-      objectifCandidat = {
-        nom: eligibles[0].nom,
-        moisRestants: eligibles[0].moisRestants as number,
-      };
-    }
+  if (dominante) {
+    categoriesDejaCitees.add(dominante.nom);
+    candidats.push({
+      famille: "tendance_dominante",
+      cle: dominante.nom,
+      priorite: 1,
+      texte: `${dominante.nom} est votre catégorie la plus variable sur cette période — elle oscille entre ${Math.round(dominante.min)}€ et ${Math.round(dominante.max)}€ selon les mois. C'est le poste qui influence le plus votre budget global.`,
+    });
   }
-  candidats.push(
-    serieEpargneCroissante && objectifCandidat
-      ? `Tu épargnes régulièrement depuis ${serieEpargneCroissante.enCours} mois — à ce rythme, ton objectif ${objectifCandidat.nom} sera atteint dans environ ${objectifCandidat.moisRestants} mois.`
-      : undefined,
-  );
 
-  // S4. Mois le plus dépensier de la période, avec la catégorie qui
-  // explique le mieux ce dépassement (celle dont l'excès par rapport à sa
-  // propre moyenne sur les autres mois de la période est le plus grand).
-  let indexPic = -1;
-  let depensePic = 0;
-  reelles.forEach((v, i) => {
-    if (v > depensePic) {
-      depensePic = v;
-      indexPic = i;
-    }
-  });
-  let categorieExplicative: { nom: string; exces: number } | null = null;
-  if (indexPic >= 0) {
-    for (const cat of depensesParCategorie) {
+  // === 3. Corrélation entre catégories =========================================
+  // Deux catégories en hausse consécutive simultanée, dont l'excès combiné
+  // vs leur propre moyenne sur la période est significatif.
+  const candidatesHausse = depensesParCategorie
+    .filter((cat) => !categoriesDejaCitees.has(cat.nom))
+    .map((cat) => {
       const serieCat = cat.parMois.slice(debut);
-      if (serieCat.length < 2) continue;
-      const valeurPic = serieCat[indexPic];
-      const autresMois = serieCat.filter((_, i) => i !== indexPic);
-      const exces = valeurPic - moyenne(autresMois);
-      if (!categorieExplicative || exces > categorieExplicative.exces) {
-        categorieExplicative = { nom: cat.nom, exces };
+      const moy = moyenne(serieCat);
+      const streak = streakHausseConsecutive(serieCat);
+      const dernierMois = serieCat.length > 0 ? serieCat[serieCat.length - 1] : 0;
+      const excesVsMoyenne = dernierMois - moy;
+      const hausseMoyenneParMois =
+        streak > 0 ? (dernierMois - serieCat[serieCat.length - 1 - streak]) / streak : 0;
+      return { cat, serieCat, moy, streak, excesVsMoyenne, hausseMoyenneParMois };
+    })
+    .filter(
+      ({ moy, streak, hausseMoyenneParMois }) =>
+        moy >= MONTANT_MIN_CATEGORIE_SIGNIFICATIVE &&
+        streak >= 1 &&
+        hausseMoyenneParMois >= SEUIL_HAUSSE_MENSUELLE_EUR,
+    )
+    .sort((a, b) => b.excesVsMoyenne - a.excesVsMoyenne);
+  if (candidatesHausse.length >= 2) {
+    const [a, b] = candidatesHausse;
+    categoriesDejaCitees.add(a.cat.nom);
+    categoriesDejaCitees.add(b.cat.nom);
+    const moisEnsemble = Math.min(a.streak, b.streak) + 1;
+    candidats.push({
+      famille: "correlation_categories",
+      cle: `${a.cat.nom}+${b.cat.nom}`,
+      priorite: 2,
+      texte: `Vos dépenses ${a.cat.nom} et ${b.cat.nom} augmentent simultanément depuis ${moisEnsemble} mois. Ensemble, elles représentent environ ${Math.round(a.excesVsMoyenne + b.excesVsMoyenne)}€ supplémentaires par rapport à votre moyenne habituelle sur cette période.`,
+    });
+  }
+
+  // === 4. Projection sur la période suivante ===================================
+  // "Vivante" dans le sens où elle est recalculée à partir des vraies
+  // valeurs de chaque rendu, jamais mise en cache — extrapolation linéaire
+  // simple à partir des deux derniers mois de marge (disponible - dépensé -
+  // épargné), comparée à la moyenne récente pour donner un repère.
+  if (reelles.length >= 2 && prevues[prevues.length - 1] > 0) {
+    const marges = reelles.map((r, i) => (prevues[i] ?? 0) - r - (epargneUtile[i] ?? 0));
+    const dernier = marges[marges.length - 1];
+    const avantDernier = marges[marges.length - 2];
+    const projection = dernier + (dernier - avantDernier);
+    const fenetre = Math.min(3, marges.length);
+    const moyenneRecente = moyenne(marges.slice(-fenetre));
+    const diffPct =
+      moyenneRecente !== 0
+        ? ((projection - moyenneRecente) / Math.abs(moyenneRecente)) * 100
+        : 0;
+    const qualif =
+      Math.abs(diffPct) < 10
+        ? "proche de"
+        : diffPct > 0
+          ? "légèrement au-dessus de"
+          : "légèrement en dessous de";
+    candidats.push({
+      famille: "projection_suivante",
+      cle: "projection",
+      priorite: 3,
+      texte: `Si votre rythme actuel continue, vous devriez terminer le mois prochain avec environ ${Math.round(projection)}€ de marge — ${qualif} votre moyenne des ${fenetre} derniers mois (${Math.round(moyenneRecente)}€).`,
+    });
+  }
+
+  // === 5. Point fort à valoriser ===============================================
+  // Priorité au taux d'épargne (le plus parlant), repli sur le streak
+  // d'épargne régulière + objectif atteignable au rythme actuel si le taux
+  // d'épargne n'a pas assez progressé.
+  let pointFortAjoute = false;
+  const tauxParMois = reelles.map((_, i) =>
+    prevues[i] > 0 ? (epargneUtile[i] / prevues[i]) * 100 : null,
+  );
+  const tauxValides = tauxParMois.filter((t): t is number => t !== null);
+  if (tauxValides.length >= SEUIL_MOIS_MIN_TENDANCE) {
+    const milieu = Math.floor(tauxValides.length / 2);
+    const tauxAvant = moyenne(tauxValides.slice(0, milieu));
+    const tauxApres = moyenne(tauxValides.slice(milieu));
+    if (tauxApres - tauxAvant >= SEUIL_PROGRES_EPARGNE_PP) {
+      candidats.push({
+        famille: "point_fort_epargne",
+        cle: "point_fort",
+        priorite: 4,
+        texte: `Votre taux d'épargne a progressé de ${Math.round(tauxAvant)}% à ${Math.round(tauxApres)}% sur cette période. C'est une évolution significative qui mérite d'être maintenue.`,
+      });
+      pointFortAjoute = true;
+    }
+  }
+  if (!pointFortAjoute) {
+    const serieEpargneCroissante = series.find((s) => s.type === "epargne-croissante");
+    if (serieEpargneCroissante && serieEpargneCroissante.enCours >= SEUIL_MOIS_MIN_EPARGNE_STREAK) {
+      const eligibles = objectifs
+        .filter(
+          (o) => !o.ferme && o.cible > 0 && o.moisRestants !== null && !o.rythmeInsuffisant,
+        )
+        .sort((a, b) => (a.moisRestants ?? Infinity) - (b.moisRestants ?? Infinity));
+      if (eligibles.length > 0) {
+        candidats.push({
+          famille: "point_fort_objectif",
+          cle: "point_fort",
+          priorite: 4,
+          texte: `Vous épargnez régulièrement depuis ${serieEpargneCroissante.enCours} mois — à ce rythme, votre objectif ${eligibles[0].nom} sera atteint dans environ ${eligibles[0].moisRestants} mois.`,
+        });
       }
     }
   }
-  candidats.push(
-    indexPic >= 0 && categorieExplicative && categorieExplicative.exces > 0
-      ? `${labelsUtiles[indexPic]} est ton mois le plus dépensier sur cette période — principalement à cause de ${categorieExplicative.nom} (+${Math.round(categorieExplicative.exces)}€ vs ta moyenne habituelle).`
-      : undefined,
-  );
 
-  // S5. Tendance globale à la baisse, confirmée sur au moins 3 mois.
-  let baisseConfirmee: { deltaEurosParMois: number } | null = null;
-  if (reelles.length >= SEUIL_MOIS_MIN_TENDANCE) {
-    const t = tendance(reelles);
-    if (t !== null && t <= -SEUIL_BAISSE_CONFIRMEE) {
-      baisseConfirmee = {
-        deltaEurosParMois:
-          (reelles[reelles.length - 1] - reelles[0]) / (reelles.length - 1),
-      };
+  // === 6. Point d'attention ====================================================
+  // Menace principale sur la trajectoire : catégorie en hausse consécutive
+  // depuis au moins 3 mois, avec l'impact chiffré sur la capacité
+  // d'épargne. Repli sur le mois le plus dépensier de la période si aucune
+  // catégorie n'a une vraie dérive sur 3 mois.
+  const menaceHausse = depensesParCategorie
+    .filter((cat) => !categoriesDejaCitees.has(cat.nom))
+    .map((cat) => {
+      const serieCat = cat.parMois.slice(debut);
+      const moy = moyenne(serieCat);
+      const streak = streakHausseConsecutive(serieCat);
+      const hausseMoyenneParMois =
+        streak >= 2
+          ? (serieCat[serieCat.length - 1] - serieCat[serieCat.length - 1 - streak]) / streak
+          : 0;
+      return { cat, moy, streak, hausseMoyenneParMois };
+    })
+    .filter(
+      ({ moy, streak, hausseMoyenneParMois }) =>
+        moy >= MONTANT_MIN_CATEGORIE_SIGNIFICATIVE &&
+        streak >= 2 &&
+        hausseMoyenneParMois >= SEUIL_HAUSSE_MENSUELLE_EUR,
+    )
+    .sort((a, b) => b.hausseMoyenneParMois - a.hausseMoyenneParMois)[0];
+  if (menaceHausse) {
+    categoriesDejaCitees.add(menaceHausse.cat.nom);
+    const moisConsecutifs = menaceHausse.streak + 1;
+    candidats.push({
+      famille: "point_attention_hausse",
+      cle: "point_attention",
+      priorite: 5,
+      texte: `${menaceHausse.cat.nom} augmente depuis ${moisConsecutifs} mois consécutifs (+${Math.round(menaceHausse.hausseMoyenneParMois)}€/mois en moyenne). Si cette tendance continue, elle réduira votre capacité d'épargne d'environ ${Math.round(menaceHausse.hausseMoyenneParMois)}€ par mois.`,
+    });
+  } else {
+    let indexPic = -1;
+    let depensePic = 0;
+    reelles.forEach((v, i) => {
+      if (v > depensePic) {
+        depensePic = v;
+        indexPic = i;
+      }
+    });
+    if (indexPic >= 0) {
+      let categorieExplicative: { nom: string; exces: number } | null = null;
+      for (const cat of depensesParCategorie) {
+        if (categoriesDejaCitees.has(cat.nom)) continue;
+        const serieCat = cat.parMois.slice(debut);
+        if (serieCat.length < 2) continue;
+        const valeurPic = serieCat[indexPic];
+        const autresMois = serieCat.filter((_, i) => i !== indexPic);
+        const exces = valeurPic - moyenne(autresMois);
+        if (!categorieExplicative || exces > categorieExplicative.exces) {
+          categorieExplicative = { nom: cat.nom, exces };
+        }
+      }
+      if (categorieExplicative && categorieExplicative.exces > 0) {
+        categoriesDejaCitees.add(categorieExplicative.nom);
+        candidats.push({
+          famille: "point_attention_pic",
+          cle: "point_attention",
+          priorite: 5,
+          texte: `${labelsUtiles[indexPic]} a été votre mois le plus dépensier sur cette période — principalement à cause de ${categorieExplicative.nom} (+${Math.round(categorieExplicative.exces)}€ vs votre moyenne habituelle). Un repère utile si un mois similaire se représente.`,
+        });
+      }
     }
   }
-  candidats.push(
-    baisseConfirmee
-      ? `Tes dépenses sont en baisse régulière depuis ${reelles.length} mois (${Math.round(baisseConfirmee.deltaEurosParMois)}€/mois en moyenne) — tu gagnes en maîtrise de ton budget.`
-      : undefined,
-  );
 
-  // S6. Volatilité détectée : dépenses très irrégulières d'un mois à
-  // l'autre sur la période (coefficient de variation élevé), avec le mois
-  // le plus haut et le plus bas pour rendre l'écart concret.
-  let volatilite: { moisHaut: string; moisBas: string; ecart: number } | null =
-    null;
-  if (reelles.length >= SEUIL_MOIS_MIN_TENDANCE) {
-    const moy = moyenne(reelles);
-    const coefficientVariation = moy > 0 ? (ecartType(reelles, moy) / moy) * 100 : 0;
-    if (coefficientVariation >= SEUIL_VOLATILITE) {
-      let iMax = 0;
-      let iMin = 0;
-      reelles.forEach((v, i) => {
-        if (v > reelles[iMax]) iMax = i;
-        if (v < reelles[iMin]) iMin = i;
-      });
-      volatilite = {
-        moisHaut: labelsUtiles[iMax],
-        moisBas: labelsUtiles[iMin],
-        ecart: reelles[iMax] - reelles[iMin],
-      };
-    }
-  }
-  candidats.push(
-    volatilite
-      ? `Tes dépenses varient beaucoup d'un mois à l'autre sur cette période — ${volatilite.moisHaut} vs ${volatilite.moisBas} avec un écart de ${Math.round(volatilite.ecart)}€. Identifier tes dépenses exceptionnelles pourrait t'aider à mieux planifier.`
-      : undefined,
-  );
+  // Dédoublonnage final par `cle` (categoriesDejaCitees couvre déjà
+  // l'essentiel pendant la détection, ceci couvre les clés globales
+  // partagées par plusieurs variantes d'une même famille — ex: point_fort,
+  // point_attention) puis tri par priorité (l'ordre de la vision d'origine :
+  // bilan → tendance dominante → corrélation → projection → point fort →
+  // point d'attention).
+  const clesVues = new Set<string>();
+  const insights = candidats
+    .filter((c) => {
+      if (clesVues.has(c.cle)) return false;
+      clesVues.add(c.cle);
+      return true;
+    })
+    .sort((a, b) => a.priorite - b.priorite)
+    .map((c) => c.texte);
 
-  // Jamais deux insights identiques (garde-fou défensif — les 6 règles
-  // ci-dessus portent sur des sujets distincts, donc une vraie collision
-  // ne devrait arriver que par coïncidence de formulation).
-  const insights = [
-    ...new Set(candidats.filter((c): c is string => c !== undefined)),
-  ];
-
-  // S7. Repli si aucune règle ne s'applique (pas assez d'historique).
   if (insights.length === 0) {
     return [
-      "Pas encore assez d'historique sur cette période pour dégager une tendance — continue à enregistrer tes dépenses.",
+      "Pas encore assez d'historique sur cette période pour dégager une tendance — continuez à enregistrer vos dépenses.",
     ];
   }
   return insights.slice(0, maxInsights);

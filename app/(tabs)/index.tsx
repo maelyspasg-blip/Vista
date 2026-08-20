@@ -5,7 +5,7 @@ import { getInitiales } from "../../utils/initiales";
 import { moisPrecedent, totalParType } from "../../utils/exportExcel";
 import { entreesBudgetDuMois, estCategorieActiveCeMois } from "../../utils/budget";
 import { useRouter } from "expo-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -35,13 +35,23 @@ import { SegmentHachure } from "../SegmentHachure";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { Enveloppe, Objectif, useObjectifs } from "../store";
-import { genererConseils } from "../../utils/conseils";
+import {
+  chargerEtatsInsights,
+  Conseil,
+  EtatInsight,
+  EtatsInsightsMap,
+  genererConseils,
+  LIBELLES_ETAT_INSIGHT,
+  sauvegarderEtatsInsights,
+} from "../../utils/conseils";
+import { supabase } from "../../supabaseClient";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { useAccessibilite } from "../AccessibiliteContext";
 import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
+import { InsightVerrouille } from "../InsightVerrouille";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
 
@@ -61,6 +71,87 @@ function formaterDateLongue(dateISO: string): string {
   const d = new Date(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
   return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+}
+
+// Couleurs du badge d'état affiché sur chaque conseil (utils/conseils.ts)
+// — entièrement issues de la palette Vista existante (peach/vert), jamais
+// de nouvelle couleur inventée : NOUVEAU/DEGRADATION en gris neutre,
+// A_SURVEILLER/RISQUE en orange clair, CONFIRME/RISQUE fort en orange
+// plein, ACTION en rouge (seuil critique, déjà la couleur "alerte" du
+// reste de l'app), AMELIORATION/RETABLISSEMENT en vert clair,
+// RESOLU/STABLE en vert plein.
+function couleursEtatInsight(
+  etat: EtatInsight,
+  C: typeof COULEURS.clair,
+): { fond: string; texte: string } {
+  switch (etat) {
+    case "NOUVEAU":
+    case "DEGRADATION":
+      return { fond: C.fondSecondaire, texte: C.texteMuted };
+    case "A_SURVEILLER":
+    case "RISQUE":
+      return { fond: C.peachLight, texte: C.peachText };
+    case "CONFIRME":
+      return { fond: C.peach, texte: "#FFFFFF" };
+    case "ACTION":
+      return { fond: C.rouge, texte: "#FFFFFF" };
+    case "AMELIORATION":
+    case "RETABLISSEMENT":
+      return { fond: C.vertLight, texte: C.vertText };
+    case "RESOLU":
+    case "STABLE":
+      return { fond: C.vert, texte: "#FFFFFF" };
+  }
+}
+
+// Une ligne de "Nos conseils" (pastille + badge d'état + texte) — factorisée
+// pour être rendue à l'identique que le conseil soit le tout premier
+// (toujours gratuit) ou l'un des suivants (regroupés derrière un seul bloc
+// verrouillé, cf. InsightVerrouille).
+function ligneConseil(conseil: Conseil, index: number, C: typeof COULEURS.clair) {
+  return (
+    <View
+      key={index}
+      style={[
+        styles.conseilItem,
+        index > 0 && [styles.conseilItemBorder, { borderTopColor: C.separateur }],
+      ]}
+    >
+      <View
+        style={[
+          styles.conseilDot,
+          {
+            backgroundColor:
+              conseil.niveau === "alerte"
+                ? C.rouge
+                : conseil.niveau === "attention"
+                  ? C.peach
+                  : C.vert,
+          },
+        ]}
+      />
+      <View style={styles.conseilContenu}>
+        {conseil.etat && (
+          <View
+            style={[
+              styles.conseilBadge,
+              { backgroundColor: couleursEtatInsight(conseil.etat, C).fond },
+            ]}
+          >
+            <Text
+              style={[
+                styles.conseilBadgeTexte,
+                { color: couleursEtatInsight(conseil.etat, C).texte },
+              ]}
+            >
+              {LIBELLES_ETAT_INSIGHT[conseil.etat]}
+            </Text>
+          </View>
+        )}
+        <Text style={[styles.conseilTexte, { color: C.texte }]}>{conseil.texte}</Text>
+      </View>
+    </View>
+  );
 }
 
 function DonutChart({
@@ -162,6 +253,32 @@ export default function Dashboard() {
   const C = couleurs;
   const router = useRouter();
   const [fabMenuOuvert, setFabMenuOuvert] = useState(false);
+  // RÈGLE À NE JAMAIS CASSER : ce déblocage est volontairement un state
+  // local (pas persisté en base ni dans un store partagé) — "pour la
+  // session en cours" signifie qu'il doit revenir à false à la prochaine
+  // ouverture de l'app, jamais survivre à un redémarrage.
+  const [conseilsDebloques, setConseilsDebloques] = useState(false);
+  // RÈGLE À NE JAMAIS CASSER : chargement des états persistés (AsyncStorage,
+  // cf. utils/conseils.ts) — genererConseils reste une fonction pure et
+  // synchrone, c'est ce useEffect qui fait la seule partie asynchrone
+  // (lecture au montage, écriture à chaque changement) et lui passe le
+  // résultat en prop. Ne jamais appeler chargerEtatsInsights/
+  // sauvegarderEtatsInsights ailleurs qu'ici pour cet écran, sous peine de
+  // lectures/écritures concurrentes sur la même clé.
+  const [etatsInsights, setEtatsInsights] = useState<EtatsInsightsMap>({});
+  const [userIdInsights, setUserIdInsights] = useState<string | null>(null);
+  const derniersEtatsSauvegardesRef = useRef<string>("{}");
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const userId = data.user?.id;
+      if (!userId) return;
+      const etats = await chargerEtatsInsights(userId);
+      derniersEtatsSauvegardesRef.current = JSON.stringify(etats);
+      setEtatsInsights(etats);
+      setUserIdInsights(userId);
+    })();
+  }, []);
   const { apercu: tutorielApercuVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
   const {
@@ -531,7 +648,7 @@ export default function Dashboard() {
   // construction de "Ce qu'il faut retenir" (Stats), qui analyse la période
   // sélectionnée plutôt que le mois en cours. Voir utils/conseils.ts pour la
   // liste des règles et leur ordre de priorité.
-  const conseils = genererConseils({
+  const { conseils, etatsAJour } = genererConseils({
     enveloppes: objStore.enveloppes,
     objectifs: objStore.objectifs,
     historiquesMois: objStore.historiquesMois,
@@ -543,7 +660,27 @@ export default function Dashboard() {
     disponibleEffectif,
     moisActuel: maintenant.getMonth(),
     anneeActuelle: maintenant.getFullYear(),
+    etatsPrecedents: etatsInsights,
   });
+  // RÈGLE À NE JAMAIS CASSER : persistance des états — comparée (via
+  // derniersEtatsSauvegardesRef) au dernier JSON écrit pour ne pas
+  // ré-écrire AsyncStorage à chaque rendu identique. Ne déclenche une
+  // écriture que si le contenu a réellement changé ET que l'utilisateur est
+  // connu (userIdInsights).
+  useEffect(() => {
+    if (!userIdInsights) return;
+    const serialise = JSON.stringify(etatsAJour);
+    if (serialise === derniersEtatsSauvegardesRef.current) return;
+    derniersEtatsSauvegardesRef.current = serialise;
+    setEtatsInsights(etatsAJour);
+    sauvegarderEtatsInsights(userIdInsights, etatsAJour);
+  }, [etatsAJour, userIdInsights]);
+  // RÈGLE À NE JAMAIS CASSER : isAdmin voit toujours tous les conseils sans
+  // pub — il n'existe pas encore de compte Premium dans l'app (pas de
+  // colonne Supabase, pas de flag), donc pas de bypass Premium ici pour
+  // l'instant. Le jour où Premium existera réellement, l'ajouter à cette
+  // même condition.
+  const conseilsTousVisibles = objStore.isAdmin || conseilsDebloques;
 
   const ouvrirEditionEnveloppe = (env: Enveloppe) => {
     setEnveloppeEnEdition(env);
@@ -1285,35 +1422,20 @@ export default function Dashboard() {
             <Text style={[styles.conseilsLabel, { color: C.texteMuted }]}>
               NOS CONSEILS
             </Text>
-            {conseils.map((conseil, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.conseilItem,
-                  i > 0 && [
-                    styles.conseilItemBorder,
-                    { borderTopColor: C.separateur },
-                  ],
-                ]}
+            {/* RÈGLE À NE JAMAIS CASSER : le tout premier conseil reste
+                toujours gratuit, quel que soit conseilsTousVisibles — c'est
+                ce qui donne un aperçu de valeur avant que les suivants ne
+                soient regroupés derrière le bloc verrouillé. */}
+            {ligneConseil(conseils[0], 0, C)}
+            {conseils.length > 1 && (
+              <InsightVerrouille
+                deverrouille={conseilsTousVisibles}
+                onDeverrouille={() => setConseilsDebloques(true)}
+                couleurFond={C.fondSecondaire}
               >
-                <View
-                  style={[
-                    styles.conseilDot,
-                    {
-                      backgroundColor:
-                        conseil.niveau === "alerte"
-                          ? C.rouge
-                          : conseil.niveau === "attention"
-                            ? C.peach
-                            : C.vert,
-                    },
-                  ]}
-                />
-                <Text style={[styles.conseilTexte, { color: C.texte }]}>
-                  {conseil.texte}
-                </Text>
-              </View>
-            ))}
+                {conseils.slice(1).map((conseil, i) => ligneConseil(conseil, i + 1, C))}
+              </InsightVerrouille>
+            )}
           </View>
         )}
 
@@ -3371,7 +3493,15 @@ const styles = StyleSheet.create({
     marginTop: 5,
     flexShrink: 0,
   },
-  conseilTexte: { flex: 1, fontSize: 13, lineHeight: 19 },
+  conseilTexte: { fontSize: 13, lineHeight: 19 },
+  conseilContenu: { flex: 1, gap: 4 },
+  conseilBadge: {
+    alignSelf: "flex-start",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  conseilBadgeTexte: { fontSize: 10, fontWeight: "700" },
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
   statCard: {
     flex: 1,
