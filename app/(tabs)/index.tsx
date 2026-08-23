@@ -50,6 +50,7 @@ import {
   sauvegarderEtatsInsights,
   sauvegarderNbAmeliorations,
 } from "../../utils/conseils";
+import { marquerSituationsAffichees } from "../../utils/situationsSession";
 import { supabase } from "../../supabaseClient";
 import { usePremium } from "../PremiumContext";
 import { estComptePremium } from "../../utils/premium";
@@ -205,16 +206,20 @@ function DonutChart({
     );
   }
 
-  let cumul = 0;
-  const segments = data
-    .filter((d) => d.valeur > 0)
-    .map((d, i) => {
-      const pct = d.valeur / total;
-      const dashArray = pct * circonference;
-      const dashOffset = circonference * (1 - cumul);
-      cumul += pct;
-      return { ...d, dashArray, dashOffset, key: i };
-    });
+  // Cumul calculé fonctionnellement (pas de mutation d'une variable externe
+  // pendant le .map ci-dessous) : cumuls[i] = somme des % des segments
+  // précédents, point de départ du i-ème arc du donut.
+  const donnees = data.filter((d) => d.valeur > 0);
+  const cumuls = donnees.reduce<number[]>((acc, d, i) => {
+    acc.push(i === 0 ? 0 : acc[i - 1] + donnees[i - 1].valeur / total);
+    return acc;
+  }, []);
+  const segments = donnees.map((d, i) => {
+    const pct = d.valeur / total;
+    const dashArray = pct * circonference;
+    const dashOffset = circonference * (1 - cumuls[i]);
+    return { ...d, dashArray, dashOffset, key: i };
+  });
 
   return (
     <View
@@ -660,6 +665,19 @@ export default function Dashboard() {
     anneeActuelle: maintenant.getFullYear(),
     etatsPrecedents: etatsInsights,
   });
+  // RÈGLE À NE JAMAIS CASSER : "Nos conseils" est la source PRIORITAIRE —
+  // il s'affiche toujours en entier, JAMAIS filtré par
+  // situationsDejaAffichees (contrairement à "Vista" sur Stats, qui lui
+  // exclut ce qu'Aperçu a déjà montré). Ne JAMAIS passer
+  // `situationsExclues` ici : Aperçu ne fait que MARQUER ce qu'il affiche
+  // pour que Stats l'évite ensuite, il ne s'auto-filtre jamais — passer
+  // situationsExclues ici créait un bug d'auto-exclusion (Aperçu masquait
+  // ses propres conseils dès le rendu suivant, dès que son propre effet de
+  // marquage avait tourné une première fois). Voir utils/situationsSession.ts.
+  const clesConseilsAffiches = conseils.map((c) => c.cle).join("|");
+  useEffect(() => {
+    marquerSituationsAffichees(clesConseilsAffiches ? clesConseilsAffiches.split("|") : []);
+  }, [clesConseilsAffiches]);
   // RÈGLE À NE JAMAIS CASSER : persistance des états — comparée (via
   // derniersEtatsSauvegardesRef) au dernier JSON écrit pour ne pas
   // ré-écrire AsyncStorage à chaque rendu identique. Ne déclenche une

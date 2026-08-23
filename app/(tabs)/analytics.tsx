@@ -20,7 +20,6 @@ import { COULEURS, useTheme } from "../ThemeContext";
 import { calculerSeries, Serie, TypeSerie } from "../../utils/series";
 import {
   budgetDuMoisArchive,
-  calculerResteEstimeCourant,
   entreesBudgetDuMois,
 } from "../../utils/budget";
 import {
@@ -36,9 +35,9 @@ import {
   calculerRythmeObjectif,
   calculerTauxEpargne,
   chargerNbAmeliorations,
-  Conseil,
-  genererConseils,
 } from "../../utils/conseils";
+import { genererMessageBilanVista } from "../../utils/bilanVista";
+import { situationsDejaAffichees } from "../../utils/situationsSession";
 import { calculerTrophees, Trophee } from "../../utils/trophees";
 import { supabase } from "../../supabaseClient";
 import { PALETTE_COULEURS } from "../ColorPicker";
@@ -50,10 +49,7 @@ import { genererInsightsPeriode } from "../../utils/tendancesPeriode";
 // demande explicite. Le nom _COMPLETS reste pour éviter de renommer tous
 // les usages existants (LABEL_MOIS_ACTUEL, "Variation d'un mois à
 // l'autre", etc.), pas parce qu'il coexiste encore avec une version courte.
-import {
-  calculerResteEstimeArchive,
-  MOIS_LABELS as MOIS_LABELS_COMPLETS,
-} from "../../utils/exportExcel";
+import { MOIS_LABELS as MOIS_LABELS_COMPLETS } from "../../utils/exportExcel";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useGuest } from "../GuestContext";
@@ -65,6 +61,7 @@ import { useLargeurAnimee } from "../BarreProgression";
 import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
 import { InsightVerrouille } from "../InsightVerrouille";
 import { PremiumVerrou } from "../PremiumVerrou";
+import { GraphiqueFlux, LienFlux, NoeudFlux } from "../GraphiqueFlux";
 import { usePremium } from "../PremiumContext";
 import { estComptePremium } from "../../utils/premium";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
@@ -209,6 +206,22 @@ function formaterPeriode(nbMois: number): string {
   return `${nbMois} mois`;
 }
 
+// RÈGLE À NE JAMAIS CASSER : SEULE fonction qui construit une liste de
+// {mois, annee} pour "les N derniers mois" — utilisée à la fois par le
+// sélecteur de période principal (moisAffiches) et par celui du graphique
+// de flux (Partie 3), qui a son propre nombre de mois indépendant. Ne
+// jamais dupliquer cette formule ailleurs dans le fichier.
+function construireMoisPeriode(
+  nbMois: number,
+  moisRef: number,
+  anneeRef: number,
+): { mois: number; annee: number }[] {
+  return Array.from({ length: nbMois }, (_, i) => {
+    const d = new Date(anneeRef, moisRef - nbMois + 1 + i, 1);
+    return { mois: d.getMonth(), annee: d.getFullYear() };
+  });
+}
+
 const PERIODE_MAX_MOIS = 120; // plafond fixe (10 ans), indépendant des données de l'utilisateur
 // Nombre de mois consultables par un compte non-premium sur Stats — cf.
 // estComptePremium (utils/premium.ts) pour qui est concerné.
@@ -233,7 +246,7 @@ function genererOptionsPeriode(nbMoisDisponibles: number): OptionPeriode[] {
     options.push({ valeur, label: formaterPeriode(valeur), disponible, prochaine });
   };
 
-  for (let m = 2; m <= 12; m++) ajouter(m);
+  for (let m = 1; m <= 12; m++) ajouter(m);
   for (let a = 2; a * 12 <= PERIODE_MAX_MOIS; a++) ajouter(a * 12);
 
   return options;
@@ -1000,24 +1013,36 @@ export default function Analytics() {
     lignes: { moisLabel: string; montant: number }[];
   } | null>(null);
   const [modalSeriesVisible, setModalSeriesVisible] = useState(false);
+  // RÈGLE À NE JAMAIS CASSER : "Ton bilan" est structuré en 4 onglets
+  // horizontaux (Vista / Santé / Trophées / Et si...), même principe que
+  // Jour/Semaine/Mois sur Planning — chaque onglet a son propre ScrollView
+  // indépendant (voir scrollVistaRef/scrollSanteRef/scrollTropheesRef/
+  // scrollSimulateurRef plus bas), jamais un seul ScrollView partagé entre
+  // onglets.
   const [vueModalStats, setVueModalStats] = useState<
-    "score" | "series" | "simulateur" | "trophees"
-  >("score");
-  // Les 4 onglets (Score/Séries/Simulateur/Trophées) partagent le même
-  // ScrollView — sans reset explicite, changer d'onglet garde l'ancien
-  // contentOffset, qui peut dépasser la hauteur du nouveau contenu et
-  // donner l'impression que le scroll est bloqué (impossible d'atteindre le
-  // bas des cartes Séries après avoir consulté un autre onglet plus court).
-  const scrollStatsRef = useRef<ScrollView>(null);
+    "vista" | "sante" | "trophees" | "simulateur"
+  >("vista");
+  const scrollVistaRef = useRef<ScrollView>(null);
+  const scrollSanteRef = useRef<ScrollView>(null);
+  const scrollTropheesRef = useRef<ScrollView>(null);
+  const scrollSimulateurRef = useRef<ScrollView>(null);
   const changerVueModalStats = (
-    v: "score" | "series" | "simulateur" | "trophees",
+    v: "vista" | "sante" | "trophees" | "simulateur",
   ) => {
     setVueModalStats(v);
-    scrollStatsRef.current?.scrollTo({ y: 0, animated: false });
+    const ref =
+      v === "vista"
+        ? scrollVistaRef
+        : v === "sante"
+          ? scrollSanteRef
+          : v === "trophees"
+            ? scrollTropheesRef
+            : scrollSimulateurRef;
+    ref.current?.scrollTo({ y: 0, animated: false });
   };
   // RÈGLE À NE JAMAIS CASSER : deep-link "Simuler" — utilisé par "Ta
   // prochaine meilleure décision", "Ce qui fait bouger ta note" (leviers) et
-  // "Ce que Vista a remarqué" pour ouvrir directement l'onglet Simulateur
+  // "Ce que Vista a remarqué" pour ouvrir directement l'onglet "Et si..."
   // avec la bonne catégorie déjà sélectionnée, plutôt que de laisser
   // l'utilisateur la rechercher lui-même.
   const ouvrirSimulateurPour = (categorieId?: string) => {
@@ -1266,49 +1291,30 @@ export default function Analytics() {
     );
   };
 
-  // === "Ce que Vista a remarqué" / "Ta prochaine meilleure décision" ==========
-  // RÈGLE À NE JAMAIS CASSER : ne jamais reconstruire la formule "Reste
-  // estimé" ici — toujours passer par les mêmes fonctions partagées
-  // qu'Aperçu (app/(tabs)/index.tsx), sinon les deux écrans finissent par
-  // afficher des chiffres divergents au premier changement fait d'un seul
-  // côté.
-  const {
-    disponibleEffectif: disponibleEffectifCoach,
-    resteEstime: resteEstimeCoach,
-  } = calculerResteEstimeCourant(
-    objStore.enveloppes,
-    objStore.epargneMois,
-    ANNEE_ACTUELLE,
-    MOIS_ACTUEL,
-  );
-  const resteEstimePrecedentCoach = snapshotMoisPrecedentPourSimulation
-    ? calculerResteEstimeArchive(snapshotMoisPrecedentPourSimulation)
-    : null;
-
-  // RÈGLE À NE JAMAIS CASSER : appel volontairement "sans état" (
-  // etatsPrecedents: {}) — contrairement à "Nos conseils" sur Aperçu, ces
-  // deux sections n'ont pas besoin de suivre un arc narratif multi-jours
-  // (badges NOUVEAU/CONFIRME/...), juste des observations factuelles
-  // fraîches à chaque ouverture. On n'agit donc jamais sur l'`etatsAJour`
-  // retourné (jamais persisté depuis cet écran) — utils/conseils.ts reste
-  // le seul moteur (pas de nouveau moteur, cf. demande d'origine).
-  const { conseils: conseilsCoach }: { conseils: Conseil[] } = genererConseils({
-    enveloppes: objStore.enveloppes,
-    objectifs: objStore.objectifs,
+  // === "Ce que Vista a remarqué" / "Prochaine meilleure décision" =============
+  // RÈGLE À NE JAMAIS CASSER : Zone 3 (Vista Bilan) — TOUT l'historique
+  // disponible, JAMAIS le mois en cours. utils/bilanVista.ts est un moteur
+  // entièrement séparé de utils/conseils.ts (Zone 1, mois en cours) et
+  // utils/tendancesPeriode.ts (Zone 2, période sélectionnée) — ne jamais
+  // lui passer resteEstime/disponibleEffectif du mois en cours, seulement
+  // objStore.historiquesMois (mois déjà archivés).
+  const { messages: messagesVista, decision: decisionVista } = genererMessageBilanVista({
     historiquesMois: objStore.historiquesMois,
-    transactions: objStore.transactions,
-    historiquePaiements: objStore.historiquePaiements,
-    epargneMois: objStore.epargneMois,
-    resteEstime: resteEstimeCoach,
-    resteEstimePrecedent: resteEstimePrecedentCoach,
-    disponibleEffectif: disponibleEffectifCoach,
+    objectifsAvecRythme: objStore.objectifs.map((o) => ({
+      objectif: { id: o.id, nom: o.nom, ferme: o.ferme },
+    })),
+    enveloppes: objStore.enveloppes,
     moisActuel: MOIS_ACTUEL,
     anneeActuelle: ANNEE_ACTUELLE,
-    maxConseils: 4,
-    etatsPrecedents: {},
+    // RÈGLE À NE JAMAIS CASSER : "Nos conseils" (Aperçu) est la source
+    // PRIORITAIRE — "Vista" ici ne fait qu'EXCLURE ce qu'Aperçu a déjà
+    // marqué comme affiché (voir l'effet correspondant dans
+    // app/(tabs)/index.tsx), jamais l'inverse. "Vista" ne marque rien lui-
+    // même.
+    situationsExclues: situationsDejaAffichees(),
   });
-  const decisionPrioritaire = conseilsCoach[0] ?? null;
-  const observationsVista = conseilsCoach.slice(1, 4);
+  const decisionPrioritaire = decisionVista;
+  const observationsVista = messagesVista;
 
   // Onglet Trophées.
   const trophees = calculerTrophees({
@@ -1327,9 +1333,14 @@ export default function Analytics() {
   type LevierScore = { texte: string; categorieId?: string };
   const leviersScore: LevierScore[] = (() => {
     const leviers: LevierScore[] = [];
-    const enveloppesSansEntreeScore = objStore.enveloppes.filter((e) => e.type !== "Entrée");
+    // RÈGLE À NE JAMAIS CASSER : un "levier" est par définition une action
+    // d'ajustement ("réduire", "lisser") — jamais suggérée sur une catégorie
+    // Fixe (loyer, assurance...), qui n'est justement pas ajustable
+    // facilement. Les catégories Fixe restent visibles ailleurs (bilan,
+    // observations), seuls les leviers d'action se limitent aux Variable.
+    const enveloppesVariablesScore = objStore.enveloppes.filter((e) => e.type === "Variable");
 
-    const pireDepassement = enveloppesSansEntreeScore
+    const pireDepassement = enveloppesVariablesScore
       .filter((e) => e.budget > 0 && e.depense > e.budget)
       .sort((a, b) => b.depense - b.budget - (a.depense - a.budget))[0];
     if (pireDepassement) {
@@ -1354,7 +1365,7 @@ export default function Analytics() {
     }
 
     let pireVolatilite: { nom: string; id: string; cv: number } | null = null;
-    enveloppesSansEntreeScore.forEach((e) => {
+    enveloppesVariablesScore.forEach((e) => {
       const valeurs = objStore.historiquesMois
         .slice(-3)
         .map((s) => s.enveloppes.find((x) => x.id === e.id)?.depense ?? 0);
@@ -1443,10 +1454,7 @@ export default function Analytics() {
   // (par opposition à LABEL_MOIS_ACTUEL, pour celles sur le mois en cours).
   const labelPeriode = `${nbMois} derniers mois`;
 
-  const moisAffiches = Array.from({ length: nbMois }, (_, i) => {
-    const d = new Date(ANNEE_ACTUELLE, MOIS_ACTUEL - nbMois + 1 + i, 1);
-    return { mois: d.getMonth(), annee: d.getFullYear() };
-  });
+  const moisAffiches = construireMoisPeriode(nbMois, MOIS_ACTUEL, ANNEE_ACTUELLE);
 
   const getDepenseMois = (
     mois: number,
@@ -1853,9 +1861,11 @@ export default function Analytics() {
   // catégorie qui accélère le plus (règle 1) et celle qui explique le pic
   // de dépense de la période (règle 5).
   const depensesParCategorie = objStore.enveloppes
-    .filter((e) => e.type !== "Entrée")
+    .filter((e): e is Enveloppe & { type: "Fixe" | "Variable" } => e.type !== "Entrée")
     .map((env) => ({
+      id: env.id,
       nom: env.nom,
+      type: env.type,
       parMois: moisAffiches.map(
         ({ mois, annee }) => getDepenseMois(mois, annee, [env.id]) ?? 0,
       ),
@@ -1867,9 +1877,14 @@ export default function Analytics() {
     donneesPrevisionnelles,
     labels,
     nbMoisAvecDonnees,
+    nbMoisSelectionne,
     series,
     depensesParCategorie,
     objectifs: objectifsAvecDelta,
+    enveloppes: objStore.enveloppes,
+    moisActuel: MOIS_ACTUEL,
+    anneeActuelle: ANNEE_ACTUELLE,
+    situationsExclues: situationsDejaAffichees(),
   });
   // RÈGLE À NE JAMAIS CASSER : premium voit toujours tous les insights sans
   // pub — voir la même règle dans app/(tabs)/index.tsx.
@@ -1904,11 +1919,17 @@ export default function Analytics() {
   // technique que topDepensesParCategorie : pour chaque mois de la période,
   // mois en cours → objStore.enveloppes (dédupliqué par nom), mois archivé
   // → le snapshot correspondant, puis on cumule par nom de catégorie.
+  // Paramétrée par `moisListe` (plutôt que de fermer sur moisAffiches) pour
+  // être réutilisable par le graphique de flux (Partie 3), qui a son propre
+  // sélecteur de période indépendant — SEULE fonction qui sait agréger des
+  // dépenses/entrées réelles sur une période de mois donnée, ne jamais la
+  // dupliquer.
   const construireRepartitionSurPeriode = (
     predicat: (e: { type: string; depense: number; nom: string }) => boolean,
+    moisListe: { mois: number; annee: number }[],
   ) => {
     const parCategorie = new Map<string, { nom: string; couleur: string; montant: number }>();
-    moisAffiches.forEach(({ mois, annee }) => {
+    moisListe.forEach(({ mois, annee }) => {
       const enveloppesMoisBrutes =
         mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
           ? objStore.enveloppes
@@ -1935,6 +1956,7 @@ export default function Analytics() {
 
   const repartitionDepenses = construireRepartitionSurPeriode(
     (e) => e.type !== "Entrée" && e.depense > 0,
+    moisAffiches,
   );
 
   // "Budget" est le nom réservé de l'entrée créée par la migration de
@@ -1945,6 +1967,7 @@ export default function Analytics() {
   // cette répartition.
   const repartitionEntrees = construireRepartitionSurPeriode(
     (e) => e.type === "Entrée" && e.depense > 0 && e.nom !== "Budget",
+    moisAffiches,
   );
 
   // RÈGLE À NE JAMAIS CASSER : même condition que le rendu du tiroir
@@ -1960,6 +1983,278 @@ export default function Analytics() {
     (repartitionDepenses.length > 0 ||
       repartitionEntrees.length > 0 ||
       topDepensesTri.length > 0);
+
+  // === "Flux de votre argent" (Ton bilan, Partie 3) ===========================
+  // RÈGLE À NE JAMAIS CASSER : ne montre QUE des montants réels déjà
+  // enregistrés (enveloppe.depense, épargne réelle), jamais un budget prévu
+  // ni une projection — voir aussi la RÈGLE en tête de GraphiqueFlux.tsx.
+  // Graphique réservé Premium (cf. PremiumVerrou dans le JSX) : pas de
+  // palier gratuit ici, contrairement aux autres tiroirs de Stats.
+  const [nbMoisFlux, setNbMoisFlux] = useState(1);
+  const moisFluxAffiches = construireMoisPeriode(nbMoisFlux, MOIS_ACTUEL, ANNEE_ACTUELLE);
+  // Mois immédiatement avant le premier mois de moisFluxAffiches (Date gère
+  // nativement le débordement d'année en passant un index de mois négatif),
+  // point de départ de la "période précédente de même durée" utilisée pour
+  // la variation affichée au tap sur un flux, et de la fenêtre de calcul
+  // des versements d'objectifs sur la période (colonne 3).
+  const finPeriodePrecedenteFlux = new Date(
+    moisFluxAffiches[0].annee,
+    moisFluxAffiches[0].mois - 1,
+    1,
+  );
+  const moisFluxPrecedents = construireMoisPeriode(
+    nbMoisFlux,
+    finPeriodePrecedenteFlux.getMonth(),
+    finPeriodePrecedenteFlux.getFullYear(),
+  );
+  // Colonne 1 : Entrées d'argent par catégorie (même exclusion de "Budget"
+  // que repartitionEntrees plus haut).
+  const fluxEntrees = construireRepartitionSurPeriode(
+    (e) => e.type === "Entrée" && e.depense > 0 && e.nom !== "Budget",
+    moisFluxAffiches,
+  );
+  const fluxNoeudsEntrees: NoeudFlux[] = fluxEntrees.map((e) => ({
+    id: e.cle,
+    label: e.label,
+    couleur: e.couleur,
+    montant: e.montant,
+  }));
+  // Catégories de dépense réelles (Fixe/Variable) sur la période — toutes,
+  // pour le calcul de "Liquidités" plus bas ; seules celles du Cas 1
+  // (cf. RÈGLE ci-dessous) obtiennent une barre en colonne 2.
+  const fluxCategories = construireRepartitionSurPeriode(
+    (e) => e.type !== "Entrée" && e.depense > 0,
+    moisFluxAffiches,
+  );
+  const fluxCategoriesPrecedentes = construireRepartitionSurPeriode(
+    (e) => e.type !== "Entrée" && e.depense > 0,
+    moisFluxPrecedents,
+  );
+  const fluxVariationParCategorie: Record<string, number | null> = {};
+  fluxCategories.forEach((c) => {
+    const precedent = fluxCategoriesPrecedentes.find((p) => p.cle === c.cle);
+    fluxVariationParCategorie[c.cle] =
+      precedent && precedent.montant > 0
+        ? ((c.montant - precedent.montant) / precedent.montant) * 100
+        : null;
+  });
+
+  // Une catégorie recréée sous le même nom (après suppression) a un nouvel
+  // id à chaque fois — rassemble tous les id ayant jamais porté ce nom
+  // (même principe que construireRepartitionSurPeriode) pour ne rater
+  // aucune transaction historique.
+  const bornesFlux = {
+    debut: new Date(moisFluxAffiches[0].annee, moisFluxAffiches[0].mois, 1),
+    finExclusive: new Date(
+      moisFluxAffiches[moisFluxAffiches.length - 1].annee,
+      moisFluxAffiches[moisFluxAffiches.length - 1].mois + 1,
+      1,
+    ),
+  };
+  const idsPourNomCategorieFlux = (nom: string): Set<string> => {
+    const ids = new Set<string>();
+    objStore.enveloppes.forEach((e) => {
+      if (e.nom === nom) ids.add(e.id);
+    });
+    moisFluxAffiches.forEach(({ mois, annee }) => {
+      objStore.historiquesMois
+        .find((s) => s.mois === mois && s.annee === annee)
+        ?.enveloppes.forEach((e) => {
+          if (e.nom === nom) ids.add(e.id);
+        });
+    });
+    return ids;
+  };
+  const transactionsGroupeesParNomFlux = (nomCategorie: string) => {
+    const ids = idsPourNomCategorieFlux(nomCategorie);
+    const parNom = new Map<string, number>();
+    objStore.transactions
+      .filter((t) => ids.has(t.enveloppeId))
+      .filter((t) => {
+        const d = new Date(t.date);
+        return d >= bornesFlux.debut && d < bornesFlux.finExclusive;
+      })
+      .forEach((t) => {
+        // RÈGLE : une transaction sans nom précis (vide/blanc) rejoint le
+        // groupe "Non précisé" plutôt que de créer un nœud sans label.
+        const cle = t.nom.trim() === "" ? "Non précisé" : t.nom;
+        parNom.set(cle, (parNom.get(cle) ?? 0) + t.montant);
+      });
+    return [...parNom.entries()]
+      .map(([nom, montant]) => ({ nom, montant }))
+      .filter((x) => x.montant > 0);
+  };
+
+  // RÈGLE À NE JAMAIS CASSER — 4 CAS DE FLUX (cf. RÈGLE en tête de
+  // GraphiqueFlux.tsx) :
+  // Cas 1 — catégorie Variable avec 2+ transactions distinctes sur la
+  // période → barre en colonne 2, détail en colonne 3 (un nœud par nom de
+  // transaction, regroupé ; une transaction sans nom rejoint "Non
+  // précisé"). Si la somme des transactions nommées est inférieure au
+  // total réel de la catégorie (dépenses non détaillées), l'écart devient
+  // un nœud "Autre" en colonne 3, TOUJOURS en dernière position de son
+  // groupe, jamais affiché si l'écart est nul/négligeable.
+  // Cas 2 — catégorie Fixe, ou Variable sans détail exploitable (0 ou 1
+  // transaction distincte) → AUCUNE barre en colonne 2, le flux passe
+  // directement colonne 1 → colonne 3 (cf. idsNoeudsDirects au site
+  // d'appel), colonne 3 affichant le nom réel de la catégorie.
+  // Cas 3/4 — "Liquidités"/"Épargne", calculées globalement ci-dessous,
+  // jamais par catégorie — flux direct colonne 1 → colonne 3, exactement
+  // comme le Cas 2.
+  //
+  // RÈGLE À NE JAMAIS CASSER : un même nom de transaction ne doit
+  // apparaître qu'une seule fois en colonne 3 — s'il ressort sous deux
+  // catégories Cas 1 différentes, fusionner en un seul nœud alimenté par
+  // plusieurs liens (noeudsDestinationParLabel ci-dessous). "Autre" n'est
+  // JAMAIS fusionné entre catégories : chaque catégorie a son propre écart
+  // (id scindé par cat.cle), seuls les vrais noms de transactions se
+  // fusionnent.
+  const classificationsFlux = fluxCategories.map((cat) => {
+    const type = objStore.enveloppes.find((e) => e.nom === cat.label)?.type;
+    const brut =
+      type === "Variable"
+        ? transactionsGroupeesParNomFlux(cat.label).sort((a, b) => b.montant - a.montant)
+        : [];
+    if (brut.length < 2) {
+      return { cas: 2 as const, cat };
+    }
+    const sommeDetail = brut.reduce((acc, d) => acc + d.montant, 0);
+    const ecart = cat.montant - sommeDetail;
+    const detail = ecart > 0.005 ? [...brut, { nom: "Autre", montant: ecart }] : brut;
+    return { cas: 1 as const, cat, detail };
+  });
+  const fluxNoeudsCategories: NoeudFlux[] = classificationsFlux
+    .filter((c) => c.cas === 1)
+    .map(({ cat }) => ({ id: cat.cle, label: cat.label, couleur: cat.couleur, montant: cat.montant }));
+
+  // RÈGLE À NE JAMAIS CASSER : "Liquidités" = totalEntrées - totalDépensé -
+  // totalÉpargné (TOUTE dépense de catégorie, Cas 1 ET Cas 2 confondus —
+  // jamais seulement les catégories visibles en colonne 2), JAMAIS
+  // resteEstime ni totalDepensePrevue — uniquement des montants déjà
+  // réalisés. C'est l'argent disponible EN CE MOMENT (déjà reçu, pas encore
+  // affecté à une catégorie ni épargné), pas une projection de fin de mois.
+  // "Épargne" = argent réellement mis de côté sur la période
+  // (getEpargneMois, déjà défini plus haut : epargneMois du store pour le
+  // mois en cours, snapshot.epargne pour les mois archivés) — apparaît en
+  // colonne 3, alimentée directement depuis la colonne 1 (Entrées) comme
+  // "Liquidités", jamais via une catégorie.
+  const ID_NOEUD_LIQUIDITES = "liquidites";
+  const ID_NOEUD_EPARGNE = "epargne";
+  const totalEntreesFlux = fluxNoeudsEntrees.reduce((acc, n) => acc + n.montant, 0);
+  const totalDepenseCategoriesFlux = fluxCategories.reduce((acc, c) => acc + c.montant, 0);
+  const totalEpargneFlux = moisFluxAffiches.reduce(
+    (acc, { mois, annee }) => acc + (getEpargneMois(mois, annee) ?? 0),
+    0,
+  );
+  const totalLiquiditesFlux = Math.max(
+    0,
+    totalEntreesFlux - totalDepenseCategoriesFlux - totalEpargneFlux,
+  );
+
+  // RÈGLE À NE JAMAIS CASSER — TRI DÉCROISSANT STRICT PAR GROUPE : la
+  // colonne 3 est triée par montant décroissant, mais un groupe (le détail
+  // d'une catégorie Cas 1, une catégorie Cas 2, "Liquidités" ou "Épargne")
+  // ne doit jamais être éclaté — c'est le TOTAL du groupe qui est comparé
+  // aux autres pour décider de sa position, ses membres restant consécutifs
+  // et déjà triés entre eux (cf. `detail` plus haut, "Autre" toujours en
+  // dernière position puisque toujours ajouté en fin de tableau). On
+  // construit des "blocs" (sortKey = total du groupe, ids = membres déjà
+  // dans l'ordre voulu), triés une seule fois à la fin — jamais un tri
+  // direct de fluxNoeudsDestination, qui casserait le regroupement (cf.
+  // RÈGLE dans GraphiqueFlux.tsx : "ordre fourni par l'appelant respecté").
+  const fluxLiensVersDestination: LienFlux[] = [];
+  const noeudsDestinationParLabel = new Map<string, NoeudFlux>();
+  const noeudsAutresParId = new Map<string, NoeudFlux>();
+  const noeudsDirectsCategoriesParId = new Map<string, NoeudFlux>();
+  const idsCategoriesDirectes: string[] = [];
+  const blocsDestination: { sortKey: number; ids: string[] }[] = [];
+  classificationsFlux.forEach((classe) => {
+    const { cat } = classe;
+    if (classe.cas === 1) {
+      const idsNouveaux: string[] = [];
+      classe.detail.forEach((d) => {
+        if (d.nom === "Autre") {
+          const idNoeud = `${cat.cle}__autre`;
+          noeudsAutresParId.set(idNoeud, {
+            id: idNoeud,
+            label: "Autre",
+            couleur: cat.couleur,
+            montant: d.montant,
+          });
+          fluxLiensVersDestination.push({ sourceId: cat.cle, destId: idNoeud, montant: d.montant });
+          idsNouveaux.push(idNoeud);
+          return;
+        }
+        const existant = noeudsDestinationParLabel.get(d.nom);
+        if (existant) {
+          noeudsDestinationParLabel.set(d.nom, {
+            ...existant,
+            montant: existant.montant + d.montant,
+          });
+          fluxLiensVersDestination.push({ sourceId: cat.cle, destId: existant.id, montant: d.montant });
+        } else {
+          const idNoeud = `transaction__${d.nom}`;
+          noeudsDestinationParLabel.set(d.nom, {
+            id: idNoeud,
+            label: d.nom,
+            couleur: cat.couleur,
+            montant: d.montant,
+          });
+          fluxLiensVersDestination.push({ sourceId: cat.cle, destId: idNoeud, montant: d.montant });
+          idsNouveaux.push(idNoeud);
+        }
+      });
+      // Si toutes les transactions de cette catégorie fusionnent dans des
+      // nœuds déjà créés par une catégorie précédente, aucun nouveau bloc à
+      // positionner ici : ces nœuds restent à la position de leur bloc
+      // d'origine.
+      if (idsNouveaux.length > 0) {
+        blocsDestination.push({ sortKey: cat.montant, ids: idsNouveaux });
+      }
+      return;
+    }
+    // Cas 2 : flux direct colonne 1 → colonne 3, cf. RÈGLE plus haut —
+    // aucune barre en colonne 2 pour cette catégorie.
+    idsCategoriesDirectes.push(cat.cle);
+    noeudsDirectsCategoriesParId.set(cat.cle, {
+      id: cat.cle,
+      label: cat.label,
+      couleur: cat.couleur,
+      montant: cat.montant,
+    });
+    blocsDestination.push({ sortKey: cat.montant, ids: [cat.cle] });
+  });
+  if (totalLiquiditesFlux > 0) {
+    blocsDestination.push({ sortKey: totalLiquiditesFlux, ids: [ID_NOEUD_LIQUIDITES] });
+  }
+  if (totalEpargneFlux > 0) {
+    blocsDestination.push({ sortKey: totalEpargneFlux, ids: [ID_NOEUD_EPARGNE] });
+  }
+  const noeudsDestinationParId = new Map<string, NoeudFlux>([
+    ...[...noeudsDestinationParLabel.values()].map((n): [string, NoeudFlux] => [n.id, n]),
+    ...noeudsAutresParId,
+    ...noeudsDirectsCategoriesParId,
+    ...(totalLiquiditesFlux > 0
+      ? ([
+          [
+            ID_NOEUD_LIQUIDITES,
+            { id: ID_NOEUD_LIQUIDITES, label: "Liquidités", couleur: C.texteMuted, montant: totalLiquiditesFlux },
+          ],
+        ] as [string, NoeudFlux][])
+      : []),
+    ...(totalEpargneFlux > 0
+      ? ([
+          [
+            ID_NOEUD_EPARGNE,
+            { id: ID_NOEUD_EPARGNE, label: "Épargne", couleur: C.vert, montant: totalEpargneFlux },
+          ],
+        ] as [string, NoeudFlux][])
+      : []),
+  ]);
+  const fluxNoeudsDestination: NoeudFlux[] = [...blocsDestination]
+    .sort((a, b) => b.sortKey - a.sortKey)
+    .flatMap((bloc) => bloc.ids.map((id) => noeudsDestinationParId.get(id)).filter((n): n is NoeudFlux => !!n));
+  const [modeAffichageFlux, setModeAffichageFlux] = useState<"euro" | "pct">("euro");
 
   // Défini ici (état de la page, pas au niveau module comme les autres
   // pages) car la première étape doit ouvrir tous les tiroirs d'un coup via
@@ -2101,7 +2396,8 @@ export default function Analytics() {
             ]}
             onPress={() => {
               setModalSeriesVisible(true);
-              scrollStatsRef.current?.scrollTo({ y: 0, animated: false });
+              setVueModalStats("vista");
+              scrollVistaRef.current?.scrollTo({ y: 0, animated: false });
             }}
             activeOpacity={0.7}
             accessibilityRole="button"
@@ -3410,13 +3706,13 @@ export default function Analytics() {
                   Ton bilan
                 </Text>
                 <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
-                  {vueModalStats === "score"
+                  {vueModalStats === "vista"
                     ? "Vue d'ensemble de ta situation"
-                    : vueModalStats === "series"
-                      ? "Régularité mois après mois"
-                      : vueModalStats === "simulateur"
-                        ? "Et si tu ajustais un budget ?"
-                        : "Tes réussites, débloquées au fil du temps"}
+                    : vueModalStats === "sante"
+                      ? "Ta santé financière"
+                      : vueModalStats === "trophees"
+                        ? "Tes réussites, débloquées au fil du temps"
+                        : "Et si tu ajustais un budget ?"}
                 </Text>
               </View>
               <TouchableOpacity
@@ -3429,54 +3725,151 @@ export default function Analytics() {
               </TouchableOpacity>
             </View>
 
-            {/* RÈGLE À NE JAMAIS CASSER : TOUT le contenu qui suit le
-                header (sections coach + chips + contenu de l'onglet actif)
-                vit dans CE SEUL ScrollView, jamais dans un second
-                ScrollView imbriqué ni dans une View à hauteur fixe — c'est
-                ce qui garantit qu'aucune section n'est jamais coupée/
-                écrasée quelle que soit la longueur du contenu. La carte
-                (styles.modalCardBadges) utilise maxHeight, pas height : elle
-                s'adapte au contenu court et plafonne pour le contenu long,
-                que ce seul ScrollView fait alors défiler. */}
-            <ScrollView ref={scrollStatsRef} showsVerticalScrollIndicator={false}>
-            {/* RÈGLE À NE JAMAIS CASSER : "Ce que Vista a remarqué" et "Ta
-                prochaine meilleure décision" restent visibles pour TOUS les
-                comptes (contrairement aux 3 onglets détaillés ci-dessous,
-                Premium uniquement) — même logique qu'un aperçu gratuit sur
-                "Nos conseils" d'Aperçu. */}
-            {decisionPrioritaire && (
-              <View
-                style={[
-                  styles.decisionBloc,
-                  { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
-                ]}
-              >
-                <Text style={[styles.decisionLabel, { color: C.texteMuted }]}>
-                  TA PROCHAINE MEILLEURE DÉCISION
-                </Text>
-                <Text style={[styles.decisionTexte, { color: C.texte }]}>
-                  {decisionPrioritaire.texte}
-                </Text>
+            {/* RÈGLE À NE JAMAIS CASSER : "Ton bilan" est structuré en 4
+                onglets horizontaux (Vista / Santé / Trophées / Et si...),
+                pas une seule page scrollable — chaque onglet vit dans son
+                PROPRE ScrollView indépendant (jamais partagé), monté/démonté
+                au changement d'onglet. Chaque section vit dans sa propre
+                carte (styles.serieCarte) avec un titre — jamais de texte
+                flottant hors d'un bloc identifié. */}
+            <View style={[styles.tabsRow, { backgroundColor: C.fondSecondaire }]}>
+              {(["vista", "sante", "trophees", "simulateur"] as const).map((v) => (
                 <TouchableOpacity
-                  style={[styles.decisionBouton, { backgroundColor: C.purple }]}
-                  onPress={() => ouvrirSimulateurPour(decisionPrioritaire.categorieId)}
-                  activeOpacity={0.8}
+                  key={v}
+                  style={[
+                    styles.tabBtn,
+                    vueModalStats === v && [styles.tabBtnActif, { backgroundColor: C.carte }],
+                  ]}
+                  onPress={() => changerVueModalStats(v)}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.decisionBoutonTexte}>Simuler</Text>
+                  <Text
+                    style={[
+                      styles.tabTexte,
+                      { color: C.texteMuted },
+                      vueModalStats === v && { color: C.purple },
+                    ]}
+                  >
+                    {v === "vista"
+                      ? "Vista"
+                      : v === "sante"
+                        ? "Santé"
+                        : v === "trophees"
+                          ? "Trophées"
+                          : "Simulation"}
+                  </Text>
                 </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* === Onglet 1 : "Vista" — visible pour TOUS les comptes
+                (contrairement aux 3 autres onglets, Premium uniquement),
+                même logique qu'un aperçu gratuit sur "Nos conseils"
+                d'Aperçu. Ordre vertical : graphique de flux → "Ce que Vista
+                a remarqué" → "Prochaine meilleure décision". */}
+            {vueModalStats === "vista" && (
+            <ScrollView ref={scrollVistaRef} showsVerticalScrollIndicator={false}>
+            <View style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}>
+              <View style={styles.serieEnTete}>
+                <View
+                  style={[styles.serieIconeFond, { backgroundColor: C.bleuGrisLight }]}
+                >
+                  <Ionicons name="git-network-outline" size={18} color={C.bleuGris} />
+                </View>
+                <Text style={[styles.serieTitre, { color: C.texte }]}>
+                  Flux de votre argent
+                </Text>
+                <InfoBulle
+                  titre="D'où viennent ces chiffres ?"
+                  texte="Uniquement vos dépenses déjà réalisées (jamais un budget prévu ni une projection) — répond à une seule question : où est réellement allé votre argent sur la période choisie ?"
+                />
               </View>
-            )}
+
+              {premium ? (
+                <>
+                  <View style={styles.chipRow}>
+                    {[1, 3, 6, 12].map((m) => {
+                      const actif = nbMoisFlux === m;
+                      return (
+                        <TouchableOpacity
+                          key={m}
+                          style={[
+                            styles.chip,
+                            { backgroundColor: C.carte, borderColor: C.carteBorder },
+                            actif && { backgroundColor: C.purple, borderColor: C.purple },
+                          ]}
+                          onPress={() => setNbMoisFlux(m)}
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[
+                              styles.chipTexte,
+                              { color: C.texteMuted },
+                              actif && styles.chipTexteActif,
+                            ]}
+                          >
+                            {formaterPeriode(m)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                    <TouchableOpacity
+                      style={[styles.chip, { backgroundColor: C.carte, borderColor: C.carteBorder }]}
+                      onPress={() =>
+                        setModeAffichageFlux(modeAffichageFlux === "euro" ? "pct" : "euro")
+                      }
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.chipTexte, { color: C.texteMuted }]}>
+                        {modeAffichageFlux === "euro" ? "€" : "%"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {fluxNoeudsEntrees.length > 0 && fluxNoeudsDestination.length > 0 ? (
+                    <GraphiqueFlux
+                      colonnes={[
+                        { titre: "Entrées d'argent", noeuds: fluxNoeudsEntrees },
+                        { titre: "Catégories", noeuds: fluxNoeudsCategories },
+                        { titre: "Destination", noeuds: fluxNoeudsDestination },
+                      ]}
+                      liensVersDestination={fluxLiensVersDestination}
+                      idsNoeudsDirects={[
+                        ...idsCategoriesDirectes,
+                        ...(totalEpargneFlux > 0 ? [ID_NOEUD_EPARGNE] : []),
+                        ...(totalLiquiditesFlux > 0 ? [ID_NOEUD_LIQUIDITES] : []),
+                      ]}
+                      couleurs={C}
+                      fondCarte={C.carte}
+                      reduireAnimations={reduireAnimations}
+                      variationParNoeud={fluxVariationParCategorie}
+                      modeAffichage={modeAffichageFlux}
+                    />
+                  ) : (
+                    <Text style={[styles.fluxVideTexte, { color: C.texteMuted }]}>
+                      Pas encore assez de données sur cette période.
+                    </Text>
+                  )}
+                </>
+              ) : (
+                <PremiumVerrou hauteur={260} />
+              )}
+            </View>
 
             {observationsVista.length > 0 && (
               <View
-                style={[
-                  styles.decisionBloc,
-                  { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
-                ]}
+                style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
               >
-                <Text style={[styles.decisionLabel, { color: C.texteMuted }]}>
-                  CE QUE VISTA A REMARQUÉ
-                </Text>
+                <View style={styles.serieEnTete}>
+                  <View
+                    style={[styles.serieIconeFond, { backgroundColor: C.purpleLight }]}
+                  >
+                    <Ionicons name="sparkles" size={18} color={C.purple} />
+                  </View>
+                  <Text style={[styles.serieTitre, { color: C.texte }]}>
+                    Ce que Vista a remarqué
+                  </Text>
+                </View>
                 {observationsVista.map((c, i) => (
                   <View
                     key={i}
@@ -3491,49 +3884,39 @@ export default function Analytics() {
               </View>
             )}
 
-            <View style={styles.chipRow}>
-              {(["score", "series", "simulateur", "trophees"] as const).map((v) => (
+            {decisionPrioritaire && (
+              <View
+                style={[
+                  styles.decisionBloc,
+                  { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                ]}
+              >
+                <Text style={[styles.decisionLabel, { color: C.texteMuted }]}>
+                  PROCHAINE MEILLEURE DÉCISION
+                </Text>
+                <Text style={[styles.decisionTexte, { color: C.texte }]}>
+                  {decisionPrioritaire.texte}
+                </Text>
                 <TouchableOpacity
-                  key={v}
-                  style={[
-                    styles.chip,
-                    { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
-                    vueModalStats === v && {
-                      backgroundColor: C.purple,
-                      borderColor: C.purple,
-                    },
-                  ]}
-                  onPress={() => changerVueModalStats(v)}
-                  activeOpacity={0.7}
+                  style={[styles.decisionBouton, { backgroundColor: C.purple }]}
+                  onPress={() => ouvrirSimulateurPour(decisionPrioritaire.categorieId)}
+                  activeOpacity={0.8}
                 >
-                  <Text
-                    style={[
-                      styles.chipTexte,
-                      { color: C.texteMuted },
-                      vueModalStats === v && styles.chipTexteActif,
-                    ]}
-                  >
-                    {v === "score"
-                      ? "Score"
-                      : v === "series"
-                        ? "Séries"
-                        : v === "simulateur"
-                          ? "Simulateur"
-                          : "Trophées"}
-                  </Text>
+                  <Text style={styles.decisionBoutonTexte}>Simuler</Text>
                 </TouchableOpacity>
-              ))}
-            </View>
+              </View>
+            )}
 
-              {/* RÈGLE À NE JAMAIS CASSER : "Ton bilan" (Score/Séries/
-                  Simulateur) est Premium uniquement — pas de déblocage par
-                  pub (contrairement à InsightVerrouille). Un seul
-                  PremiumVerrou couvre les 3 onglets à la fois (le titre en
-                  tête de modale, lui, reste toujours visible) plutôt que de
-                  dupliquer le verrou dans chacun des 3 blocs ci-dessous. */}
-              {premium ? (
-                <>
-              {vueModalStats === "score" && (
+            <View style={{ height: 32 }} />
+            </ScrollView>
+            )}
+
+            {/* === Onglet 2 : "Santé" — Premium uniquement, pas de
+                déblocage par pub (contrairement à InsightVerrouille). */}
+            {vueModalStats === "sante" && (
+              premium ? (
+              <ScrollView ref={scrollSanteRef} showsVerticalScrollIndicator={false}>
+              {(
                 <View
                   style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
                 >
@@ -3767,8 +4150,20 @@ export default function Analytics() {
                 </View>
               )}
 
-              {vueModalStats === "series" &&
-                series.map((serie) => {
+              <View style={{ height: 32 }} />
+              </ScrollView>
+              ) : (
+                <PremiumVerrou />
+              )
+            )}
+
+            {/* === Onglet 3 : "Trophées" — regroupe les cartes de séries
+                (déjà chacune sa propre carte) et la grille de trophées.
+                Premium uniquement, pas de déblocage par pub. */}
+            {vueModalStats === "trophees" && (
+              premium ? (
+              <ScrollView ref={scrollTropheesRef} showsVerticalScrollIndicator={false}>
+              {series.map((serie) => {
                 const config = CONFIG_SERIE[serie.type];
                 const active = serie.enCours > 0;
                 const seuilManquant =
@@ -4049,18 +4444,81 @@ export default function Analytics() {
                 );
               })}
 
-              {vueModalStats === "simulateur" && (
+              <Text style={[styles.sousSectionTitreGroupe, { color: C.texteMuted }]}>
+                TES TROPHÉES
+              </Text>
+              <View style={styles.trophesGrille}>
+                {trophees.map((trophee) => (
+                  <View
+                    key={trophee.id}
+                    style={[
+                      styles.tropheeCarte,
+                      { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
+                      !trophee.debloque && { opacity: 0.55 },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.tropheeIconeFond,
+                        { backgroundColor: trophee.debloque ? C.vertLight : C.carte },
+                      ]}
+                    >
+                      <Ionicons
+                        name={trophee.debloque ? "trophy" : "lock-closed-outline"}
+                        size={18}
+                        color={trophee.debloque ? C.vertText : C.texteMuted}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.tropheeTitre,
+                        { color: trophee.debloque ? C.texte : C.texteMuted },
+                      ]}
+                    >
+                      {trophee.titre}
+                    </Text>
+                    <Text
+                      style={[styles.tropheeDescription, { color: C.texteMuted }]}
+                      numberOfLines={3}
+                    >
+                      {trophee.description}
+                    </Text>
+                    {trophee.niveau && (
+                      <View
+                        style={[
+                          styles.tropheeNiveauPill,
+                          { backgroundColor: couleurNiveauTrophee(trophee.niveau) },
+                        ]}
+                      >
+                        <Text style={styles.tropheeNiveauTexte}>
+                          {trophee.niveau === "bronze"
+                            ? "Bronze"
+                            : trophee.niveau === "argent"
+                              ? "Argent"
+                              : "Or"}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </View>
+
+              <View style={{ height: 32 }} />
+              </ScrollView>
+              ) : (
+                <PremiumVerrou />
+              )
+            )}
+
+            {/* === Onglet 4 : "Et si..." (Simulateur) — Premium uniquement,
+                pas de déblocage par pub. */}
+            {vueModalStats === "simulateur" && (
+              premium ? (
+              <ScrollView ref={scrollSimulateurRef} showsVerticalScrollIndicator={false}>
+              {(
                 <View
                   style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
                 >
-                  {/* ScrollView dédié en plus du ScrollView englobant déjà les
-                      3 onglets (scrollStatsRef juste au-dessus) : filet
-                      supplémentaire pour que le contenu du Simulateur reste
-                      toujours atteignable en scrollant, même si sa hauteur
-                      dépasse l'espace visible de la modale "Ton bilan"
-                      (hauteur fixe à 80% de l'écran, petits écrans en
-                      particulier). */}
-                  <ScrollView showsVerticalScrollIndicator={false}>
                   <View style={styles.serieEnTete}>
                     <View
                       style={[styles.serieIconeFond, { backgroundColor: C.purpleLight }]}
@@ -4138,12 +4596,29 @@ export default function Analytics() {
                                     { backgroundColor: env.couleur },
                                   ]}
                                 />
-                                <Text
-                                  style={[styles.tiroirNom, { color: C.texte }]}
-                                  numberOfLines={1}
-                                >
-                                  {env.nom}
-                                </Text>
+                                <View style={styles.tiroirNomColonne}>
+                                  <Text
+                                    style={[styles.tiroirNom, { color: C.texte }]}
+                                    numberOfLines={1}
+                                  >
+                                    {env.nom}
+                                  </Text>
+                                  {/* RÈGLE À NE JAMAIS CASSER : une catégorie
+                                      Fixe reste sélectionnable ici (ex:
+                                      simuler un déménagement qui change le
+                                      loyer) mais jamais suggérée comme un
+                                      "levier" d'économie facile — cette
+                                      mention discrète le rappelle sans
+                                      bloquer la sélection. */}
+                                  {env.type === "Fixe" && (
+                                    <Text
+                                      style={[styles.tiroirNomFixe, { color: C.texteMuted }]}
+                                      numberOfLines={1}
+                                    >
+                                      Dépense fixe — difficile à modifier
+                                    </Text>
+                                  )}
+                                </View>
                                 <Text
                                   style={[
                                     styles.simulateurBudgetActuelTexte,
@@ -4546,74 +5021,16 @@ export default function Analytics() {
                       </View>
                     ))}
                   </View>
-                  </ScrollView>
                 </View>
               )}
 
-              {vueModalStats === "trophees" && (
-                <View style={styles.trophesGrille}>
-                  {trophees.map((trophee) => (
-                    <View
-                      key={trophee.id}
-                      style={[
-                        styles.tropheeCarte,
-                        { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
-                        !trophee.debloque && { opacity: 0.55 },
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.tropheeIconeFond,
-                          { backgroundColor: trophee.debloque ? C.vertLight : C.carte },
-                        ]}
-                      >
-                        <Ionicons
-                          name={trophee.debloque ? "trophy" : "lock-closed-outline"}
-                          size={18}
-                          color={trophee.debloque ? C.vertText : C.texteMuted}
-                        />
-                      </View>
-                      <Text
-                        style={[
-                          styles.tropheeTitre,
-                          { color: trophee.debloque ? C.texte : C.texteMuted },
-                        ]}
-                      >
-                        {trophee.titre}
-                      </Text>
-                      <Text
-                        style={[styles.tropheeDescription, { color: C.texteMuted }]}
-                        numberOfLines={3}
-                      >
-                        {trophee.description}
-                      </Text>
-                      {trophee.niveau && (
-                        <View
-                          style={[
-                            styles.tropheeNiveauPill,
-                            { backgroundColor: couleurNiveauTrophee(trophee.niveau) },
-                          ]}
-                        >
-                          <Text style={styles.tropheeNiveauTexte}>
-                            {trophee.niveau === "bronze"
-                              ? "Bronze"
-                              : trophee.niveau === "argent"
-                                ? "Argent"
-                                : "Or"}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  ))}
-                </View>
-              )}
-                </>
+              <View style={{ height: 32 }} />
+              </ScrollView>
               ) : (
                 <PremiumVerrou />
-              )}
+              )
+            )}
 
-              <View style={{ height: 20 }} />
-            </ScrollView>
             {isGuest && (
               <View style={styles.overlayGuestStats}>
                 <Ionicons name="lock-closed-outline" size={28} color="#FFFFFF" />
@@ -5043,13 +5460,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 26,
     paddingBottom: 20,
     // RÈGLE À NE JAMAIS CASSER : maxHeight (pas height fixe) — la carte
-    // s'adapte au contenu quand il est court (évite l'espace vide géant
-    // observé avec les sections "Ce que Vista a remarqué"/"Ta prochaine
-    // décision" + les onglets) et plafonne à 85% de l'écran pour le contenu
-    // long, que le SEUL ScrollView à l'intérieur (voir la règle juste avant
-    // son ouverture dans le JSX) fait alors défiler. Tout le contenu doit
-    // rester DANS ce ScrollView unique — jamais un second ScrollView
-    // imbriqué ni une View à hauteur fixe, sous peine de retrouver le
+    // s'adapte au contenu quand il est court et plafonne à 85% de l'écran
+    // pour le contenu long. "Ton bilan" a 4 onglets, CHACUN avec son propre
+    // ScrollView (scrollVistaRef/scrollSanteRef/scrollTropheesRef/
+    // scrollSimulateurRef) — jamais un second ScrollView imbriqué DANS un
+    // onglet, ni une View à hauteur fixe, sous peine de retrouver le
     // problème "tiroirs/onglets écrasés en bas de page" déjà rencontré.
     maxHeight: "85%",
   },
@@ -5072,6 +5487,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   serieTitre: { fontSize: 15, fontWeight: "700", flex: 1 },
+  tabsRow: {
+    flexDirection: "row",
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 12,
+    gap: 4,
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  tabBtnActif: {},
+  tabTexte: { fontSize: 13, fontWeight: "600" },
+  sousSectionTitreGroupe: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 14,
+    marginBottom: 4,
+    paddingHorizontal: 4,
+  },
   serieTitreLigne: {
     flexDirection: "row",
     alignItems: "center",
@@ -5213,6 +5650,7 @@ const styles = StyleSheet.create({
   chipActif: { backgroundColor: "#8B6FE8", borderColor: "#8B6FE8" },
   chipTexte: { fontSize: 12, fontWeight: "600", color: "#999" },
   chipTexteActif: { color: "#FFFFFF" },
+  fluxVideTexte: { fontSize: 13, fontWeight: "500", marginTop: 8 },
   tiroirBouton: {
     flexDirection: "row",
     alignItems: "center",
@@ -5243,7 +5681,9 @@ const styles = StyleSheet.create({
     borderBottomColor: "#F0F0F0",
   },
   tiroirRond: { width: 12, height: 12, borderRadius: 6 },
-  tiroirNom: { flex: 1, fontSize: 14, color: "#1A1A1A", fontWeight: "500" },
+  tiroirNomColonne: { flex: 1 },
+  tiroirNom: { fontSize: 14, color: "#1A1A1A", fontWeight: "500" },
+  tiroirNomFixe: { fontSize: 11, fontWeight: "500", marginTop: 1 },
   tiroirReset: { padding: 14, alignItems: "center" },
   tiroirResetTexte: { fontSize: 13, color: "#999", fontWeight: "600" },
   filtreImpactTexte: {
@@ -5396,7 +5836,10 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: "#F0EEF8",
   },
-  legendeRow: { flexDirection: "row", gap: 14, marginTop: 12 },
+  // RÈGLE À NE JAMAIS CASSER : flexWrap obligatoire — sans lui, une légende
+  // avec beaucoup de catégories déborde du cadre sur une seule ligne au
+  // lieu de passer automatiquement à la ligne suivante (bug confirmé).
+  legendeRow: { flexDirection: "row", flexWrap: "wrap", gap: 14, rowGap: 8, marginTop: 12 },
   legendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   legendeDot: { width: 9, height: 9, borderRadius: 2 },
   legendeTexte: { fontSize: 11, color: "#999", fontWeight: "500" },

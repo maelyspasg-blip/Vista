@@ -1,3 +1,10 @@
+// RÈGLE À NE JAMAIS CASSER : cette zone couvre LE MOIS EN COURS
+// uniquement — "Que dois-je faire maintenant ?". Ne jamais y mettre des
+// insights des autres zones. Cartographie : Nos conseils (ici) = mois en
+// cours / Ce qu'il faut retenir (utils/tendancesPeriode.ts) = période
+// sélectionnée par l'utilisateur sur Stats / Vista Bilan
+// (utils/bilanVista.ts) = tout l'historique disponible.
+//
 // RÈGLE À NE JAMAIS CASSER : tous les chiffres affichés dans un conseil
 // (reste estimé, montant/pourcentage dépensé d'une catégorie, budget
 // prévu, moyenne historique, rythme d'objectif...) doivent venir des
@@ -12,6 +19,30 @@
 // retire silencieusement un conseil si cette règle est violée par erreur —
 // mais elle ne remplace pas la discipline : ne recalculez rien ici,
 // utilisez ce qui est passé en paramètre.
+//
+// RÈGLE À NE JAMAIS CASSER : une catégorie de type "Fixe" (loyer, assurance,
+// abonnement fixe...) ne doit JAMAIS être citée INDIVIDUELLEMENT dans un
+// conseil — ni en observation d'évolution/dépassement, ni en
+// recommandation d'action. Un loyer fixe est par définition constant et
+// prévu : "le loyer a dépassé 0€" ou "le loyer augmente" n'a pas de sens
+// actionnable (bug confirmé, cf. historique). Seules les catégories
+// Variable alimentent les détections PAR CATÉGORIE de detecterSituations
+// (cf. `enveloppesVariables` ci-dessous, filtré une seule fois en tête de
+// fonction) ; une catégorie Fixe ne peut apparaître que dans un montant
+// GLOBAL agrégeant Fixe+Variable (ex: totalDepenses), jamais nommée seule.
+//
+// RÈGLE À NE JAMAIS CASSER : anti-répétition entre zones — "Nos conseils"
+// (ici) est la source PRIORITAIRE, toujours affiché en entier, JAMAIS
+// filtré (genererConseils n'accepte donc `situationsExclues` que pour
+// permettre aux DEUX AUTRES zones de s'exclure PAR RAPPORT À celle-ci,
+// jamais l'inverse — ne jamais passer ce paramètre depuis
+// app/(tabs)/index.tsx). Après affichage, l'appelant marque les
+// situations montrées via utils/situationsSession.ts (mémoire de session
+// en RAM, jamais persistée) ; "Ce qu'il faut retenir"
+// (utils/tendancesPeriode.ts) et "Vista Bilan" (utils/bilanVista.ts) lisent
+// ensuite ce marquage pour ne jamais répéter la même situation. Le repli
+// générique ("tout va bien"/"données insuffisantes") est volontairement
+// épargné, ce n'est pas un insight qui "se répète".
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   Enveloppe,
@@ -70,6 +101,13 @@ export type Conseil = {
   // objectif précis — utilisé par validerConseil pour vérifier que
   // l'objectif mentionné existe toujours (cf. RÈGLE en tête de fichier).
   objectifId?: string;
+  // Identifiant stable de la situation (même valeur que EtatInsightPersiste
+  // .situationId quand la situation est suivie dans le temps) — permet à
+  // l'appelant de coordonner l'anti-répétition entre "Nos conseils"
+  // (Aperçu) et "Vista" (Ton bilan, Stats) via
+  // utils/situationsSession.ts : jamais montrer deux fois la même situation
+  // dans des blocs différents au cours de la même session.
+  cle: string;
 };
 
 export type EtatInsightPersiste = {
@@ -599,14 +637,20 @@ function texteBudgetCategorie(
     ratio >= 1
       ? `${e.nom} a dépassé son budget de ${Math.round(e.depense - e.budget)}€ ce mois-ci.`
       : `${e.nom} a déjà consommé ${pct}% de son budget et il reste ${joursRestantsDansMois} jour${joursRestantsDansMois > 1 ? "s" : ""} ce mois-ci.`;
+  // RÈGLE : cette fonction n'est appelée que pour des catégories Variable
+  // (candidatsBudget filtre sur enveloppesVariables, cf. RÈGLE en tête de
+  // fichier) — une catégorie Fixe n'atteint jamais ce texte, donc l'action
+  // de réduction est toujours pertinente ici, sans condition sur `e.type`.
   const action =
     depassementProjete > 0
       ? ` À ce rythme, le dépassement atteindrait ${depassementProjete}€ — limiter ce poste à environ ${budgetJournalierRestant.toFixed(1)}€/jour permettrait de rester dans votre budget.`
       : "";
+  const suggestionRevision =
+    " Si votre objectif d'épargne reste prioritaire, ce budget mérite peut-être d'être révisé.";
 
   if (etat === "DEGRADATION") return `${constat}${action}`;
   if (etat === "RISQUE") return `${constat} Cette tension se confirme d'une vérification à l'autre.${action}`;
-  return `${constat} Cette situation dure depuis plusieurs vérifications maintenant.${action} Si votre objectif d'épargne reste prioritaire, ce budget mérite peut-être d'être révisé.`;
+  return `${constat} Cette situation dure depuis plusieurs vérifications maintenant.${action}${suggestionRevision}`;
 }
 
 function texteTendanceCategorie(e: Enveloppe, pctProjete: number, etat: EtatInsight): string {
@@ -631,7 +675,17 @@ function texteDeficitGlobal(
   joursRestantsDansMois: number,
   etat: EtatInsight,
 ): string {
-  if (etat === "STABLE" || etat === "RETABLISSEMENT") {
+  // RÈGLE À NE JAMAIS CASSER : le signe RÉEL et ACTUEL de resteEstime fait
+  // toujours autorité sur le texte affiché — jamais le seul `etat`. `etat`
+  // n'est mis à jour qu'une fois par jour calendaire (cf. RÈGLE #2 en tête
+  // de fichier) : si resteEstime redevient positif PLUS TARD le même jour
+  // (l'utilisateur ajuste un budget, encaisse une entrée...), `etat` peut
+  // rester figé sur DEGRADATION/RISQUE/ACTION jusqu'au lendemain alors que
+  // resteEstime, recalculé à chaque rendu, est déjà positif. Sans ce garde,
+  // on affichait "vous êtes en passe de dépasser votre budget de 333€" avec
+  // 333€ = un reste estimé en réalité POSITIF (bug confirmé) — le montant
+  // était juste, mais le sens (dépassement) était l'inverse de la réalité.
+  if (resteEstime >= 0) {
     return etat === "STABLE"
       ? "Vous êtes revenu dans votre budget — situation stabilisée."
       : "Vous êtes repassé dans votre budget ce mois-ci après un dépassement récent.";
@@ -646,12 +700,16 @@ function texteDeficitGlobal(
 }
 
 function texteObjectifTrajectoire(objectif: Objectif, etat: EtatInsight): string {
-  if (etat === "STABLE" || etat === "RETABLISSEMENT") {
+  // RÈGLE À NE JAMAIS CASSER : même garde que texteDeficitGlobal — si
+  // l'objectif est déjà atteint MAINTENANT (fait réel et actuel), ne jamais
+  // afficher "il reste Xu20ac" même si `etat` est encore figé sur une valeur
+  // d'avant l'atteinte (mise à jour au plus 1x/jour).
+  if (etat === "STABLE" || etat === "RETABLISSEMENT" || objectif.actuel >= objectif.cible) {
     return etat === "STABLE"
       ? `${objectif.nom} a repris un rythme régulier — situation stabilisée.`
       : `${objectif.nom} a reçu un nouveau versement ce mois-ci après une période sans progression. Bon signe.`;
   }
-  const manque = Math.round(objectif.cible - objectif.actuel);
+  const manque = Math.round(Math.max(0, objectif.cible - objectif.actuel));
   if (etat === "DEGRADATION") {
     return `Aucun versement sur ${objectif.nom} ce mois-ci. Il reste ${manque}€ pour l'atteindre.`;
   }
@@ -667,7 +725,12 @@ function texteMargeEvolution(
   moisPrec: number,
   etat: EtatInsight,
 ): string {
-  if (etat === "STABLE" || etat === "RETABLISSEMENT") {
+  // RÈGLE À NE JAMAIS CASSER : même garde que texteDeficitGlobal — si la
+  // marge ne se dégrade plus MAINTENANT (fait réel, recalculé à chaque
+  // rendu), ne jamais afficher "se réduit" même si `etat` reste
+  // temporairement figé sur DEGRADATION/RISQUE/ACTION (mise à jour au plus
+  // 1x/jour, cf. RÈGLE #2 en tête de fichier).
+  if (etat === "STABLE" || etat === "RETABLISSEMENT" || resteEstime >= resteEstimePrecedent) {
     return etat === "STABLE"
       ? "Votre marge de fin de mois s'est stabilisée."
       : "Votre marge de fin de mois s'est redressée récemment — bon signe.";
@@ -730,6 +793,12 @@ function detecterSituations(
 
   const enveloppesSansEntree = enveloppes.filter((e) => e.type !== "Entrée");
   const totalDepenses = enveloppesSansEntree.reduce((acc, e) => acc + e.depense, 0);
+  // RÈGLE À NE JAMAIS CASSER : cf. RÈGLE en tête de fichier — base commune à
+  // TOUTE détection par catégorie ci-dessous (budget, tendance, spike,
+  // corrélation, compensation, récurrente, nouvelle catégorie). Une
+  // catégorie Fixe n'est jamais candidate individuellement, seul
+  // `totalDepenses` (global, ci-dessus) peut encore l'inclure.
+  const enveloppesVariables = enveloppesSansEntree.filter((e) => e.type === "Variable");
   const jourActuel = new Date().getDate();
   const joursRestantsDansMois = joursDansMois(moisActuel, anneeActuelle) - jourActuel;
   const ratioReste = disponibleEffectif > 0 ? resteEstime / disponibleEffectif : 0;
@@ -769,7 +838,7 @@ function detecterSituations(
   };
 
   // === Budget de catégorie (dépassé/imminent, arc complet) ===================
-  const candidatsBudget = enveloppesSansEntree
+  const candidatsBudget = enveloppesVariables
     .filter((e) => e.budget > 0 && !categoriesDejaCitees.has(e.id))
     .map((e) => {
       const ratio = e.depense / e.budget;
@@ -843,7 +912,7 @@ function detecterSituations(
 
   // === Compensation entre catégories ==========================================
   if (snapshotMoisPrecedent) {
-    const deltasCategories = enveloppesSansEntree
+    const deltasCategories = enveloppesVariables
       .filter((e) => !categoriesDejaCitees.has(e.id))
       .map((e) => {
         const prec = snapshotEnv(snapshotMoisPrecedent, e.id);
@@ -874,7 +943,7 @@ function detecterSituations(
 
   // === Deux catégories qui évoluent ensemble ==================================
   if (snapshotMoisPrecedent) {
-    const hausseCorrelees = enveloppesSansEntree
+    const hausseCorrelees = enveloppesVariables
       .filter((e) => e.depense >= MONTANT_MIN_CATEGORIE && !categoriesDejaCitees.has(e.id))
       .map((e) => {
         const depensePrec = snapshotEnv(snapshotMoisPrecedent, e.id)?.depense ?? 0;
@@ -900,7 +969,7 @@ function detecterSituations(
   }
 
   // === Tendance individuelle : hausse (arc complet, projection fin de mois) ===
-  const candidatsTendance = enveloppesSansEntree
+  const candidatsTendance = enveloppesVariables
     .filter((e) => !categoriesDejaCitees.has(e.id))
     .map((e) => {
       const moyenne = moyenneRecenteCategorie(e.id);
@@ -933,7 +1002,7 @@ function detecterSituations(
 
   // === Tendance individuelle : baisse (bonne nouvelle, ponctuelle) ============
   if (snapshotMoisPrecedent) {
-    const candidatBaisse = enveloppesSansEntree
+    const candidatBaisse = enveloppesVariables
       .filter((e) => !categoriesDejaCitees.has(e.id))
       .map((e) => {
         const depensePrec = snapshotEnv(snapshotMoisPrecedent, e.id)?.depense ?? 0;
@@ -966,7 +1035,7 @@ function detecterSituations(
       comptesParCategorie.set(e.id, (comptesParCategorie.get(e.id) ?? 0) + 1);
     });
   });
-  const candidatSpike = enveloppesSansEntree
+  const candidatSpike = enveloppesVariables
     .filter((e) => !categoriesDejaCitees.has(e.id) && (comptesParCategorie.get(e.id) ?? 0) >= 2)
     .map((e) => ({
       e,
@@ -990,8 +1059,8 @@ function detecterSituations(
   }
 
   // === Dépense récurrente détectée =============================================
-  const candidatRecurrente = enveloppesSansEntree
-    .filter((e) => !categoriesDejaCitees.has(e.id) && e.type === "Variable" && !e.recurrente)
+  const candidatRecurrente = enveloppesVariables
+    .filter((e) => !categoriesDejaCitees.has(e.id) && !e.recurrente)
     .map((e) => {
       const montants = historiquesMois
         .slice(-NB_MOIS_MOYENNE_CATEGORIE)
@@ -1021,7 +1090,7 @@ function detecterSituations(
   }
 
   // === Nouvelle catégorie apparue ==============================================
-  const candidatNouvelle = enveloppesSansEntree
+  const candidatNouvelle = enveloppesVariables
     .filter((e) => !categoriesDejaCitees.has(e.id) && e.depense >= MONTANT_MIN_CATEGORIE)
     .find(
       (e) =>
@@ -1339,7 +1408,12 @@ type ConseilValidable = {
 export type ParamsValidationConseil = {
   resteEstime: number;
   enveloppes: Enveloppe[];
-  objectifsAvecRythme: ObjectifAvecRythme[];
+  // Type volontairement allégé (juste l'id) plutôt que ObjectifAvecRythme
+  // complet — validerConseil ne lit jamais rien d'autre que .objectif.id,
+  // et ça permet à d'autres zones (utils/tendancesPeriode.ts,
+  // utils/bilanVista.ts) de valider sans avoir à reconstruire un
+  // RythmeObjectif complet juste pour satisfaire ce paramètre.
+  objectifsAvecRythme: { objectif: { id: string } }[];
   moisActuel: number;
   anneeActuelle: number;
 };
@@ -1421,8 +1495,17 @@ export function genererConseils(params: {
   anneeActuelle: number;
   maxConseils?: number;
   etatsPrecedents: EtatsInsightsMap;
+  // RÈGLE À NE JAMAIS CASSER : anti-répétition inter-écrans — clés de
+  // situations déjà affichées ailleurs dans la session (ex: "Nos conseils"
+  // sur Aperçu) à ne pas montrer une seconde fois ici (ex: "Vista" sur Ton
+  // bilan). Voir utils/situationsSession.ts, mémoire de session
+  // uniquement (jamais persistée). Le repli générique ("repli", "tout va
+  // bien"/"données insuffisantes") est volontairement épargné par ce
+  // filtre — ce n'est pas un insight qui "se répète", c'est un état vide
+  // légitime sur chaque écran qui n'a rien à montrer.
+  situationsExclues?: Set<string>;
 }): { conseils: Conseil[]; etatsAJour: EtatsInsightsMap; nouvellesResolutions: number } {
-  const { maxConseils = 3, etatsPrecedents } = params;
+  const { maxConseils = 3, etatsPrecedents, situationsExclues } = params;
 
   const { situations, etatsAJour, nouvellesResolutions, objectifsAvecRythme } = detecterSituations(
     params,
@@ -1460,7 +1543,8 @@ export function genererConseils(params: {
           anneeActuelle: params.anneeActuelle,
         },
       ),
-    );
+    )
+    .filter((s) => s.cle === "repli" || !situationsExclues?.has(s.cle));
 
   const conseils: Conseil[] = situationsUniques.slice(0, maxConseils).map((s) => {
     const etat = s.etat ?? "NOUVEAU";
@@ -1470,6 +1554,7 @@ export function genererConseils(params: {
       etat: s.etat,
       categorieId: s.categorieId,
       objectifId: s.objectifId,
+      cle: s.cle,
     };
   });
 
