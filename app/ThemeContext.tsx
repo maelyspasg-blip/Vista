@@ -2,6 +2,7 @@ import { createContext, useContext, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { useAccessibilite } from "./AccessibiliteContext";
 import { signalerErreurSync } from "./store";
+import { setThemeCache } from "./themeStorage";
 
 export type Theme = "clair" | "sombre";
 
@@ -142,6 +143,11 @@ export function ThemeProvider({
     setTheme((t) => {
       const nouveau: Theme = t === "clair" ? "sombre" : "clair";
       majThemeSupabase(nouveau);
+      // RÈGLE : rafraîchit le cache local utilisé par le splash JS au
+      // PROCHAIN lancement (cf. RÈGLE dans app/themeStorage.ts) — sans ça,
+      // basculer le thème ne serait reflété par le splash qu'après un
+      // aller-retour Supabase au lancement suivant, jamais immédiatement.
+      setThemeCache(nouveau);
       return nouveau;
     });
   };

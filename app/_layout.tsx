@@ -1,7 +1,8 @@
 import type { Session } from "@supabase/supabase-js";
 import { Stack, useRouter, useSegments } from "expo-router";
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, View } from "react-native";
+import * as ExpoSplashScreen from "expo-splash-screen";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AppState, Animated, StyleSheet } from "react-native";
 import "react-native-gesture-handler";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
@@ -15,8 +16,20 @@ import { supabase } from "../supabaseClient";
 import "./calendarLocale";
 import { ecouterOnboardingTermine } from "./onboardingCompletion";
 import { getOnboardingVu } from "./onboardingStorage";
+import { SplashScreen } from "./SplashScreen";
 import { Theme, ThemeProvider } from "./ThemeContext";
+import { getThemeCache, setThemeCache } from "./themeStorage";
 import { PageTutoriel, TutorielContext, TutorielStatus } from "./TutorielContext";
+
+// RÈGLE À NE JAMAIS CASSER — COORDINATION SPLASH NATIF → SPLASH JS : appelé
+// au chargement du module (avant le premier rendu), pas dans un effet —
+// sinon le splash natif (app.json, expo-splash-screen plugin) risque de
+// disparaître tout seul avant que notre splash JS (SplashScreen.tsx) soit
+// prêt à prendre le relais, laissant un flash d'écran blanc/noir natif nu.
+ExpoSplashScreen.preventAutoHideAsync().catch(() => {});
+
+const DUREE_MIN_SPLASH_MS = 1000;
+const DUREE_FADE_SPLASH_MS = 300;
 
 const COLONNES_TUTORIEL: Record<PageTutoriel, string> = {
   apercu: "tutoriel_apercu_vu",
@@ -64,6 +77,12 @@ export default function RootLayout() {
   const [themeInitial, setThemeInitial] = useState<Theme | undefined>(
     undefined,
   );
+  // RÈGLE : thème utilisé PAR LE SPLASH uniquement, distinct de
+  // `themeInitial` (celui de ThemeProvider) — lu depuis le cache local
+  // AsyncStorage, disponible avant même la réponse Supabase (cf. RÈGLE dans
+  // app/themeStorage.ts). `null` tant qu'il n'a pas encore été lu (repli sur
+  // useColorScheme() dans SplashScreen.tsx, cf. RÈGLE là-bas).
+  const [themeSplash, setThemeSplash] = useState<Theme | null>(null);
   const [accessibiliteInitiale, setAccessibiliteInitiale] =
     useState<AccessibiliteInitiale>({});
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(
@@ -82,6 +101,43 @@ export default function RootLayout() {
     stats: true,
   });
   const dernierUserIdRef = useRef<string | null>(null);
+  // RÈGLE À NE JAMAIS CASSER — SPLASH JS, DURÉE MINIMUM + FADE : `instantMontage`
+  // fige l'instant du tout premier rendu (initialiseur paresseux useState,
+  // jamais recalculé — Date.now() directement dans le corps du composant
+  // serait réévalué à CHAQUE rendu, une fonction impure interdite pendant
+  // le rendu par le React Compiler) pour garantir DUREE_MIN_SPLASH_MS de
+  // splash même si le chargement Supabase est instantané — jamais un flash
+  // trop rapide. `opaciteSplash` : useMemo (pas useRef().current, lui aussi
+  // interdit en lecture pendant le rendu par le React Compiler), même
+  // pattern que l'Animated.Value stable de GraphiqueFlux.tsx. `splashVisible`
+  // reste vrai pendant tout le fondu (l'écran réel est déjà monté DESSOUS,
+  // superposé par le splash en `position: absolute`, jamais un fondu vers
+  // du vide) ; passe à `false` seulement une fois l'animation terminée, pour
+  // démonter l'overlay et ne plus jamais bloquer les interactions.
+  const [instantMontage] = useState(() => Date.now());
+  const [splashVisible, setSplashVisible] = useState(true);
+  const opaciteSplash = useMemo(() => new Animated.Value(1), []);
+
+  useEffect(() => {
+    // Une fois le premier rendu JS (notre splash) commis, on masque le
+    // splash NATIF pour révéler celui-ci — jamais l'inverse (cf. RÈGLE
+    // preventAutoHideAsync en tête de fichier).
+    ExpoSplashScreen.hideAsync().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (chargement) return;
+    const ecoule = Date.now() - instantMontage;
+    const attente = Math.max(0, DUREE_MIN_SPLASH_MS - ecoule);
+    const delai = setTimeout(() => {
+      Animated.timing(opaciteSplash, {
+        toValue: 0,
+        duration: DUREE_FADE_SPLASH_MS,
+        useNativeDriver: true,
+      }).start(() => setSplashVisible(false));
+    }, attente);
+    return () => clearTimeout(delai);
+  }, [chargement, opaciteSplash, instantMontage]);
 
   const marquerTutorielVu = (page: PageTutoriel) => {
     setTutoriel((t) => ({ ...t, [page]: true }));
@@ -123,11 +179,17 @@ export default function RootLayout() {
 
   useEffect(() => {
     (async () => {
-      const [{ data }, vu] = await Promise.all([
+      // RÈGLE : lu EN PARALLÈLE du reste, jamais après — c'est ce qui permet
+      // au splash JS d'afficher la bonne couleur dès le premier rendu, sans
+      // attendre la requête réseau vers `profils` (cf. RÈGLE dans
+      // app/themeStorage.ts).
+      const [{ data }, vu, themeCache] = await Promise.all([
         supabase.auth.getSession(),
         getOnboardingVu(),
+        getThemeCache(),
       ]);
       setOnboardingVu(vu);
+      setThemeSplash(themeCache);
 
       if (data.session) {
         dernierUserIdRef.current = data.session.user.id;
@@ -147,6 +209,12 @@ export default function RootLayout() {
         });
         if (profil?.theme === "clair" || profil?.theme === "sombre") {
           setThemeInitial(profil.theme);
+          // RÈGLE : rafraîchit le cache local à chaque chargement de profil
+          // (pas seulement à la bascule manuelle, cf. ThemeContext.tsx) —
+          // pour que le PROCHAIN lancement affiche la bonne couleur même si
+          // le thème a été changé depuis un autre appareil.
+          setThemeSplash(profil.theme);
+          setThemeCache(profil.theme);
         }
 
         setAccessibiliteInitiale({
@@ -330,12 +398,13 @@ export default function RootLayout() {
     router,
   ]);
 
+  // RÈGLE À NE JAMAIS CASSER : pendant `chargement`, RIEN d'autre que le
+  // splash ne doit être monté — ThemeProvider (themeInitial), GuestContext
+  // (isGuest/msRestantsEssai) etc. dépendent tous de données pas encore
+  // chargées à ce stade (cf. l'effet plus haut, qui pose ces states EN MÊME
+  // TEMPS que `setChargement(false)`).
   if (chargement) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator />
-      </View>
-    );
+    return <SplashScreen theme={themeSplash} />;
   }
 
   return (
@@ -357,6 +426,25 @@ export default function RootLayout() {
           </GuestContext.Provider>
         </ThemeProvider>
       </AccessibiliteProvider>
+      {/* RÈGLE À NE JAMAIS CASSER — FONDU VERS L'ÉCRAN RÉEL, JAMAIS VERS DU
+          VIDE : l'app réelle (Navigateur ci-dessus) est déjà montée EN
+          DESSOUS dès que `chargement` passe à false — ce splash n'est qu'une
+          SUPERPOSITION (position: absolute) dont l'opacité descend à 0 sur
+          DUREE_FADE_SPLASH_MS, révélant progressivement l'app déjà rendue,
+          jamais un fondu vers un fond noir/blanc. pointerEvents="none" :
+          purement décoratif, ne doit jamais intercepter un tap même à
+          pleine opacité. */}
+      {splashVisible && (
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { opacity: opaciteSplash }]}
+        >
+          {/* RÈGLE : themeInitial (le VRAI thème, déjà chargé à ce stade,
+              chargement === false) prioritaire sur themeSplash (le cache,
+              une simple estimation) — plus de raison de deviner ici. */}
+          <SplashScreen theme={themeInitial ?? themeSplash} />
+        </Animated.View>
+      )}
     </GestureHandlerRootView>
   );
 }
