@@ -6029,9 +6029,19 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 0.5,
     marginBottom: 4,
+    flexShrink: 1,
   },
+  // RÈGLE À NE JAMAIS CASSER : flexShrink vaut 0 par défaut en React Native
+  // (contrairement au web) — sans flexShrink:1 sur kpiLabel ET flexWrap sur
+  // cette rangée, le libellé ("DÉPENSE MOY. / JOUR") ne pouvait ni rétrécir
+  // ni passer à la ligne quand la taille de texte d'accessibilité augmente
+  // (cf. app/AccessibiliteContext.tsx, ECHELLES_TEXTE jusqu'à 1.3x) : il
+  // débordait de la kpiCard et poussait/coupait la bulle d'info hors de sa
+  // position. flexWrap fait retomber la bulle sur la ligne suivante,
+  // toujours immédiatement après le texte, plutôt que de la faire déborder.
   kpiLabelRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: 4,
     marginBottom: 4,

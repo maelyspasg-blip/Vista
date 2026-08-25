@@ -3,7 +3,12 @@ import { Directory, File } from "expo-file-system";
 import { widgetsDirectory } from "expo-widgets";
 import type { Evenement, Transaction } from "../app/store";
 import { genererOccurrencesEvenement } from "./evenements";
-import { PlanningWidget, type EvenementWidgetJour } from "../widgets/PlanningWidget";
+import {
+  PlanningWidget,
+  type DepenseWidgetJour,
+  type EvenementWidgetJour,
+  type JourSemaineWidget,
+} from "../widgets/PlanningWidget";
 import { AjoutRapideWidget } from "../widgets/AjoutRapideWidget";
 
 // RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
@@ -59,6 +64,21 @@ function heureEnMinutes(heure: string): number {
 
 function dateVersISO(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+// RÈGLE À NE JAMAIS CASSER — PROPS TOUJOURS SÉRIALISABLES : updateSnapshot
+// ET updateTimeline passent leurs props au pont natif (JSI HostFunction) qui
+// les sérialise côté widget — un NaN/Infinity/undefined dans un champ
+// numérique fait planter cette sérialisation avec une "Exception in
+// HostFunction" qui peut survenir HORS du call stack synchrone (donc pas
+// toujours rattrapable par un simple try/catch JS, cf. RÈGLE plus bas sur
+// AjoutRapideWidget). La seule protection fiable est de garantir que ces
+// valeurs sont déjà propres AVANT l'appel, jamais de compter sur le pont
+// natif pour les valider — d'où cet usage systématique, y compris pour les
+// champs numériques imbriqués dans `semaine`/`evenements` du widget
+// Planning.
+function nombreSur(valeur: number): number {
+  return Number.isFinite(valeur) ? valeur : 0;
 }
 
 // Date au même jour que `reference`, à l'heure "XhYY" donnée — utilisé pour
@@ -117,12 +137,79 @@ function evenementsDuJourPourWidget(
       heureDebut: e.heure,
       estPasse: heureEnMinutes(e.heure) < referenceMinutes,
       estFinancier: e.estFinancier,
+      // RÈGLE : jamais `null` (cf. RÈGLE PROPS TOUJOURS SÉRIALISABLES plus
+      // bas, et RÈGLE sur EvenementWidgetJour.montant) — `nombreSur` (défini
+      // plus bas, hissé par hoisting de déclaration de fonction) ramène tout
+      // NaN/undefined à 0, jamais `null`.
+      montant: nombreSur(e.montant ?? 0),
     }))
     .sort((a, b) => heureEnMinutes(a.heureDebut) - heureEnMinutes(b.heureDebut));
 }
 
+// Lundi 00:00 de la semaine calendaire contenant `reference` — base de la
+// rangée des 7 jours (medium/large). `getDay()` renvoie 0 (dimanche) à 6
+// (samedi) ; `(jour + 6) % 7` le convertit en offset lundi-premier (0 pour
+// lundi, 6 pour dimanche) à soustraire pour revenir au lundi de la semaine.
+function lundiDeLaSemaine(reference: Date): Date {
+  const d = new Date(reference);
+  const offsetLundi = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - offsetLundi);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// Transactions réelles (pas des événements de calendrier) du jour de
+// `reference` — pour la ligne "− 35 €  Courses" du widget Planning
+// medium/large (cf. RÈGLE DONNÉES demandée : distinct des `Evenement`
+// estFinancier, qui restent des événements planifiés). `montant` passe par
+// `nombreSur` — jamais de NaN/Infinity transmis au pont natif (cf. RÈGLE
+// PROPS TOUJOURS SÉRIALISABLES plus haut).
+function transactionsDuJourPourWidget(
+  transactions: Transaction[],
+  reference: Date,
+): DepenseWidgetJour[] {
+  const referenceISO = dateVersISO(reference);
+  return transactions
+    .filter((t) => t.date === referenceISO)
+    .map((t) => ({ nom: t.nom, montant: nombreSur(t.montant) }));
+}
+
+// Les 7 jours (lundi -> dimanche) de la semaine de `reference`, chacun avec
+// ses propres événements ET dépenses — pour la vue semaine du widget
+// Planning (medium/large). Réutilise `evenementsDuJourPourWidget` /
+// `transactionsDuJourPourWidget` jour par jour (même filtrage/tri/expansion
+// des récurrences que le format actuel), donc aucune divergence possible
+// entre les deux vues. `estPasse` compare la date du jour à la date de
+// `reference` (pas `new Date()` — cf. RÈGLE en tête de widgets/
+// PlanningWidget.tsx) : un jour AVANT le jour de `reference` est passé,
+// jamais le jour de `reference` lui-même (qui est "aujourd'hui", pas
+// "passé", même en fin de journée).
+function semaineWidgetPourReference(
+  evenements: Evenement[],
+  transactions: Transaction[],
+  reference: Date,
+): JourSemaineWidget[] {
+  const lundi = lundiDeLaSemaine(reference);
+  const referenceISO = dateVersISO(reference);
+
+  return Array.from({ length: 7 }, (_, i) => {
+    const jourDate = new Date(lundi);
+    jourDate.setDate(jourDate.getDate() + i);
+    const jourISO = dateVersISO(jourDate);
+    return {
+      dateISO: jourISO,
+      jourMois: jourDate.getDate(),
+      estAujourdHui: jourISO === referenceISO,
+      estPasse: jourISO < referenceISO,
+      evenements: evenementsDuJourPourWidget(evenements, jourDate),
+      depenses: transactionsDuJourPourWidget(transactions, jourDate),
+    };
+  });
+}
+
 export async function synchroniserWidgetPlanning(
   evenements: Evenement[],
+  transactions: Transaction[],
 ): Promise<void> {
   try {
     const logoUri = await obtenirLogoUri();
@@ -153,10 +240,27 @@ export async function synchroniserWidgetPlanning(
     );
 
     PlanningWidget.updateTimeline(
-      datesEntrees.map((date) => ({
-        date,
-        props: { evenements: evenementsDuJourPourWidget(evenements, date), logoUri },
-      })),
+      datesEntrees.map((date) => {
+        const semaine = semaineWidgetPourReference(evenements, transactions, date);
+        // Dérivé de `semaine` (jamais recalculé indépendamment) — même
+        // source que les lignes de dépenses affichées, aucune divergence
+        // possible entre le total et le détail (cf. RÈGLE sur
+        // PlanningWidgetProps.depensesParJour dans widgets/PlanningWidget.tsx).
+        const depensesParJour = semaine.map((jour) => ({
+          dateISO: jour.dateISO,
+          total: nombreSur(jour.depenses.reduce((acc, d) => acc + d.montant, 0)),
+        }));
+        return {
+          date,
+          props: {
+            evenements: evenementsDuJourPourWidget(evenements, date),
+            semaine,
+            depensesParJour,
+            derniereMiseAJour: maintenant.getTime(),
+            logoUri,
+          },
+        };
+      }),
     );
   } catch (e) {
     console.error("[widgetsSync] Mise à jour du widget Planning a échoué :", e);
@@ -169,19 +273,8 @@ export async function synchroniserWidgetPlanning(
 // que sur action utilisateur (ajout/modif/suppression de dépense) —
 // updateSnapshot + un appel de synchro à chaque CRUD (cf. app/store.ts,
 // mêmes points d'appel que appliquerEnveloppes) suffit, jamais de
-// rafraîchissement programmé inutile.
-// RÈGLE À NE JAMAIS CASSER — PROPS TOUJOURS SÉRIALISABLES : updateSnapshot
-// passe ces props au pont natif (JSI HostFunction) qui les sérialise côté
-// widget — un NaN/Infinity/undefined dans un champ numérique, ou un champ
-// non-string dans `nom`, fait planter cette sérialisation avec une
-// "Exception in HostFunction" qui peut survenir HORS du call stack
-// synchrone (donc pas toujours rattrapable par un simple try/catch JS,
-// cf. RÈGLE plus bas). La seule protection fiable est de garantir que ces
-// valeurs sont déjà propres AVANT l'appel, jamais de compter sur le pont
-// natif pour les valider.
-function nombreSur(valeur: number): number {
-  return Number.isFinite(valeur) ? valeur : 0;
-}
+// rafraîchissement programmé inutile. `nombreSur` (défini plus haut) reste
+// utilisé ci-dessous pour les mêmes raisons de sérialisation.
 
 // TEMPORAIRE — DEBUG PAR ÉLIMINATION : le crash natif persiste malgré la
 // sanitisation des valeurs (Number.isFinite, nom forcé en string) ET un

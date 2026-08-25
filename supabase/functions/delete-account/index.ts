@@ -1,12 +1,19 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { supprimerDonneesUtilisateur } from "../_shared/tables.ts";
+import { CORS_HEADERS, reponseJSON } from "../_shared/cors.ts";
 
 Deno.serve(async (req) => {
+  // RÈGLE : préflight CORS — le SDK supabase-js envoie un header
+  // Authorization personnalisé, ce qui déclenche une requête OPTIONS
+  // préalable depuis un navigateur (Expo web). Sans réponse dédiée ici,
+  // cette requête échouerait avant même d'atteindre la logique métier.
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: CORS_HEADERS });
+  }
+
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response(JSON.stringify({ error: "Non authentifié" }), {
-      status: 401,
-    });
+    return reponseJSON({ error: "Non authentifié" }, 401);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -23,9 +30,7 @@ Deno.serve(async (req) => {
   } = await supabaseUser.auth.getUser();
 
   if (erreurUser || !user) {
-    return new Response(JSON.stringify({ error: "Session invalide" }), {
-      status: 401,
-    });
+    return reponseJSON({ error: "Session invalide" }, 401);
   }
 
   const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
@@ -49,20 +54,14 @@ Deno.serve(async (req) => {
     user.id,
   );
   if (erreurSuppression) {
-    return new Response(
-      JSON.stringify({
-        error: erreurSuppression.message,
-        ...(erreurDonnees ? { avertissementDonnees: erreurDonnees } : {}),
-      }),
-      { status: 500 },
-    );
+    // RÈGLE : le détail Postgres/Auth (erreurSuppression.message,
+    // erreurDonnees) reste dans les logs serveur (console.error, visibles
+    // dans le dashboard Supabase) mais ne part jamais dans la réponse HTTP —
+    // ni le client (app/profil.tsx) ni un attaquant potentiel ne doivent
+    // recevoir de détails internes (noms de table, contraintes SQL...).
+    console.error("[delete-account] Échec suppression auth.users :", erreurSuppression.message);
+    return reponseJSON({ error: "Suppression du compte impossible pour le moment." }, 500);
   }
 
-  return new Response(
-    JSON.stringify({
-      success: true,
-      ...(erreurDonnees ? { avertissementDonnees: erreurDonnees } : {}),
-    }),
-    { status: 200 },
-  );
+  return reponseJSON({ success: true }, 200);
 });

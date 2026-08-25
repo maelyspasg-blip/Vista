@@ -291,11 +291,32 @@ function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
   };
 }
 
+// RÈGLE À NE JAMAIS CASSER — DERNIER REMPART AVANT SUPABASE, PAS UNE
+// VALIDATION DE FORMULAIRE : chaque écran valide déjà ses champs à sa
+// façon (parseMontant, clavier numérique...) avant d'appeler le store —
+// ces deux helpers ne dupliquent pas cette UX, ils garantissent juste
+// qu'aucune valeur aberrante (NaN, Infinity, texte à rallonge venu d'un bug
+// ou d'un appel direct à l'API) n'atteint jamais Supabase, quel que soit le
+// chemin emprunté. Un montant invalide est ramené à 0 (jamais rejeté avec
+// une erreur bloquante : cf. RÈGLE générale du store, throwing casserait
+// des flux existants) ; un texte trop long est tronqué, jamais rejeté.
+// Même esprit que heureVersColonneSupabase (Math.min/Math.max) déjà présent
+// juste au-dessus dans ce fichier.
+const LONGUEUR_TEXTE_MAX = 50;
+
+function montantSecurise(valeur: number): number {
+  return Number.isFinite(valeur) && valeur >= 0 ? valeur : 0;
+}
+
+function texteSecurise(valeur: string, max: number = LONGUEUR_TEXTE_MAX): string {
+  return valeur.trim().slice(0, max);
+}
+
 function enveloppeVersColonnes(e: Omit<Enveloppe, "id">) {
   return {
-    nom: e.nom,
-    depense: e.depense,
-    budget: e.budget,
+    nom: texteSecurise(e.nom),
+    depense: montantSecurise(e.depense),
+    budget: montantSecurise(e.budget),
     couleur: e.couleur,
     recurrente: e.recurrente,
     frequence_jours: e.frequenceJours ?? null,
@@ -465,16 +486,16 @@ function objectifDepuisLigne(l: ObjectifRow): Objectif {
 
 function objectifVersColonnes(o: Omit<Objectif, "id">) {
   return {
-    nom: o.nom,
-    cible: o.cible,
-    actuel: o.actuel,
+    nom: texteSecurise(o.nom),
+    cible: montantSecurise(o.cible),
+    actuel: montantSecurise(o.actuel),
     couleur: o.couleur,
     recurrent: o.recurrent ?? null,
-    montant_mensuel: o.montantMensuel ?? null,
+    montant_mensuel: o.montantMensuel != null ? montantSecurise(o.montantMensuel) : null,
     jour_du_mois: o.jourDuMois ?? null,
     dernier_versement_mois: o.dernierVersement?.mois ?? null,
     dernier_versement_annee: o.dernierVersement?.annee ?? null,
-    contribution_mois: o.contributionMois ?? 0,
+    contribution_mois: montantSecurise(o.contributionMois ?? 0),
     ferme: o.ferme ?? false,
   };
 }
@@ -549,14 +570,14 @@ function evenementDepuisLigne(l: EvenementRow): Evenement {
 
 function evenementVersColonnes(e: Omit<Evenement, "id">) {
   return {
-    nom: e.nom,
+    nom: texteSecurise(e.nom),
     date: e.date,
     date_fin: e.dateFin ?? null,
     heure: heureVersColonneSupabase(e.heure),
     duree: e.duree,
     couleur: e.couleur,
     est_financier: e.estFinancier,
-    montant: e.montant ?? null,
+    montant: e.montant != null ? montantSecurise(e.montant) : null,
     categorie_liee: e.categorieLiee ?? null,
     recurrent: e.recurrent ?? null,
     frequence: e.frequence ?? null,
@@ -620,8 +641,8 @@ function modeleDepenseDepuisLigne(l: ModeleDepenseRow): ModeleDepense {
 function modeleDepenseVersColonnes(m: Omit<ModeleDepense, "id">) {
   return {
     enveloppe_id: m.enveloppeId,
-    nom: m.nom,
-    montant: m.montant,
+    nom: texteSecurise(m.nom),
+    montant: m.montant != null ? montantSecurise(m.montant) : null,
   };
 }
 
@@ -651,8 +672,8 @@ function paiementHistoriqueDepuisLigne(
 function paiementHistoriqueVersColonnes(p: Omit<PaiementHistorique, "id">) {
   return {
     enveloppe_id: p.enveloppeId,
-    nom: p.nom,
-    montant: p.montant,
+    nom: texteSecurise(p.nom),
+    montant: montantSecurise(p.montant),
     date: p.date,
     couleur: p.couleur,
   };
@@ -702,8 +723,8 @@ async function ajouterPaiementHistoriqueInterne(
 function transactionVersColonnes(t: Omit<Transaction, "id">) {
   return {
     enveloppe_id: t.enveloppeId,
-    nom: t.nom,
-    montant: t.montant,
+    nom: texteSecurise(t.nom),
+    montant: montantSecurise(t.montant),
     date: t.date,
   };
 }
@@ -1251,7 +1272,7 @@ function majEpargneMoisSupabase(montant: number) {
     if (!user) return;
     supabase
       .from("profils")
-      .update({ epargne_mois: montant })
+      .update({ epargne_mois: montantSecurise(montant) })
       .eq("user_id", user.id)
       .then(({ error }) => {
         if (error) {
@@ -1317,7 +1338,7 @@ function majPrenomSupabase(prenom: string) {
     if (!user) return;
     supabase
       .from("profils")
-      .update({ prenom })
+      .update({ prenom: texteSecurise(prenom) })
       .eq("user_id", user.id)
       .then(({ error }) => {
         if (error) {
@@ -1335,7 +1356,7 @@ function majNomSupabase(nom: string) {
     if (!user) return;
     supabase
       .from("profils")
-      .update({ nom })
+      .update({ nom: texteSecurise(nom) })
       .eq("user_id", user.id)
       .then(({ error }) => {
         if (error) {
@@ -1645,7 +1666,7 @@ export function useObjectifs() {
         // "L'app met à jour ces données à chaque ouverture" — chargerEvenements
         // est l'appel fait au montage de (tabs)/_layout.tsx, donc le point
         // naturel pour synchroniser les deux widgets à l'ouverture de l'app.
-        synchroniserWidgetPlanning(evenementsCharges);
+        synchroniserWidgetPlanning(evenementsCharges, etat.transactions);
         synchroniserWidgetAjoutRapide(etat.transactions);
       } catch (e) {
         console.error("Chargement des événements a échoué :", e);
@@ -2034,7 +2055,7 @@ export function useObjectifs() {
       ancienNom: string,
       nouveauNom: string,
     ): Promise<boolean> => {
-      const nom = nouveauNom.trim();
+      const nom = texteSecurise(nouveauNom);
       if (!nom || nom === ancienNom) return false;
       try {
         const {
@@ -2343,7 +2364,7 @@ export function useObjectifs() {
 
         const nouvel = evenementDepuisLigne(data);
         setEtat({ evenements: [...etat.evenements, nouvel] });
-        synchroniserWidgetPlanning(etat.evenements);
+        synchroniserWidgetPlanning(etat.evenements, etat.transactions);
 
         if (
           nouvel.estFinancier &&
@@ -2367,7 +2388,7 @@ export function useObjectifs() {
     supprimerEvenement: (id: string) => {
       const ev = etat.evenements.find((e) => e.id === id);
       setEtat({ evenements: etat.evenements.filter((e) => e.id !== id) });
-      synchroniserWidgetPlanning(etat.evenements);
+      synchroniserWidgetPlanning(etat.evenements, etat.transactions);
 
       if (
         ev?.estFinancier &&
@@ -2406,7 +2427,7 @@ export function useObjectifs() {
           e.id === id ? { ...e, ...champs } : e,
         ),
       });
-      synchroniserWidgetPlanning(etat.evenements);
+      synchroniserWidgetPlanning(etat.evenements, etat.transactions);
 
       const colonnes: Record<string, unknown> = {};
       if ("nom" in champs) colonnes.nom = champs.nom;
@@ -2513,6 +2534,7 @@ export function useObjectifs() {
         setEtat({ transactions: transactionsMaj });
         appliquerEnveloppes(enveloppesMaj);
         synchroniserWidgetAjoutRapide(transactionsMaj);
+        synchroniserWidgetPlanning(etat.evenements, transactionsMaj);
         return nouvelle;
       } catch (e) {
         console.error("Ajout de dépense a échoué :", e);
@@ -2557,6 +2579,7 @@ export function useObjectifs() {
       setEtat({ transactions: transactionsMaj });
       appliquerEnveloppes(enveloppesMaj);
       synchroniserWidgetAjoutRapide(transactionsMaj);
+      synchroniserWidgetPlanning(etat.evenements, transactionsMaj);
 
       const { error } = await supabase
         .from("transactions")
@@ -2583,6 +2606,7 @@ export function useObjectifs() {
       setEtat({ transactions: transactionsMaj });
       appliquerEnveloppes(enveloppesMaj);
       synchroniserWidgetAjoutRapide(transactionsMaj);
+      synchroniserWidgetPlanning(etat.evenements, transactionsMaj);
       supabase
         .from("transactions")
         .delete()
