@@ -48,7 +48,11 @@ export function GuestBanner({ topSafeArea = false }: { topSafeArea?: boolean }) 
         {texte}
       </Text>
       <TouchableOpacity
-        onPress={() => router.push("/onboarding/inscription")}
+        // RÈGLE : replace (pas push) — même choix que
+        // app/onboarding/essai-expire.tsx pour quitter le mode invité vers
+        // l'inscription, pour ne jamais pouvoir revenir en arrière dessus
+        // depuis une pile de navigation profonde (onglet du dessous).
+        onPress={() => router.replace("/onboarding/inscription")}
         activeOpacity={0.8}
         style={styles.bouton}
       >

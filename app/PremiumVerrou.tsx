@@ -6,6 +6,11 @@ import { useTheme } from "./ThemeContext";
 
 const COULEUR_CADENAS = "#2D3A4A";
 
+// RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
+// composant ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
+// .upsert() vers Supabase — composant d'affichage pur, toute écriture vit
+// dans app/store.ts (cf. RÈGLE DE SÉCURITÉ en tête de ce fichier).
+//
 // RÈGLE À NE JAMAIS CASSER : à la différence d'InsightVerrouille (déblocage
 // par pub, contenu réel toujours rendu en dessous), ce composant ne montre
 // JAMAIS le contenu verrouillé et ne propose aucune pub — Premium

@@ -41,8 +41,7 @@ import { TextInput } from "../TexteInput";
 import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
-
-type FrequenceEvenement = "jour" | "semaine" | "mois" | "an";
+import { FrequenceEvenement, genererOccurrencesEvenement } from "../../utils/evenements";
 
 const JOURS_SEMAINE = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const HEURES = Array.from({ length: 24 }, (_, i) => `${i}h`);
@@ -69,37 +68,6 @@ function dateVersISO(date: Date): string {
 
 function premierJourMoisISO(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
-}
-
-function genererOccurrencesEvenement(
-  dateDebut: Date,
-  frequence: FrequenceEvenement,
-  debutFenetre: Date,
-  finFenetre: Date,
-): Date[] {
-  const occurrences: Date[] = [];
-  const debut = new Date(dateDebut);
-  debut.setHours(0, 0, 0, 0);
-
-  if (frequence === "jour") {
-    const cursor = new Date(Math.max(debut.getTime(), debutFenetre.getTime()));
-    while (cursor <= finFenetre) {
-      occurrences.push(new Date(cursor));
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    return occurrences;
-  }
-
-  const cursor = new Date(debut);
-  let iterations = 0;
-  while (cursor <= finFenetre && iterations < 1000) {
-    if (cursor >= debutFenetre) occurrences.push(new Date(cursor));
-    if (frequence === "semaine") cursor.setDate(cursor.getDate() + 7);
-    else if (frequence === "mois") cursor.setMonth(cursor.getMonth() + 1);
-    else cursor.setFullYear(cursor.getFullYear() + 1);
-    iterations++;
-  }
-  return occurrences;
 }
 
 function formaterDateCourte(date: Date): string {

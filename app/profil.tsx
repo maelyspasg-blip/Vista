@@ -1036,10 +1036,11 @@ export default function Profil() {
               ]}
             >
               {[
-                "Analyses et conseils personnalisés illimités, sans publicité",
-                "Historique complet de vos budgets et dépenses",
+                "Graphique de flux financier (onglet Vista de Ton bilan)",
+                "Analyses et conseils personnalisés illimités sans publicité",
+                "Historique complet (Budget + Stats au-delà de 2 mois)",
+                "Ton bilan complet (Santé, Trophées, Simulation)",
                 "Export de vos données (Excel et résumé visuel)",
-                "Accès complet à Ton bilan (Score, Séries, Simulateur)",
               ].map((avantage, i) => (
                 <View
                   key={avantage}
@@ -1091,10 +1092,31 @@ export default function Profil() {
             </TouchableOpacity>
           )}
 
+          {/* RÈGLE À NE JAMAIS CASSER : symétrique du bloc ci-dessus, pour
+              le cas admin en train de simuler Premium (toggle "Simuler
+              Premium" de la section admin, utils/premium.ts) — jamais un
+              abonnement réel, donc jamais l'alerte App Store : ce bouton
+              désactive directement le toggle local. Visible et accessible
+              ici (pas seulement dans la section admin plus bas), pour
+              qu'un admin en train de tester le mode Premium puisse en
+              sortir sans redescendre chercher le toggle d'origine. */}
+          {estPremium && objStore.isAdmin && (
+            <TouchableOpacity
+              style={[styles.btnSecondaire, { borderColor: C.separateur }]}
+              onPress={() => definirPremium(false)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="exit-outline" size={16} color={C.texte} />
+              <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+                Quitter le mode Premium
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             style={[
               styles.btnSecondaire,
-              { borderColor: C.separateur, marginTop: estPremium && !objStore.isAdmin ? 12 : 0 },
+              { borderColor: C.separateur, marginTop: estPremium ? 12 : 0 },
             ]}
             onPress={seDeconnecter}
             activeOpacity={0.7}

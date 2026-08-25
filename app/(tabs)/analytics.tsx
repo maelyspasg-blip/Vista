@@ -36,7 +36,7 @@ import {
   calculerTauxEpargne,
   chargerNbAmeliorations,
 } from "../../utils/conseils";
-import { genererMessageBilanVista } from "../../utils/bilanVista";
+import { analyserFluxFinancier, genererMessageBilanVista } from "../../utils/bilanVista";
 import { situationsDejaAffichees } from "../../utils/situationsSession";
 import { calculerTrophees, Trophee } from "../../utils/trophees";
 import { supabase } from "../../supabaseClient";
@@ -1026,6 +1026,35 @@ export default function Analytics() {
   const scrollSanteRef = useRef<ScrollView>(null);
   const scrollTropheesRef = useRef<ScrollView>(null);
   const scrollSimulateurRef = useRef<ScrollView>(null);
+  // RÈGLE À NE JAMAIS CASSER — HAUTEUR DE LA MODALE "TON BILAN" :
+  // Cette modale doit TOUJOURS occuper 85-90% de l'écran.
+  // Ne JAMAIS modifier cette valeur lors de corrections sur d'autres
+  // fonctionnalités (scroll, onglets, insights...) — toute modification ici
+  // casse l'affichage de TOUS les onglets. Valeur validée :
+  // Dimensions.get('window').height * 0.88.
+  // RÈGLE À NE JAMAIS CASSER — HAUTEUR FIXE, JAMAIS maxHeight : un
+  // ScrollView `flex: 1` (cf. scrollVistaRef/scrollSanteRef/
+  // scrollTropheesRef/scrollSimulateurRef plus bas, nécessaire pour que la
+  // zone tactile de scroll couvre tout l'onglet) a besoin d'un parent à
+  // hauteur DÉFINIE pour se dimensionner correctement — un `maxHeight` sur
+  // le conteneur (comportement "s'adapte au contenu, plafonne à X%") ne
+  // fournit PAS de base définie à un enfant flex:1, ce qui a déjà cassé la
+  // hauteur de toute la modale une première fois (régression confirmée :
+  // ajouter flex:1 aux ScrollView avec un conteneur en maxHeight fait
+  // s'effondrer modalCardBadges). `height` (fixe, calculée une fois ici)
+  // est la seule valeur sûre pour ce conteneur tant que ses enfants directs
+  // utilisent flex:1.
+  const HAUTEUR_MODALE_TON_BILAN = Dimensions.get("window").height * 0.88;
+  // RÈGLE À NE JAMAIS CASSER : "Ton bilan" doit garder EXACTEMENT la même
+  // hauteur de conteneur quel que soit l'onglet actif — modalCardBadges a
+  // désormais une hauteur FIXE (HAUTEUR_MODALE_TON_BILAN ci-dessus, cf.
+  // RÈGLE juste au-dessus), donc un onglet verrouillé (PremiumVerrou,
+  // contenu court par nature) ne rétrécit plus la modale par construction.
+  // HAUTEUR_ONGLET_VERROUILLE reste néanmoins utile pour que le contenu
+  // verrouillé lui-même remplisse visuellement l'espace disponible dans
+  // cette hauteur fixe, plutôt que de laisser un grand vide sous
+  // PremiumVerrou.
+  const HAUTEUR_ONGLET_VERROUILLE = Dimensions.get("window").height * 0.85 - 220;
   const changerVueModalStats = (
     v: "vista" | "sante" | "trophees" | "simulateur",
   ) => {
@@ -1041,10 +1070,9 @@ export default function Analytics() {
     ref.current?.scrollTo({ y: 0, animated: false });
   };
   // RÈGLE À NE JAMAIS CASSER : deep-link "Simuler" — utilisé par "Ta
-  // prochaine meilleure décision", "Ce qui fait bouger ta note" (leviers) et
-  // "Ce que Vista a remarqué" pour ouvrir directement l'onglet "Et si..."
-  // avec la bonne catégorie déjà sélectionnée, plutôt que de laisser
-  // l'utilisateur la rechercher lui-même.
+  // prochaine meilleure décision" et "Ce qui fait bouger ta note" (leviers)
+  // pour ouvrir directement l'onglet "Et si..." avec la bonne catégorie déjà
+  // sélectionnée, plutôt que de laisser l'utilisateur la rechercher lui-même.
   const ouvrirSimulateurPour = (categorieId?: string) => {
     if (categorieId) setCategorieSimulee(categorieId);
     changerVueModalStats("simulateur");
@@ -1291,14 +1319,17 @@ export default function Analytics() {
     );
   };
 
-  // === "Ce que Vista a remarqué" / "Prochaine meilleure décision" =============
+  // === "Prochaine meilleure décision" ==========================================
   // RÈGLE À NE JAMAIS CASSER : Zone 3 (Vista Bilan) — TOUT l'historique
   // disponible, JAMAIS le mois en cours. utils/bilanVista.ts est un moteur
   // entièrement séparé de utils/conseils.ts (Zone 1, mois en cours) et
   // utils/tendancesPeriode.ts (Zone 2, période sélectionnée) — ne jamais
   // lui passer resteEstime/disponibleEffectif du mois en cours, seulement
-  // objStore.historiquesMois (mois déjà archivés).
-  const { messages: messagesVista, decision: decisionVista } = genererMessageBilanVista({
+  // objStore.historiquesMois (mois déjà archivés). Seule "decision" est
+  // encore utilisée ici — "Ce que Vista a remarqué" vient désormais de
+  // analyserFluxFinancier (période sélectionnée du graphique de flux, cf.
+  // définition de analyseFlux plus haut), pas de ce moteur tout-historique.
+  const { decision: decisionPrioritaire } = genererMessageBilanVista({
     historiquesMois: objStore.historiquesMois,
     objectifsAvecRythme: objStore.objectifs.map((o) => ({
       objectif: { id: o.id, nom: o.nom, ferme: o.ferme },
@@ -1313,8 +1344,6 @@ export default function Analytics() {
     // même.
     situationsExclues: situationsDejaAffichees(),
   });
-  const decisionPrioritaire = decisionVista;
-  const observationsVista = messagesVista;
 
   // Onglet Trophées.
   const trophees = calculerTrophees({
@@ -1804,37 +1833,45 @@ export default function Analytics() {
   // précédent immédiat, où l'id est fiable), le Top dépenses cumule sur
   // plusieurs mois potentiellement non consécutifs : si une catégorie a été
   // supprimée puis recréée entre-temps (ex: "Loyer" supprimé puis rajouté),
-  // l'ancienne et la nouvelle enveloppe ont des id différents pour le même
-  // nom, et regrouper par id la faisait apparaître deux fois dans le
-  // classement — sur des rangs distincts — au lieu d'une fois avec son vrai
-  // total cumulé. nom/couleur sont ceux du mois le plus RÉCENT rencontré
-  // (moisAffiches va du plus ancien au plus récent, donc la dernière
-  // écriture gagne) : le classement reflète la couleur actuelle de la
-  // catégorie, pas celle d'une ancienne version supprimée.
+  // ou si deux catégories actives portent le même nom (aucun garde-fou à la
+  // création, cf. budget.tsx), l'une et l'autre enveloppe ont des id
+  // différents pour le même nom, et regrouper par id les faisait apparaître
+  // deux fois dans le classement — sur des rangs distincts — au lieu d'une
+  // fois avec son vrai total cumulé (somme des montants). nom/couleur sont
+  // ceux du mois le plus RÉCENT rencontré (moisAffiches va du plus ancien
+  // au plus récent, donc la dernière écriture gagne) : le classement
+  // reflète la couleur actuelle de la catégorie, pas celle d'une ancienne
+  // version supprimée.
   const topDepensesParCategorie = new Map<
     string,
     { nom: string; montant: number; couleur: string }
   >();
   moisAffiches.forEach(({ mois, annee }) => {
-    // Pour le mois en cours, déduplique par nom avant de sommer : deux
-    // enveloppes vivantes portant le même nom (catégorie supprimée puis
-    // recréée sans que l'ancienne ait été retirée de Supabase) sinon
-    // additionnent deux fois la même dépense réelle dans le classement.
     const enveloppesMoisBrutes =
       mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
         ? objStore.enveloppes
         : (objStore.historiquesMois.find(
             (s) => s.mois === mois && s.annee === annee,
           )?.enveloppes ?? []);
+    // RÈGLE : déduplique par ID (jamais par nom) avant de sommer — protège
+    // contre une même ligne comptée deux fois (glitch d'état), sans perdre
+    // la dépense d'une VRAIE deuxième catégorie de même nom : c'est la
+    // boucle ci-dessous (regroupement par `e.nom` + somme) qui fusionne ce
+    // cas-là, jamais cette étape.
     const enveloppesMois =
       mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
-        ? [...new Map(enveloppesMoisBrutes.map((e) => [e.nom, e])).values()]
+        ? [...new Map(enveloppesMoisBrutes.map((e) => [e.id, e])).values()]
         : enveloppesMoisBrutes;
     enveloppesMois.forEach((e) => {
       if (e.type === "Entrée" || e.depense <= 0) return;
-      const existante = topDepensesParCategorie.get(e.nom);
-      topDepensesParCategorie.set(e.nom, {
-        nom: e.nom,
+      // RÈGLE : clé normalisée (espaces superflus retirés) — "Loyer" et
+      // "Loyer " (espace de fin, faute de frappe possible à la création,
+      // aucune validation d'unicité de nom n'existe dans le formulaire de
+      // création) doivent fusionner en une seule ligne, jamais deux.
+      const cleNom = e.nom.trim();
+      const existante = topDepensesParCategorie.get(cleNom);
+      topDepensesParCategorie.set(cleNom, {
+        nom: cleNom,
         couleur: e.couleur,
         montant: (existante?.montant ?? 0) + e.depense,
       });
@@ -1917,13 +1954,16 @@ export default function Analytics() {
   // sélectionnée (moisAffiches), exactement comme Top dépenses juste en
   // dessous — jamais le seul mois en cours (objStore.enveloppes seul). Même
   // technique que topDepensesParCategorie : pour chaque mois de la période,
-  // mois en cours → objStore.enveloppes (dédupliqué par nom), mois archivé
-  // → le snapshot correspondant, puis on cumule par nom de catégorie.
-  // Paramétrée par `moisListe` (plutôt que de fermer sur moisAffiches) pour
-  // être réutilisable par le graphique de flux (Partie 3), qui a son propre
-  // sélecteur de période indépendant — SEULE fonction qui sait agréger des
-  // dépenses/entrées réelles sur une période de mois donnée, ne jamais la
-  // dupliquer.
+  // mois en cours → objStore.enveloppes, mois archivé → le snapshot
+  // correspondant, puis on cumule PAR NOM de catégorie (jamais par id : une
+  // catégorie supprimée puis recréée, ou deux catégories actives portant le
+  // même nom sans garde-fou à la création, cf. budget.tsx, ont des id
+  // différents mais doivent apparaître UNE SEULE FOIS avec leur total
+  // sommé). Paramétrée par `moisListe` (plutôt que de fermer sur
+  // moisAffiches) pour être réutilisable par le graphique de flux (Partie
+  // 3), qui a son propre sélecteur de période indépendant — SEULE fonction
+  // qui sait agréger des dépenses/entrées réelles sur une période de mois
+  // donnée, ne jamais la dupliquer.
   const construireRepartitionSurPeriode = (
     predicat: (e: { type: string; depense: number; nom: string }) => boolean,
     moisListe: { mois: number; annee: number }[],
@@ -1935,15 +1975,23 @@ export default function Analytics() {
           ? objStore.enveloppes
           : (objStore.historiquesMois.find((s) => s.mois === mois && s.annee === annee)
               ?.enveloppes ?? []);
+      // RÈGLE : déduplique par ID (jamais par nom ici) — protège contre une
+      // même ligne apparaissant deux fois dans le tableau (glitch d'état),
+      // sans jeter la dépense d'une VRAIE deuxième catégorie qui porterait
+      // le même nom : c'est la boucle ci-dessous (regroupement par
+      // `e.nom` + somme) qui se charge de fusionner ces cas-là.
       const enveloppesMois =
         mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
-          ? [...new Map(enveloppesMoisBrutes.map((e) => [e.nom, e])).values()]
+          ? [...new Map(enveloppesMoisBrutes.map((e) => [e.id, e])).values()]
           : enveloppesMoisBrutes;
       enveloppesMois.forEach((e) => {
         if (!predicat(e)) return;
-        const existante = parCategorie.get(e.nom);
-        parCategorie.set(e.nom, {
-          nom: e.nom,
+        // RÈGLE : clé normalisée, même raison que topDepensesParCategorie
+        // plus haut — jamais deux lignes pour "Loyer" et "Loyer ".
+        const cleNom = e.nom.trim();
+        const existante = parCategorie.get(cleNom);
+        parCategorie.set(cleNom, {
+          nom: cleNom,
           couleur: e.couleur,
           montant: (existante?.montant ?? 0) + e.depense,
         });
@@ -2051,16 +2099,24 @@ export default function Analytics() {
       1,
     ),
   };
+  // RÈGLE À NE JAMAIS CASSER : comparaison par nom TRIMMÉ des deux côtés —
+  // `nom` reçu ici est déjà trimmé (cf. cleNom dans
+  // construireRepartitionSurPeriode), donc comparer contre `e.nom` brut
+  // échouait silencieusement dès qu'une enveloppe portait un espace
+  // superflu en base (legacy ou faute de frappe à la création) : `ids`
+  // restait vide, `transactionsGroupeesParNomFlux` ne trouvait aucune
+  // transaction, et la catégorie basculait à tort en Cas 2 (aucune
+  // sous-catégorie affichée) malgré des transactions nommées bien réelles.
   const idsPourNomCategorieFlux = (nom: string): Set<string> => {
     const ids = new Set<string>();
     objStore.enveloppes.forEach((e) => {
-      if (e.nom === nom) ids.add(e.id);
+      if (e.nom.trim() === nom) ids.add(e.id);
     });
     moisFluxAffiches.forEach(({ mois, annee }) => {
       objStore.historiquesMois
         .find((s) => s.mois === mois && s.annee === annee)
         ?.enveloppes.forEach((e) => {
-          if (e.nom === nom) ids.add(e.id);
+          if (e.nom.trim() === nom) ids.add(e.id);
         });
     });
     return ids;
@@ -2085,19 +2141,27 @@ export default function Analytics() {
       .filter((x) => x.montant > 0);
   };
 
-  // RÈGLE À NE JAMAIS CASSER — 4 CAS DE FLUX (cf. RÈGLE en tête de
-  // GraphiqueFlux.tsx) :
-  // Cas 1 — catégorie Variable avec 2+ transactions distinctes sur la
+  // RÈGLE À NE JAMAIS CASSER — 4 CAS DE FLUX, RECALCULÉS À CHAQUE RENDU
+  // (cf. RÈGLE en tête de GraphiqueFlux.tsx) : cette classification lit
+  // `objStore.transactions` (via transactionsGroupeesParNomFlux) et
+  // `fluxCategories` directement à chaque rendu du composant, jamais
+  // mémoïsée avec des dépendances figées — dès qu'une transaction nommée
+  // est ajoutée/renommée/supprimée, la structure des colonnes doit
+  // basculer automatiquement au rendu suivant, sans action de
+  // l'utilisateur ni recalcul manuel.
+  // Cas 1 — catégorie Variable avec AU MOINS 1 transaction nommée sur la
   // période → barre en colonne 2, détail en colonne 3 (un nœud par nom de
   // transaction, regroupé ; une transaction sans nom rejoint "Non
-  // précisé"). Si la somme des transactions nommées est inférieure au
-  // total réel de la catégorie (dépenses non détaillées), l'écart devient
-  // un nœud "Autre" en colonne 3, TOUJOURS en dernière position de son
-  // groupe, jamais affiché si l'écart est nul/négligeable.
-  // Cas 2 — catégorie Fixe, ou Variable sans détail exploitable (0 ou 1
-  // transaction distincte) → AUCUNE barre en colonne 2, le flux passe
-  // directement colonne 1 → colonne 3 (cf. idsNoeudsDirects au site
-  // d'appel), colonne 3 affichant le nom réel de la catégorie.
+  // précisé"). Ex: "Courses" avec une seule transaction "Super U" bascule
+  // en Cas 1 — colonne 2 "Courses", colonne 3 "Super U". Si la somme des
+  // transactions nommées est inférieure au total réel de la catégorie
+  // (dépenses non détaillées), l'écart devient un nœud "Autre" en colonne
+  // 3, TOUJOURS en dernière position de son groupe, jamais affiché si
+  // l'écart est nul/négligeable.
+  // Cas 2 — catégorie Fixe, ou Variable SANS AUCUNE transaction nommée sur
+  // la période → AUCUNE barre en colonne 2, le flux passe directement
+  // colonne 1 → colonne 3 (cf. idsNoeudsDirects au site d'appel), colonne
+  // 3 affichant le nom réel de la catégorie.
   // Cas 3/4 — "Liquidités"/"Épargne", calculées globalement ci-dessous,
   // jamais par catégorie — flux direct colonne 1 → colonne 3, exactement
   // comme le Cas 2.
@@ -2110,12 +2174,14 @@ export default function Analytics() {
   // (id scindé par cat.cle), seuls les vrais noms de transactions se
   // fusionnent.
   const classificationsFlux = fluxCategories.map((cat) => {
-    const type = objStore.enveloppes.find((e) => e.nom === cat.label)?.type;
+    // RÈGLE : même comparaison par nom trimmé qu'idsPourNomCategorieFlux
+    // ci-dessus — cat.label est déjà trimmé, jamais e.nom brut.
+    const type = objStore.enveloppes.find((e) => e.nom.trim() === cat.label)?.type;
     const brut =
       type === "Variable"
         ? transactionsGroupeesParNomFlux(cat.label).sort((a, b) => b.montant - a.montant)
         : [];
-    if (brut.length < 2) {
+    if (brut.length < 1) {
       return { cas: 2 as const, cat };
     }
     const sommeDetail = brut.reduce((acc, d) => acc + d.montant, 0);
@@ -2151,6 +2217,46 @@ export default function Analytics() {
     totalEntreesFlux - totalDepenseCategoriesFlux - totalEpargneFlux,
   );
 
+  // "Ce que Vista a remarqué" (onglet Vista) : analyse automatique du
+  // graphique de flux ci-dessus, adaptée à la période choisie (nbMoisFlux) —
+  // remplace l'ancien contenu "tout historique" de cette carte, cf. RÈGLE
+  // EXCEPTION DE ZONE en tête de analyserFluxFinancier (utils/bilanVista.ts).
+  const transactionsPeriodeFlux = objStore.transactions.filter((t) => {
+    const d = new Date(t.date);
+    return d >= bornesFlux.debut && d < bornesFlux.finExclusive;
+  });
+  // RÈGLE À NE JAMAIS CASSER : `fluxCategories.cle` est une clé de
+  // regroupement par NOM (peut fusionner plusieurs enveloppes recréées sous
+  // le même nom au fil des mois, cf. construireRepartitionSurPeriode plus
+  // haut) — jamais un vrai id d'enveloppe. analyserFluxFinancier a besoin du
+  // VRAI id de l'enveloppe ACTIVE correspondante aujourd'hui pour
+  // validerConseil (sinon warning en boucle, catégorie jamais retrouvée) :
+  // résolu ici par nom trimmé, `undefined` si plus aucune enveloppe active
+  // ne porte ce nom.
+  const categoriesParMontantFlux = fluxCategories.map((c) => {
+    const enveloppeActuelle = objStore.enveloppes.find((e) => e.nom.trim() === c.label);
+    return {
+      cle: c.cle,
+      label: c.label,
+      montant: c.montant,
+      categorieId: enveloppeActuelle?.id,
+      type: enveloppeActuelle?.type,
+    };
+  });
+  const analyseFlux = analyserFluxFinancier({
+    entreesTotal: totalEntreesFlux,
+    depensesTotal: totalDepenseCategoriesFlux,
+    liquidites: totalLiquiditesFlux,
+    epargne: totalEpargneFlux,
+    categoriesParMontant: categoriesParMontantFlux,
+    historiquesMois: objStore.historiquesMois,
+    nbMoisSelectionne: nbMoisFlux,
+    transactions: transactionsPeriodeFlux,
+    enveloppes: objStore.enveloppes,
+    moisActuel: MOIS_ACTUEL,
+    anneeActuelle: ANNEE_ACTUELLE,
+  });
+
   // RÈGLE À NE JAMAIS CASSER — TRI DÉCROISSANT STRICT PAR GROUPE : la
   // colonne 3 est triée par montant décroissant, mais un groupe (le détail
   // d'une catégorie Cas 1, une catégorie Cas 2, "Liquidités" ou "Épargne")
@@ -2180,6 +2286,7 @@ export default function Analytics() {
             label: "Autre",
             couleur: cat.couleur,
             montant: d.montant,
+            groupeId: cat.cle,
           });
           fluxLiensVersDestination.push({ sourceId: cat.cle, destId: idNoeud, montant: d.montant });
           idsNouveaux.push(idNoeud);
@@ -2199,6 +2306,7 @@ export default function Analytics() {
             label: d.nom,
             couleur: cat.couleur,
             montant: d.montant,
+            groupeId: cat.cle,
           });
           fluxLiensVersDestination.push({ sourceId: cat.cle, destId: idNoeud, montant: d.montant });
           idsNouveaux.push(idNoeud);
@@ -3690,15 +3798,21 @@ export default function Analytics() {
         animationType={reduireAnimations ? "none" : "slide"}
         onRequestClose={() => setModalSeriesVisible(false)}
       >
-        <TouchableOpacity
-          style={styles.modalOverlayTouch}
-          activeOpacity={1}
-          onPress={() => setModalSeriesVisible(false)}
-        >
-          <TouchableOpacity
-            style={[styles.modalCardBadges, { backgroundColor: C.carte }]}
-            activeOpacity={1}
-            onPress={() => {}}
+        {/* RÈGLE À NE JAMAIS CASSER — View SIMPLE, PAS TouchableOpacity :
+            un TouchableOpacity ici (même avec un onPress no-op côté carte
+            pour absorber le tap) interfère avec la négociation de geste du
+            ScrollView (symptôme confirmé : scroll peu fluide/qui répond mal
+            malgré un ScrollView par ailleurs correctement configuré). La
+            fermeture au tap sur le fond n'existe donc plus ici — seuls le
+            bouton "Terminé" et onRequestClose (bouton retour Android)
+            ferment la modale désormais, jamais un TouchableOpacity qui
+            enveloppe le contenu scrollable. */}
+        <View style={styles.modalOverlayTouch}>
+          <View
+            style={[
+              styles.modalCardBadges,
+              { backgroundColor: C.carte, height: HAUTEUR_MODALE_TON_BILAN },
+            ]}
           >
             <View style={styles.modalHeader}>
               <View>
@@ -3728,10 +3842,13 @@ export default function Analytics() {
             {/* RÈGLE À NE JAMAIS CASSER : "Ton bilan" est structuré en 4
                 onglets horizontaux (Vista / Santé / Trophées / Et si...),
                 pas une seule page scrollable — chaque onglet vit dans son
-                PROPRE ScrollView indépendant (jamais partagé), monté/démonté
-                au changement d'onglet. Chaque section vit dans sa propre
-                carte (styles.serieCarte) avec un titre — jamais de texte
-                flottant hors d'un bloc identifié. */}
+                PROPRE ScrollView indépendant (jamais partagé), TOUJOURS
+                monté dès l'ouverture de la modale (visibilité basculée via
+                `style={{ display }}`, jamais un montage/démontage au
+                changement d'onglet — cf. RÈGLE "TOUJOURS MONTÉ" plus bas).
+                Chaque section vit dans sa propre carte (styles.serieCarte)
+                avec un titre — jamais de texte flottant hors d'un bloc
+                identifié. */}
             <View style={[styles.tabsRow, { backgroundColor: C.fondSecondaire }]}>
               {(["vista", "sante", "trophees", "simulateur"] as const).map((v) => (
                 <TouchableOpacity
@@ -3767,8 +3884,29 @@ export default function Analytics() {
                 même logique qu'un aperçu gratuit sur "Nos conseils"
                 d'Aperçu. Ordre vertical : graphique de flux → "Ce que Vista
                 a remarqué" → "Prochaine meilleure décision". */}
-            {vueModalStats === "vista" && (
-            <ScrollView ref={scrollVistaRef} showsVerticalScrollIndicator={false}>
+            {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
+                `display` : les 4 ScrollView des onglets restent montés en
+                permanence dès l'ouverture de la modale (jamais un
+                montage/démontage conditionnel au changement d'onglet) —
+                un ScrollView RN fraîchement monté APRÈS que son parent soit
+                déjà stable peut avoir une mesure de contentSize incorrecte
+                tant qu'aucun geste ne force un re-layout (symptôme : scroll
+                bloqué jusqu'à un premier aller-retour). display: "none"
+                masque l'onglet inactif sans jamais le démonter, donc sans
+                jamais revivre ce problème au changement d'onglet — cf.
+                RÈGLE identique sur les 3 autres onglets ci-dessous. */}
+            <ScrollView
+              ref={scrollVistaRef}
+              showsVerticalScrollIndicator
+              indicatorStyle={theme === "sombre" ? "white" : "black"}
+              scrollEventThrottle={16}
+              scrollEnabled
+              bounces
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              style={{ flex: 1, width: "100%", display: vueModalStats === "vista" ? "flex" : "none" }}
+              contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 26, paddingBottom: 60 }}
+            >
             <View style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}>
               <View style={styles.serieEnTete}>
                 <View
@@ -3856,7 +3994,7 @@ export default function Analytics() {
               )}
             </View>
 
-            {observationsVista.length > 0 && (
+            {analyseFlux && (
               <View
                 style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
               >
@@ -3870,17 +4008,31 @@ export default function Analytics() {
                     Ce que Vista a remarqué
                   </Text>
                 </View>
-                {observationsVista.map((c, i) => (
-                  <View
-                    key={i}
-                    style={[styles.observationLigne, i > 0 && { marginTop: 6 }]}
-                  >
+                {/* RÈGLE À NE JAMAIS CASSER : 2 insights générés par
+                    analyserFluxFinancier (utils/bilanVista.ts) à partir du
+                    graphique de flux ci-dessus — le premier reste toujours
+                    gratuit, exactement comme "Ce qu'il faut retenir" plus
+                    bas ; le second est verrouillé (InsightVerrouille). Se
+                    recalculent automatiquement à chaque changement de
+                    nbMoisFlux puisque analyseFlux est recalculé à chaque
+                    rendu, sans mémoïsation figée. */}
+                <View style={styles.observationLigne}>
+                  <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
+                  <Text style={[styles.observationTexte, { color: C.texte }]}>
+                    {analyseFlux.insight1}
+                  </Text>
+                </View>
+                <InsightVerrouille
+                  deverrouille={retenirTousVisibles}
+                  onDeverrouille={() => setRetenirDebloque(true)}
+                >
+                  <View style={[styles.observationLigne, { marginTop: 6 }]}>
                     <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
                     <Text style={[styles.observationTexte, { color: C.texte }]}>
-                      {c.texte}
+                      {analyseFlux.insight2}
                     </Text>
                   </View>
-                ))}
+                </InsightVerrouille>
               </View>
             )}
 
@@ -3909,13 +4061,31 @@ export default function Analytics() {
 
             <View style={{ height: 32 }} />
             </ScrollView>
-            )}
 
             {/* === Onglet 2 : "Santé" — Premium uniquement, pas de
                 déblocage par pub (contrairement à InsightVerrouille). */}
-            {vueModalStats === "sante" && (
-              premium ? (
-              <ScrollView ref={scrollSanteRef} showsVerticalScrollIndicator={false}>
+            {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
+                `display` : cf. RÈGLE identique sur l'onglet Vista plus haut
+                — le ScrollView reste monté dès que `premium` est vrai
+                (indépendamment de l'onglet actif), seule sa visibilité
+                bascule via `display`, jamais un montage/démontage au
+                changement d'onglet. */}
+            {!premium && vueModalStats === "sante" && (
+              <PremiumVerrou hauteur={HAUTEUR_ONGLET_VERROUILLE} />
+            )}
+            {premium && (
+              <ScrollView
+                ref={scrollSanteRef}
+                showsVerticalScrollIndicator
+                indicatorStyle={theme === "sombre" ? "white" : "black"}
+                scrollEventThrottle={16}
+                scrollEnabled
+                bounces
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                style={{ flex: 1, width: "100%", display: vueModalStats === "sante" ? "flex" : "none" }}
+                contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 26, paddingBottom: 60 }}
+              >
               {(
                 <View
                   style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
@@ -4152,17 +4322,29 @@ export default function Analytics() {
 
               <View style={{ height: 32 }} />
               </ScrollView>
-              ) : (
-                <PremiumVerrou />
-              )
             )}
 
             {/* === Onglet 3 : "Trophées" — regroupe les cartes de séries
                 (déjà chacune sa propre carte) et la grille de trophées.
                 Premium uniquement, pas de déblocage par pub. */}
-            {vueModalStats === "trophees" && (
-              premium ? (
-              <ScrollView ref={scrollTropheesRef} showsVerticalScrollIndicator={false}>
+            {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
+                `display` : cf. RÈGLE identique sur l'onglet Vista plus haut. */}
+            {!premium && vueModalStats === "trophees" && (
+              <PremiumVerrou hauteur={HAUTEUR_ONGLET_VERROUILLE} />
+            )}
+            {premium && (
+              <ScrollView
+                ref={scrollTropheesRef}
+                showsVerticalScrollIndicator
+                indicatorStyle={theme === "sombre" ? "white" : "black"}
+                scrollEventThrottle={16}
+                scrollEnabled
+                bounces
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                style={{ flex: 1, width: "100%", display: vueModalStats === "trophees" ? "flex" : "none" }}
+                contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 26, paddingBottom: 60 }}
+              >
               {series.map((serie) => {
                 const config = CONFIG_SERIE[serie.type];
                 const active = serie.enCours > 0;
@@ -4505,16 +4687,28 @@ export default function Analytics() {
 
               <View style={{ height: 32 }} />
               </ScrollView>
-              ) : (
-                <PremiumVerrou />
-              )
             )}
 
             {/* === Onglet 4 : "Et si..." (Simulateur) — Premium uniquement,
                 pas de déblocage par pub. */}
-            {vueModalStats === "simulateur" && (
-              premium ? (
-              <ScrollView ref={scrollSimulateurRef} showsVerticalScrollIndicator={false}>
+            {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
+                `display` : cf. RÈGLE identique sur l'onglet Vista plus haut. */}
+            {!premium && vueModalStats === "simulateur" && (
+              <PremiumVerrou hauteur={HAUTEUR_ONGLET_VERROUILLE} />
+            )}
+            {premium && (
+              <ScrollView
+                ref={scrollSimulateurRef}
+                showsVerticalScrollIndicator
+                indicatorStyle={theme === "sombre" ? "white" : "black"}
+                scrollEventThrottle={16}
+                scrollEnabled
+                bounces
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                style={{ flex: 1, width: "100%", display: vueModalStats === "simulateur" ? "flex" : "none" }}
+                contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 26, paddingBottom: 60 }}
+              >
               {(
                 <View
                   style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
@@ -5026,9 +5220,6 @@ export default function Analytics() {
 
               <View style={{ height: 32 }} />
               </ScrollView>
-              ) : (
-                <PremiumVerrou />
-              )
             )}
 
             {isGuest && (
@@ -5041,7 +5232,10 @@ export default function Analytics() {
                   style={[styles.overlayGuestBouton, { backgroundColor: C.purple }]}
                   onPress={() => {
                     setModalSeriesVisible(false);
-                    router.push("/onboarding/inscription");
+                    // RÈGLE : replace (pas push) — même choix que
+                    // app/onboarding/essai-expire.tsx et GuestBanner.tsx pour
+                    // quitter le mode invité vers l'inscription.
+                    router.replace("/onboarding/inscription");
                   }}
                 >
                   <Text style={styles.overlayGuestBoutonTexte}>
@@ -5050,8 +5244,8 @@ export default function Analytics() {
                 </BoutonPrincipal>
               </View>
             )}
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       <Modal
@@ -5441,6 +5635,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingTop: 20,
+    // RÈGLE À NE JAMAIS CASSER : paddingHorizontal posé ICI (et sur tabsRow),
+    // PAS sur modalCardBadges — cf. RÈGLE juste en dessous, sur
+    // modalCardBadges, pour la raison exacte.
+    paddingHorizontal: 26,
   },
   modalTitre: { fontSize: 18, fontWeight: "700" },
   modalTermine: { fontSize: 16, fontWeight: "600" },
@@ -5457,16 +5655,28 @@ const styles = StyleSheet.create({
   modalCardBadges: {
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
-    paddingHorizontal: 26,
-    paddingBottom: 20,
-    // RÈGLE À NE JAMAIS CASSER : maxHeight (pas height fixe) — la carte
-    // s'adapte au contenu quand il est court et plafonne à 85% de l'écran
-    // pour le contenu long. "Ton bilan" a 4 onglets, CHACUN avec son propre
-    // ScrollView (scrollVistaRef/scrollSanteRef/scrollTropheesRef/
-    // scrollSimulateurRef) — jamais un second ScrollView imbriqué DANS un
-    // onglet, ni une View à hauteur fixe, sous peine de retrouver le
-    // problème "tiroirs/onglets écrasés en bas de page" déjà rencontré.
-    maxHeight: "85%",
+    // RÈGLE À NE JAMAIS CASSER — JAMAIS DE paddingHorizontal/paddingBottom
+    // ICI : ce conteneur est le PARENT direct des 4 ScrollView de "Ton
+    // bilan" — tout padding posé ici les rétrécit, laissant une bande
+    // (le padding) EN DEHORS des limites tactiles du ScrollView, où le
+    // scroll ne répond pas (bug confirmé : "le scroll ne fonctionne que
+    // sur la zone grisée, pas sur les bords blancs"). Le padding
+    // équivalent vit désormais DANS le contenu scrollable
+    // (contentContainerStyle de chaque ScrollView, cf.
+    // scrollVistaRef/scrollSanteRef/scrollTropheesRef/scrollSimulateurRef)
+    // et sur modalHeader/tabsRow (qui restent, eux, hors du ScrollView par
+    // design) — jamais sur ce conteneur partagé.
+    // RÈGLE À NE JAMAIS CASSER — HAUTEUR FIXE (`height`, JAMAIS `maxHeight`) :
+    // `height` est posé au site d'appel via HAUTEUR_MODALE_TON_BILAN (cf.
+    // RÈGLE "À NE JAMAIS CASSER — HAUTEUR DE LA MODALE" dans le corps du
+    // composant) — jamais ici en dur, ni remplacé par `maxHeight`, qui ne
+    // fournit pas de base définie aux 4 ScrollView `flex: 1` de "Ton bilan"
+    // (scrollVistaRef/scrollSanteRef/scrollTropheesRef/scrollSimulateurRef)
+    // et fait s'effondrer toute la modale (régression déjà rencontrée).
+    // "Ton bilan" a 4 onglets, CHACUN avec son propre ScrollView — jamais un
+    // second ScrollView imbriqué DANS un onglet, ni une View à hauteur
+    // fixe séparée, sous peine de retrouver le problème "tiroirs/onglets
+    // écrasés en bas de page" déjà rencontré.
   },
   serieCarte: {
     borderRadius: 16,
@@ -5491,6 +5701,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     borderRadius: 14,
     padding: 4,
+    // RÈGLE : marginHorizontal (pas paddingHorizontal, déjà `padding: 4`
+    // ci-dessus pour l'espacement interne des boutons) — aligne ce sélecteur
+    // sur modalHeader et le contenu scrollable, cf. RÈGLE sur
+    // modalCardBadges (plus de paddingHorizontal partagé).
+    marginHorizontal: 26,
     marginBottom: 12,
     gap: 4,
   },

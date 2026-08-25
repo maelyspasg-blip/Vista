@@ -1,3 +1,9 @@
+// RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
+// module ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
+// .upsert() vers Supabase (ni même AsyncStorage, cf. RÈGLE juste en
+// dessous : mémoire RAM de session uniquement) — toute écriture persistée
+// vit dans app/store.ts (cf. RÈGLE DE SÉCURITÉ en tête de ce fichier).
+//
 // RÈGLE À NE JAMAIS CASSER : mémoire de SESSION uniquement (variable de
 // module en RAM, jamais AsyncStorage) — "ne pas répéter un conseil déjà
 // affiché" ne vaut que pour la session en cours (l'app ouverte), jamais

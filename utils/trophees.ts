@@ -1,3 +1,8 @@
+// RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
+// module ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
+// .upsert() vers Supabase — calcul pur à partir de données déjà chargées,
+// toute écriture vit dans app/store.ts (cf. RÈGLE DE SÉCURITÉ en tête de
+// ce fichier).
 import { Enveloppe, Objectif, PaiementHistorique, SnapshotMois, Transaction } from "../app/store";
 import { calculerRythmeObjectif } from "./conseils";
 

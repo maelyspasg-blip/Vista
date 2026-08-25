@@ -1,3 +1,9 @@
+// RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
+// module ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
+// .upsert() vers Supabase — c'est un moteur de lecture pur (déduction de
+// texte à partir de données déjà chargées), toute écriture doit vivre dans
+// app/store.ts (cf. RÈGLE DE SÉCURITÉ en tête de ce fichier).
+//
 // RÈGLE À NE JAMAIS CASSER : cette zone couvre LE MOIS EN COURS
 // uniquement — "Que dois-je faire maintenant ?". Ne jamais y mettre des
 // insights des autres zones. Cartographie : Nos conseils (ici) = mois en
@@ -273,6 +279,69 @@ export async function sauvegarderEtatsInsights(
     // Best-effort : une erreur d'écriture ne doit jamais empêcher l'affichage
     // des conseils, juste faire perdre l'historique d'état la prochaine fois.
   }
+}
+
+// RÈGLE À NE JAMAIS CASSER — PRÉFIXES situationId QUI PORTENT SUR UNE (OU
+// DEUX, séparées par "+") CATÉGORIE(S) DE DÉPENSE : cf. les `situationId`
+// posés plus bas dans detecterSituations. Sert UNIQUEMENT à
+// nettoyerEtatsInsightsObsoletes ci-dessous, pour savoir quelles entrées
+// comparer aux enveloppes actuelles — ne JAMAIS y ajouter un préfixe
+// objectif/global (deficit:, objectif:, marge:, comportement:,
+// meilleurmois:, projection:, suggestion:, atteint:, modifie:, proche:,
+// versement:) : leur "id" ne correspond par définition à aucune enveloppe,
+// ce n'est pas une preuve d'obsolescence, ça viderait ces entrées à tort. Si
+// un nouveau situationId par catégorie est ajouté dans detecterSituations,
+// ajouter son préfixe ICI, sinon les entrées obsolètes de ce type ne seront
+// simplement jamais nettoyées (repli sûr — jamais de faux positif).
+const PREFIXES_SITUATION_CATEGORIE = [
+  "budget",
+  "tendance",
+  "baisse",
+  "inhabituelle",
+  "recurrente",
+  "nouvelle",
+  "compensation",
+  "correlation",
+];
+
+// RÈGLE À NE JAMAIS CASSER — NETTOYAGE SILENCIEUX, UNE SEULE FOIS AU
+// CHARGEMENT : retire toute entrée par catégorie dont AUCUNE référence
+// (deux pour compensation/correlation) ne correspond plus à une enveloppe
+// active aujourd'hui — l'appelant décide du "une seule fois" (cf. RÈGLE côté
+// app/(tabs)/index.tsx), cette fonction est pure et peut être rappelée sans
+// risque, elle ne fait qu'un filtrage. Comparaison par id ET par nom
+// trimmé (pas seulement id) : des entrées legacy antérieures à l'usage d'un
+// id stable comme situationId ont pu être écrites avec le nom de la
+// catégorie à la place — même filtre "actif ce mois-ci" que validerConseil
+// (estCategorieActiveCeMois), pour ne jamais garder une entrée que
+// validerConseil aurait de toute façon rejetée à chaque rendu (c'est
+// exactement le warning en boucle que ce nettoyage doit faire disparaître).
+export function nettoyerEtatsInsightsObsoletes(
+  etats: EtatsInsightsMap,
+  enveloppes: Enveloppe[],
+  anneeActuelle: number,
+  moisActuel: number,
+): EtatsInsightsMap {
+  const nettoye: EtatsInsightsMap = {};
+  Object.entries(etats).forEach(([situationId, etatPersiste]) => {
+    const [prefixe, reste] = situationId.split(":");
+    if (!PREFIXES_SITUATION_CATEGORIE.includes(prefixe)) {
+      nettoye[situationId] = etatPersiste;
+      return;
+    }
+    const references = (reste ?? "").split("+");
+    const toutesActives = references.every((ref) =>
+      enveloppes.some(
+        (e) =>
+          (e.id === ref || e.nom.trim() === ref) &&
+          estCategorieActiveCeMois(e, anneeActuelle, moisActuel),
+      ),
+    );
+    if (toutesActives) {
+      nettoye[situationId] = etatPersiste;
+    }
+  });
+  return nettoye;
 }
 
 // Compteur cumulatif du nombre de situations passées par RESOLU/STABLE au
@@ -1369,6 +1438,32 @@ function detecterSituations(
       niveauConseil: () => "bon",
     });
   }
+
+  // RÈGLE À NE JAMAIS CASSER — NETTOYAGE IMMÉDIAT DES CATÉGORIES DISPARUES :
+  // contrairement à la purge par ancienneté juste en dessous, celle-ci ne
+  // peut PAS attendre 30 jours. Les familles liées à une catégorie
+  // (situationId = "budget:<id>" ou "tendance:<id>") gardent souvent
+  // `estActive` vrai en interne (basé sur le dernier depense/budget connu
+  // de la ligne), donc `dateDerniereMiseAJour` continue d'être rafraîchie
+  // chaque jour tant que la situation "semble" active — la purge par
+  // ancienneté ne se déclenche alors JAMAIS. Sans ce nettoyage, une
+  // catégorie supprimée (ou une catégorie ponctuelle expirée, toujours
+  // présente dans `enveloppes` mais inactive ce mois-ci) reste indéfiniment
+  // dans le cache : validerConseil (plus bas dans genererConseils) rejette
+  // alors le même conseil à CHAQUE appel, produisant le warning "catégorie
+  // ... inactive ou introuvable ce mois-ci" en boucle. On supprime donc ici
+  // toute situation de catégorie dont l'id ne correspond plus à une
+  // enveloppe active ce mois-ci — même test que validerConseil, appliqué en
+  // amont plutôt que rejeté en aval à chaque rendu.
+  const FAMILLES_CATEGORIE = ["budget", "tendance"];
+  Object.keys(etatsAJour).forEach((situationId) => {
+    const [famille, idCategorie] = situationId.split(":");
+    if (!FAMILLES_CATEGORIE.includes(famille)) return;
+    const enveloppe = enveloppes.find((e) => e.id === idCategorie);
+    if (!enveloppe || !estCategorieActiveCeMois(enveloppe, anneeActuelle, moisActuel)) {
+      delete etatsAJour[situationId];
+    }
+  });
 
   // Purge des entrées jamais retouchées depuis longtemps (ex: catégorie
   // supprimée entre-temps) — hygiène, évite une croissance illimitée du

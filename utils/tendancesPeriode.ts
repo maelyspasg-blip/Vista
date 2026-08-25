@@ -1,3 +1,8 @@
+// RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
+// module ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
+// .upsert() vers Supabase — moteur de lecture pur, toute écriture vit dans
+// app/store.ts (cf. RÈGLE DE SÉCURITÉ en tête de ce fichier).
+//
 // RÈGLE À NE JAMAIS CASSER — CARTOGRAPHIE DES 3 ZONES DE COACHING :
 // Nos conseils (utils/conseils.ts) = MOIS EN COURS / Ce qu'il faut retenir
 // (ce fichier) = PÉRIODE SÉLECTIONNÉE par l'utilisateur sur Stats / Vista

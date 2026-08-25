@@ -1,10 +1,55 @@
 import { useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabaseClient";
 import { annulerToutesNotifications } from "./notifications";
 import {
   synchroniserWidgetAjoutRapide,
   synchroniserWidgetPlanning,
 } from "../utils/widgetsSync";
+
+// ============================================================================
+// RÈGLE DE SÉCURITÉ — SUPPRESSIONS EN BASE (à lire avant de toucher à toute
+// fonction ci-dessous qui appelle .delete()) :
+//
+// Fonctions qui suppriment des lignes Supabase, et leurs conditions :
+//   - appliquerEnveloppes() [interne] : supprime toute enveloppe absente du
+//     tableau reçu. Bloquée si le tableau est vide alors que l'état
+//     précédent ne l'était pas (cf. RÈGLE locale à la fonction — supprimer
+//     TOUTES les catégories d'un coup n'a aucun parcours UI légitime dans
+//     l'app). Sauvegarde AsyncStorage best-effort + re-vérification
+//     user_id explicite avant chaque suppression individuelle.
+//   - supprimerObjectif() : 1 objectif par id, protégé côté base par la
+//     contrainte FK ON DELETE NO ACTION (refuse un objectif déjà archivé
+//     dans un mois passé).
+//   - supprimerEnveloppe() : 1 catégorie + ses transactions/événements
+//     liés, même protection FK.
+//   - supprimerEvenement() / supprimerTransaction() / supprimerModeleDepense() :
+//     1 ligne par id.
+//
+// RÈGLE À NE JAMAIS CASSER : toute suppression doit rester scopée à
+// l'utilisateur courant. Ce scoping repose aujourd'hui sur les policies
+// RLS Supabase (aucune définition de policy trouvée dans
+// supabase/migrations/ au moment d'un audit de sécurité — À VÉRIFIER
+// DIRECTEMENT DANS LE DASHBOARD SUPABASE, pas seulement dans ce repo, avant
+// de considérer ce point acquis). `appliquerEnveloppes()` ajoute en plus un
+// filtre `user_id` explicite côté client, en défense en profondeur — les
+// autres fonctions listées ci-dessus n'ont pas encore ce filtre client, à
+// étendre si l'audit RLS révèle un manque réel côté serveur.
+//
+// RÈGLE À NE JAMAIS CASSER : appliquerEnveloppes() ne doit JAMAIS recevoir
+// un tableau vide en provenance d'un état précédent non vide sans que ce
+// soit explicitement voulu (cf. le garde-fou dans la fonction elle-même) —
+// une suppression légitime (une catégorie) reste toujours un tableau non
+// vide, seul le cas catastrophique (tout a disparu) est bloqué.
+//
+// RÈGLE (process — aucune infra de test automatisé dans ce repo à ce jour,
+// pas de suite à faire tourner en CI) : avant tout commit touchant ce
+// fichier, vérifier MANUELLEMENT que le nombre d'enveloppes et de
+// transactions en base n'a pas diminué sans action explicite de
+// l'utilisateur (suppression d'une catégorie/dépense précise dans l'UI),
+// et qu'aucun nouvel appel .delete()/.update()/.upsert() n'a été ajouté
+// sans un filtre d'appartenance explicite (id précis + idéalement user_id).
+// ============================================================================
 
 // Couleur de secours si une ligne existante a `couleur` vide/null en base
 // (donnée legacy, colonne nullable côté Supabase malgré le type non-null ici)
@@ -280,18 +325,80 @@ function enveloppesEgales(a: Enveloppe, b: Enveloppe): boolean {
   );
 }
 
+// RÈGLE : slot unique (écrasé à chaque suppression, pas un historique
+// cumulatif) — cette sauvegarde est un filet de secours pour un
+// débogage/support manuel après coup, pas une fonctionnalité de
+// "corbeille" pour l'utilisateur ; best-effort, une erreur d'écriture ne
+// doit jamais bloquer la suppression Supabase elle-même.
+const CLE_BACKUP_ENVELOPPES_SUPPRIMEES = "vista_backup_enveloppes_supprimees";
+
+function sauvegarderEnveloppesSupprimees(enveloppes: Enveloppe[]): void {
+  AsyncStorage.setItem(
+    CLE_BACKUP_ENVELOPPES_SUPPRIMEES,
+    JSON.stringify({ horodatage: new Date().toISOString(), enveloppes }),
+  ).catch((e) => {
+    console.warn(
+      "[store] Sauvegarde de secours des enveloppes supprimées a échoué :",
+      e,
+    );
+  });
+}
+
+// RÈGLE À NE JAMAIS CASSER — PROTECTION DONNÉES : cette fonction est la
+// plus dangereuse du fichier — elle supprime en base TOUTE enveloppe
+// absente du tableau reçu, cf. RÈGLE DE SÉCURITÉ en tête de fichier.
 function appliquerEnveloppes(nouvellesEnveloppes: Enveloppe[]) {
   const anciennes = etat.enveloppes;
+
+  // RÈGLE À NE JAMAIS CASSER : un tableau VIDE reçu alors que l'état
+  // précédent NE L'ÉTAIT PAS est traité comme une anomalie (bug, race
+  // condition, appel avant hydratation complète des données) plutôt
+  // qu'une action utilisateur légitime — supprimer TOUTES les catégories
+  // d'un coup n'a aucun parcours UI dédié dans l'app (contrairement à
+  // supprimer UNE catégorie via modifierEnveloppes, qui reste un tableau
+  // non vide de longueur n-1 et n'est jamais bloqué par ce garde-fou).
+  // Opération annulée AVANT tout setEtat : jamais un flash local d'une
+  // liste vide, jamais un appel Supabase déclenché.
+  if (nouvellesEnveloppes.length === 0 && anciennes.length > 0) {
+    console.warn(
+      `[store] appliquerEnveloppes ANNULÉ : tableau vide reçu alors que ${anciennes.length} enveloppe(s) existaient — opération bloquée par sécurité, rien n'a été modifié.`,
+    );
+    signalerErreurSync(
+      "Une anomalie a empêché la mise à jour de vos catégories — rien n'a été modifié.",
+    );
+    return;
+  }
+
   setEtat({ enveloppes: nouvellesEnveloppes });
 
   const idsNouvelles = new Set(nouvellesEnveloppes.map((e) => e.id));
-  anciennes
-    .filter((e) => !idsNouvelles.has(e.id))
-    .forEach((e) => {
+  const enveloppesASupprimer = anciennes.filter((e) => !idsNouvelles.has(e.id));
+
+  if (enveloppesASupprimer.length > 0) {
+    console.warn(
+      `[store] appliquerEnveloppes : suppression de ${enveloppesASupprimer.length} enveloppe(s) — ${enveloppesASupprimer.map((e) => e.nom).join(", ")}.`,
+    );
+    sauvegarderEnveloppesSupprimees(enveloppesASupprimer);
+  }
+
+  enveloppesASupprimer.forEach((e) => {
+    // RÈGLE : double vérification defense-in-depth AU-DELÀ des policies
+    // RLS Supabase (censées déjà scoper par user_id côté serveur, cf.
+    // RÈGLE DE SÉCURITÉ en tête de fichier) — on revérifie ici qu'un
+    // utilisateur est bien connecté et on ajoute explicitement le filtre
+    // user_id à la requête, jamais un simple .eq("id", ...) seul.
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) {
+        console.warn(
+          `[store] Suppression de l'enveloppe ${e.id} annulée : aucun utilisateur connecté.`,
+        );
+        return;
+      }
       supabase
         .from("enveloppes")
         .delete()
         .eq("id", e.id)
+        .eq("user_id", user.id)
         .then(({ error }) => {
           if (error) {
             console.error("Supabase delete enveloppe a échoué :", error);
@@ -301,6 +408,7 @@ function appliquerEnveloppes(nouvellesEnveloppes: Enveloppe[]) {
           }
         });
     });
+  });
 
   nouvellesEnveloppes.forEach((e) => {
     const ancienne = anciennes.find((a) => a.id === e.id);
@@ -1538,7 +1646,7 @@ export function useObjectifs() {
         // est l'appel fait au montage de (tabs)/_layout.tsx, donc le point
         // naturel pour synchroniser les deux widgets à l'ouverture de l'app.
         synchroniserWidgetPlanning(evenementsCharges);
-        synchroniserWidgetAjoutRapide();
+        synchroniserWidgetAjoutRapide(etat.transactions);
       } catch (e) {
         console.error("Chargement des événements a échoué :", e);
         signalerErreurSync(
@@ -1908,6 +2016,97 @@ export function useObjectifs() {
 
     modifierEnveloppes: (enveloppes: Enveloppe[]) => {
       appliquerEnveloppes(enveloppes);
+    },
+
+    // RÈGLE À NE JAMAIS CASSER : contrairement à modifierEnveloppes (qui
+    // cible un id précis via appliquerEnveloppes), ce renommage est
+    // VOLONTAIREMENT GLOBAL — l'utilisateur veut que "Loyer" s'appelle
+    // "Logement" PARTOUT (mois en cours ET tous les mois archivés), pas
+    // seulement pour la ligne actuellement affichée. Renomme donc par NOM
+    // (pas par id) dans `enveloppes` ET `snapshot_enveloppes` — seule
+    // action de ce fichier qui modifie rétroactivement des snapshots
+    // archivés, exception délibérée à la règle générale d'immutabilité de
+    // l'historique (paiements, montants) : un nom de catégorie est un
+    // libellé, pas un fait financier passé, donc pas soumis à la même
+    // contrainte. Fonctionne aussi pour les enveloppes de type "Entrée",
+    // aucune restriction de type ici.
+    renommerCategoriePartout: async (
+      ancienNom: string,
+      nouveauNom: string,
+    ): Promise<boolean> => {
+      const nom = nouveauNom.trim();
+      if (!nom || nom === ancienNom) return false;
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          console.error(
+            "Renommage de catégorie refusé : aucun utilisateur connecté.",
+          );
+          signalerErreurSync("Tu dois être connecté pour renommer une catégorie.");
+          return false;
+        }
+
+        const { error: erreurEnveloppes } = await supabase
+          .from("enveloppes")
+          .update({ nom })
+          .eq("user_id", user.id)
+          .eq("nom", ancienNom);
+        if (erreurEnveloppes) {
+          console.error(
+            "Supabase update enveloppes (renommage global) a échoué :",
+            erreurEnveloppes,
+          );
+          signalerErreurSync(
+            `Impossible de renommer la catégorie : ${erreurEnveloppes.message}`,
+          );
+          return false;
+        }
+
+        // RÈGLE : snapshot_enveloppes n'a pas de colonne user_id directe
+        // (scopée via snapshot_mois_id → snapshots_mois.user_id) — on
+        // restreint donc explicitement aux snapshotIds déjà chargés pour
+        // CET utilisateur (etat.historiquesMois, lui-même chargé scopé par
+        // user_id dans chargerHistoriquesMois), jamais un update sans borne.
+        const snapshotIds = etat.historiquesMois.map((s) => s.id);
+        if (snapshotIds.length > 0) {
+          const { error: erreurSnapshots } = await supabase
+            .from("snapshot_enveloppes")
+            .update({ nom })
+            .in("snapshot_mois_id", snapshotIds)
+            .eq("nom", ancienNom);
+          if (erreurSnapshots) {
+            console.error(
+              "Supabase update snapshot_enveloppes (renommage global) a échoué :",
+              erreurSnapshots,
+            );
+            signalerErreurSync(
+              `Impossible de renommer la catégorie dans l'historique : ${erreurSnapshots.message}`,
+            );
+            return false;
+          }
+        }
+
+        setEtat({
+          enveloppes: etat.enveloppes.map((e) =>
+            e.nom === ancienNom ? { ...e, nom } : e,
+          ),
+          historiquesMois: etat.historiquesMois.map((s) => ({
+            ...s,
+            enveloppes: s.enveloppes.map((e) =>
+              e.nom === ancienNom ? { ...e, nom } : e,
+            ),
+          })),
+        });
+        return true;
+      } catch (e) {
+        console.error("Renommage global de catégorie a échoué :", e);
+        signalerErreurSync(
+          "Impossible de renommer la catégorie : problème de connexion.",
+        );
+        return false;
+      }
     },
 
     supprimerEnveloppe: async (id: string) => {
@@ -2310,8 +2509,10 @@ export function useObjectifs() {
         const enveloppesMaj = etat.enveloppes.map((e) =>
           e.id === enveloppeId ? { ...e, depense: e.depense + montant } : e,
         );
-        setEtat({ transactions: [...etat.transactions, nouvelle] });
+        const transactionsMaj = [...etat.transactions, nouvelle];
+        setEtat({ transactions: transactionsMaj });
         appliquerEnveloppes(enveloppesMaj);
+        synchroniserWidgetAjoutRapide(transactionsMaj);
         return nouvelle;
       } catch (e) {
         console.error("Ajout de dépense a échoué :", e);
@@ -2355,6 +2556,7 @@ export function useObjectifs() {
 
       setEtat({ transactions: transactionsMaj });
       appliquerEnveloppes(enveloppesMaj);
+      synchroniserWidgetAjoutRapide(transactionsMaj);
 
       const { error } = await supabase
         .from("transactions")
@@ -2377,10 +2579,10 @@ export function useObjectifs() {
           ? { ...e, depense: Math.max(0, e.depense - tx.montant) }
           : e,
       );
-      setEtat({
-        transactions: etat.transactions.filter((t) => t.id !== id),
-      });
+      const transactionsMaj = etat.transactions.filter((t) => t.id !== id);
+      setEtat({ transactions: transactionsMaj });
       appliquerEnveloppes(enveloppesMaj);
+      synchroniserWidgetAjoutRapide(transactionsMaj);
       supabase
         .from("transactions")
         .delete()

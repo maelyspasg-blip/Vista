@@ -286,6 +286,15 @@ export default function RootLayout() {
     const dansOnboarding = segments[0] === "onboarding";
     const dansPreferences = dansOnboarding && segments[1] === "preferences";
     const dansEssaiExpire = dansOnboarding && segments[1] === "essai-expire";
+    // RÈGLE À NE JAMAIS CASSER : un invité (session anonyme déjà active,
+    // onboarding déjà marqué complet) qui navigue volontairement vers
+    // /onboarding/inscription pour convertir son compte (depuis GuestBanner
+    // ou "Ton bilan", cf. RÈGLE dans ces fichiers) ne doit JAMAIS être
+    // reboucané vers (tabs) par ce useEffect — sinon l'écran d'inscription
+    // s'affiche une fraction de seconde puis disparaît (bug confirmé). Cette
+    // route reste la SEULE exception : tout autre écran d'onboarding, une
+    // fois onboarding_complete vrai, renvoie normalement vers (tabs).
+    const dansInscription = dansOnboarding && segments[1] === "inscription";
     const dansTabs = segments[0] === "(tabs)" || segments[0] === "profil";
     const surSlides = dansOnboarding && segments.length <= 1;
 
@@ -302,7 +311,7 @@ export default function RootLayout() {
       if (onboardingComplete === null) return;
       if (!onboardingComplete) {
         if (!dansPreferences) router.replace("/onboarding/preferences");
-      } else if (dansOnboarding) {
+      } else if (dansOnboarding && !(isGuest && dansInscription)) {
         router.replace("/(tabs)");
       }
     } else if (dansTabs) {
@@ -316,6 +325,7 @@ export default function RootLayout() {
     onboardingVu,
     onboardingComplete,
     estGuestExpire,
+    isGuest,
     segments,
     router,
   ]);

@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { TABLES_UTILISATEUR } from "../_shared/tables.ts";
+import { supprimerDonneesUtilisateur } from "../_shared/tables.ts";
 
 // Invoquée quotidiennement (Supabase Dashboard -> Integrations -> Cron
 // Jobs -> Invoke Edge Function). Source de vérité pour l'expiration du mode
@@ -35,14 +35,11 @@ Deno.serve(async (req) => {
   const resultats: Record<string, string> = {};
 
   for (const { user_id } of invitesExpires ?? []) {
-    for (const table of TABLES_UTILISATEUR) {
-      const { error } = await supabaseAdmin.from(table).delete().eq("user_id", user_id);
-      if (error) {
-        resultats[user_id] = `Échec suppression ${table} : ${error.message}`;
-        break;
-      }
+    const erreurDonnees = await supprimerDonneesUtilisateur(supabaseAdmin, user_id);
+    if (erreurDonnees) {
+      resultats[user_id] = erreurDonnees;
+      continue;
     }
-    if (resultats[user_id]) continue;
 
     const { error: erreurSuppression } =
       await supabaseAdmin.auth.admin.deleteUser(user_id);

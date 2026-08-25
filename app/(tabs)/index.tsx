@@ -47,6 +47,7 @@ import {
   EtatsInsightsMap,
   genererConseils,
   LIBELLES_ETAT_INSIGHT,
+  nettoyerEtatsInsightsObsoletes,
   sauvegarderEtatsInsights,
   sauvegarderNbAmeliorations,
 } from "../../utils/conseils";
@@ -298,6 +299,37 @@ export default function Dashboard() {
       setUserIdInsights(userId);
     })();
   }, []);
+  // RÈGLE À NE JAMAIS CASSER — NETTOYAGE SILENCIEUX, UNE SEULE FOIS AU
+  // CHARGEMENT : retire les entrées AsyncStorage (vista_etats_insights_*)
+  // dont la catégorie référencée (par id ou par nom, pour les entrées
+  // legacy) n'existe plus/n'est plus active — cf. nettoyerEtatsInsightsObsoletes
+  // (utils/conseils.ts). objStore.enveloppes peut être vide un court instant
+  // au tout premier rendu (chargement async du store, indépendant du
+  // `chargement` de _layout.tsx) — on attend qu'il soit non-vide ET que
+  // etatsInsights ait été chargé (userIdInsights posé) avant de nettoyer,
+  // jamais sur un tableau d'enveloppes potentiellement pas encore prêt, sous
+  // peine de vider à tort tout l'historique de suivi. Le ref garantit que ça
+  // ne tourne qu'UNE fois par session, même si enveloppes change ensuite.
+  const nettoyageInsightsFaitRef = useRef(false);
+  useEffect(() => {
+    if (nettoyageInsightsFaitRef.current) return;
+    if (!userIdInsights || objStore.enveloppes.length === 0) return;
+    nettoyageInsightsFaitRef.current = true;
+    (async () => {
+      const maintenant = new Date();
+      const nettoye = nettoyerEtatsInsightsObsoletes(
+        etatsInsights,
+        objStore.enveloppes,
+        maintenant.getFullYear(),
+        maintenant.getMonth(),
+      );
+      if (Object.keys(nettoye).length !== Object.keys(etatsInsights).length) {
+        derniersEtatsSauvegardesRef.current = JSON.stringify(nettoye);
+        setEtatsInsights(nettoye);
+        await sauvegarderEtatsInsights(userIdInsights, nettoye);
+      }
+    })();
+  }, [userIdInsights, objStore.enveloppes, etatsInsights]);
   const { apercu: tutorielApercuVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
   const {
@@ -717,12 +749,22 @@ export default function Dashboard() {
 
   const sauvegarderEnveloppe = () => {
     if (!enveloppeEnEdition) return;
+    // RÈGLE : un renommage se répercute PARTOUT (mois en cours ET tous les
+    // mois archivés, cf. objStore.renommerCategoriePartout) — la mise à
+    // jour ci-dessous via setEnveloppes/appliquerEnveloppes ne cible que
+    // CETTE ligne précise par id, donc on déclenche le renommage global en
+    // plus, jamais à la place (les autres champs modifiés ici — budget,
+    // couleur, type... — restent propres à cette seule enveloppe).
+    const nouveauNom = nomTemp.trim();
+    if (nouveauNom && nouveauNom !== enveloppeEnEdition.nom) {
+      objStore.renommerCategoriePartout(enveloppeEnEdition.nom, nouveauNom);
+    }
     setEnveloppes(
       enveloppes.map((e) =>
         e.id === enveloppeEnEdition.id
           ? {
               ...e,
-              nom: nomTemp || e.nom,
+              nom: nouveauNom || e.nom,
               budget: parseMontant(budgetTemp) || 0,
               couleur: couleurTemp,
               type: typeTemp,

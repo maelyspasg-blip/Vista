@@ -1,9 +1,18 @@
 import { Asset } from "expo-asset";
 import { Directory, File } from "expo-file-system";
 import { widgetsDirectory } from "expo-widgets";
-import type { Evenement } from "../app/store";
+import type { Evenement, Transaction } from "../app/store";
+import { genererOccurrencesEvenement } from "./evenements";
 import { PlanningWidget, type EvenementWidgetJour } from "../widgets/PlanningWidget";
 import { AjoutRapideWidget } from "../widgets/AjoutRapideWidget";
+
+// RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
+// module ne fait que PRÉPARER un snapshot (à partir de données déjà
+// chargées par l'app) et l'écrire dans le dossier App Group partagé avec
+// les extensions widget (updateSnapshot) — il ne doit JAMAIS contenir
+// d'appel .delete()/.update()/.insert()/.upsert() vers Supabase. Toute
+// écriture Supabase réelle vit dans app/store.ts (cf. RÈGLE DE SÉCURITÉ en
+// tête de ce fichier).
 
 const NOM_FICHIER_LOGO = "vista-logo-mark.png";
 
@@ -52,26 +61,62 @@ function dateVersISO(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-// Ne considère que les événements ponctuels rattachés directement à
-// aujourd'hui (date === aujourd'hui, avec une heure précise) — les
-// événements récurrents ne sont volontairement pas développés ici pour
-// garder cette synchro simple : la logique d'expansion des occurrences
-// (genererOccurrencesEvenement) vit dans app/(tabs)/planning.tsx et n'est
-// pas partagée pour l'instant. À réévaluer si des événements récurrents
-// doivent apparaître dans le widget.
+// Date au même jour que `reference`, à l'heure "XhYY" donnée — utilisé pour
+// transformer un horaire d'événement en Date exploitable par
+// Widget.updateTimeline (une entrée par horaire de début, cf. RÈGLE plus
+// bas). setHours(0, minutesTotales, ...) gère nativement le débordement
+// (ex: 90 minutes → 1h30), pas besoin d'extraire heures/minutes séparément.
+function dateAvecHeure(reference: Date, heure: string): Date {
+  const d = new Date(reference);
+  d.setHours(0, heureEnMinutes(heure), 0, 0);
+  return d;
+}
+
+// Un événement récurrent tombe-t-il le jour de `reference` ? Réutilise
+// EXACTEMENT la même expansion d'occurrences que app/(tabs)/planning.tsx
+// (import partagé depuis utils/evenements.ts, cf. RÈGLE là-bas) — jamais
+// une seconde implémentation qui pourrait diverger. Fenêtre réduite à
+// [reference 00:00, reference 23:59] : on ne veut savoir que "ce jour-là
+// en fait partie", pas la liste complète des occurrences futures.
+function evenementRecurrentTombeCeJourLa(e: Evenement, reference: Date): boolean {
+  if (!e.recurrent || !e.frequence) return false;
+  const debutFenetre = new Date(reference);
+  debutFenetre.setHours(0, 0, 0, 0);
+  const finFenetre = new Date(reference);
+  finFenetre.setHours(23, 59, 59, 999);
+  return (
+    genererOccurrencesEvenement(new Date(e.date), e.frequence, debutFenetre, finFenetre)
+      .length > 0
+  );
+}
+
+// Événements du jour de `reference` pour le widget Planning — ponctuels
+// datés ce jour-là OU récurrents dont une occurrence y tombe (cf.
+// evenementRecurrentTombeCeJourLa ci-dessus). `reference` pilote aussi
+// `estPasse` : appelée avec des dates différentes (cf.
+// synchroniserWidgetPlanning), ça permet à CHAQUE entrée de la timeline de
+// porter le bon état "passé/à venir" pour l'heure à laquelle WidgetKit
+// l'affichera réellement, plutôt que de figer `estPasse` à l'heure de la
+// synchro pour toutes les entrées futures.
 function evenementsDuJourPourWidget(
   evenements: Evenement[],
+  reference: Date,
 ): EvenementWidgetJour[] {
-  const maintenant = new Date();
-  const aujourdhuiISO = dateVersISO(maintenant);
-  const maintenantMinutes = maintenant.getHours() * 60 + maintenant.getMinutes();
+  const referenceISO = dateVersISO(reference);
+  const referenceMinutes = reference.getHours() * 60 + reference.getMinutes();
 
   return evenements
-    .filter((e) => e.date === aujourdhuiISO && !e.touteLaJournee && e.heure)
+    .filter(
+      (e) =>
+        !e.touteLaJournee &&
+        e.heure &&
+        (e.date === referenceISO || evenementRecurrentTombeCeJourLa(e, reference)),
+    )
     .map((e) => ({
       nom: e.nom,
       heureDebut: e.heure,
-      estPasse: heureEnMinutes(e.heure) < maintenantMinutes,
+      estPasse: heureEnMinutes(e.heure) < referenceMinutes,
+      estFinancier: e.estFinancier,
     }))
     .sort((a, b) => heureEnMinutes(a.heureDebut) - heureEnMinutes(b.heureDebut));
 }
@@ -81,19 +126,156 @@ export async function synchroniserWidgetPlanning(
 ): Promise<void> {
   try {
     const logoUri = await obtenirLogoUri();
-    PlanningWidget.updateSnapshot({
-      evenements: evenementsDuJourPourWidget(evenements),
-      logoUri,
-    });
+    const maintenant = new Date();
+
+    // RÈGLE À NE JAMAIS CASSER — TIMELINE, PAS UN SIMPLE SNAPSHOT : une
+    // entrée par horaire de début d'événement encore à venir aujourd'hui
+    // (pour que "prochain événement" avance tout seul dans le widget small,
+    // sans réveil de l'app) + une dernière entrée à minuit ce soir. Cette
+    // dernière entrée bascule elle-même sur le jour suivant : comme
+    // `evenementsDuJourPourWidget` calcule "aujourd'hui" par rapport à la
+    // `reference` reçue, lui passer minuit (qui déborde nativement sur le
+    // jour suivant via setHours(24, ...)) donne directement l'agenda de
+    // DEMAIN — le widget change de jour sans dépendre d'une réouverture de
+    // l'app, tant que cette entrée n'a pas été remplacée entre-temps par
+    // une nouvelle synchro (ajout/modif/suppression d'événement).
+    const evenementsAujourdHui = evenementsDuJourPourWidget(evenements, maintenant);
+    const horairesAVenir = evenementsAujourdHui
+      .filter((e) => !e.estPasse)
+      .map((e) => dateAvecHeure(maintenant, e.heureDebut))
+      .filter((d) => d > maintenant);
+
+    const minuitCeSoir = new Date(maintenant);
+    minuitCeSoir.setHours(24, 0, 0, 0);
+
+    const datesEntrees = [maintenant, ...horairesAVenir, minuitCeSoir].sort(
+      (a, b) => a.getTime() - b.getTime(),
+    );
+
+    PlanningWidget.updateTimeline(
+      datesEntrees.map((date) => ({
+        date,
+        props: { evenements: evenementsDuJourPourWidget(evenements, date), logoUri },
+      })),
+    );
   } catch (e) {
     console.error("[widgetsSync] Mise à jour du widget Planning a échoué :", e);
   }
 }
 
-export async function synchroniserWidgetAjoutRapide(): Promise<void> {
+// RÈGLE : pas de updateTimeline ici, contrairement au widget Planning — il
+// n'y a pas d'état "futur déjà connu" à programmer (contrairement à "cet
+// événement commence à telle heure"), juste un total courant qui ne change
+// que sur action utilisateur (ajout/modif/suppression de dépense) —
+// updateSnapshot + un appel de synchro à chaque CRUD (cf. app/store.ts,
+// mêmes points d'appel que appliquerEnveloppes) suffit, jamais de
+// rafraîchissement programmé inutile.
+// RÈGLE À NE JAMAIS CASSER — PROPS TOUJOURS SÉRIALISABLES : updateSnapshot
+// passe ces props au pont natif (JSI HostFunction) qui les sérialise côté
+// widget — un NaN/Infinity/undefined dans un champ numérique, ou un champ
+// non-string dans `nom`, fait planter cette sérialisation avec une
+// "Exception in HostFunction" qui peut survenir HORS du call stack
+// synchrone (donc pas toujours rattrapable par un simple try/catch JS,
+// cf. RÈGLE plus bas). La seule protection fiable est de garantir que ces
+// valeurs sont déjà propres AVANT l'appel, jamais de compter sur le pont
+// natif pour les valider.
+function nombreSur(valeur: number): number {
+  return Number.isFinite(valeur) ? valeur : 0;
+}
+
+// TEMPORAIRE — DEBUG PAR ÉLIMINATION : le crash natif persiste malgré la
+// sanitisation des valeurs (Number.isFinite, nom forcé en string) ET un
+// try/catch autour de l'appel — cf. RÈGLE plus haut : une "Exception in
+// HostFunction" peut survenir HORS du call stack synchrone, donc un
+// try/catch JS ne la voit pas forcément passer. À DÉFAUT DE POUVOIR TESTER
+// SUR DEVICE DEPUIS CET ENVIRONNEMENT, ce palier permet de rejouer
+// manuellement les 4 étapes demandées sans réécrire le fichier à chaque
+// fois : changer UNIQUEMENT ce nombre, relancer sur device, noter à quel
+// palier ça replante. 4 = comportement normal (toutes les props), à
+// remettre une fois la vraie cause identifiée — ne JAMAIS livrer autre
+// chose que 4.
+const ETAPE_DEBUG_AJOUT_RAPIDE: 1 | 2 | 3 | 4 = 4;
+
+export async function synchroniserWidgetAjoutRapide(
+  transactions: Transaction[],
+): Promise<void> {
   try {
     const logoUri = await obtenirLogoUri();
-    AjoutRapideWidget.updateSnapshot({ logoUri });
+    const logoUriSur = typeof logoUri === "string" ? logoUri : null;
+
+    // Palier 1 : minimum absolu, cf. étape 1 de la demande.
+    if (ETAPE_DEBUG_AJOUT_RAPIDE === 1) {
+      const props = { logoUri: logoUriSur };
+      console.log("[widgetsSync] DEBUG palier 1 — props :", JSON.stringify(props));
+      AjoutRapideWidget.updateSnapshot(props);
+      return;
+    }
+
+    const aujourdhuiISO = dateVersISO(new Date());
+    const depenseAujourdHui = nombreSur(
+      transactions
+        .filter((t) => t.date === aujourdhuiISO)
+        .reduce((acc, t) => acc + nombreSur(t.montant), 0),
+    );
+
+    // Palier 2 : + depenseAujourdHui figé à 0, cf. étape 2 de la demande —
+    // isole depenseAujourdHui de derniereDepense.
+    if (ETAPE_DEBUG_AJOUT_RAPIDE === 2) {
+      const props = { logoUri: logoUriSur, depenseAujourdHui: 0 };
+      console.log("[widgetsSync] DEBUG palier 2 — props :", JSON.stringify(props));
+      AjoutRapideWidget.updateSnapshot(props);
+      return;
+    }
+
+    // Palier 3 : + derniereDepense absent (jamais `null` explicite — cf.
+    // RÈGLE CAUSE IDENTIFIÉE plus bas, corrigée ici aussi par cohérence).
+    if (ETAPE_DEBUG_AJOUT_RAPIDE === 3) {
+      const props = { logoUri: logoUriSur, depenseAujourdHui: 0, derniereDepense: undefined };
+      console.log("[widgetsSync] DEBUG palier 3 — props :", JSON.stringify(props));
+      AjoutRapideWidget.updateSnapshot(props);
+      return;
+    }
+
+    // RÈGLE : `transactions` est alimenté par le store en ORDRE
+    // D'INSERTION (le plus récent toujours ajouté en fin de tableau, cf.
+    // app/store.ts) — le dernier élément EST la dépense la plus récente,
+    // jamais besoin de re-trier par date (Transaction.date n'a pas de
+    // composante horaire, un tri par date seule ne départagerait pas deux
+    // dépenses du même jour).
+    const derniere =
+      transactions.length > 0 ? transactions[transactions.length - 1] : null;
+    // RÈGLE — CAUSE IDENTIFIÉE PAR LES LOGS DEVICE : les crashs
+    // "Exception in HostFunction" corrélaient à 5/5 avec `derniereDepense:
+    // null` explicite dans les props envoyées (jamais avec un objet
+    // rempli) — cf. logs .expo/dev/logs/start.log. Le pont natif accepte
+    // visiblement mal une valeur JSON `null` pour ce champ optionnel
+    // objet, contrairement à la clé absente. `derniereDepense` est donc
+    // soit ABSENT (jamais `null` explicite), soit un objet SIMPLE à deux
+    // champs déjà validés (nom forcé en string, montant fini) — jamais
+    // l'objet Transaction brut (qui porte enveloppeId/id/date, sans
+    // intérêt ici et sans garantie de sérialisation propre). Reste à
+    // reconfirmer sur device : si le crash persiste malgré ça, la cause
+    // est ailleurs et il faudra revenir à la ladder ETAPE_DEBUG_AJOUT_RAPIDE
+    // ci-dessus pour continuer l'élimination.
+    const derniereDepense =
+      derniere && typeof derniere.nom === "string" && Number.isFinite(derniere.montant)
+        ? { nom: derniere.nom, montant: derniere.montant }
+        : undefined;
+    // Palier 4 (normal) : + les vraies valeurs calculées, cf. étape 4 — log
+    // systématique des props exactement envoyées, pour comparer avec ce
+    // que le natif reçoit réellement en cas de crash à ce palier.
+    const props = { logoUri: logoUriSur, depenseAujourdHui, derniereDepense };
+    console.log("[widgetsSync] props avant updateSnapshot :", JSON.stringify(props));
+    try {
+      AjoutRapideWidget.updateSnapshot(props);
+    } catch (e) {
+      console.error(
+        "[widgetsSync] AjoutRapideWidget.updateSnapshot a planté — props envoyées :",
+        JSON.stringify(props),
+        "erreur :",
+        e,
+      );
+    }
   } catch (e) {
     console.error(
       "[widgetsSync] Mise à jour du widget Ajout rapide a échoué :",

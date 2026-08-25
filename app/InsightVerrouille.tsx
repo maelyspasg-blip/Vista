@@ -4,6 +4,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
 
+// RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
+// composant ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
+// .upsert() vers Supabase — composant d'affichage/déblocage UI pur, toute
+// écriture vit dans app/store.ts (cf. RÈGLE DE SÉCURITÉ en tête de ce
+// fichier).
+//
 // Couleur "navy" déjà utilisée ailleurs dans l'app (ex: widgets) — sobre,
 // pas de cercle ni de fond coloré autour, même esprit que l'icône ampoule
 // (Ionicons + couleur simple) utilisée dans budget.tsx.

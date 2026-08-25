@@ -1,5 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+// RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
+// module ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
+// .upsert() vers Supabase — seul AsyncStorage (stockage LOCAL à
+// l'appareil, jamais synchronisé en base) est utilisé ici, cf. RÈGLE
+// juste en dessous.
+//
 // RÈGLE À NE JAMAIS CASSER : simulation locale en attendant l'intégration
 // RevenueCat — ce flag ne représente aucun abonnement réel, il ne doit
 // jamais être positionné à true ailleurs que via le toggle "Simuler

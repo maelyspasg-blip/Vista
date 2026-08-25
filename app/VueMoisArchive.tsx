@@ -1,11 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
-import { StyleSheet, TouchableOpacity, View } from "react-native";
+import { Alert, Modal, StyleSheet, TouchableOpacity, View } from "react-native";
 import { BarreProgression } from "./BarreProgression";
+import { BoutonPrincipal } from "./BoutonPrincipal";
 import { PALETTE_COULEURS } from "./ColorPicker";
 import { useObjectifs } from "./store";
 import { formaterMontant } from "../utils/montant";
 import { Text } from "./Texte";
+import { TextInput } from "./TexteInput";
 import { useTheme } from "./ThemeContext";
 import {
   categoriesDuMois,
@@ -32,6 +34,42 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
   const [deltaPourcentagePour, setDeltaPourcentagePour] = useState<
     Record<string, boolean>
   >({});
+  // RÈGLE : renommage GLOBAL par nom (cf. objStore.renommerCategoriePartout)
+  // — même depuis cette vue "lecture seule" des mois archivés, le nom
+  // affiché ici est un libellé, pas un montant du mois : le modifier ne
+  // touche à rien de financier, seulement à comment la catégorie s'appelle
+  // partout dans l'app.
+  const [renommageAncienNom, setRenommageAncienNom] = useState<string | null>(null);
+  const [nouveauNomTemp, setNouveauNomTemp] = useState("");
+  const [renommageEnCours, setRenommageEnCours] = useState(false);
+
+  const ouvrirRenommage = (nom: string) => {
+    setRenommageAncienNom(nom);
+    setNouveauNomTemp(nom);
+  };
+
+  const confirmerRenommage = async () => {
+    if (!renommageAncienNom || renommageEnCours) return;
+    const nouveauNom = nouveauNomTemp.trim();
+    if (!nouveauNom || nouveauNom === renommageAncienNom) {
+      setRenommageAncienNom(null);
+      return;
+    }
+    setRenommageEnCours(true);
+    const succes = await objStore.renommerCategoriePartout(
+      renommageAncienNom,
+      nouveauNom,
+    );
+    setRenommageEnCours(false);
+    if (!succes) {
+      Alert.alert(
+        "Renommage impossible",
+        "Une erreur est survenue, réessaie plus tard.",
+      );
+      return;
+    }
+    setRenommageAncienNom(null);
+  };
 
   const donnees: DonneesExport = {
     enveloppes: objStore.enveloppes,
@@ -47,6 +85,7 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
   const disponible = disponibleDuMois(donnees, mois, annee) ?? 0;
 
   const categories = envs.filter((e) => e.type !== "Entrée");
+  const entrees = envs.filter((e) => e.type === "Entrée" && e.depense > 0);
   const snapshot = objStore.historiquesMois.find(
     (s) => s.mois === mois && s.annee === annee,
   );
@@ -151,6 +190,14 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                   >
                     {env.nom}
                   </Text>
+                  <TouchableOpacity
+                    onPress={() => ouvrirRenommage(env.nom)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Renommer ${env.nom}`}
+                  >
+                    <Ionicons name="pencil" size={13} color={C.texteMuted} />
+                  </TouchableOpacity>
                 </View>
                 <View style={styles.envRowRight}>
                   <Text style={[styles.envMontant, { color: couleur }]}>
@@ -224,6 +271,41 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
         );
       })}
 
+      {entrees.length > 0 && (
+        <>
+          <Text style={[styles.sectionTitle, { color: C.texteMuted, marginTop: 20 }]}>
+            ENTRÉES D&apos;ARGENT DE {MOIS_LABELS[mois].toUpperCase()} {annee}
+          </Text>
+          {entrees.map((env, index) => {
+            const cle = env.id || `entree-${env.nom}-${index}`;
+            const couleur = (env as unknown as { couleur?: string }).couleur ?? C.vert;
+            return (
+              <View key={cle} style={[styles.envCard, { backgroundColor: couleur + "22" }]}>
+                <View style={styles.envRow}>
+                  <View style={styles.envNomRow}>
+                    <View style={[styles.envDot, { backgroundColor: couleur }]} />
+                    <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
+                      {env.nom}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => ouvrirRenommage(env.nom)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Renommer ${env.nom}`}
+                    >
+                      <Ionicons name="pencil" size={13} color={C.texteMuted} />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={[styles.envMontant, { color: couleur }]}>
+                    {formaterMontant(env.depense)} €
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </>
+      )}
+
       {objectifs.length > 0 && (
         <>
           <Text style={[styles.sectionTitle, { color: C.texteMuted, marginTop: 20 }]}>
@@ -260,6 +342,64 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
         </>
       )}
       <View style={{ height: theme === "sombre" ? 20 : 40 }} />
+
+      <Modal
+        visible={renommageAncienNom !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRenommageAncienNom(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setRenommageAncienNom(null)}
+        >
+          <TouchableOpacity
+            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
+            <Text style={[styles.modalTitre, { color: C.texte }]}>
+              Renommer la catégorie
+            </Text>
+            <Text style={[styles.modalSousTitre, { color: C.texteMuted }]}>
+              Ce changement s&apos;applique à tous les mois où cette
+              catégorie apparaît.
+            </Text>
+            <TextInput
+              style={[
+                styles.input,
+                { backgroundColor: C.fondSecondaire, color: C.texte },
+              ]}
+              value={nouveauNomTemp}
+              onChangeText={setNouveauNomTemp}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={confirmerRenommage}
+            />
+            <View style={styles.modalBoutons}>
+              <TouchableOpacity
+                style={styles.btnAnnuler}
+                onPress={() => setRenommageAncienNom(null)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                  Annuler
+                </Text>
+              </TouchableOpacity>
+              <BoutonPrincipal
+                style={[styles.btnValider, { backgroundColor: C.hero }]}
+                onPress={confirmerRenommage}
+                disabled={renommageEnCours}
+              >
+                <Text style={styles.btnValiderTexte}>
+                  {renommageEnCours ? "..." : "Enregistrer"}
+                </Text>
+              </BoutonPrincipal>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -323,4 +463,19 @@ const styles = StyleSheet.create({
   txNom: { fontSize: 13, fontWeight: "600" },
   txDate: { fontSize: 11 },
   txMontant: { fontSize: 13, fontWeight: "700" },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    justifyContent: "center",
+    padding: 24,
+  },
+  modalCard: { borderRadius: 20, padding: 22 },
+  modalTitre: { fontSize: 17, fontWeight: "700", marginBottom: 6 },
+  modalSousTitre: { fontSize: 12, lineHeight: 17, marginBottom: 16 },
+  input: { borderRadius: 13, padding: 14, fontSize: 16 },
+  modalBoutons: { flexDirection: "row", gap: 10, marginTop: 16 },
+  btnAnnuler: { flex: 1, padding: 15, alignItems: "center" },
+  btnAnnulerTexte: { fontSize: 15, fontWeight: "600" },
+  btnValider: { flex: 1, borderRadius: 13, padding: 15, alignItems: "center" },
+  btnValiderTexte: { fontSize: 15, color: "#FFFFFF", fontWeight: "700" },
 });
