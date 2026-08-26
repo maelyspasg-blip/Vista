@@ -42,3 +42,7 @@ app-example
 /ios
 /android
 .env
+
+# marqueur local du hook pre-commit-review (empreinte du dernier diff staged
+# validé par security-auditor/code-reviewer) — jamais versionné
+.claude/hooks/.last-review-ok
