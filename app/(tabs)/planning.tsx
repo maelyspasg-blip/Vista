@@ -36,6 +36,8 @@ import { Enveloppe, Evenement, useObjectifs } from "../store";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { useTheme } from "../ThemeContext";
 import { useAccessibilite } from "../AccessibiliteContext";
+import { useGuest } from "../GuestContext";
+import { bloquerSiInvite } from "../guestGate";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
@@ -232,6 +234,7 @@ export default function Planning() {
   const { theme, couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const router = useRouter();
+  const { isGuest } = useGuest();
   const params = useLocalSearchParams<{ editEventId?: string }>();
   const { planning: tutorielPlanningVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
@@ -511,6 +514,7 @@ export default function Planning() {
   };
 
   const ouvrirCreationComplete = () => {
+    if (bloquerSiInvite(isGuest, router)) return;
     setNomEvent("");
     setHeureEvent("9h00");
     setDureeEvent("1");
@@ -536,6 +540,7 @@ export default function Planning() {
   };
 
   const ouvrirCreationRapide = (heureTexte: string, date: Date = dateActuelle) => {
+    if (bloquerSiInvite(isGuest, router)) return;
     setNomEvent("");
     setHeureEvent(heureTexte);
     setDureeEvent("1");

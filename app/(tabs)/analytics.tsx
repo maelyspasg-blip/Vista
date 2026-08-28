@@ -874,12 +874,12 @@ export default function Analytics() {
   const estFocusDebug = useIsFocused();
   const objStore = useObjectifs();
   const { estPremium, simulerNonPremium } = usePremium();
+  const { isGuest } = useGuest();
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Stats — voir
   // estComptePremium (utils/premium.ts) pour ce qu'il combine.
-  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium);
+  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
   const { theme, couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
-  const { isGuest } = useGuest();
   const { stats: tutorielStatsVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
   const {

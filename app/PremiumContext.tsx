@@ -1,5 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useState } from "react";
-import { chargerPremiumSimule, sauvegarderPremiumSimule } from "../utils/premium";
+import { chargerPremiumSimule, purgerPremiumSimule, sauvegarderPremiumSimule } from "../utils/premium";
+import { supabase } from "../supabaseClient";
 
 type PremiumContextValue = {
   estPremium: boolean;
@@ -21,6 +22,23 @@ export function PremiumProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     chargerPremiumSimule().then(setEstPremium);
+    // RÈGLE À NE JAMAIS CASSER — ISOLATION ENTRE COMPTES : ce Provider est
+    // monté UNE SEULE FOIS pour toute la durée de vie de l'app (racine de
+    // app/_layout.tsx) — son state (estPremium, simulerNonPremium) survit
+    // donc à n'importe quelle déconnexion/reconnexion sans ce listener.
+    // Sur SIGNED_OUT, on revient aux valeurs par défaut ET on purge
+    // AsyncStorage (cf. purgerPremiumSimule), sinon le prochain compte
+    // connecté sur cet appareil (invité ou non) hériterait du badge/anneau
+    // Premium d'un compte précédent — même mécanisme que
+    // reinitialiserEtatUtilisateur dans app/store.ts.
+    const { data: abonnement } = supabase.auth.onAuthStateChange((evenement) => {
+      if (evenement === "SIGNED_OUT") {
+        setEstPremium(false);
+        setSimulerNonPremium(false);
+        purgerPremiumSimule();
+      }
+    });
+    return () => abonnement.subscription.unsubscribe();
   }, []);
 
   const definirPremium = (actif: boolean) => {

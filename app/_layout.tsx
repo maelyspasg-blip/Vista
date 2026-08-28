@@ -13,6 +13,7 @@ import {
 import { GuestContext } from "./GuestContext";
 import { PremiumProvider } from "./PremiumContext";
 import { supabase } from "../supabaseClient";
+import { reinitialiserEtatUtilisateur } from "./store";
 import "./calendarLocale";
 import { ecouterOnboardingTermine } from "./onboardingCompletion";
 import { getOnboardingVu } from "./onboardingStorage";
@@ -238,6 +239,7 @@ export default function RootLayout() {
             // L'effet de redirection ci-dessous s'occupe de l'écran affiché
             // (essai-expire), une fois estGuestExpire posé à true.
             await supabase.auth.signOut();
+            reinitialiserEtatUtilisateur();
             setSession(null);
             setOnboardingComplete(null);
             setEstGuestExpire(true);
@@ -259,7 +261,7 @@ export default function RootLayout() {
     ecouterOnboardingTermine(() => setOnboardingComplete(true));
 
     const { data: abonnement } = supabase.auth.onAuthStateChange(
-      (_event, nouvelleSession) => {
+      (event, nouvelleSession) => {
         setSession(nouvelleSession);
         if (!nouvelleSession) {
           setIsGuest(false);
@@ -267,6 +269,18 @@ export default function RootLayout() {
           setMsRestantsEssai(null);
           setOnboardingComplete(null);
           dernierUserIdRef.current = null;
+          // RÈGLE À NE JAMAIS CASSER — PROTECTION CONTRE LES DONNÉES QUI
+          // FUITENT D'UN COMPTE À L'AUTRE : cf. RÈGLE détaillée sur
+          // reinitialiserEtatUtilisateur dans app/store.ts. Le listener
+          // interne de store.ts fait déjà cette réinitialisation de façon
+          // fiable (toujours actif au niveau module), mais on l'appelle
+          // aussi ici explicitement, sur l'événement SIGNED_OUT précisément
+          // — défense en profondeur, jamais un seul mécanisme considéré
+          // suffisant seul pour une donnée aussi sensible qu'une photo/un
+          // nom de profil.
+          if (event === "SIGNED_OUT") {
+            reinitialiserEtatUtilisateur();
+          }
           // estGuestExpire n'est volontairement pas remis à false ici : une
           // déconnexion peut survenir précisément parce que l'essai vient
           // d'expirer (cf. l'effet de recheck plus bas), et l'effet de
@@ -330,6 +344,7 @@ export default function RootLayout() {
       if (ms <= 0) {
         setEstGuestExpire(true);
         supabase.auth.signOut();
+        reinitialiserEtatUtilisateur();
       }
     };
 

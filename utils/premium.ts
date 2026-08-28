@@ -52,12 +52,38 @@ export async function sauvegarderPremiumSimule(actif: boolean): Promise<void> {
   }
 }
 
+// RÈGLE À NE JAMAIS CASSER — ISOLATION ENTRE COMPTES : CLE_PREMIUM_SIMULE
+// n'est PAS namespacée par userId (contrairement aux caches insights/
+// backups) — sans purge explicite à la déconnexion, un admin qui active
+// "Simuler Premium" puis se déconnecte laisserait ce flag survivre en
+// AsyncStorage ET dans le state React de PremiumContext (qui ne se
+// réinitialise pas tout seul, cf. PremiumContext.tsx), faisant apparaître
+// le badge/anneau Premium sur le PROCHAIN compte connecté sur le même
+// appareil (invité ou non). Appelée par PremiumContext sur l'événement
+// SIGNED_OUT — même mécanisme réactif que reinitialiserEtatUtilisateur
+// dans app/store.ts.
+export async function purgerPremiumSimule(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(CLE_PREMIUM_SIMULE);
+  } catch {
+    // Best-effort, cf. sauvegarderPremiumSimule.
+  }
+}
+
 // RÈGLE À NE JAMAIS CASSER : point d'entrée UNIQUE pour savoir si un compte
 // a accès aux fonctionnalités Premium — ne jamais dupliquer cette logique
 // ailleurs dans le code, toujours passer par cette fonction (un seul
 // endroit à changer le jour où RevenueCat remplace la simulation).
 //
 // Ordre des vérifications, DÉLIBÉRÉMENT dans cet ordre précis :
+//   0. isGuest → false, INCONDITIONNELLEMENT, avant même TESTFLIGHT_MODE. Un
+//      compte invité (essai 7 jours, cf. GuestContext) ne doit jamais voir
+//      le badge/anneau Premium ni bénéficier de l'accès Premium, même
+//      pendant la période TestFlight — sinon un simple visiteur en mode
+//      découverte se retrouve visuellement indiscernable d'un vrai compte
+//      Premium/admin. Un compte invité n'est jamais admin (isAdmin est
+//      toujours false pour une session anonyme), donc ce cas n'a pas besoin
+//      d'être recroisé avec les branches isAdmin ci-dessous.
 //   1. isAdmin && simulerNonPremium → false. Un admin qui active "Simuler
 //      compte non-premium" doit voir EXACTEMENT ce que voit un utilisateur
 //      gratuit, y compris pendant la période TestFlight — ce cas doit donc
@@ -66,8 +92,9 @@ export async function sauvegarderPremiumSimule(actif: boolean): Promise<void> {
 //      tout, y compris ce qui est exclusif à Premium.
 //   3. TESTFLIGHT_MODE → true. Ne s'applique qu'aux comptes NON-ADMIN à ce
 //      stade (les cas admin sont déjà tranchés ci-dessus) — tout testeur
-//      TestFlight externe (jamais admin) a accès à 100% des fonctionnalités
-//      Premium sans restriction. Cf. RÈGLE sur TESTFLIGHT_MODE plus haut.
+//      TestFlight externe (jamais admin, jamais invité) a accès à 100% des
+//      fonctionnalités Premium sans restriction. Cf. RÈGLE sur
+//      TESTFLIGHT_MODE plus haut.
 //   4. estPremium — le flag simulé (toggle "Simuler Premium", admin
 //      uniquement) pour prévisualiser le rendu premium sans être soi-même
 //      admin, en dehors de toute période TestFlight.
@@ -80,7 +107,9 @@ export function estComptePremium(
   isAdmin: boolean,
   estPremium: boolean,
   simulerNonPremium: boolean,
+  isGuest: boolean,
 ): boolean {
+  if (isGuest) return false;
   if (isAdmin && simulerNonPremium) return false;
   if (isAdmin) return true;
   if (TESTFLIGHT_MODE) return true;

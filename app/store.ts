@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabaseClient";
 import { annulerToutesNotifications } from "./notifications";
 import { determinerAlerteBudget, type AlerteBudget } from "./alertesBudget";
+import { purgerDonneesInsights } from "../utils/conseils";
 import {
   synchroniserWidgetAjoutRapide,
   synchroniserWidgetPlanning,
@@ -198,9 +199,6 @@ export type SnapshotMois = {
   totalDepense: number;
 };
 
-const EVENEMENTS_INIT: Evenement[] = [];
-const TRANSACTIONS_INIT: Transaction[] = [];
-
 export type SuggestionRecurrence = {
   enveloppeId: string;
   nom: string;
@@ -246,7 +244,18 @@ type EtatStore = {
   suggestionRecurrence: SuggestionRecurrence | null;
 };
 
-let etat: EtatStore = {
+// RÈGLE À NE JAMAIS CASSER — PROTECTION CONTRE LES DONNÉES QUI FUITENT
+// D'UN COMPTE À L'AUTRE : `etat` est un objet de niveau MODULE (`let`, pas
+// un state React) — il survit à n'importe quel démontage/remontage de
+// composant, y compris un retour à l'écran de connexion après déconnexion.
+// Sans réinitialisation explicite, un `??`/fallback dans un chargeur (ex:
+// `avatarUrl: profil?.avatar_url ?? etat.avatarUrl`) peut faire réapparaître
+// la photo/le nom du compte PRÉCÉDENT pour un nouveau compte dont la colonne
+// est légitimement `null` — c'est exactement le bug corrigé ici :
+// `reinitialiserEtatUtilisateur` (cf. plus bas) doit être appelée à CHAQUE
+// déconnexion (voir ses sites d'appel : profil.tsx, app/_layout.tsx) AVANT
+// qu'un nouveau compte ne charge ses propres données, jamais après.
+const ETAT_INITIAL: EtatStore = {
   userId: null,
   objectifs: [],
   epargneMois: 0,
@@ -260,9 +269,9 @@ let etat: EtatStore = {
   notificationsActives: true,
   alertesBudget: true,
   alerteBudgetActuelle: null,
-  transactions: TRANSACTIONS_INIT,
+  transactions: [],
   modelesDepenses: [],
-  evenements: EVENEMENTS_INIT,
+  evenements: [],
   historiquePaiements: [],
   historiquesMois: [],
   dernierMoisArchive: null,
@@ -271,12 +280,48 @@ let etat: EtatStore = {
   suggestionRecurrence: null,
 };
 
+let etat: EtatStore = { ...ETAT_INITIAL };
+
 type Ecouteur = (etat: EtatStore) => void;
 let ecouteurs: Ecouteur[] = [];
 
 function setEtat(nouvelEtat: Partial<EtatStore>) {
   etat = { ...etat, ...nouvelEtat };
   ecouteurs.forEach((fn) => fn(etat));
+}
+
+// RÈGLE À NE JAMAIS CASSER — POINT D'ENTRÉE UNIQUE POUR RÉINITIALISER LE
+// STORE À LA DÉCONNEXION : remet CHAQUE champ à sa valeur par défaut
+// (ETAT_INITIAL, cf. RÈGLE plus haut) — photo, prénom, nom, catégories,
+// transactions, objectifs, tout. Idempotent (rappelable plusieurs fois sans
+// risque) : appelée à la fois réactivement (onAuthStateChange ci-dessous,
+// SEULE source fiable puisque active au niveau module, indépendamment de
+// tout composant React monté) ET explicitement à chaque site d'appel de
+// supabase.auth.signOut() (app/_layout.tsx, app/profil.tsx) en défense en
+// profondeur — jamais un seul de ces deux mécanismes considéré suffisant
+// seul.
+export function reinitialiserEtatUtilisateur() {
+  // RÈGLE À NE JAMAIS CASSER — PURGE COMPLÈTE, PAS SEULEMENT LE STATE
+  // MÉMOIRE : capturé AVANT le setEtat ci-dessous puisque celui-ci remet
+  // etat.userId à null — sans ce userId sortant, impossible de cibler les
+  // clés AsyncStorage namespacées par compte (insights) pour les purger.
+  // Best-effort et fire-and-forget (jamais awaité par l'appelant, qui doit
+  // rester synchrone) : une purge manquée dans de très rares cas d'erreur
+  // AsyncStorage est un moindre mal comparé à retarder la déconnexion.
+  const userIdSortant = etat.userId;
+  setEtat(ETAT_INITIAL);
+  if (userIdSortant) {
+    purgerDonneesInsights(userIdSortant).catch(() => {});
+  }
+  // RÈGLE À NE JAMAIS CASSER — ISOLATION ENTRE COMPTES : ces deux clés ne
+  // sont PAS namespacées par userId (slot unique, cf. leurs RÈGLE
+  // respectives plus haut) — sans purge ici, une donnée personnelle
+  // (catégorie/objectif supprimé du compte sortant) resterait lisible en
+  // AsyncStorage même après déconnexion.
+  AsyncStorage.multiRemove([
+    CLE_BACKUP_ENVELOPPES_SUPPRIMEES,
+    CLE_BACKUP_OBJECTIFS_SUPPRIMES,
+  ]).catch(() => {});
 }
 
 // RÈGLE À NE JAMAIS CASSER — SEULE SOURCE QUI ÉCRIT etat.userId : ce
@@ -287,7 +332,17 @@ function setEtat(nouvelEtat: Partial<EtatStore>) {
 // de l'app — jamais un appel ponctuel à supabase.auth.getUser() ailleurs
 // dans ce fichier, qui peut retourner un utilisateur null s'il est fait
 // avant que ce premier événement n'ait eu lieu.
-supabase.auth.onAuthStateChange((_evenement, session) => {
+//
+// RÈGLE À NE JAMAIS CASSER — RÉINITIALISATION SUR SIGNED_OUT : cf. RÈGLE
+// détaillée sur reinitialiserEtatUtilisateur ci-dessus — c'est ICI, dans ce
+// listener toujours actif au niveau module (pas dans un composant React qui
+// pourrait ne pas être monté au moment de la déconnexion), que la
+// réinitialisation est GARANTIE de se produire.
+supabase.auth.onAuthStateChange((evenement, session) => {
+  if (evenement === "SIGNED_OUT") {
+    reinitialiserEtatUtilisateur();
+    return;
+  }
   setEtat({ userId: session?.user?.id ?? null });
 });
 

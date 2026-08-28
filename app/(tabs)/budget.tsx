@@ -29,6 +29,8 @@ import { useTheme } from "../ThemeContext";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
 import { usePremium } from "../PremiumContext";
+import { useGuest } from "../GuestContext";
+import { bloquerSiInvite } from "../guestGate";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { estComptePremium } from "../../utils/premium";
 import { PALETTE_COULEURS } from "../ColorPicker";
@@ -171,9 +173,10 @@ export default function Budget() {
   const objStore = useObjectifs();
   const estTablette = useEstTablette();
   const { estPremium, simulerNonPremium } = usePremium();
+  const { isGuest } = useGuest();
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Budget —
   // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
-  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium);
+  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
   const { couleurs: C, theme } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const params = useLocalSearchParams<{
@@ -651,6 +654,7 @@ export default function Budget() {
   const depenseDominante = trouverDepenseDominante(enveloppesSansEntree);
 
   const ouvrirAjout = (enveloppeId?: string) => {
+    if (bloquerSiInvite(isGuest, router)) return;
     setNomTx("");
     setMontantTx("");
     setEnveloppeTx(enveloppeId ?? enveloppesCourantes[0]?.id ?? null);

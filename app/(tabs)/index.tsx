@@ -54,6 +54,8 @@ import {
 import { marquerSituationsAffichees } from "../../utils/situationsSession";
 import { supabase } from "../../supabaseClient";
 import { usePremium } from "../PremiumContext";
+import { useGuest } from "../GuestContext";
+import { bloquerSiInvite } from "../guestGate";
 import { estComptePremium } from "../../utils/premium";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { InfoBulle } from "../InfoBulle";
@@ -269,6 +271,7 @@ export default function Dashboard() {
   const objStore = useObjectifs();
   const estTablette = useEstTablette();
   const { estPremium, simulerNonPremium } = usePremium();
+  const { isGuest } = useGuest();
   const { theme, couleurs, toggleTheme } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const C = couleurs;
@@ -752,9 +755,10 @@ export default function Dashboard() {
   }, [etatsAJour, userIdInsights, nouvellesResolutions, nbAmeliorations]);
   // RÈGLE À NE JAMAIS CASSER : premium (isAdmin ou estPremium, cf.
   // estComptePremium) voit toujours tous les conseils sans pub.
-  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium);
+  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
 
   const ouvrirEditionEnveloppe = (env: Enveloppe) => {
+    if (bloquerSiInvite(isGuest, router)) return;
     setEnveloppeEnEdition(env);
     setNomTemp(env.nom);
     setBudgetTemp(String(env.budget));
@@ -944,11 +948,13 @@ export default function Dashboard() {
   // d'en dupliquer un troisième.
   const ouvrirAjoutDepenseDepuisFab = () => {
     setFabMenuOuvert(false);
+    if (bloquerSiInvite(isGuest, router)) return;
     router.push({ pathname: "/budget", params: { ouvrirAjout: "1" } });
   };
 
   const ouvrirAjoutEntreeDepuisFab = () => {
     setFabMenuOuvert(false);
+    if (bloquerSiInvite(isGuest, router)) return;
     setDateEntreeBudget(dateVersISO(new Date()));
     setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
     setModalAjoutEntreeBudgetVisible(true);
@@ -986,6 +992,7 @@ export default function Dashboard() {
   };
 
   const ouvrirCreationObjectif = () => {
+    if (bloquerSiInvite(isGuest, router)) return;
     setObjectifEnEdition(null);
     resetFormObjectif();
     setVueModal("form");

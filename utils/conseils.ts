@@ -372,6 +372,24 @@ export async function sauvegarderNbAmeliorations(
   }
 }
 
+// RÈGLE À NE JAMAIS CASSER — ISOLATION ENTRE COMPTES : ces deux clés sont
+// déjà namespacées par userId (donc un NOUVEAU compte ne peut techniquement
+// pas les lire), mais on les purge quand même explicitement à la
+// déconnexion du compte SORTANT — appelée par
+// reinitialiserEtatUtilisateur (app/store.ts) avec le userId qui vient de
+// se déconnecter, jamais laisser cet historique narratif traîner
+// indéfiniment sur l'appareil après un logout.
+export async function purgerDonneesInsights(userId: string): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([
+      `${PREFIXE_CLE_ETATS_INSIGHTS}${userId}`,
+      `${PREFIXE_CLE_AMELIORATIONS}${userId}`,
+    ]);
+  } catch {
+    // Best-effort, même logique que sauvegarderEtatsInsights ci-dessus.
+  }
+}
+
 // --- Moteur de coaching "Nos conseils" (Aperçu) ----------------------------
 //
 // RÈGLE À NE JAMAIS CASSER — à lire avant de toucher à ce qui suit :

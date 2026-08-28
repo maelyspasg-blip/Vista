@@ -49,7 +49,7 @@ import { GuestBanner } from "./GuestBanner";
 import { useGuest } from "./GuestContext";
 import { SyncErrorBanner } from "./SyncErrorBanner";
 import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
-import { useObjectifs } from "./store";
+import { reinitialiserEtatUtilisateur, useObjectifs } from "./store";
 import { usePremium } from "./PremiumContext";
 import { styleModaleTablette, useEstTablette } from "./useTablette";
 import { estComptePremium } from "../utils/premium";
@@ -142,7 +142,7 @@ export default function Profil() {
     usePremium();
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Profil —
   // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
-  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium);
+  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
   const scrollProfilRef = useRef<ScrollView>(null);
   const [yPasserPremium, setYPasserPremium] = useState(0);
 
@@ -458,6 +458,13 @@ export default function Profil() {
 
   const confirmerDeconnexion = async () => {
     await supabase.auth.signOut();
+    // RÈGLE À NE JAMAIS CASSER — DÉFENSE EN PROFONDEUR : le listener
+    // onAuthStateChange dans app/store.ts fait déjà cette réinitialisation
+    // de façon fiable (toujours actif, indépendant de ce composant), mais
+    // on l'appelle aussi explicitement ici — jamais laisser une photo/un
+    // nom d'un compte précédent survivre à une déconnexion, même dans
+    // l'hypothèse où le listener tarderait à se déclencher.
+    reinitialiserEtatUtilisateur();
     router.replace("/onboarding/connexion");
   };
 
@@ -555,6 +562,10 @@ export default function Profil() {
     }
 
     await supabase.auth.signOut();
+    // RÈGLE : même défense en profondeur que confirmerDeconnexion ci-dessus
+    // — d'autant plus importante ici, un compte supprimé ne doit à aucun
+    // prix laisser sa photo/son nom visibles pour la prochaine connexion.
+    reinitialiserEtatUtilisateur();
     router.replace("/onboarding/connexion");
     Alert.alert(
       "Compte supprimé",
