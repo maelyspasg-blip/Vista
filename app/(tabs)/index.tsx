@@ -60,6 +60,7 @@ import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { useAccessibilite } from "../AccessibiliteContext";
+import { AlerteBudgetBanner } from "../AlerteBudgetBanner";
 import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
 import { InsightVerrouille } from "../InsightVerrouille";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
@@ -272,7 +273,17 @@ export default function Dashboard() {
   // local (pas persisté en base ni dans un store partagé) — "pour la
   // session en cours" signifie qu'il doit revenir à false à la prochaine
   // ouverture de l'app, jamais survivre à un redémarrage.
-  const [conseilsDebloques, setConseilsDebloques] = useState(false);
+  //
+  // RÈGLE À NE JAMAIS CASSER — DÉBLOCAGE PAR INSIGHT, JAMAIS GLOBAL :
+  // Set<number> des INDEX de conseils débloqués (indices dans `conseils`,
+  // pas dans `conseils.slice(1)`) — regarder une pub débloque UNIQUEMENT
+  // l'insight sur lequel on a tapé le cadenas. Un ancien booléen unique
+  // (conseilsDebloques) débloquait TOUS les conseils verrouillés d'un coup
+  // dès qu'une seule pub était regardée, ce qui n'est plus le comportement
+  // voulu.
+  const [insightsDebloques, setInsightsDebloques] = useState<Set<number>>(
+    new Set(),
+  );
   // RÈGLE À NE JAMAIS CASSER : chargement des états persistés (AsyncStorage,
   // cf. utils/conseils.ts) — genererConseils reste une fonction pure et
   // synchrone, c'est ce useEffect qui fait la seule partie asynchrone
@@ -389,6 +400,12 @@ export default function Dashboard() {
       id: "fab",
       texte:
         "Appuie ici pour ajouter une dépense ou une entrée d'argent rapidement.",
+    },
+    {
+      id: "objectif",
+      texte:
+        "Crée un objectif d'épargne pour suivre ta progression — vacances, achat, réserve... Vista calcule automatiquement si tu es en avance ou en retard sur ta trajectoire.",
+      onAfficher: () => faireDefilerVersCibleTutoriel("objectif"),
     },
   ];
 
@@ -731,7 +748,6 @@ export default function Dashboard() {
   // RÈGLE À NE JAMAIS CASSER : premium (isAdmin ou estPremium, cf.
   // estComptePremium) voit toujours tous les conseils sans pub.
   const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium);
-  const conseilsTousVisibles = premium || conseilsDebloques;
 
   const ouvrirEditionEnveloppe = (env: Enveloppe) => {
     setEnveloppeEnEdition(env);
@@ -1164,6 +1180,7 @@ export default function Dashboard() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.fondPage }}>
+      <AlerteBudgetBanner />
       <ScrollView
         ref={scrollRef}
         style={[styles.container, { backgroundColor: C.fondPage }]}
@@ -1503,18 +1520,28 @@ export default function Dashboard() {
               NOS CONSEILS
             </Text>
             {/* RÈGLE À NE JAMAIS CASSER : le tout premier conseil reste
-                toujours gratuit, quel que soit conseilsTousVisibles — c'est
+                toujours gratuit, quel que soit l'état de déblocage — c'est
                 ce qui donne un aperçu de valeur avant que les suivants ne
-                soient regroupés derrière le bloc verrouillé. */}
+                soient verrouillés chacun individuellement. */}
             {ligneConseil(conseils[0], 0, C)}
-            {conseils.length > 1 && (
-              <InsightVerrouille
-                deverrouille={conseilsTousVisibles}
-                onDeverrouille={() => setConseilsDebloques(true)}
-              >
-                {conseils.slice(1).map((conseil, i) => ligneConseil(conseil, i + 1, C))}
-              </InsightVerrouille>
-            )}
+            {conseils.slice(1).map((conseil, i) => {
+              const index = i + 1;
+              return (
+                <InsightVerrouille
+                  key={index}
+                  deverrouille={premium || insightsDebloques.has(index)}
+                  onDeverrouille={() =>
+                    setInsightsDebloques((prev) => {
+                      const suivant = new Set(prev);
+                      suivant.add(index);
+                      return suivant;
+                    })
+                  }
+                >
+                  {ligneConseil(conseil, index, C)}
+                </InsightVerrouille>
+              );
+            })}
           </View>
         )}
 
@@ -1653,6 +1680,11 @@ export default function Dashboard() {
           </CibleTutoriel>
         </View>
 
+        <CibleTutoriel
+          id="objectif"
+          onMesure={mesurerCibleTutoriel}
+          cleFocus={cleFocusTutoriel}
+        >
         <TouchableOpacity
           style={[
             styles.epargneCard,
@@ -1692,6 +1724,7 @@ export default function Dashboard() {
             {formaterMontant(objStore.epargneMois)} €
           </Text>
         </TouchableOpacity>
+        </CibleTutoriel>
 
         {depensesNonCategorisees > 0 && (
           <TouchableOpacity

@@ -766,6 +766,25 @@ export default function Profil() {
             />
           </View>
 
+          <View style={[styles.switchRow, { marginTop: 18 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.switchLabel, { color: C.texte }]}>
+                Alertes budget
+              </Text>
+              <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                Recevoir des alertes quand je m&apos;approche de dépasser mon
+                budget
+              </Text>
+            </View>
+            <Switch
+              value={objStore.alertesBudget}
+              onValueChange={objStore.modifierAlertesBudget}
+              trackColor={{ false: C.separateur, true: C.purpleLight }}
+              thumbColor={objStore.alertesBudget ? C.purple : "#FFF"}
+              accessibilityLabel="Alertes budget"
+            />
+          </View>
+
           <TouchableOpacity
             style={[styles.btnSecondaire, { borderColor: C.separateur, marginTop: 18 }]}
             onPress={() => {

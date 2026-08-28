@@ -2,6 +2,7 @@ import { useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabaseClient";
 import { annulerToutesNotifications } from "./notifications";
+import { determinerAlerteBudget, type AlerteBudget } from "./alertesBudget";
 import {
   synchroniserWidgetAjoutRapide,
   synchroniserWidgetPlanning,
@@ -195,6 +196,17 @@ export type SuggestionRecurrence = {
 };
 
 type EtatStore = {
+  // RÈGLE À NE JAMAIS CASSER — SOURCE DE VÉRITÉ POUR "SESSION RÉSOLUE" :
+  // maintenu par le listener supabase.auth.onAuthStateChange (voir plus
+  // bas), jamais reconstruit à la volée via un appel ponctuel à
+  // supabase.auth.getUser() — c'est justement cette re-vérification
+  // ponctuelle, faite avant que la session persistée ait fini d'être
+  // restaurée au tout premier lancement, qui causait "Archivage du mois
+  // refusé : aucun utilisateur connecté" au démarrage (verifierArchivageMois
+  // déclenché par app/(tabs)/_layout.tsx dès le montage, potentiellement
+  // avant que ce listener n'ait reçu son premier événement). null tant que
+  // l'état d'auth n'est pas encore connu OU si l'utilisateur est déconnecté.
+  userId: string | null;
   objectifs: Objectif[];
   epargneMois: number;
   enveloppes: Enveloppe[];
@@ -205,6 +217,11 @@ type EtatStore = {
   avatarUrl: string | null;
   isAdmin: boolean;
   notificationsActives: boolean;
+  alertesBudget: boolean;
+  // RÈGLE : bandeau in-app (pas une notification push) — au plus UNE alerte
+  // à la fois, cf. RÈGLE détaillée dans app/alertesBudget.ts. `null` = pas
+  // de bandeau à afficher actuellement.
+  alerteBudgetActuelle: AlerteBudget | null;
   transactions: Transaction[];
   modelesDepenses: ModeleDepense[];
   evenements: Evenement[];
@@ -217,6 +234,7 @@ type EtatStore = {
 };
 
 let etat: EtatStore = {
+  userId: null,
   objectifs: [],
   epargneMois: 0,
   enveloppes: [],
@@ -227,6 +245,8 @@ let etat: EtatStore = {
   avatarUrl: null,
   isAdmin: false,
   notificationsActives: true,
+  alertesBudget: true,
+  alerteBudgetActuelle: null,
   transactions: TRANSACTIONS_INIT,
   modelesDepenses: [],
   evenements: EVENEMENTS_INIT,
@@ -245,6 +265,18 @@ function setEtat(nouvelEtat: Partial<EtatStore>) {
   etat = { ...etat, ...nouvelEtat };
   ecouteurs.forEach((fn) => fn(etat));
 }
+
+// RÈGLE À NE JAMAIS CASSER — SEULE SOURCE QUI ÉCRIT etat.userId : ce
+// listener est notifié une première fois dès son abonnement avec la session
+// déjà restaurée (ou son absence), PUIS à chaque changement réel (connexion,
+// déconnexion, refresh de token). C'est ce premier appel, et lui seul, qui
+// garantit que etat.userId reflète la réalité même juste après le démarrage
+// de l'app — jamais un appel ponctuel à supabase.auth.getUser() ailleurs
+// dans ce fichier, qui peut retourner un utilisateur null s'il est fait
+// avant que ce premier événement n'ait eu lieu.
+supabase.auth.onAuthStateChange((_evenement, session) => {
+  setEtat({ userId: session?.user?.id ?? null });
+});
 
 let minuteurErreurSync: ReturnType<typeof setTimeout> | null = null;
 
@@ -762,6 +794,20 @@ async function enregistrerSnapshotMoisSupabase(params: {
   enveloppes: SnapshotEnveloppe[];
   objectifs: SnapshotObjectif[];
 }): Promise<string | null> {
+  // RÈGLE À NE JAMAIS CASSER — GARDE CONTRE LA RACE AU DÉMARRAGE : dernier
+  // rempart avant tout appel réseau, même si les deux appelants
+  // (archiverMoisActuelInterne, verifierArchivageMoisInterne) gardent déjà
+  // sur etat.userId — cf. RÈGLE détaillée sur etat.userId plus haut dans ce
+  // fichier. Redondant par construction, jamais superflu : cette fonction
+  // ne doit JAMAIS dépendre de la discipline de ses appelants pour rester
+  // sûre.
+  if (!etat.userId) {
+    console.error(
+      "Archivage du mois refusé : aucun utilisateur connecté (userId non résolu).",
+    );
+    return null;
+  }
+
   try {
     const {
       data: { user },
@@ -856,6 +902,14 @@ async function enregistrerSnapshotMoisSupabase(params: {
 }
 
 async function archiverMoisActuelInterne(mois: number, annee: number) {
+  // RÈGLE À NE JAMAIS CASSER — GARDE CONTRE LA RACE AU DÉMARRAGE : voir la
+  // même RÈGLE dans verifierArchivageMoisInterne — répétée ici car cette
+  // fonction est AUSSI atteignable directement via l'action publique
+  // archiverMoisActuel(mois, annee), pas seulement via
+  // verifierArchivageMoisInterne. Ne jamais construire/envoyer le snapshot
+  // (enregistrerSnapshotMoisSupabase) sans un userId déjà résolu.
+  if (!etat.userId) return;
+
   const dejaArchive = etat.historiquesMois.some(
     (s) => s.mois === mois && s.annee === annee,
   );
@@ -1050,6 +1104,19 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
 }
 
 function verifierArchivageMoisInterne() {
+  // RÈGLE À NE JAMAIS CASSER — GARDE CONTRE LA RACE AU DÉMARRAGE : cette
+  // fonction est déclenchée par un useEffect au montage de app/(tabs)/
+  // _layout.tsx (et par le setInterval/AppState qui suivent) — au tout
+  // premier lancement, elle peut s'exécuter avant que
+  // supabase.auth.onAuthStateChange n'ait livré son premier événement (cf.
+  // RÈGLE sur etat.userId plus haut). Sans cette garde, elle continuerait
+  // jusqu'à archiverMoisActuelInterne -> enregistrerSnapshotMoisSupabase,
+  // qui échouerait avec "aucun utilisateur connecté" — un cycle du
+  // setInterval (60s) ou le prochain retour au premier plan (AppState)
+  // suffit à réessayer une fois la session résolue, jamais besoin de
+  // rattraper cet appel manqué autrement.
+  if (!etat.userId) return;
+
   const maintenant = new Date();
   const moisActuel = maintenant.getMonth();
   const anneeActuelle = maintenant.getFullYear();
@@ -1189,6 +1256,77 @@ function verifierEvenementsFinanciersInterne() {
   aAppliquer.forEach((e) => {
     majEvenementSupabase(e.id, { montant_applique: true });
   });
+}
+
+// RÈGLE À NE JAMAIS CASSER — FORECAST DES DÉPENSES PRÉVUES (budget d'une
+// catégorie Variable) : mécanisme SÉPARÉ du bump de `depense` ci-dessus
+// (verifierEvenementsFinanciersInterne, qui applique un événement financier
+// à la dépense RÉELLE une fois sa date passée). Ici, il s'agit d'ajuster le
+// BUDGET PRÉVISIONNEL dès la création/modification/suppression d'un
+// événement financier, pour que la catégorie ait "de la place" pour une
+// dépense à venir connue à l'avance — indépendant de `montantApplique`.
+//
+// RÈGLE À NE JAMAIS CASSER — JAMAIS VERS LE BAS, JAMAIS EN NÉGATIF : le
+// forecast ne fait QUE monter pour couvrir les événements financiers
+// connus de cette catégorie ce mois-ci, jamais baisser — y compris à la
+// suppression/modification d'un événement. "Recalculer le minimum
+// nécessaire" signifie recalculer la somme des événements financiers
+// restants et ré-appliquer la même règle (budget = max(budget actuel,
+// somme nécessaire)) : si la somme nécessaire a baissé (ou disparu), le
+// budget actuel la couvre déjà largement et n'est jamais réduit par ce
+// mécanisme — seule une modification MANUELLE du budget peut le baisser.
+//
+// RÈGLE À NE JAMAIS CASSER — UNIQUEMENT CATÉGORIE VARIABLE : filtre
+// explicite (type === "Variable"), jamais Fixe ni Entrée — un événement
+// financier lié à une catégorie Fixe/Entrée n'ajuste jamais son forecast.
+//
+// RÈGLE : seuls les événements du MOIS EN COURS (celui que représente
+// etat.enveloppes, qui est TOUJOURS le mois courant — les mois passés sont
+// archivés dans etat.historiquesMois, cf. archiverMoisActuelInterne) sont
+// comptés ici. Un événement dans un mois futur n'a aucun Enveloppe.budget à
+// ajuster (l'app ne modélise pas de budget par mois futur) — il ne sera
+// pris en compte que lorsque ce mois deviendra le mois courant, sans
+// mécanisme de rattrapage rétroactif.
+function ajusterForecastEvenementsFinanciers(nomCategorie: string) {
+  const enveloppe = etat.enveloppes.find(
+    (e) => e.nom === nomCategorie && e.type === "Variable",
+  );
+  if (!enveloppe) return;
+
+  const maintenant = new Date();
+  const sommeEvenementsFinanciers = etat.evenements
+    .filter((e) => {
+      if (!e.estFinancier || !e.montant || e.montant <= 0) return false;
+      if (e.categorieLiee !== nomCategorie) return false;
+      const dateEvenement = new Date(e.date);
+      return (
+        dateEvenement.getMonth() === maintenant.getMonth() &&
+        dateEvenement.getFullYear() === maintenant.getFullYear()
+      );
+    })
+    .reduce((acc, e) => acc + (e.montant ?? 0), 0);
+
+  if (sommeEvenementsFinanciers <= enveloppe.budget) return;
+
+  const enveloppesMaj = etat.enveloppes.map((e) =>
+    e.id === enveloppe.id ? { ...e, budget: sommeEvenementsFinanciers } : e,
+  );
+  appliquerEnveloppes(enveloppesMaj);
+}
+
+// RÈGLE À NE JAMAIS CASSER — UN SEUL BANDEAU À LA FOIS : si un bandeau est
+// déjà affiché (etat.alerteBudgetActuelle non null), on ne calcule même pas
+// une nouvelle alerte — jamais interrompre/remplacer un bandeau que
+// l'utilisateur est en train de voir. determinerAlerteBudget (app/
+// alertesBudget.ts) est fire-and-forget (jamais await ici), déjà protégée
+// par son propre try/catch interne.
+function verifierAlerteBudget(enveloppes: Enveloppe[]) {
+  if (etat.alerteBudgetActuelle) return;
+  determinerAlerteBudget(enveloppes, etat.historiquesMois, etat.alertesBudget).then(
+    (alerte) => {
+      if (alerte) setEtat({ alerteBudgetActuelle: alerte });
+    },
+  );
 }
 
 async function verifierEcheancesFixesInterne() {
@@ -1390,6 +1528,24 @@ function majNotificationsActivesSupabase(actif: boolean) {
   });
 }
 
+function majAlertesBudgetSupabase(actif: boolean) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({ alertes_budget: actif })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error("Supabase update alertes_budget a échoué :", error);
+          signalerErreurSync(
+            `Impossible de sauvegarder les alertes budget : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
 export function useObjectifs() {
   const [local, setLocal] = useState<EtatStore>(etat);
 
@@ -1399,6 +1555,7 @@ export function useObjectifs() {
   });
 
   return {
+    userId: local.userId,
     objectifs: local.objectifs,
     epargneMois: local.epargneMois,
     enveloppes: local.enveloppes,
@@ -1413,6 +1570,8 @@ export function useObjectifs() {
     // profils.is_admin (activé manuellement depuis le dashboard Supabase).
     estAdmin: () => local.isAdmin,
     notificationsActives: local.notificationsActives,
+    alertesBudget: local.alertesBudget,
+    alerteBudgetActuelle: local.alerteBudgetActuelle,
     transactions: local.transactions,
     modelesDepenses: local.modelesDepenses,
     evenements: local.evenements,
@@ -1518,7 +1677,7 @@ export function useObjectifs() {
             supabase
               .from("profils")
               .select(
-                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, seuil_epargne_constante, prenom, nom, avatar_url, is_admin, notifications_actives, dernier_mois_archive_mois, dernier_mois_archive_annee",
+                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, seuil_epargne_constante, prenom, nom, avatar_url, is_admin, notifications_actives, alertes_budget, dernier_mois_archive_mois, dernier_mois_archive_annee",
               )
               .eq("user_id", user.id)
               .single(),
@@ -1563,6 +1722,7 @@ export function useObjectifs() {
           isAdmin: profil?.is_admin ?? etat.isAdmin,
           notificationsActives:
             profil?.notifications_actives ?? etat.notificationsActives,
+          alertesBudget: profil?.alertes_budget ?? etat.alertesBudget,
           dernierMoisArchive,
         });
       } catch (e) {
@@ -2286,6 +2446,19 @@ export function useObjectifs() {
       }
     },
 
+    modifierAlertesBudget: (actif: boolean) => {
+      setEtat({ alertesBudget: actif });
+      majAlertesBudgetSupabase(actif);
+    },
+
+    // RÈGLE : ferme le bandeau — n'a PAS besoin de re-marquer l'alerte
+    // comme "vue" dans AsyncStorage, c'est déjà fait par
+    // determinerAlerteBudget au moment où elle a été sélectionnée pour
+    // affichage (cf. app/alertesBudget.ts), pas au moment de la fermeture.
+    fermerAlerteBudget: () => {
+      setEtat({ alerteBudgetActuelle: null });
+    },
+
     archiverMoisActuel: (mois: number, annee: number) => {
       archiverMoisActuelInterne(mois, annee);
     },
@@ -2374,6 +2547,9 @@ export function useObjectifs() {
         ) {
           verifierEvenementsFinanciersInterne();
         }
+        if (nouvel.estFinancier && nouvel.montant && nouvel.montant > 0 && nouvel.categorieLiee) {
+          ajusterForecastEvenementsFinanciers(nouvel.categorieLiee);
+        }
 
         return nouvel;
       } catch (e) {
@@ -2403,6 +2579,15 @@ export function useObjectifs() {
             : e,
         );
         appliquerEnveloppes(enveloppesMaj);
+      }
+
+      // RÈGLE : recalcule le forecast de la catégorie après suppression —
+      // cf. RÈGLE détaillée sur ajusterForecastEvenementsFinanciers. Comme
+      // le forecast ne baisse jamais via ce mécanisme, cet appel ne fait
+      // concrètement rien tant que le budget actuel couvre déjà les
+      // événements financiers restants de cette catégorie ce mois-ci.
+      if (ev?.estFinancier && ev.montant && ev.montant > 0 && ev.categorieLiee) {
+        ajusterForecastEvenementsFinanciers(ev.categorieLiee);
       }
 
       supabase
@@ -2482,6 +2667,36 @@ export function useObjectifs() {
 
       if (champsFinanciers) {
         verifierEvenementsFinanciersInterne();
+
+        // RÈGLE : recalcule le forecast pour l'ANCIENNE catégorie (si elle a
+        // changé ou si l'événement n'est plus financier) ET la NOUVELLE —
+        // etat.evenements reflète déjà les nouveaux champs à ce stade (cf.
+        // setEtat plus haut), donc le calcul pour l'ancienne catégorie exclut
+        // déjà la contribution de cet événement. Ne baisse jamais le
+        // forecast (cf. RÈGLE sur ajusterForecastEvenementsFinanciers) :
+        // recalculer pour l'ancienne catégorie ne fait rien de concret si
+        // son budget couvrait déjà largement ses événements restants.
+        const nouveau = etat.evenements.find((e) => e.id === id);
+        const categoriesAVerifier = new Set<string>();
+        if (
+          ancien?.estFinancier &&
+          ancien.montant &&
+          ancien.montant > 0 &&
+          ancien.categorieLiee &&
+          ancien.categorieLiee !== "Aucune"
+        ) {
+          categoriesAVerifier.add(ancien.categorieLiee);
+        }
+        if (
+          nouveau?.estFinancier &&
+          nouveau.montant &&
+          nouveau.montant > 0 &&
+          nouveau.categorieLiee &&
+          nouveau.categorieLiee !== "Aucune"
+        ) {
+          categoriesAVerifier.add(nouveau.categorieLiee);
+        }
+        categoriesAVerifier.forEach((nom) => ajusterForecastEvenementsFinanciers(nom));
       }
     },
 
@@ -2535,6 +2750,7 @@ export function useObjectifs() {
         appliquerEnveloppes(enveloppesMaj);
         synchroniserWidgetAjoutRapide(transactionsMaj);
         synchroniserWidgetPlanning(etat.evenements, transactionsMaj);
+        verifierAlerteBudget(enveloppesMaj);
         return nouvelle;
       } catch (e) {
         console.error("Ajout de dépense a échoué :", e);
@@ -2580,6 +2796,7 @@ export function useObjectifs() {
       appliquerEnveloppes(enveloppesMaj);
       synchroniserWidgetAjoutRapide(transactionsMaj);
       synchroniserWidgetPlanning(etat.evenements, transactionsMaj);
+      verifierAlerteBudget(enveloppesMaj);
 
       const { error } = await supabase
         .from("transactions")

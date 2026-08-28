@@ -4724,7 +4724,9 @@ export default function Analytics() {
                     </Text>
                     <InfoBulle
                       titre="Comment ce simulateur fonctionne"
-                      texte={`Choisis une catégorie et ajuste son budget hypothétique avec le curseur. La courbe compare ta trajectoire d'épargne actuelle (moyenne de tes derniers mois) à ce qu'elle serait sur ${NB_MOIS_PROJECTION} mois avec ce budget ajusté. C'est purement indicatif : rien n'est enregistré ni modifié dans tes vraies données.`}
+                      texte="Choisis une catégorie et ajuste le curseur pour voir l'impact sur ton budget. Ex : si tu réduis tes sorties de 30€/mois, tu économises 360€ sur un an."
+                      taille={18}
+                      couleur={C.texteMuted}
                     />
                   </View>
 
@@ -4877,6 +4879,19 @@ export default function Analytics() {
                           />
 
                           {/* Barre de temporalité : période de projection. */}
+                          <View style={styles.temporaliteEnTete}>
+                            <Text
+                              style={[styles.serieDescription, { color: C.texteMuted, flex: 1 }]}
+                            >
+                              Durée de la simulation
+                            </Text>
+                            <InfoBulle
+                              titre="Durée de la simulation"
+                              texte="Choisis la durée de ta simulation. Ex : une réduction de 20€/mois représente 240€ économisés sur 12 mois."
+                              taille={18}
+                              couleur={C.texteMuted}
+                            />
+                          </View>
                           <View style={styles.periodeSimulationRow}>
                             {[1, 3, 6, 12, 24].map((mois) => (
                               <TouchableOpacity
@@ -5013,6 +5028,12 @@ export default function Analytics() {
                                         : `Cette modification libère ${formaterMontant(ecartMensuelSimule)}€/mois sur cette catégorie.`
                                     : `Cette modification coûte ${formaterMontant(Math.abs(ecartMensuelSimule))}€/mois de plus sur cette catégorie.`}
                                 </Text>
+                                <InfoBulle
+                                  titre="Impact sur ton objectif"
+                                  texte="Vista calcule automatiquement l'impact de ta simulation sur ton objectif d'épargne. Ex : réduire les restaurants de 30€/mois te permettrait d'atteindre ton objectif Vacances 4 mois plus tôt."
+                                  taille={18}
+                                  couleur={C.texteMuted}
+                                />
                               </View>
                             </View>
                           </View>
@@ -5080,9 +5101,17 @@ export default function Analytics() {
 
                   {/* B. Simulation inverse */}
                   <View style={[styles.simulateurSousSection, { borderTopColor: C.separateur }]}>
-                    <Text style={[styles.serieTitre, { color: C.texte, fontSize: 15 }]}>
-                      Combien veux-tu économiser ?
-                    </Text>
+                    <View style={styles.serieEnTete}>
+                      <Text style={[styles.serieTitre, { color: C.texte, fontSize: 15 }]}>
+                        Combien veux-tu économiser ?
+                      </Text>
+                      <InfoBulle
+                        titre="Simulation inverse"
+                        texte="Indique combien tu veux économiser et Vista te propose comment y arriver. Ex : objectif 600€ en 6 mois → il te manque 100€/mois → Vista suggère 3 façons d'y arriver."
+                        taille={18}
+                        couleur={C.texteMuted}
+                      />
+                    </View>
                     <TextInput
                       style={[styles.inputSeuil, { color: C.texte, backgroundColor: C.carte, marginTop: 10 }]}
                       placeholder="Montant en €"
@@ -5180,9 +5209,17 @@ export default function Analytics() {
 
                   {/* C. Scénarios comparatifs */}
                   <View style={[styles.simulateurSousSection, { borderTopColor: C.separateur }]}>
-                    <Text style={[styles.serieTitre, { color: C.texte, fontSize: 15 }]}>
-                      Scénarios comparatifs
-                    </Text>
+                    <View style={styles.serieEnTete}>
+                      <Text style={[styles.serieTitre, { color: C.texte, fontSize: 15 }]}>
+                        Scénarios comparatifs
+                      </Text>
+                      <InfoBulle
+                        titre="Scénarios comparatifs"
+                        texte="Compare plusieurs niveaux d'effort pour atteindre ton objectif. Ex : scénario prudent (-20€ restaurants), intermédiaire (-30€ restaurants -20€ loisirs), ambitieux (-50€ restaurants -40€ loisirs)."
+                        taille={18}
+                        couleur={C.texteMuted}
+                      />
+                    </View>
                     {scenariosComparatifs.map((scenario) => (
                       <View
                         key={scenario.id}
@@ -5688,6 +5725,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     marginBottom: 12,
+  },
+  temporaliteEnTete: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 14,
   },
   serieIconeFond: {
     width: 32,

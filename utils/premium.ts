@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
 // RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
 // module ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
@@ -6,6 +7,23 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // l'appareil, jamais synchronisé en base) est utilisé ici, cf. RÈGLE
 // juste en dessous.
 //
+// RÈGLE À NE JAMAIS CASSER — METTRE À false AVANT LA PUBLICATION APP STORE
+// OFFICIELLE : tant que true, tout le monde (y compris les testeurs
+// TestFlight externes, qui n'ont ni objStore.isAdmin ni accès au toggle
+// "Simuler Premium") a accès à 100% des fonctionnalités Premium sans
+// restriction — voir estComptePremium ci-dessous, qui court-circuite TOUT
+// le reste de sa logique (y compris simulerNonPremium) dès que ce flag est
+// actif. Aucun mécanisme de rappel automatique ne le repasse à false : une
+// vérification manuelle avant soumission App Store est nécessaire.
+export const TESTFLIGHT_MODE = true;
+
+// RÈGLE : Ad Unit ID de la pub récompensée AdMob — sélectionné une seule
+// fois ici selon la plateforme (Platform.OS), jamais dupliqué ailleurs dans
+// le code (InsightVerrouille.tsx l'importe directement).
+export const AD_UNIT_ID_REWARDED =
+  Platform.OS === "ios"
+    ? "ca-app-pub-4645298475525932/3811187805"
+    : "ca-app-pub-4645298475525932/6067589553";
 // RÈGLE À NE JAMAIS CASSER : simulation locale en attendant l'intégration
 // RevenueCat — ce flag ne représente aucun abonnement réel, il ne doit
 // jamais être positionné à true ailleurs que via le toggle "Simuler
@@ -48,6 +66,7 @@ export function estComptePremium(
   estPremium: boolean,
   simulerNonPremium: boolean,
 ): boolean {
+  if (TESTFLIGHT_MODE) return true;
   if (simulerNonPremium) return false;
   return isAdmin || estPremium;
 }

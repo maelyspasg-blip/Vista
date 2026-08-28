@@ -1,6 +1,12 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import {
+  AdEventType,
+  RewardedAd,
+  RewardedAdEventType,
+} from "react-native-google-mobile-ads";
+import { AD_UNIT_ID_REWARDED, TESTFLIGHT_MODE } from "../utils/premium";
 import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
 
@@ -15,25 +21,13 @@ import { useTheme } from "./ThemeContext";
 // (Ionicons + couleur simple) utilisée dans budget.tsx.
 const COULEUR_CADENAS = "#2D3A4A";
 
-// RÈGLE À NE JAMAIS CASSER : pas de flou ici, ni natif (expo-blur,
-// react-native-blur — mêmes modules natifs nécessitant un rebuild qui n'a
-// pas eu lieu, testé et cassé une première fois) ni simulé par des couches
-// semi-transparentes (essayé ensuite : le contenu restait partiellement
-// devinable). Bloc totalement OPAQUE à la place — aucune ambiguïté, aucune
-// dépendance native, fiable partout : le contenu en dessous n'est ni lisible
-// ni devinable, seule sa hauteur est préservée (children toujours rendu en
-// dessous, jamais remplacé par un placeholder vide).
-//
-// RÈGLE À NE JAMAIS CASSER : la couche opaque (le View "cache" ci-dessous)
-// et la couche tactile (le Pressable) sont deux éléments SÉPARÉS, jamais le
-// même composant. Un TouchableOpacity/Pressable qui porte à la fois le
-// fond opaque ET la gestion du tap réduit son opacité pendant l'appui
-// (comportement par défaut de ces composants, même sans activeOpacity
-// explicite) — le contenu verrouillé redevenait lisible en maintenant le
-// doigt dessus. Le View "cache" n'a aucune interactivité (pas de onPress,
-// pas de Pressable) donc rien ne peut jamais faire varier son opacité ; le
-// Pressable au-dessus est entièrement transparent, donc même s'il change
-// d'état visuel au press, il n'y a rien de coloré à voir varier.
+// RÈGLE À NE JAMAIS CASSER — AdMob NÉCESSITE UN REBUILD NATIF EAS : ce
+// composant ne peut PAS être testé avec le dev client seul (le module
+// natif react-native-google-mobile-ads doit être compilé dans le binaire).
+// Sur dev client sans ce rebuild, le SDK natif est absent — c'est
+// justement pour ça que le fallback ci-dessous (pubChargee toujours false
+// si `load()` n'aboutit jamais) retombe sur l'Alert simulé plutôt que de
+// planter.
 export function InsightVerrouille({
   deverrouille,
   onDeverrouille,
@@ -45,10 +39,81 @@ export function InsightVerrouille({
 }) {
   const { theme, couleurs: C } = useTheme();
   const [enCoursDeblocage, setEnCoursDeblocage] = useState(false);
+  const [pubChargee, setPubChargee] = useState(false);
+  const rewardedRef = useRef<RewardedAd | null>(null);
 
-  if (deverrouille) return <>{children}</>;
+  // RÈGLE À NE JAMAIS CASSER — TOUS LES HOOKS AVANT TOUT RETURN
+  // CONDITIONNEL : `deverrouille`/TESTFLIGHT_MODE ne doivent jamais changer
+  // l'ORDRE des hooks appelés d'un rendu à l'autre (règle React) — d'où cet
+  // effet toujours déclaré ici, son corps décidant lui-même s'il a quelque
+  // chose à faire, plutôt qu'un hook placé après un `if (...) return`.
+  //
+  // RÈGLE : chargée une seule fois au montage ([] volontaire) — TESTFLIGHT_
+  // MODE ou un insight déjà déverrouillé au moment du montage n'ont jamais
+  // besoin d'une pub, jamais chargée dans ce cas (aucun appel AdMob inutile
+  // pendant la période TestFlight).
+  useEffect(() => {
+    if (TESTFLIGHT_MODE || deverrouille) return;
 
+    const rewarded = RewardedAd.createForAdRequest(AD_UNIT_ID_REWARDED);
+    rewardedRef.current = rewarded;
+
+    const desabonnerCharge = rewarded.addAdEventListener(
+      RewardedAdEventType.LOADED,
+      () => setPubChargee(true),
+    );
+    // RÈGLE À NE JAMAIS CASSER : onDeverrouille ne doit être déclenché QUE
+    // sur EARNED_REWARD (l'utilisateur a effectivement regardé la pub
+    // jusqu'au bout) — jamais sur CLOSED seul, qui se déclenche aussi si
+    // l'utilisateur ferme la pub avant la fin sans obtenir la récompense.
+    const desabonnerRecompense = rewarded.addAdEventListener(
+      RewardedAdEventType.EARNED_REWARD,
+      () => {
+        setEnCoursDeblocage(false);
+        onDeverrouille();
+      },
+    );
+    const desabonnerErreur = rewarded.addAdEventListener(AdEventType.ERROR, () => {
+      setPubChargee(false);
+      setEnCoursDeblocage(false);
+    });
+    const desabonnerFerme = rewarded.addAdEventListener(AdEventType.CLOSED, () => {
+      setEnCoursDeblocage(false);
+    });
+
+    rewarded.load();
+
+    return () => {
+      desabonnerCharge();
+      desabonnerRecompense();
+      desabonnerErreur();
+      desabonnerFerme();
+      rewardedRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // RÈGLE À NE JAMAIS CASSER : TESTFLIGHT_MODE n'affiche JAMAIS le cadenas,
+  // quel que soit `deverrouille` — cf. utils/premium.ts.
+  if (TESTFLIGHT_MODE || deverrouille) return <>{children}</>;
+
+  // RÈGLE À NE JAMAIS CASSER — FALLBACK SI PUB NON DISPONIBLE : si la pub
+  // AdMob n'a pas fini de charger (ou a échoué — device sans le rebuild
+  // natif EAS, pas de réseau, aucun inventaire disponible...), on retombe
+  // sur l'Alert simulé plutôt que de laisser le bouton sans effet.
   const demanderDeblocage = () => {
+    if (pubChargee && rewardedRef.current) {
+      setEnCoursDeblocage(true);
+      rewardedRef.current.show().catch(() => {
+        setEnCoursDeblocage(false);
+        demanderDeblocageSimule();
+      });
+      return;
+    }
+    demanderDeblocageSimule();
+  };
+
+  const demanderDeblocageSimule = () => {
     Alert.alert(
       "Débloquer les analyses",
       "Regardez une courte publicité pour accéder à toutes vos analyses personnalisées.",
@@ -58,9 +123,10 @@ export function InsightVerrouille({
           text: "Regarder la pub",
           onPress: () => {
             setEnCoursDeblocage(true);
-            // Simulation de la pub récompensée — à remplacer par un vrai
-            // SDK (AdMob) plus tard, sans changer onDeverrouille qu'elle
-            // déclenche ni ce délai.
+            // Simulation de la pub récompensée (fallback) — même délai/
+            // même déclenchement de onDeverrouille que le vrai SDK AdMob
+            // ci-dessus, pour un comportement identique du point de vue de
+            // l'utilisateur quel que soit le chemin emprunté.
             setTimeout(() => {
               setEnCoursDeblocage(false);
               onDeverrouille();
