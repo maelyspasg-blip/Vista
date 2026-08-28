@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-    Dimensions,
     StyleSheet,
     TouchableOpacity,
     View,
@@ -10,12 +9,12 @@ import {
 import { marquerOnboardingVu } from "../onboardingStorage";
 import { Text } from "../Texte";
 import { BoutonPrincipal } from "../BoutonPrincipal";
+import { styleModaleTablette, useEstTablette } from "../useTablette";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
 const MINT = "#5DC8A0";
 const PEACH = "#F4956A";
-const { width } = Dimensions.get("window");
 
 const SLIDES = [
   {
@@ -49,6 +48,7 @@ const SLIDES = [
 
 export default function Onboarding() {
   const router = useRouter();
+  const estTablette = useEstTablette();
   const [slideActuel, setSlideActuel] = useState(0);
 
   const suivant = () => {
@@ -69,6 +69,13 @@ export default function Onboarding() {
 
   return (
     <View style={styles.container}>
+      {/* RÈGLE — iPad : colonne limitée à 560px — `container` est déjà
+          `alignItems:"center"`, donc ce wrapper se centre naturellement.
+          `illustration` (ci-dessous) est passée de "largeur d'écran - 56"
+          en dur à "100%" pour que son bord suive ce wrapper au lieu de
+          continuer à viser la largeur RÉELLE de l'appareil (bien plus
+          large que 560px sur iPad). */}
+      <View style={[{ width: "100%" }, styleModaleTablette(estTablette, 560)]}>
       <TouchableOpacity
         style={styles.skip}
         onPress={passer}
@@ -112,6 +119,7 @@ export default function Onboarding() {
           {slideActuel === SLIDES.length - 1 ? "Commencer" : "Suivant"}
         </Text>
       </BoutonPrincipal>
+      </View>
     </View>
   );
 }
@@ -128,7 +136,7 @@ const styles = StyleSheet.create({
   skip: { alignSelf: "flex-end", marginBottom: 20 },
   skipTexte: { fontSize: 14, color: "#BBBBBB" },
   illustration: {
-    width: width - 56,
+    width: "100%",
     height: 280,
     borderRadius: 28,
     alignItems: "center",

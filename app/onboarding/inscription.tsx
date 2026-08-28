@@ -15,6 +15,7 @@ import { supabase } from "../../supabaseClient";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
+import { styleModaleTablette, useEstTablette } from "../useTablette";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
@@ -23,6 +24,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function Inscription() {
   const router = useRouter();
+  const estTablette = useEstTablette();
   const insets = useSafeAreaInsets();
   const [email, setEmail] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
@@ -90,6 +92,9 @@ export default function Inscription() {
       ]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      {/* RÈGLE — iPad : colonne de contenu limitée à 560px, centrée — même
+          pattern que app/onboarding/connexion.tsx. */}
+      <View style={[{ flex: 1 }, styleModaleTablette(estTablette, 560)]}>
       <Image
         source={require("../../assets/images/vista-logo-mark.png")}
         style={styles.logo}
@@ -197,6 +202,7 @@ export default function Inscription() {
           </TouchableOpacity>
         </View>
       )}
+      </View>
     </KeyboardAvoidingView>
   );
 }

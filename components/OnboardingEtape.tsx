@@ -14,6 +14,7 @@ import { BarreProgression } from "../app/BarreProgression";
 import { BoutonPrincipal } from "../app/BoutonPrincipal";
 import { Text } from "../app/Texte";
 import { useTheme } from "../app/ThemeContext";
+import { styleModaleTablette, useEstTablette } from "../app/useTablette";
 
 // Wrapper commun aux 6 écrans du questionnaire d'onboarding : fond, logo,
 // barre de progression, titre/aide, zone de contenu scrollable, et le
@@ -55,12 +56,19 @@ export function OnboardingEtape({
 }) {
   const { theme, couleurs: C } = useTheme();
   const fond = theme === "sombre" ? C.fond : C.fondPage;
+  const estTablette = useEstTablette();
 
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: fond }]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      {/* RÈGLE — iPad : colonne de contenu limitée à 560px, centrée — un
+          seul point de changement pour les 6 écrans du questionnaire
+          d'onboarding, qui passent tous par ce composant partagé. Englobe
+          ScrollView ET pied (bouton fixe en bas) pour qu'ils restent alignés
+          sur la même colonne centrée. */}
+      <View style={[{ flex: 1 }, styleModaleTablette(estTablette, 560)]}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -131,6 +139,7 @@ export function OnboardingEtape({
             <Text style={styles.boutonTexte}>{boutonLabel}</Text>
           )}
         </BoutonPrincipal>
+      </View>
       </View>
     </KeyboardAvoidingView>
   );

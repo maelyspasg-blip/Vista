@@ -21,11 +21,13 @@ import { ModaleDocumentLegal } from "../ModaleDocumentLegal";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
+import { styleModaleTablette, useEstTablette } from "../useTablette";
 
 const PURPLE = "#8B6FE8";
 
 export default function Connexion() {
   const router = useRouter();
+  const estTablette = useEstTablette();
   const insets = useSafeAreaInsets();
   const [email, setEmail] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
@@ -81,6 +83,11 @@ export default function Connexion() {
       ]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      {/* RÈGLE — iPad : colonne de contenu limitée à 560px, centrée — le
+          conteneur (KeyboardAvoidingView) garde son padding/fond pleine
+          largeur, seul ce wrapper interne est capé (même pattern que
+          ModaleDocumentLegal.tsx). */}
+      <View style={[{ flex: 1 }, styleModaleTablette(estTablette, 560)]}>
       <Image
         source={require("../../assets/images/vista-logo-mark.png")}
         style={styles.logo}
@@ -170,6 +177,7 @@ export default function Connexion() {
       >
         <Text style={styles.mentionsLegalesTexte}>Mentions légales</Text>
       </TouchableOpacity>
+      </View>
 
       <ModaleDocumentLegal
         visible={documentLegalOuvert === "confidentialite"}

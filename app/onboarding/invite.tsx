@@ -12,11 +12,13 @@ import { messageErreurAuth } from "../authErrors";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
+import { styleModaleTablette, useEstTablette } from "../useTablette";
 
 const PURPLE = "#8B6FE8";
 
 export default function Invite() {
   const router = useRouter();
+  const estTablette = useEstTablette();
   const [prenom, setPrenom] = useState("");
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState("");
@@ -56,6 +58,9 @@ export default function Invite() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      {/* RÈGLE — iPad : colonne de contenu limitée à 560px, centrée — même
+          pattern que app/onboarding/connexion.tsx. */}
+      <View style={[{ flex: 1 }, styleModaleTablette(estTablette, 560)]}>
       <View style={styles.header}>
         <Text style={styles.titre}>Essayer Vista</Text>
         <Text style={styles.sousTitre}>
@@ -104,6 +109,7 @@ export default function Invite() {
             <Text style={styles.btnTexte}>Commencer</Text>
           )}
         </BoutonPrincipal>
+      </View>
       </View>
     </KeyboardAvoidingView>
   );
