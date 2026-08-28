@@ -4,35 +4,22 @@ import { Ionicons } from "@expo/vector-icons";
 import { AD_UNIT_ID_REWARDED, TESTFLIGHT_MODE } from "../utils/premium";
 import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
-
-// RÈGLE À NE JAMAIS CASSER — require() DANS UN try/catch, JAMAIS UN IMPORT
-// STATIQUE : react-native-google-mobile-ads est un module natif qui
-// nécessite un rebuild EAS (cf. RÈGLE plus bas) — sur le dev client actuel
-// (pas rebuild), le module natif RNGoogleMobileAdsModule est absent, et
-// l'évaluation du module JS de la librairie plante immédiatement à
-// l'IMPORT (avant même d'atteindre le corps de ce composant). Un
-// `import { ... } from "react-native-google-mobile-ads"` statique est
-// hissé et évalué AU CHARGEMENT DU BUNDLE, hors de portée de tout
-// try/catch placé dans ce fichier — seul un require() explicite, lui un
-// appel de fonction normal exécuté à l'endroit où il est écrit, peut être
-// intercepté. Sans ce garde, l'app plantait au démarrage avec
-// "RNGoogleMobileAdsModule not found" dès que ce fichier était chargé,
-// même si aucun insight verrouillé n'était jamais affiché à l'écran.
-let RewardedAd: any = null;
-let RewardedAdEventType: any = null;
-let AdEventType: any = null;
-
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const admob = require("react-native-google-mobile-ads");
-  RewardedAd = admob.RewardedAd;
-  RewardedAdEventType = admob.RewardedAdEventType;
-  AdEventType = admob.AdEventType;
-} catch {
-  // AdMob non disponible (dev client sans rebuild natif EAS, ou plateforme
-  // web) — RewardedAd reste `null`, le composant retombe systématiquement
-  // sur l'Alert simulé plus bas, jamais de crash.
-}
+// RÈGLE À NE JAMAIS CASSER : import depuis la paire utils/adMobModule.ts/
+// utils/adMobModule.web.ts, jamais react-native-google-mobile-ads
+// directement depuis ce fichier — cf. RÈGLE détaillée dans
+// utils/adMobModule.ts (le try/catch seul ne protège pas la résolution
+// statique du bundler web). DANS utils/, PAS app/ : tout fichier posé
+// directement dans app/ est balayé par le require.context d'expo-router
+// (construction de la table de routes) qui require() chaque fichier par
+// son nom de fichier EXACT sur disque, sans respecter la préférence de
+// plateforme .web.ts — seul un import depuis en dehors de app/ passe par
+// la résolution Metro standard qui, elle, préfère bien adMobModule.web.ts
+// sur le web.
+import { AdEventType, RewardedAd, RewardedAdEventType } from "../utils/adMobModule";
+// RÈGLE : TestIds n'est pas encore consommé ici — importé/exporté par
+// utils/adMobModule.ts pour que le guard try/catch le couvre dès qu'un
+// usage (ex: ad unit de test en __DEV__) sera ajouté, sans retoucher le
+// require() protégé à ce moment-là.
 
 // RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
 // composant ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
@@ -79,41 +66,60 @@ export function InsightVerrouille({
   useEffect(() => {
     if (TESTFLIGHT_MODE || deverrouille || !RewardedAd) return;
 
-    const rewarded = RewardedAd.createForAdRequest(AD_UNIT_ID_REWARDED);
-    rewardedRef.current = rewarded;
+    // RÈGLE À NE JAMAIS CASSER — SECOND GARDE, INDISPENSABLE EN PLUS DU
+    // try/catch DANS utils/adMobModule.ts : ce dernier protège uniquement
+    // le require() du package — `RewardedAd` est un objet JS valide dès que
+    // ce require() réussit, MÊME si le module natif n'est pas linké dans ce
+    // build (dev client sans rebuild EAS). C'est justement
+    // `createForAdRequest()`/`addAdEventListener()`/`load()` ci-dessous qui
+    // touchent réellement le pont natif et peuvent planter avec "Module
+    // XXX not found" à CE point précis, hors de portée du try/catch de
+    // adMobModule.ts. Toute erreur ici laisse `pubChargee` à `false` pour
+    // de bon (jamais mis à `true`), donc `demanderDeblocage` retombe
+    // automatiquement sur l'Alert simulé — jamais de crash visible.
+    try {
+      const rewarded = RewardedAd.createForAdRequest(AD_UNIT_ID_REWARDED);
+      rewardedRef.current = rewarded;
 
-    const desabonnerCharge = rewarded.addAdEventListener(
-      RewardedAdEventType.LOADED,
-      () => setPubChargee(true),
-    );
-    // RÈGLE À NE JAMAIS CASSER : onDeverrouille ne doit être déclenché QUE
-    // sur EARNED_REWARD (l'utilisateur a effectivement regardé la pub
-    // jusqu'au bout) — jamais sur CLOSED seul, qui se déclenche aussi si
-    // l'utilisateur ferme la pub avant la fin sans obtenir la récompense.
-    const desabonnerRecompense = rewarded.addAdEventListener(
-      RewardedAdEventType.EARNED_REWARD,
-      () => {
+      const desabonnerCharge = rewarded.addAdEventListener(
+        RewardedAdEventType.LOADED,
+        () => setPubChargee(true),
+      );
+      // RÈGLE À NE JAMAIS CASSER : onDeverrouille ne doit être déclenché QUE
+      // sur EARNED_REWARD (l'utilisateur a effectivement regardé la pub
+      // jusqu'au bout) — jamais sur CLOSED seul, qui se déclenche aussi si
+      // l'utilisateur ferme la pub avant la fin sans obtenir la récompense.
+      const desabonnerRecompense = rewarded.addAdEventListener(
+        RewardedAdEventType.EARNED_REWARD,
+        () => {
+          setEnCoursDeblocage(false);
+          onDeverrouille();
+        },
+      );
+      const desabonnerErreur = rewarded.addAdEventListener(AdEventType.ERROR, () => {
+        setPubChargee(false);
         setEnCoursDeblocage(false);
-        onDeverrouille();
-      },
-    );
-    const desabonnerErreur = rewarded.addAdEventListener(AdEventType.ERROR, () => {
-      setPubChargee(false);
-      setEnCoursDeblocage(false);
-    });
-    const desabonnerFerme = rewarded.addAdEventListener(AdEventType.CLOSED, () => {
-      setEnCoursDeblocage(false);
-    });
+      });
+      const desabonnerFerme = rewarded.addAdEventListener(AdEventType.CLOSED, () => {
+        setEnCoursDeblocage(false);
+      });
 
-    rewarded.load();
+      rewarded.load();
 
-    return () => {
-      desabonnerCharge();
-      desabonnerRecompense();
-      desabonnerErreur();
-      desabonnerFerme();
+      return () => {
+        desabonnerCharge();
+        desabonnerRecompense();
+        desabonnerErreur();
+        desabonnerFerme();
+        rewardedRef.current = null;
+      };
+    } catch (e) {
+      console.error(
+        "[InsightVerrouille] Initialisation AdMob (RewardedAd) a échoué — fallback Alert simulé :",
+        e,
+      );
       rewardedRef.current = null;
-    };
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -128,10 +134,19 @@ export function InsightVerrouille({
   const demanderDeblocage = () => {
     if (RewardedAd && pubChargee && rewardedRef.current) {
       setEnCoursDeblocage(true);
-      rewardedRef.current.show().catch(() => {
+      // RÈGLE : try/catch en plus du .catch() sur la promesse — show() peut
+      // aussi planter de façon SYNCHRONE (pas seulement via une promesse
+      // rejetée) si le pont natif est absent, même piège que
+      // createForAdRequest() dans le useEffect plus haut.
+      try {
+        rewardedRef.current.show().catch(() => {
+          setEnCoursDeblocage(false);
+          demanderDeblocageSimule();
+        });
+      } catch {
         setEnCoursDeblocage(false);
         demanderDeblocageSimule();
-      });
+      }
       return;
     }
     demanderDeblocageSimule();

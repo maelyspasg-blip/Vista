@@ -650,14 +650,17 @@ export default function Dashboard() {
         : "RESTE ESTIMÉ EN FIN DE MOIS";
   const heroResteValeur =
     etatReste === "negatif" ? Math.abs(resteEstime) : resteEstime;
+  // RÈGLE À NE JAMAIS CASSER — ROUGE UNIQUEMENT SI NÉGATIF : contrairement à
+  // heroResteLabel/lecture ci-dessus (qui distinguent bien les 3 états pour
+  // le texte), la COULEUR du chiffre ne doit jamais signaler "procheLimite"
+  // comme un danger — resteEstime reste positif dans ce cas, donc couleur
+  // normale (navy en clair, blanc en sombre) ; seul un vrai dépassement
+  // (etatReste === "negatif", strictement équivalent à resteEstime < 0)
+  // déclenche le rouge.
   const heroResteCouleurClair =
-    etatReste === "positif" ? C.texte : C.peachText;
+    etatReste === "negatif" ? C.peachText : C.texte;
   const heroResteCouleurSombre =
-    etatReste === "positif"
-      ? "#FFFFFF"
-      : etatReste === "procheLimite"
-        ? "#FFE0C2"
-        : "#FFD2D2";
+    etatReste === "negatif" ? "#FFD2D2" : "#FFFFFF";
 
   const objectifsActifs = objStore.objectifs.filter((o) => !o.ferme);
   const objectifsClotures = objStore.objectifs.filter((o) => o.ferme);

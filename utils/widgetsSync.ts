@@ -11,6 +11,20 @@ import {
 } from "../widgets/PlanningWidget";
 import { AjoutRapideWidget } from "../widgets/AjoutRapideWidget";
 
+// RÈGLE À NE JAMAIS CASSER — MOITIÉ NATIVE DE LA PAIRE widgetsSync.ts/
+// widgetsSync.web.ts : ce fichier importe (en cascade, via
+// widgets/PlanningWidget.tsx et widgets/AjoutRapideWidget.tsx) expo-widgets
+// et @expo/ui/swift-ui, deux modules qui appellent
+// expo-modules-core.requireNativeViewManager au chargement — absent sur
+// web, ce qui casse le rendu serveur d'expo-router pour TOUTE la app (ce
+// fichier est importé par app/store.ts, lui-même importé par tous les
+// écrans). C'est pour ça qu'existe widgetsSync.web.ts (stub no-op, mêmes
+// signatures) : Metro le préfère automatiquement à celui-ci sur toute
+// build web. Ne jamais fusionner les deux fichiers avec un
+// `Platform.OS === "web"` : ce garde runtime n'empêcherait pas Metro de
+// résoudre/transformer ces imports natifs au moment du bundling (même
+// piège que la paire utils/adMobModule.ts/.web.ts).
+//
 // RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
 // module ne fait que PRÉPARER un snapshot (à partir de données déjà
 // chargées par l'app) et l'écrire dans le dossier App Group partagé avec

@@ -51,8 +51,8 @@ import { genererInsightsPeriode } from "../../utils/tendancesPeriode";
 // l'autre", etc.), pas parce qu'il coexiste encore avec une version courte.
 import { MOIS_LABELS as MOIS_LABELS_COMPLETS } from "../../utils/exportExcel";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
-import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useGuest } from "../GuestContext";
+import { bloquerSiInvite } from "../guestGate";
 import { InfoBulle } from "../InfoBulle";
 import {
   styleModaleTablette,
@@ -1240,6 +1240,7 @@ export default function Analytics() {
   );
 
   const creerObjectifDepuisSimulationInverse = async () => {
+    if (bloquerSiInvite(isGuest, router)) return;
     if (montantCibleInverseNum <= 0) return;
     const couleur = couleurLaPlusDistincte(
       PALETTE_COULEURS,
@@ -1313,6 +1314,7 @@ export default function Analytics() {
   };
 
   const confirmerAdoptionScenario = (scenario: (typeof scenariosComparatifs)[number]) => {
+    if (bloquerSiInvite(isGuest, router)) return;
     const nomsCategories = scenario.reductions.map((r) => r.enveloppe.nom).join(", ");
     Alert.alert(
       `Adopter le scénario ${scenario.titre} ?`,
@@ -3978,7 +3980,17 @@ export default function Analytics() {
                 />
               </View>
 
-              {premium ? (
+              {/* RÈGLE À NE JAMAIS CASSER — INVITÉ = ACCÈS COMPLET À "TON
+                  BILAN" (SAUF SIMULATEUR) : un compte invité (isGuest) n'est
+                  jamais `premium` (cf. estComptePremium, utils/premium.ts),
+                  mais doit quand même voir tout le contenu des onglets
+                  Vista/Santé/Trophées comme un compte premium — seul
+                  l'onglet Simulateur reste réservé, et seulement pour ses
+                  actions qui écrivent réellement en base (cf.
+                  bloquerSiInvite sur creerObjectifDepuisSimulationInverse/
+                  confirmerAdoptionScenario plus bas), jamais pour la
+                  consultation. */}
+              {premium || isGuest ? (
                 <>
                   <View style={styles.chipRow}>
                     {[1, 3, 6, 12].map((m) => {
@@ -4118,17 +4130,18 @@ export default function Analytics() {
             </ScrollView>
 
             {/* === Onglet 2 : "Santé" — Premium uniquement, pas de
-                déblocage par pub (contrairement à InsightVerrouille). */}
+                déblocage par pub (contrairement à InsightVerrouille), sauf
+                invité (cf. RÈGLE sur l'onglet Vista plus haut). */}
             {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
                 `display` : cf. RÈGLE identique sur l'onglet Vista plus haut
                 — le ScrollView reste monté dès que `premium` est vrai
                 (indépendamment de l'onglet actif), seule sa visibilité
                 bascule via `display`, jamais un montage/démontage au
                 changement d'onglet. */}
-            {!premium && vueModalStats === "sante" && (
+            {!premium && !isGuest && vueModalStats === "sante" && (
               <PremiumVerrou hauteur={HAUTEUR_ONGLET_VERROUILLE} />
             )}
-            {premium && (
+            {(premium || isGuest) && (
               <ScrollView
                 ref={scrollSanteRef}
                 showsVerticalScrollIndicator
@@ -4381,13 +4394,14 @@ export default function Analytics() {
 
             {/* === Onglet 3 : "Trophées" — regroupe les cartes de séries
                 (déjà chacune sa propre carte) et la grille de trophées.
-                Premium uniquement, pas de déblocage par pub. */}
+                Premium uniquement, pas de déblocage par pub, sauf invité
+                (cf. RÈGLE sur l'onglet Vista plus haut). */}
             {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
                 `display` : cf. RÈGLE identique sur l'onglet Vista plus haut. */}
-            {!premium && vueModalStats === "trophees" && (
+            {!premium && !isGuest && vueModalStats === "trophees" && (
               <PremiumVerrou hauteur={HAUTEUR_ONGLET_VERROUILLE} />
             )}
-            {premium && (
+            {(premium || isGuest) && (
               <ScrollView
                 ref={scrollTropheesRef}
                 showsVerticalScrollIndicator
@@ -4745,13 +4759,19 @@ export default function Analytics() {
             )}
 
             {/* === Onglet 4 : "Et si..." (Simulateur) — Premium uniquement,
-                pas de déblocage par pub. */}
+                pas de déblocage par pub. Un invité PEUT consulter cet
+                onglet comme les 3 autres (cf. RÈGLE sur l'onglet Vista plus
+                haut) — c'est le seul onglet où, contrairement aux 3 autres,
+                le blocage invité reste actif, mais déplacé au niveau des
+                actions qui écrivent réellement en base (bloquerSiInvite sur
+                creerObjectifDepuisSimulationInverse/
+                confirmerAdoptionScenario), jamais sur la simple lecture. */}
             {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
                 `display` : cf. RÈGLE identique sur l'onglet Vista plus haut. */}
-            {!premium && vueModalStats === "simulateur" && (
+            {!premium && !isGuest && vueModalStats === "simulateur" && (
               <PremiumVerrou hauteur={HAUTEUR_ONGLET_VERROUILLE} />
             )}
-            {premium && (
+            {(premium || isGuest) && (
               <ScrollView
                 ref={scrollSimulateurRef}
                 showsVerticalScrollIndicator
@@ -5314,28 +5334,17 @@ export default function Analytics() {
               </ScrollView>
             )}
 
-            {isGuest && (
-              <View style={styles.overlayGuestStats}>
-                <Ionicons name="lock-closed-outline" size={28} color="#FFFFFF" />
-                <Text style={styles.overlayGuestTexte}>
-                  Crée un compte pour accéder aux statistiques complètes
-                </Text>
-                <BoutonPrincipal
-                  style={[styles.overlayGuestBouton, { backgroundColor: C.purple }]}
-                  onPress={() => {
-                    setModalSeriesVisible(false);
-                    // RÈGLE : replace (pas push) — même choix que
-                    // app/onboarding/essai-expire.tsx et GuestBanner.tsx pour
-                    // quitter le mode invité vers l'inscription.
-                    router.replace("/onboarding/inscription");
-                  }}
-                >
-                  <Text style={styles.overlayGuestBoutonTexte}>
-                    Créer un compte
-                  </Text>
-                </BoutonPrincipal>
-              </View>
-            )}
+            {/* RÈGLE À NE JAMAIS CASSER — PAS DE VERROU GLOBAL "TON BILAN"
+                POUR LES INVITÉS : un compte invité a accès en LECTURE aux 4
+                onglets (Vista/Santé/Trophées/Simulateur, cf. RÈGLE sur
+                l'onglet Vista plus haut) — seules les actions qui écrivent
+                réellement en base dans l'onglet Simulateur sont bloquées
+                (bloquerSiInvite sur creerObjectifDepuisSimulationInverse/
+                confirmerAdoptionScenario), jamais la modale entière. Un
+                ancien overlay `{isGuest && ...}` bloquait ici
+                inconditionnellement les 4 onglets derrière "Crée un compte
+                pour accéder aux statistiques complètes" — supprimé
+                volontairement, ne pas le réintroduire. */}
           </View>
         </View>
       </Modal>
@@ -5656,37 +5665,6 @@ function raisonPrincipaleVariation(
 }
 
 const styles = StyleSheet.create({
-  overlayGuestStats: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(20,20,30,0.82)",
-    borderBottomLeftRadius: 26,
-    borderBottomRightRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 32,
-    gap: 14,
-  },
-  overlayGuestTexte: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "600",
-    textAlign: "center",
-    lineHeight: 21,
-  },
-  overlayGuestBouton: {
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-  },
-  overlayGuestBoutonTexte: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
-  },
   container: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 20 },
   header: { marginTop: 60, marginBottom: 16 },
   headerRow: {
