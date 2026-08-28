@@ -21,21 +21,34 @@ import {
 //     user_id explicite avant chaque suppression individuelle.
 //   - supprimerObjectif() : 1 objectif par id, protégé côté base par la
 //     contrainte FK ON DELETE NO ACTION (refuse un objectif déjà archivé
-//     dans un mois passé).
+//     dans un mois passé) ET par un filtre double id + user_id explicite
+//     côté client (même niveau de protection qu'appliquerEnveloppes) ET par
+//     une sauvegarde AsyncStorage best-effort AVANT toute suppression
+//     réelle (cf. sauvegarderObjectifsSupprimes) — un objectif est de
+//     l'argent mis de côté par l'utilisateur, jamais moins protégé qu'une
+//     catégorie de dépense. Aucune autre fonction touchant à
+//     etat.objectifs ne doit jamais réduire la longueur du tableau — elles
+//     ne font toutes que .map() (même longueur) ou .filter() UNIQUEMENT
+//     dans cette fonction précise ; si un futur changement ajoute un
+//     .filter()/.slice() sur etat.objectifs ailleurs, c'est un signal
+//     d'alerte à traiter comme une suppression et à protéger pareillement.
 //   - supprimerEnveloppe() : 1 catégorie + ses transactions/événements
 //     liés, même protection FK.
 //   - supprimerEvenement() / supprimerTransaction() / supprimerModeleDepense() :
 //     1 ligne par id.
 //
 // RÈGLE À NE JAMAIS CASSER : toute suppression doit rester scopée à
-// l'utilisateur courant. Ce scoping repose aujourd'hui sur les policies
-// RLS Supabase (aucune définition de policy trouvée dans
-// supabase/migrations/ au moment d'un audit de sécurité — À VÉRIFIER
-// DIRECTEMENT DANS LE DASHBOARD SUPABASE, pas seulement dans ce repo, avant
-// de considérer ce point acquis). `appliquerEnveloppes()` ajoute en plus un
-// filtre `user_id` explicite côté client, en défense en profondeur — les
-// autres fonctions listées ci-dessus n'ont pas encore ce filtre client, à
-// étendre si l'audit RLS révèle un manque réel côté serveur.
+// l'utilisateur courant. Ce scoping repose sur les policies RLS Supabase —
+// un audit de sécurité a confirmé leur ABSENCE dans supabase/migrations/ et
+// une migration (20260825120000_rls_policies.sql) les ajoute pour TOUTES
+// les tables listées ci-dessus, mais cette migration doit être appliquée
+// MANUELLEMENT (dashboard Supabase ou `supabase db push`, cf. le rapport
+// d'audit) — ne jamais supposer qu'elle est déjà active sans vérification
+// directe dans le dashboard. `appliquerEnveloppes()` et `supprimerObjectif()`
+// ajoutent en plus un filtre `user_id` explicite côté client, en défense en
+// profondeur — les autres fonctions listées ci-dessus n'ont pas encore ce
+// filtre client, à étendre si l'audit RLS révèle un manque réel côté
+// serveur.
 //
 // RÈGLE À NE JAMAIS CASSER : appliquerEnveloppes() ne doit JAMAIS recevoir
 // un tableau vide en provenance d'un état précédent non vide sans que ce
@@ -392,6 +405,25 @@ function sauvegarderEnveloppesSupprimees(enveloppes: Enveloppe[]): void {
   ).catch((e) => {
     console.warn(
       "[store] Sauvegarde de secours des enveloppes supprimées a échoué :",
+      e,
+    );
+  });
+}
+
+// RÈGLE À NE JAMAIS CASSER — PROTECTION DES DONNÉES D'ÉPARGNE : un objectif
+// représente de l'argent mis de côté par l'utilisateur (actuel/cible) —
+// même filet de secours que les enveloppes (cf. sauvegarderEnveloppesSupprimees
+// juste au-dessus), même slot unique écrasé à chaque suppression (pas une
+// corbeille utilisateur, un filet de débogage/support best-effort).
+const CLE_BACKUP_OBJECTIFS_SUPPRIMES = "vista_backup_objectifs_supprimes";
+
+function sauvegarderObjectifsSupprimes(objectifs: Objectif[]): void {
+  AsyncStorage.setItem(
+    CLE_BACKUP_OBJECTIFS_SUPPRIMES,
+    JSON.stringify({ horodatage: new Date().toISOString(), objectifs }),
+  ).catch((e) => {
+    console.warn(
+      "[store] Sauvegarde de secours des objectifs supprimés a échoué :",
       e,
     );
   });
@@ -1733,6 +1765,9 @@ export function useObjectifs() {
       }
     },
 
+    // RÈGLE : ajoute, ne supprime jamais — cf. RÈGLE DE SÉCURITÉ en tête de
+    // fichier sur la protection des données d'épargne (etat.objectifs ne
+    // doit jamais rétrécir en dehors de supprimerObjectif).
     ajouterObjectif: async (
       nom: string,
       cible: number,
@@ -2040,6 +2075,10 @@ export function useObjectifs() {
       majEpargneMoisSupabase(montant);
     },
 
+    // RÈGLE : ne fait que .map() sur etat.objectifs (même longueur) — cf.
+    // RÈGLE DE SÉCURITÉ en tête de fichier, ne jamais transformer ceci en
+    // filter()/reconstruction de tableau sans le même niveau de protection
+    // que supprimerObjectif.
     modifierObjectif: (
       id: string,
       champs: Partial<
@@ -2068,6 +2107,8 @@ export function useObjectifs() {
       majObjectifSupabase(id, colonnes);
     },
 
+    // RÈGLE : ne fait que .map() sur etat.objectifs (même longueur) — cf.
+    // RÈGLE DE SÉCURITÉ en tête de fichier.
     ajouterFondsObjectif: (id: string, montant: number) => {
       const objectif = etat.objectifs.find((o) => o.id === id);
       if (!objectif) return;
@@ -2101,6 +2142,8 @@ export function useObjectifs() {
     // une mensualité et ça ne doit pas fausser le rythme mensuel utilisé pour
     // les projections (calculerRythmeObjectif) ni le "Mis de côté ce mois".
     // Seul objectifs.actuel change, localement et sur Supabase.
+    // RÈGLE : ne fait que .map() sur etat.objectifs (même longueur) — cf.
+    // RÈGLE DE SÉCURITÉ en tête de fichier.
     ajouterVersementPonctuel: (id: string, montant: number) => {
       const objectif = etat.objectifs.find((o) => o.id === id);
       if (!objectif) return;
@@ -2115,6 +2158,8 @@ export function useObjectifs() {
       majObjectifSupabase(id, { actuel: nouveauActuel });
     },
 
+    // RÈGLE : ne fait que .map() sur etat.objectifs (même longueur) — cf.
+    // RÈGLE DE SÉCURITÉ en tête de fichier.
     verifierVersementsObjectifs: () => {
       const aujourdhui = new Date();
       const jourActuel = aujourdhui.getDate();
@@ -2167,13 +2212,41 @@ export function useObjectifs() {
       }
     },
 
+    // RÈGLE À NE JAMAIS CASSER — PROTECTION DES DONNÉES D'ÉPARGNE : même
+    // niveau de protection que supprimerEnveloppe (appliquerEnveloppes) —
+    // filtre double id + user_id (défense en profondeur au-delà des
+    // policies RLS Supabase, cf. RÈGLE DE SÉCURITÉ en tête de fichier) ET
+    // sauvegarde AsyncStorage best-effort AVANT toute suppression réelle.
+    // Un objectif est de l'argent mis de côté par l'utilisateur — jamais
+    // moins protégé qu'une simple catégorie de dépense.
     supprimerObjectif: async (id: string) => {
+      const objectif = etat.objectifs.find((o) => o.id === id);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        console.error(
+          "Suppression d'objectif refusée : aucun utilisateur connecté.",
+        );
+        signalerErreurSync("Tu dois être connecté pour supprimer un objectif.");
+        return;
+      }
+
+      if (objectif) {
+        sauvegarderObjectifsSupprimes([objectif]);
+      }
+
       // La suppression Supabase passe en premier : snapshot_objectifs.objectif_id
       // est en ON DELETE NO ACTION, donc un objectif déjà archivé dans un mois
       // passé sera rejeté (code Postgres 23503). On ne touche l'état local
       // qu'une fois la suppression confirmée, pour ne jamais désynchroniser
       // l'UI et la base si elle échoue.
-      const { error } = await supabase.from("objectifs").delete().eq("id", id);
+      const { error } = await supabase
+        .from("objectifs")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id);
       if (error) {
         console.error("Supabase delete objectif a échoué :", error);
         signalerErreurSync(
@@ -2186,6 +2259,10 @@ export function useObjectifs() {
       setEtat({ objectifs: etat.objectifs.filter((o) => o.id !== id) });
     },
 
+    // RÈGLE : "clôturer" n'est PAS supprimer — ne fait que .map() sur
+    // etat.objectifs (même longueur, juste ferme: true) — un objectif
+    // clôturé reste visible dans l'historique ("Objectifs clôturés"), cf.
+    // RÈGLE DE SÉCURITÉ en tête de fichier.
     cloturerObjectif: (id: string) => {
       setEtat({
         objectifs: etat.objectifs.map((o) =>

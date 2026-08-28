@@ -61,6 +61,10 @@ import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { useAccessibilite } from "../AccessibiliteContext";
 import { AlerteBudgetBanner } from "../AlerteBudgetBanner";
+import {
+  styleModaleTablette,
+  useEstTablette,
+} from "../useTablette";
 import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
 import { InsightVerrouille } from "../InsightVerrouille";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
@@ -263,6 +267,7 @@ const ACCESSORY_ID = "numericDone";
 
 export default function Dashboard() {
   const objStore = useObjectifs();
+  const estTablette = useEstTablette();
   const { estPremium, simulerNonPremium } = usePremium();
   const { theme, couleurs, toggleTheme } = useTheme();
   const { reduireAnimations } = useAccessibilite();
@@ -1072,7 +1077,11 @@ export default function Dashboard() {
     return (
       <TouchableOpacity
         key={env.id}
-        style={[styles.envCard, { backgroundColor: bgClair(env.couleur) }]}
+        style={[
+          styles.envCard,
+          estTablette && styles.envCardTablette,
+          { backgroundColor: bgClair(env.couleur) },
+        ]}
         activeOpacity={0.7}
         onPress={() => ouvrirEditionEnveloppe(env)}
       >
@@ -1810,7 +1819,9 @@ export default function Dashboard() {
             >
               ENTRÉES D&apos;ARGENT
             </Text>
-            {enveloppesTrieesEntrees.map(renderCarteEnveloppe)}
+            <View style={estTablette ? styles.grilleTablette : undefined}>
+              {enveloppesTrieesEntrees.map(renderCarteEnveloppe)}
+            </View>
           </>
         )}
 
@@ -1828,7 +1839,9 @@ export default function Dashboard() {
             >
               DÉPENSES
             </Text>
-            {enveloppesTrieesDepenses.map(renderCarteEnveloppe)}
+            <View style={estTablette ? styles.grilleTablette : undefined}>
+              {enveloppesTrieesDepenses.map(renderCarteEnveloppe)}
+            </View>
           </>
         )}
 
@@ -1977,12 +1990,19 @@ export default function Dashboard() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <TouchableOpacity
-            style={styles.modalOverlayTouch}
+            style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
             activeOpacity={1}
             onPress={fermerModalAjoutEntreeBudgetAvecSauvegarde}
           >
             <TouchableOpacity
-              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
               activeOpacity={1}
               onPress={() => {}}
             >
@@ -2203,12 +2223,19 @@ export default function Dashboard() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <TouchableOpacity
-            style={styles.modalOverlayTouch}
+            style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
             activeOpacity={1}
             onPress={fermerModalEnveloppeAvecSauvegarde}
           >
             <TouchableOpacity
-              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
               activeOpacity={1}
               onPress={() => {}}
             >
@@ -2487,12 +2514,19 @@ export default function Dashboard() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <TouchableOpacity
-            style={styles.modalOverlayTouch}
+            style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
             activeOpacity={1}
             onPress={fermerModalAjoutAvecSauvegarde}
           >
             <TouchableOpacity
-              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
               activeOpacity={1}
               onPress={() => {}}
             >
@@ -2805,12 +2839,19 @@ export default function Dashboard() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <TouchableOpacity
-            style={styles.modalOverlayTouch}
+            style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
             activeOpacity={1}
             onPress={fermerModalEpargneAvecSauvegarde}
           >
             <TouchableOpacity
-              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
               activeOpacity={1}
               onPress={() => {}}
             >
@@ -3733,6 +3774,21 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     position: "relative",
   },
+  // RÈGLE — iPad : 2 colonnes plutôt qu'une pile de cartes pleine largeur
+  // sur un écran large. `gap` sur le conteneur (grilleTablette) espace les
+  // colonnes ET les lignes ; chaque carte passe de "pleine largeur
+  // implicite" (empilement classique, aucun style requis) à une largeur
+  // explicite de ~48% (row + flexWrap n'étirent pas automatiquement les
+  // enfants comme le fait un empilement en colonne).
+  grilleTablette: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  envCardTablette: {
+    width: "48%",
+    marginBottom: 0,
+  },
   envRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -3798,6 +3854,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.3)",
     justifyContent: "flex-end",
+  },
+  // RÈGLE — iPad : centre horizontalement une modale bottom-sheet plutôt
+  // que de la laisser s'étirer sur toute la largeur d'un iPad — combinée à
+  // styleModaleTablette() sur styles.modalCard, cf. même pattern dans
+  // app/(tabs)/analytics.tsx.
+  modalOverlayTouchTablette: {
+    alignItems: "center",
   },
   modalCard: {
     borderTopLeftRadius: 26,

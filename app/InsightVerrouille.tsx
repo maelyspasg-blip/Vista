@@ -1,14 +1,38 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import {
-  AdEventType,
-  RewardedAd,
-  RewardedAdEventType,
-} from "react-native-google-mobile-ads";
 import { AD_UNIT_ID_REWARDED, TESTFLIGHT_MODE } from "../utils/premium";
 import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
+
+// RÈGLE À NE JAMAIS CASSER — require() DANS UN try/catch, JAMAIS UN IMPORT
+// STATIQUE : react-native-google-mobile-ads est un module natif qui
+// nécessite un rebuild EAS (cf. RÈGLE plus bas) — sur le dev client actuel
+// (pas rebuild), le module natif RNGoogleMobileAdsModule est absent, et
+// l'évaluation du module JS de la librairie plante immédiatement à
+// l'IMPORT (avant même d'atteindre le corps de ce composant). Un
+// `import { ... } from "react-native-google-mobile-ads"` statique est
+// hissé et évalué AU CHARGEMENT DU BUNDLE, hors de portée de tout
+// try/catch placé dans ce fichier — seul un require() explicite, lui un
+// appel de fonction normal exécuté à l'endroit où il est écrit, peut être
+// intercepté. Sans ce garde, l'app plantait au démarrage avec
+// "RNGoogleMobileAdsModule not found" dès que ce fichier était chargé,
+// même si aucun insight verrouillé n'était jamais affiché à l'écran.
+let RewardedAd: any = null;
+let RewardedAdEventType: any = null;
+let AdEventType: any = null;
+
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const admob = require("react-native-google-mobile-ads");
+  RewardedAd = admob.RewardedAd;
+  RewardedAdEventType = admob.RewardedAdEventType;
+  AdEventType = admob.AdEventType;
+} catch {
+  // AdMob non disponible (dev client sans rebuild natif EAS, ou plateforme
+  // web) — RewardedAd reste `null`, le composant retombe systématiquement
+  // sur l'Alert simulé plus bas, jamais de crash.
+}
 
 // RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
 // composant ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
@@ -40,7 +64,7 @@ export function InsightVerrouille({
   const { theme, couleurs: C } = useTheme();
   const [enCoursDeblocage, setEnCoursDeblocage] = useState(false);
   const [pubChargee, setPubChargee] = useState(false);
-  const rewardedRef = useRef<RewardedAd | null>(null);
+  const rewardedRef = useRef<any>(null);
 
   // RÈGLE À NE JAMAIS CASSER — TOUS LES HOOKS AVANT TOUT RETURN
   // CONDITIONNEL : `deverrouille`/TESTFLIGHT_MODE ne doivent jamais changer
@@ -53,7 +77,7 @@ export function InsightVerrouille({
   // besoin d'une pub, jamais chargée dans ce cas (aucun appel AdMob inutile
   // pendant la période TestFlight).
   useEffect(() => {
-    if (TESTFLIGHT_MODE || deverrouille) return;
+    if (TESTFLIGHT_MODE || deverrouille || !RewardedAd) return;
 
     const rewarded = RewardedAd.createForAdRequest(AD_UNIT_ID_REWARDED);
     rewardedRef.current = rewarded;
@@ -102,7 +126,7 @@ export function InsightVerrouille({
   // natif EAS, pas de réseau, aucun inventaire disponible...), on retombe
   // sur l'Alert simulé plutôt que de laisser le bouton sans effet.
   const demanderDeblocage = () => {
-    if (pubChargee && rewardedRef.current) {
+    if (RewardedAd && pubChargee && rewardedRef.current) {
       setEnCoursDeblocage(true);
       rewardedRef.current.show().catch(() => {
         setEnCoursDeblocage(false);

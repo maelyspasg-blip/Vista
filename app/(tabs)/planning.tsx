@@ -33,6 +33,7 @@ import {
   programmerNotificationsEvenement,
 } from "../notifications";
 import { Enveloppe, Evenement, useObjectifs } from "../store";
+import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { useTheme } from "../ThemeContext";
 import { useAccessibilite } from "../AccessibiliteContext";
 import { BoutonPrincipal } from "../BoutonPrincipal";
@@ -227,6 +228,7 @@ function TapZone({
 
 export default function Planning() {
   const objStore = useObjectifs();
+  const estTablette = useEstTablette();
   const { theme, couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const router = useRouter();
@@ -1404,12 +1406,19 @@ export default function Planning() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <TouchableOpacity
-            style={styles.modalOverlayTouch}
+            style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
             activeOpacity={1}
             onPress={fermerModalCreationAvecSauvegarde}
           >
             <TouchableOpacity
-              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
               activeOpacity={1}
               onPress={() => {}}
             >
@@ -2388,6 +2397,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.3)",
     justifyContent: "flex-end",
+  },
+  // RÈGLE — iPad : cf. même pattern dans app/(tabs)/analytics.tsx.
+  modalOverlayTouchTablette: {
+    alignItems: "center",
   },
   modalCard: {
     borderTopLeftRadius: 26,

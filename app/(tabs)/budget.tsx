@@ -29,6 +29,7 @@ import { useTheme } from "../ThemeContext";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
 import { usePremium } from "../PremiumContext";
+import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { estComptePremium } from "../../utils/premium";
 import { PALETTE_COULEURS } from "../ColorPicker";
 import { couleurLaPlusDistincte } from "../../utils/couleurs";
@@ -168,6 +169,7 @@ function formaterDateLongue(dateISO: string): string {
 
 export default function Budget() {
   const objStore = useObjectifs();
+  const estTablette = useEstTablette();
   const { estPremium, simulerNonPremium } = usePremium();
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Budget —
   // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
@@ -1939,12 +1941,19 @@ export default function Budget() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <TouchableOpacity
-            style={styles.modalOverlayTouch}
+            style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
             activeOpacity={1}
             onPress={fermerModalAjoutAvecSauvegarde}
           >
             <TouchableOpacity
-              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
               activeOpacity={1}
               onPress={() => {}}
             >
@@ -2197,7 +2206,10 @@ export default function Budget() {
         onRequestClose={() => setGestionEvenement(null)}
       >
         <TouchableOpacity
-          style={styles.modalOverlayTouch}
+          style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
           activeOpacity={1}
           onPress={() => setGestionEvenement(null)}
         >
@@ -2205,6 +2217,7 @@ export default function Budget() {
             style={[
               styles.modalCard,
               { backgroundColor: C.carte, paddingBottom: 26 },
+              styleModaleTablette(estTablette),
             ]}
             activeOpacity={1}
             onPress={() => {}}
@@ -2269,12 +2282,19 @@ export default function Budget() {
         onRequestClose={() => setModalMoisVisible(false)}
       >
         <TouchableOpacity
-          style={styles.modalOverlayTouch}
+          style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
           activeOpacity={1}
           onPress={() => setModalMoisVisible(false)}
         >
           <TouchableOpacity
-            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
             activeOpacity={1}
             onPress={() => {}}
           >
@@ -2585,6 +2605,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.3)",
     justifyContent: "flex-end",
+  },
+  // RÈGLE — iPad : cf. même pattern dans app/(tabs)/analytics.tsx et
+  // app/(tabs)/index.tsx.
+  modalOverlayTouchTablette: {
+    alignItems: "center",
   },
   modalCard: {
     borderTopLeftRadius: 26,

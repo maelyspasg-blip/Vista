@@ -51,6 +51,7 @@ import { SyncErrorBanner } from "./SyncErrorBanner";
 import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { useObjectifs } from "./store";
 import { usePremium } from "./PremiumContext";
+import { styleModaleTablette, useEstTablette } from "./useTablette";
 import { estComptePremium } from "../utils/premium";
 import { Theme, useTheme } from "./ThemeContext";
 import { useTutoriel } from "./TutorielContext";
@@ -123,6 +124,7 @@ function styleCarte(
 
 export default function Profil() {
   const router = useRouter();
+  const estTablette = useEstTablette();
   const insets = useSafeAreaInsets();
   const { theme, couleurs: C, toggleTheme } = useTheme();
   const { reinitialiser: reinitialiserTutoriel } = useTutoriel();
@@ -1182,12 +1184,19 @@ export default function Profil() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <TouchableOpacity
-            style={styles.modalOverlayTouch}
+            style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
             activeOpacity={1}
             onPress={fermerModalMotDePasseAvecSauvegarde}
           >
             <TouchableOpacity
-              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
               activeOpacity={1}
               onPress={() => {}}
             >
@@ -1282,12 +1291,19 @@ export default function Profil() {
         onRequestClose={() => setModalExportVisible(false)}
       >
         <TouchableOpacity
-          style={styles.modalOverlayTouch}
+          style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
           activeOpacity={1}
           onPress={() => setModalExportVisible(false)}
         >
           <TouchableOpacity
-            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
             activeOpacity={1}
             onPress={() => {}}
           >
@@ -1372,12 +1388,19 @@ export default function Profil() {
         onRequestClose={() => setModalRapportVisible(false)}
       >
         <TouchableOpacity
-          style={styles.modalOverlayTouch}
+          style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
           activeOpacity={1}
           onPress={() => setModalRapportVisible(false)}
         >
           <TouchableOpacity
-            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
             activeOpacity={1}
             onPress={() => {}}
           >
@@ -1479,7 +1502,10 @@ export default function Profil() {
         onRequestClose={() => setModalCalculsVisible(false)}
       >
         <TouchableOpacity
-          style={styles.modalOverlayTouch}
+          style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
           activeOpacity={1}
           onPress={() => setModalCalculsVisible(false)}
         >
@@ -1487,6 +1513,7 @@ export default function Profil() {
             style={[
               styles.modalCardCalculs,
               { backgroundColor: C.carte, paddingBottom: insets.bottom + 20 },
+              styleModaleTablette(estTablette),
             ]}
             activeOpacity={1}
             onPress={() => {}}
@@ -1732,6 +1759,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.4)",
   },
   modalOverlayTouch: { justifyContent: "flex-end", flex: 1 },
+  // RÈGLE — iPad : cf. même pattern dans app/(tabs)/analytics.tsx.
+  modalOverlayTouchTablette: { alignItems: "center" },
   modalCard: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

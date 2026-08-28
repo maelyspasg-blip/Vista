@@ -8,13 +8,15 @@ import { Platform } from "react-native";
 // juste en dessous.
 //
 // RÈGLE À NE JAMAIS CASSER — METTRE À false AVANT LA PUBLICATION APP STORE
-// OFFICIELLE : tant que true, tout le monde (y compris les testeurs
-// TestFlight externes, qui n'ont ni objStore.isAdmin ni accès au toggle
-// "Simuler Premium") a accès à 100% des fonctionnalités Premium sans
-// restriction — voir estComptePremium ci-dessous, qui court-circuite TOUT
-// le reste de sa logique (y compris simulerNonPremium) dès que ce flag est
-// actif. Aucun mécanisme de rappel automatique ne le repasse à false : une
-// vérification manuelle avant soumission App Store est nécessaire.
+// OFFICIELLE : tant que true, tout NON-ADMIN (y compris les testeurs
+// TestFlight externes, qui n'ont ni objStore.isAdmin ni accès aux toggles
+// admin) a accès à 100% des fonctionnalités Premium sans restriction — voir
+// estComptePremium ci-dessous. Ne court-circuite PLUS le cas admin : un
+// admin garde le contrôle total (y compris "Simuler compte non-premium")
+// même pendant la période TestFlight, cf. RÈGLE détaillée sur
+// estComptePremium. Aucun mécanisme de rappel automatique ne repasse ce
+// flag à false : une vérification manuelle avant soumission App Store est
+// nécessaire.
 export const TESTFLIGHT_MODE = true;
 
 // RÈGLE : Ad Unit ID de la pub récompensée AdMob — sélectionné une seule
@@ -51,22 +53,36 @@ export async function sauvegarderPremiumSimule(actif: boolean): Promise<void> {
 }
 
 // RÈGLE À NE JAMAIS CASSER : point d'entrée UNIQUE pour savoir si un compte
-// a accès aux fonctionnalités Premium — un compte admin est toujours
-// considéré premium (il a accès à tout, y compris ce qui est exclusif à
-// Premium), ET le flag simulé (toggle "Simuler Premium", admin uniquement)
-// compte aussi, pour pouvoir prévisualiser le rendu premium sans être
-// soi-même admin. `simulerNonPremium` (toggle "Simuler compte non-premium",
-// admin uniquement) prend le dessus sur tout le reste — y compris isAdmin —
-// pour qu'un admin puisse voir exactement ce que voit un utilisateur
-// gratuit. Ne jamais dupliquer cette logique ailleurs dans le code —
-// toujours passer par cette fonction, pour n'avoir qu'un seul endroit à
-// changer le jour où RevenueCat remplace la simulation.
+// a accès aux fonctionnalités Premium — ne jamais dupliquer cette logique
+// ailleurs dans le code, toujours passer par cette fonction (un seul
+// endroit à changer le jour où RevenueCat remplace la simulation).
+//
+// Ordre des vérifications, DÉLIBÉRÉMENT dans cet ordre précis :
+//   1. isAdmin && simulerNonPremium → false. Un admin qui active "Simuler
+//      compte non-premium" doit voir EXACTEMENT ce que voit un utilisateur
+//      gratuit, y compris pendant la période TestFlight — ce cas doit donc
+//      être tranché AVANT TESTFLIGHT_MODE, jamais après.
+//   2. isAdmin (sans simulerNonPremium) → true. Un admin a toujours accès à
+//      tout, y compris ce qui est exclusif à Premium.
+//   3. TESTFLIGHT_MODE → true. Ne s'applique qu'aux comptes NON-ADMIN à ce
+//      stade (les cas admin sont déjà tranchés ci-dessus) — tout testeur
+//      TestFlight externe (jamais admin) a accès à 100% des fonctionnalités
+//      Premium sans restriction. Cf. RÈGLE sur TESTFLIGHT_MODE plus haut.
+//   4. estPremium — le flag simulé (toggle "Simuler Premium", admin
+//      uniquement) pour prévisualiser le rendu premium sans être soi-même
+//      admin, en dehors de toute période TestFlight.
+//
+// RÈGLE À NE JAMAIS CASSER : ne jamais remonter TESTFLIGHT_MODE avant les
+// deux checks isAdmin — c'est exactement le bug corrigé ici (TESTFLIGHT_MODE
+// court-circuitait TOUT, y compris simulerNonPremium, empêchant un admin de
+// prévisualiser la vue non-premium pendant la période TestFlight).
 export function estComptePremium(
   isAdmin: boolean,
   estPremium: boolean,
   simulerNonPremium: boolean,
 ): boolean {
+  if (isAdmin && simulerNonPremium) return false;
+  if (isAdmin) return true;
   if (TESTFLIGHT_MODE) return true;
-  if (simulerNonPremium) return false;
-  return isAdmin || estPremium;
+  return estPremium;
 }

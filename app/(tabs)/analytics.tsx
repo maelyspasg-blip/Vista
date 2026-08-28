@@ -54,6 +54,10 @@ import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useGuest } from "../GuestContext";
 import { InfoBulle } from "../InfoBulle";
+import {
+  styleModaleTablette,
+  useEstTablette,
+} from "../useTablette";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
@@ -866,6 +870,7 @@ function JaugeRepartition({
 
 export default function Analytics() {
   const router = useRouter();
+  const estTablette = useEstTablette();
   const estFocusDebug = useIsFocused();
   const objStore = useObjectifs();
   const { estPremium, simulerNonPremium } = usePremium();
@@ -1778,24 +1783,48 @@ export default function Analytics() {
       ? categoriesSelectionneesObj.filter((e) => e.type === "Entrée")
       : objStore.enveloppes.filter((e) => e.type === "Entrée");
 
+  // RÈGLE : regroupe par NOM (jamais par id) — même raison que
+  // construireRepartitionSurPeriode plus bas (deux catégories actives
+  // portant le même nom doivent apparaître comme UNE SEULE série de la
+  // barre empilée, montants sommés mois par mois, jamais deux segments
+  // dupliqués). `cle` devient le nom normalisé (jamais un id d'enveloppe) —
+  // c'est déjà comme ça que fonctionne onTapLegende/ouvrirDetailCategorieParMois
+  // ci-dessus, une simple clé de lookup dans `series`, sans autre usage
+  // externe. `couleur` : celle de la DERNIÈRE enveloppe rencontrée pour ce
+  // nom l'emporte, même convention que construireRepartitionSurPeriode.
+  const construireSeriesParCategorie = (
+    enveloppes: Enveloppe[],
+  ): SegmentBarreEmpilee[] => {
+    const parNom = new Map<
+      string,
+      { nom: string; couleur: string; ids: string[] }
+    >();
+    enveloppes.forEach((env) => {
+      const cleNom = env.nom.trim();
+      const existante = parNom.get(cleNom);
+      parNom.set(cleNom, {
+        nom: cleNom,
+        couleur: env.couleur,
+        ids: [...(existante?.ids ?? []), env.id],
+      });
+    });
+    return [...parNom.entries()].map(([cle, v]) => ({
+      cle,
+      label: v.nom,
+      couleur: v.couleur,
+      donnees: moisAffiches.map(({ mois, annee }) =>
+        v.ids.reduce(
+          (acc, id) => acc + getMontantEnveloppeMois(mois, annee, id),
+          0,
+        ),
+      ),
+    }));
+  };
+
   const seriesDepensesParCategorie: SegmentBarreEmpilee[] =
-    categoriesDepensesParCategorie.map((env) => ({
-      cle: env.id,
-      label: env.nom,
-      couleur: env.couleur,
-      donnees: moisAffiches.map(({ mois, annee }) =>
-        getMontantEnveloppeMois(mois, annee, env.id),
-      ),
-    }));
+    construireSeriesParCategorie(categoriesDepensesParCategorie);
   const seriesEntreesParCategorie: SegmentBarreEmpilee[] =
-    categoriesEntreesParCategorie.map((env) => ({
-      cle: env.id,
-      label: env.nom,
-      couleur: env.couleur,
-      donnees: moisAffiches.map(({ mois, annee }) =>
-        getMontantEnveloppeMois(mois, annee, env.id),
-      ),
-    }));
+    construireSeriesParCategorie(categoriesEntreesParCategorie);
 
   const moisAvecDonnees = moisAffiches.filter(({ mois, annee }) => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) return true;
@@ -2483,7 +2512,16 @@ export default function Analytics() {
   });
 
   return (
-    <View style={[styles.container, { backgroundColor: C.fondPage }]}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: C.fondPage },
+        // RÈGLE — iPad : marge horizontale généreuse plutôt que des
+        // tiroirs/graphiques étirés bord à bord sur toute la largeur d'un
+        // iPad — même esprit que styleModaleTablette pour les modales.
+        estTablette && { paddingHorizontal: 80 },
+      ]}
+    >
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <View style={[styles.header, styles.headerRow]}>
           <View>
@@ -2663,12 +2701,19 @@ export default function Analytics() {
           onRequestClose={() => setPeriodePickerVisible(false)}
         >
           <TouchableOpacity
-            style={styles.modalOverlayTouch}
+            style={[
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
+            ]}
             activeOpacity={1}
             onPress={() => setPeriodePickerVisible(false)}
           >
             <TouchableOpacity
-              style={[styles.modalCard, { backgroundColor: C.carte }]}
+              style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
               activeOpacity={1}
               onPress={() => {}}
             >
@@ -3807,11 +3852,21 @@ export default function Analytics() {
             bouton "Terminé" et onRequestClose (bouton retour Android)
             ferment la modale désormais, jamais un TouchableOpacity qui
             enveloppe le contenu scrollable. */}
-        <View style={styles.modalOverlayTouch}>
+        <View
+          style={[
+            styles.modalOverlayTouch,
+            estTablette && styles.modalOverlayTouchTablette,
+          ]}
+        >
           <View
             style={[
               styles.modalCardBadges,
               { backgroundColor: C.carte, height: HAUTEUR_MODALE_TON_BILAN },
+              // RÈGLE — iPad : "Ton bilan" a droit à une largeur plus
+              // généreuse (760) que les autres modales (600 par défaut,
+              // cf. styleModaleTablette) — 4 onglets riches en graphiques,
+              // pas un simple formulaire.
+              styleModaleTablette(estTablette, 760),
             ]}
           >
             <View style={styles.modalHeader}>
@@ -5292,12 +5347,19 @@ export default function Analytics() {
         onRequestClose={() => setDetailFiltreType(null)}
       >
         <TouchableOpacity
-          style={styles.modalOverlayTouch}
+          style={[
+            styles.modalOverlayTouch,
+            estTablette && styles.modalOverlayTouchTablette,
+          ]}
           activeOpacity={1}
           onPress={() => setDetailFiltreType(null)}
         >
           <TouchableOpacity
-            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            style={[
+              styles.modalCard,
+              { backgroundColor: C.carte },
+              styleModaleTablette(estTablette),
+            ]}
             activeOpacity={1}
             onPress={() => {}}
           >
@@ -5356,12 +5418,19 @@ export default function Analytics() {
         onRequestClose={() => setDetailCategorieParMois(null)}
       >
         <TouchableOpacity
-          style={styles.modalOverlayTouch}
+          style={[
+            styles.modalOverlayTouch,
+            estTablette && styles.modalOverlayTouchTablette,
+          ]}
           activeOpacity={1}
           onPress={() => setDetailCategorieParMois(null)}
         >
           <TouchableOpacity
-            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            style={[
+              styles.modalCard,
+              { backgroundColor: C.carte },
+              styleModaleTablette(estTablette),
+            ]}
             activeOpacity={1}
             onPress={() => {}}
           >
@@ -5660,6 +5729,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.3)",
     justifyContent: "flex-end",
+  },
+  // RÈGLE — iPad : centre horizontalement une modale bottom-sheet plutôt
+  // que de la laisser s'étirer sur toute la largeur d'un iPad — combinée à
+  // styleModaleTablette() sur le conteneur de contenu lui-même (qui pose la
+  // largeur max). Jamais appliqué seul, toujours avec modalOverlayTouch en
+  // premier élément du tableau de style.
+  modalOverlayTouchTablette: {
+    alignItems: "center",
   },
   modalCard: {
     borderTopLeftRadius: 26,

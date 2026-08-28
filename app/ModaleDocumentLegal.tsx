@@ -4,6 +4,7 @@ import { useAccessibilite } from "./AccessibiliteContext";
 import { BoutonPrincipal } from "./BoutonPrincipal";
 import { useTheme } from "./ThemeContext";
 import { Text } from "./Texte";
+import { useEstTablette } from "./useTablette";
 
 // Modale plein écran réutilisée pour la politique de confidentialité et les
 // CGU, accessible depuis Profil et depuis l'écran de connexion (avant même
@@ -23,6 +24,7 @@ export function ModaleDocumentLegal({
   const { couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const insets = useSafeAreaInsets();
+  const estTablette = useEstTablette();
 
   return (
     <Modal
@@ -37,24 +39,37 @@ export function ModaleDocumentLegal({
           { backgroundColor: C.fondPage, paddingTop: insets.top + 20 },
         ]}
       >
-        <Text style={[styles.titre, { color: C.texte }]}>{titre}</Text>
-        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-          <Text style={[styles.corps, { color: C.texte }]}>{texte}</Text>
-          <View style={{ height: 20 }} />
-        </ScrollView>
-        <BoutonPrincipal
+        {/* RÈGLE — iPad : colonne de lecture limitée à 700px, centrée —
+            contrairement aux modales bottom-sheet (styleModaleTablette),
+            ce conteneur reste `flex:1` (fond plein écran, presentationStyle
+            "fullScreen") ; seul ce wrapper interne (titre+texte+bouton) est
+            capé, pour ne jamais avoir un mur de texte lu bord à bord sur un
+            iPad. */}
+        <View
           style={[
-            styles.btnFermer,
-            {
-              backgroundColor: C.purple,
-              marginBottom: Math.max(20, insets.bottom + 12),
-            },
+            styles.colonneLecture,
+            estTablette && styles.colonneLectureTablette,
           ]}
-          onPress={onClose}
-          activeOpacity={0.8}
         >
-          <Text style={styles.btnFermerTexte}>Fermer</Text>
-        </BoutonPrincipal>
+          <Text style={[styles.titre, { color: C.texte }]}>{titre}</Text>
+          <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+            <Text style={[styles.corps, { color: C.texte }]}>{texte}</Text>
+            <View style={{ height: 20 }} />
+          </ScrollView>
+          <BoutonPrincipal
+            style={[
+              styles.btnFermer,
+              {
+                backgroundColor: C.purple,
+                marginBottom: Math.max(20, insets.bottom + 12),
+              },
+            ]}
+            onPress={onClose}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.btnFermerTexte}>Fermer</Text>
+          </BoutonPrincipal>
+        </View>
       </View>
     </Modal>
   );
@@ -62,6 +77,12 @@ export function ModaleDocumentLegal({
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 20 },
+  colonneLecture: { flex: 1 },
+  colonneLectureTablette: {
+    width: "100%",
+    maxWidth: 700,
+    alignSelf: "center",
+  },
   titre: { fontSize: 22, fontWeight: "700", marginBottom: 16 },
   scroll: { flex: 1 },
   corps: { fontSize: 14, lineHeight: 22 },

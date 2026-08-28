@@ -9,6 +9,7 @@ import { formaterMontant } from "../utils/montant";
 import { Text } from "./Texte";
 import { TextInput } from "./TexteInput";
 import { useTheme } from "./ThemeContext";
+import { styleModaleTablette, useEstTablette } from "./useTablette";
 import {
   categoriesDuMois,
   depenseEnveloppeDansSnapshot,
@@ -29,6 +30,7 @@ function formaterDateCourte(dateISO: string): string {
 
 export function VueMoisArchive({ mois, annee }: { mois: number; annee: number }) {
   const objStore = useObjectifs();
+  const estTablette = useEstTablette();
   const { couleurs: C, theme } = useTheme();
   const [enveloppeOuverte, setEnveloppeOuverte] = useState<string | null>(null);
   const [deltaPourcentagePour, setDeltaPourcentagePour] = useState<
@@ -350,12 +352,16 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
         onRequestClose={() => setRenommageAncienNom(null)}
       >
         <TouchableOpacity
-          style={styles.modalOverlay}
+          style={[styles.modalOverlay, estTablette && { alignItems: "center" }]}
           activeOpacity={1}
           onPress={() => setRenommageAncienNom(null)}
         >
           <TouchableOpacity
-            style={[styles.modalCard, { backgroundColor: C.carte }]}
+            style={[
+              styles.modalCard,
+              { backgroundColor: C.carte },
+              styleModaleTablette(estTablette, 480),
+            ]}
             activeOpacity={1}
             onPress={() => {}}
           >
