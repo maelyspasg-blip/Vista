@@ -61,6 +61,10 @@ const HEURE_SCROLL_INITIAL = 8;
 
 const ACCESSORY_ID = "numericDone";
 const AUJOURDHUI = new Date();
+// Vert teal — distingue visuellement les entrées d'argent prévues (cf.
+// bloc de génération dans Planning) des dépenses, toutes les autres
+// couleurs d'événements synthétiques venant de la catégorie/l'objectif liés.
+const COULEUR_ENTREE_PLANNING = "#1D9E75";
 
 function heureEnMinutes(heure: string): number {
   const [h, m] = heure.replace("h", ":").split(":");
@@ -426,6 +430,67 @@ export default function Planning() {
       }
     });
 
+  // RÈGLE : entrées d'argent prévues affichées comme événements "toute la
+  // journée" dans Planning — copie LITTÉRALE du mécanisme utilisé pour les
+  // catégories Fixe juste au-dessus (dédup par nom, boucle sur les mois
+  // voisins si repete_chaque_mois, sinon un seul événement à dateFixe, même
+  // garde-fou "déjà payée ce mois" via historiquePaiements), appliqué à
+  // type === "Entrée" au lieu de "Fixe" — cf. demande explicite "pas de
+  // réinvention". Seule différence assumée : couleur fixe
+  // (COULEUR_ENTREE_PLANNING) au lieu de e.couleur, pour distinguer
+  // visuellement une entrée d'argent d'une dépense, cf. demande initiale.
+  // Contrôle par enveloppe (e.afficherDansPlanning), jamais par réglage
+  // global — un ancien toggle dans Profil → Paramètres a été retiré à la
+  // demande explicite de l'utilisateur.
+  const enveloppesEntreesUniques = new Map<string, Enveloppe>();
+  objStore.enveloppes
+    .filter((e) => e.type === "Entrée" && e.afficherDansPlanning && e.dateFixe)
+    .forEach((e) => {
+      if (!enveloppesEntreesUniques.has(e.nom)) enveloppesEntreesUniques.set(e.nom, e);
+    });
+  [...enveloppesEntreesUniques.values()]
+    .forEach((e) => {
+      const dateOrigine = new Date(e.dateFixe!);
+      if (e.repeteChaqueMois) {
+        const jour = dateOrigine.getDate();
+        for (let offset = -2; offset <= 2; offset++) {
+          const d = new Date(anneeVue, moisVue + offset, jour);
+          const dejaPayeeCeMois = objStore.historiquePaiements.some(
+            (p) =>
+              p.enveloppeId === e.id &&
+              new Date(p.date).getMonth() === d.getMonth() &&
+              new Date(p.date).getFullYear() === d.getFullYear(),
+          );
+          if (dejaPayeeCeMois) continue;
+          tousLesEvenements.push({
+            id: `entree_${e.id}-${d.getFullYear()}-${d.getMonth()}`,
+            nom: e.nom,
+            heure: "",
+            duree: 0,
+            couleur: COULEUR_ENTREE_PLANNING,
+            estFinancier: true,
+            montant: e.budget,
+            touteLaJournee: true,
+            date: d,
+            modifiable: false,
+          });
+        }
+      } else {
+        tousLesEvenements.push({
+          id: `entree_${e.id}`,
+          nom: e.nom,
+          heure: "",
+          duree: 0,
+          couleur: COULEUR_ENTREE_PLANNING,
+          estFinancier: true,
+          montant: e.budget,
+          touteLaJournee: true,
+          date: dateOrigine,
+          modifiable: false,
+        });
+      }
+    });
+
   objStore.objectifs
     .filter((o) => o.recurrent && o.montantMensuel && o.jourDuMois)
     .forEach((o) => {
@@ -462,8 +527,25 @@ export default function Planning() {
     });
   });
 
+  // RÈGLE À NE JAMAIS CASSER — AUCUN ÉVÉNEMENT FANTÔME, JAMAIS AUX DÉPENS
+  // DES SOURCES SYNTHÉTIQUES CONNUES : un événement construit depuis
+  // evenementsSource (evenementId défini, cf. boucle plus haut) doit
+  // TOUJOURS avoir sa source réelle encore présente dans
+  // objStore.evenements au moment du rendu — sinon (transaction/onglet
+  // désynchronisé, suppression pas encore répercutée) il est retiré ici en
+  // dernier filtre plutôt que laissé affiché sans rien de réel derrière.
+  // Ce filtre NE TOUCHE JAMAIS les entrées synthétiques (Fixe, objectif,
+  // historique de paiement, entree_, ferie_) : elles ont `evenementId:
+  // undefined` PAR CONSTRUCTION (jamais une vraie ligne `evenements` en
+  // base, cf. RÈGLE sur les blocs Fixe/entrées/jours fériés plus haut) —
+  // leur appliquer ce même test les ferait toutes disparaître à tort.
+  const idsEvenementsReels = new Set(objStore.evenements.map((e) => e.id));
+  const tousLesEvenementsValides = tousLesEvenements.filter(
+    (ev) => ev.evenementId === undefined || idsEvenementsReels.has(ev.evenementId),
+  );
+
   const evsJour = (date: Date) =>
-    tousLesEvenements.filter((e) => memeJour(e.date, date));
+    tousLesEvenementsValides.filter((e) => memeJour(e.date, date));
   const evsToutLaJourneeJour = (date: Date) =>
     evsJour(date).filter((e) => e.touteLaJournee);
   const evsHorairesJour = (date: Date) =>
@@ -624,6 +706,20 @@ export default function Planning() {
       if (source) ouvrirEditionEvenement(source);
       router.setParams({ editEventId: undefined });
     }, [params.editEventId]),
+  );
+
+  // RÈGLE : rechargement forcé depuis Supabase à CHAQUE focus de l'onglet
+  // Planning (pas seulement au montage initial de (tabs)/_layout.tsx) —
+  // garantit que les événements affichés reflètent l'état réel en base
+  // même si une suppression/modification a eu lieu ailleurs (autre onglet,
+  // autre appareil, session précédente) pendant que Planning était en
+  // arrière-plan. Effet séparé du useFocusEffect ci-dessus (dépendances et
+  // responsabilités différentes) plutôt que fusionné dedans.
+  useFocusEffect(
+    useCallback(() => {
+      objStore.chargerEvenements();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
   );
 
   const sauvegarderModificationEvenement = async () => {
@@ -1033,6 +1129,12 @@ export default function Planning() {
                         <Text
                           style={[styles.alldayMontant, { color: ev.couleur }]}
                         >
+                          {/* RÈGLE : "+" uniquement pour une entrée d'argent
+                              (id préfixé entree_, cf. bloc de génération
+                              plus haut) — jamais pour une dépense, même
+                              affichée toute-la-journée (Fixe, objectif,
+                              jour férié...). */}
+                          {ev.id.startsWith("entree_") ? "+" : ""}
                           {formaterMontant(ev.montant)}€
                         </Text>
                       )}

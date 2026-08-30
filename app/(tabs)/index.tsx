@@ -796,18 +796,34 @@ export default function Dashboard() {
               budget: parseMontant(budgetTemp) || 0,
               couleur: couleurTemp,
               type: typeTemp,
-              recurrente: typeTemp !== "Fixe" ? recurrenteTemp : false,
+              // RÈGLE : pour "Entrée", `recurrente` (le mécanisme RÉEL de
+              // reconduction mensuelle de l'enveloppe, cf.
+              // archiverMoisActuelInterne dans app/store.ts, qui filtre sur
+              // e.recurrente) est piloté par le même toggle "Se répète
+              // chaque mois" que repeteChaqueMois (affichage Planning) —
+              // un seul toggle pour une seule notion de récurrence, cf.
+              // suppression du toggle "Récurrente" dédoublé pour ce type.
+              recurrente:
+                typeTemp === "Variable"
+                  ? recurrenteTemp
+                  : typeTemp === "Entrée"
+                    ? repeteChaqueMoisTemp
+                    : false,
               frequenceJours:
-                typeTemp !== "Fixe" && recurrenteTemp ? 30 : undefined,
+                typeTemp === "Variable" && recurrenteTemp ? 30 : undefined,
               dateFixe:
                 typeTemp === "Fixe" || typeTemp === "Entrée"
                   ? dateTemp
                   : undefined,
               payee: typeTemp === "Fixe" ? (e.payee ?? false) : undefined,
               repeteChaqueMois:
-                typeTemp === "Fixe" ? repeteChaqueMoisTemp : undefined,
+                typeTemp === "Fixe" || typeTemp === "Entrée"
+                  ? repeteChaqueMoisTemp
+                  : undefined,
               afficherDansPlanning:
-                typeTemp === "Fixe" ? afficherPlanningTemp : undefined,
+                typeTemp === "Fixe" || typeTemp === "Entrée"
+                  ? afficherPlanningTemp
+                  : undefined,
               // Une catégorie Variable qui devient non récurrente ici et
               // n'a encore jamais eu de mois de comptage (ex: elle était
               // récurrente depuis sa création, donc jamais concernée par le
@@ -862,18 +878,31 @@ export default function Dashboard() {
       budget: parseMontant(nouveauBudget),
       couleur: nouvelleCouleur,
       type: nouveauType,
-      recurrente: nouveauType !== "Fixe" ? estRecurrente : false,
+      // RÈGLE : même principe que sauvegarderEnveloppe ci-dessus — un seul
+      // toggle "Se répète chaque mois" pour "Entrée", qui pilote à la fois
+      // recurrente (reconduction réelle, cf. archiverMoisActuelInterne) et
+      // repeteChaqueMois (affichage Planning).
+      recurrente:
+        nouveauType === "Variable"
+          ? estRecurrente
+          : nouveauType === "Entrée"
+            ? nouveauRepeteChaqueMois
+            : false,
       frequenceJours:
-        nouveauType !== "Fixe" && estRecurrente ? 30 : undefined,
+        nouveauType === "Variable" && estRecurrente ? 30 : undefined,
       dateFixe:
         nouveauType === "Fixe" || nouveauType === "Entrée"
           ? nouvelleDate
           : undefined,
       payee: nouveauType === "Fixe" ? false : undefined,
       repeteChaqueMois:
-        nouveauType === "Fixe" ? nouveauRepeteChaqueMois : undefined,
+        nouveauType === "Fixe" || nouveauType === "Entrée"
+          ? nouveauRepeteChaqueMois
+          : undefined,
       afficherDansPlanning:
-        nouveauType === "Fixe" ? nouveauAfficherPlanning : undefined,
+        nouveauType === "Fixe" || nouveauType === "Entrée"
+          ? nouveauAfficherPlanning
+          : undefined,
       // Une catégorie Variable non récurrente n'a pas de date naturelle
       // (contrairement à Fixe/Entrée qui ont dateFixe) — on la rattache
       // explicitement à son mois de création pour qu'elle expire
@@ -2251,6 +2280,14 @@ export default function Dashboard() {
             >
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitre, { color: C.texte }]}>Modifier la catégorie</Text>
+                <TouchableOpacity
+                  onPress={fermerModalEnveloppeAvecSauvegarde}
+                  activeOpacity={0.6}
+                  accessibilityRole="button"
+                  accessibilityLabel="Fermer"
+                >
+                  <Ionicons name="close" size={20} color={C.texteMuted} />
+                </TouchableOpacity>
               </View>
               <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -2381,7 +2418,7 @@ export default function Dashboard() {
                   />
                 )}
 
-                {typeTemp !== "Fixe" && (
+                {typeTemp === "Variable" && (
                   <View style={styles.switchRow}>
                     <View>
                       <Text style={[styles.switchLabel, { color: C.texte }]}>Récurrente</Text>
@@ -2419,6 +2456,40 @@ export default function Dashboard() {
                           todayTextColor: C.vert,
                           arrowColor: C.vert,
                         }}
+                      />
+                    </View>
+
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
+                          Se répète chaque mois
+                        </Text>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                          Comme un salaire ou une allocation
+                        </Text>
+                      </View>
+                      <Switch
+                        value={repeteChaqueMoisTemp}
+                        onValueChange={setRepeteChaqueMoisTemp}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={repeteChaqueMoisTemp ? C.purple : "#FFF"}
+                      />
+                    </View>
+
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
+                          Afficher dans Planning
+                        </Text>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                          Visible aussi dans ton agenda
+                        </Text>
+                      </View>
+                      <Switch
+                        value={afficherPlanningTemp}
+                        onValueChange={setAfficherPlanningTemp}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={afficherPlanningTemp ? C.purple : "#FFF"}
                       />
                     </View>
                   </>
@@ -2696,7 +2767,7 @@ export default function Dashboard() {
                   />
                 )}
 
-                {nouveauType !== "Fixe" && (
+                {nouveauType === "Variable" && (
                   <View style={styles.switchRow}>
                     <View>
                       <Text style={[styles.switchLabel, { color: C.texte }]}>Récurrente</Text>
@@ -2737,6 +2808,40 @@ export default function Dashboard() {
                           todayTextColor: C.vert,
                           arrowColor: C.vert,
                         }}
+                      />
+                    </View>
+
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
+                          Se répète chaque mois
+                        </Text>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                          Comme un salaire ou une allocation
+                        </Text>
+                      </View>
+                      <Switch
+                        value={nouveauRepeteChaqueMois}
+                        onValueChange={setNouveauRepeteChaqueMois}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={nouveauRepeteChaqueMois ? C.purple : "#FFF"}
+                      />
+                    </View>
+
+                    <View style={styles.switchRow}>
+                      <View>
+                        <Text style={[styles.switchLabel, { color: C.texte }]}>
+                          Afficher dans Planning
+                        </Text>
+                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                          Visible aussi dans ton agenda
+                        </Text>
+                      </View>
+                      <Switch
+                        value={nouveauAfficherPlanning}
+                        onValueChange={setNouveauAfficherPlanning}
+                        trackColor={{ false: C.separateur, true: C.purpleLight }}
+                        thumbColor={nouveauAfficherPlanning ? C.purple : "#FFF"}
                       />
                     </View>
                   </>

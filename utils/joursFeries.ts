@@ -47,7 +47,7 @@ function ajouterJours(date: Date, n: number): Date {
 function creerFerie(idSuffixe: string, nom: string, date: Date): Evenement {
   return {
     id: `ferie_${idSuffixe}`,
-    nom: `🇫🇷 ${nom}`,
+    nom,
     date: dateVersISO(date),
     heure: "00:00",
     duree: 0,

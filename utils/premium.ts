@@ -19,6 +19,18 @@ import { Platform } from "react-native";
 // nécessaire.
 export const TESTFLIGHT_MODE = true;
 
+// RÈGLE À NE JAMAIS CASSER — FONDATIONS MODE COUPLE, DÉSACTIVÉ POUR LA BÊTA :
+// tant que `false`, aucun écran de l'app ne doit rendre la section "Espace
+// couple" ni aucun élément d'UI qui en dépend — cf. site d'appel dans
+// app/profil.tsx. Le schéma Supabase (espaces_partages, membres_espace,
+// enveloppes.attribue_a, transactions.attribue_a — cf.
+// supabase/migrations/20260830120000_mode_couple_fondations.sql) et
+// utils/coupleMode.ts existent déjà mais ne sont appelés par AUCUN code
+// applicatif tant que ce flag reste `false` : uniquement des fondations,
+// zéro effet sur la bêta TestFlight actuelle. Passer à `true` quand la V1
+// du mode couple est prête à être branchée dans l'UI.
+export const MODE_COUPLE_ACTIF = false;
+
 // RÈGLE : Ad Unit ID de la pub récompensée AdMob — sélectionné une seule
 // fois ici selon la plateforme (Platform.OS), jamais dupliqué ailleurs dans
 // le code (InsightVerrouille.tsx l'importe directement).

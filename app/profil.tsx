@@ -53,7 +53,7 @@ import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { reinitialiserEtatUtilisateur, useObjectifs } from "./store";
 import { usePremium } from "./PremiumContext";
 import { styleModaleTablette, useEstTablette } from "./useTablette";
-import { estComptePremium } from "../utils/premium";
+import { estComptePremium, MODE_COUPLE_ACTIF } from "../utils/premium";
 import { Theme, useTheme } from "./ThemeContext";
 import { useTutoriel } from "./TutorielContext";
 
@@ -908,6 +908,28 @@ export default function Profil() {
             />
           </View>
         </View>
+
+        {/* RÈGLE À NE JAMAIS CASSER — FONDATIONS MODE COUPLE, RIEN N'APPARAÎT
+            TANT QUE MODE_COUPLE_ACTIF EST false : cf. utils/premium.ts. Ne
+            jamais retirer cette garde même en développant le contenu de
+            cette section — elle protège la bêta TestFlight actuelle d'une
+            fonctionnalité pas encore prête. */}
+        {MODE_COUPLE_ACTIF && (
+          <>
+            <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
+              ESPACE COUPLE
+            </Text>
+            <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.purple, contrasteRenforce)]}>
+              <Text style={[styles.switchLabel, { color: C.texte }]}>
+                Partage ton budget à deux
+              </Text>
+              <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                Crée ou rejoins un espace partagé pour suivre vos dépenses
+                communes.
+              </Text>
+            </View>
+          </>
+        )}
 
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           DONNÉES
