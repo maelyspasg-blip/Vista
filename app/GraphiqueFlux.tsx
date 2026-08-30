@@ -263,6 +263,24 @@ const HAUTEUR_GRAPHIQUE_RATIO_MIN = 0.45;
 const LARGEUR_LABEL_LATERAL_MAX = 180;
 const MARGE_LABEL = 4;
 const TAILLE_LABEL_UNIFORME = 11;
+// RÈGLE : marges anti-débordement — corrigent un clipping des labels/rubans
+// aux bords du composant (bug confirmé : label de la dernière colonne coupé
+// à droite, dernier flux/label coupé en bas). N'affectent QUE l'espace
+// réservé aux labels et la hauteur RENDUE du SVG, jamais les proportions
+// des nœuds ni l'espacement entre eux (positionnerColonne continue de
+// recevoir hauteurSvg SANS ce padding, cf. site d'appel).
+const PADDING_DROIT_LABELS = 8;
+const PADDING_BAS_SUPPLEMENTAIRE = 24;
+// RÈGLE : espace supplémentaire réservé UNIQUEMENT à la colonne Destination
+// (dernière colonne) — ses labels sont statistiquement les plus longs
+// (sous-catégories, noms de transaction, ex: "Logement", "Auchan") et c'est
+// la SEULE colonne dont le bord droit du label touche directement le bord
+// du composant (les colonnes 0/1 ont de la marge de manœuvre vers la
+// colonne suivante). Décale sa barre vers la GAUCHE dans sa propre tranche
+// (au lieu de la centrer comme les autres colonnes, cf. RÈGLE "un tiers,
+// barre centrée" plus bas) — bug confirmé : labels tronqués faute de place
+// sans ce décalage.
+const MARGE_SUPPLEMENTAIRE_COLONNE_DESTINATION = 32;
 // La largeur moyenne approximative d'un caractère ci-dessous est une
 // estimation, pas une mesure exacte : React Native ne mesure pas le texte
 // avant rendu ici — mieux vaut passer à la ligne un peu trop tôt que
@@ -276,8 +294,36 @@ function tronquerSelonLargeur(texte: string, largeurDisponible: number, largeurC
 // cf. RÈGLE "TAILLE DE POLICE UNIFORME" en tête de fichier : décide
 // uniquement 1 ou 2 lignes, jamais une taille — TAILLE_LABEL_UNIFORME est
 // fixe partout.
+//
+// RÈGLE À NE JAMAIS CASSER — UN LABEL SANS ESPACE NE PASSE JAMAIS À 2
+// LIGNES : un nom en un seul "mot" ("Liquidités", "Épargne", "Carrefour"...)
+// n'a AUCUN point de coupure naturel — forcer malgré tout numberOfLines={2}
+// le coupe alors EN PLEIN MILIEU du mot ("Liqui"/"dités", bug confirmé),
+// React Native n'ayant nulle part où wrapper faute d'espace. Un label à
+// PLUSIEURS mots peut légitimement passer à 2 lignes (coupure sur une
+// espace) ; un label à un seul mot reste toujours sur 1 ligne — cf.
+// largeurLabelSansCoupure ci-dessous pour le débordement contrôlé que ça
+// implique.
 function calculerNbLignesLabel(texte: string, largeurDisponible: number): 1 | 2 {
+  if (!texte.includes(" ")) return 1;
   return texte.length * LARGEUR_CAR_LABEL <= largeurDisponible ? 1 : 2;
+}
+// RÈGLE : complément de calculerNbLignesLabel ci-dessus — un label sans
+// espace forcé à 1 ligne (jamais 2) peut dépasser largeurDisponible ; sans
+// ce complément, le Texte hériterait quand même de la largeur du
+// conteneur parent (noeudLabelZone, cf. site d'appel) au moment du calcul
+// de wrap par React Native, et un numberOfLines={1} y tronquerait
+// silencieusement le mot (ellipsizeMode="clip") au lieu de le couper au
+// milieu — un résultat tout aussi mauvais. Retourne une largeur ÉLARGIE
+// (jamais réduite) UNIQUEMENT pour le Texte lui-même (jamais pour
+// noeudLabelZone, qui reste largeurBox pour le positionnement) quand un
+// mot sans espace dépasse l'espace disponible — léger débordement visuel
+// accepté (cf. RÈGLE "TAILLE DE POLICE UNIFORME" en tête de fichier),
+// jamais un troncature invisible. `undefined` sinon (comportement inchangé).
+function largeurLabelSansCoupure(texte: string, largeurDisponible: number): number | undefined {
+  if (texte.includes(" ")) return undefined;
+  const largeurEstimee = texte.length * LARGEUR_CAR_LABEL;
+  return largeurEstimee > largeurDisponible ? largeurEstimee : undefined;
 }
 // RÈGLE : taille minimum d'un nœud — protège la lisibilité des tout petits
 // montants, cf. RÈGLE proportionnalité stricte par colonne.
@@ -764,9 +810,16 @@ export function GraphiqueFlux({
   // RÈGLE : chaque colonne occupe un tiers (ou une moitié, à 2 colonnes) de
   // la largeur totale, sa barre centrée au milieu de sa propre tranche —
   // ça laisse un espace généreux et symétrique de part et d'autre pour les
-  // rubans, cf. RÈGLE LISIBILITÉ #2.
+  // rubans, cf. RÈGLE LISIBILITÉ #2. SEULE EXCEPTION : la dernière colonne
+  // (Destination) n'est PAS centrée — sa barre est décalée vers la gauche
+  // de MARGE_SUPPLEMENTAIRE_COLONNE_DESTINATION pour réserver plus d'espace
+  // à ses labels (souvent les plus longs), cf. constante plus haut.
   const largeurSlot = largeur / nbColonnes;
-  const xColonnes = colonnes.map((_, i) => i * largeurSlot + largeurSlot / 2 - NODE_W / 2);
+  const xColonnes = colonnes.map((_, i) => {
+    const centre = i * largeurSlot + largeurSlot / 2;
+    const decalage = i === nbColonnes - 1 ? MARGE_SUPPLEMENTAIRE_COLONNE_DESTINATION : 0;
+    return centre - decalage - NODE_W / 2;
+  });
 
   const liensCategories =
     positionsParColonne[0].length > 0 && positionsParColonne[1]?.length > 0
@@ -834,6 +887,32 @@ export function GraphiqueFlux({
           })),
         )
       : [];
+  // RÈGLE À NE JAMAIS CASSER — AUCUNE SOURCE SANS DESTINATION : si une
+  // source de colonne 0 conserve malgré tout un reliquat non assigné après
+  // ce qui précède (écart d'arrondi, ou destinations directes déjà
+  // couvertes par d'autres sources) — bug confirmé : un flux "partait" d'une
+  // source sans jamais rejoindre de nœud visible — ce reliquat est rattaché
+  // au nœud "Liquidités" s'il existe dans la dernière colonne (seul nœud
+  // dont la vocation est justement "argent non affecté à une catégorie").
+  // S'il n'existe pas, le reliquat reste silencieusement non assigné (aucun
+  // nœud où l'accrocher) : mieux qu'un ruban inventé vers une destination
+  // qui n'existe pas.
+  const noeudLiquiditesFallback = (derniereColonne ?? []).find(
+    (p) => p.noeud.label === "Liquidités",
+  );
+  if (noeudLiquiditesFallback) {
+    const SEUIL_RELIQUAT_NEGLIGEABLE = 0.01;
+    sourcesRestantesDirectes.forEach((source) => {
+      if (source.restant > SEUIL_RELIQUAT_NEGLIGEABLE) {
+        liensDirects.push({
+          sourceId: source.id,
+          destId: noeudLiquiditesFallback.noeud.id,
+          montant: source.restant,
+        });
+        source.restant = 0;
+      }
+    });
+  }
   // Offsets de sortie de la colonne 0 calculés UNE SEULE FOIS sur
   // l'ensemble des deux ponts qui en partent (catégories + directs) —
   // jamais deux calculs indépendants, qui feraient repartir chaque nœud à
@@ -909,6 +988,81 @@ export function GraphiqueFlux({
     positions.filter((p) => estToucheParUnFlux(colIndex, p.noeud.id)),
   );
 
+  // RÈGLE À NE JAMAIS CASSER — HAUTEUR RENDUE TOUJOURS ASSEZ GRANDE POUR
+  // TOUT AFFICHER : PADDING_BAS_SUPPLEMENTAIRE seul est une estimation fixe
+  // — insuffisante dès qu'un nœud proche du bas a un label sur 2 lignes
+  // (cf. calculerNbLignesLabel), qui peut alors dépasser la hauteur du SVG
+  // et se faire couper (bug confirmé). Calcule ici, pour CHAQUE nœud
+  // affichable de CHAQUE colonne, le bord bas réel de son label (centré sur
+  // la hauteur de sa barre, cf. noeudLabelZone/justifyContent:"center" au
+  // rendu) — jamais seulement le dernier nœud de la colonne Destination :
+  // un nœud AVANT-dernier avec un label 2 lignes peut déborder plus bas que
+  // le dernier nœud (label 1 ligne) qui le suit. hauteurRenduSvg est le
+  // MAX entre la hauteur habituelle (hauteurSvg + PADDING_BAS_SUPPLEMENTAIRE)
+  // et ce débordement réel + une petite marge — jamais l'inverse (un
+  // plafond qui compresserait). hauteurSvg lui-même (proportions des
+  // nœuds, cf. positionnerColonne) reste totalement INCHANGÉ par ce calcul.
+  const HAUTEUR_LIGNE_LABEL = 14; // ~ line-height à TAILLE_LABEL_UNIFORME (11px)
+  const HAUTEUR_LIGNE_MONTANT = 14;
+  const MARGE_BAS_SVG = 8;
+  const debordementBasMax = positionsAffichablesParColonne.reduce((max, positions, colIndex) => {
+    const estColonneGauche = colIndex === 0;
+    return positions.reduce((maxCol, { noeud, y, h }) => {
+      if (noeud.label === "") return Math.max(maxCol, y + h);
+      const largeurDisponible = estColonneGauche
+        ? Math.max(0, xColonnes[colIndex] - MARGE_LABEL)
+        : Math.max(0, largeur - xColonnes[colIndex] - NODE_W - MARGE_LABEL - PADDING_DROIT_LABELS);
+      const largeurBox = Math.min(largeurDisponible, LARGEUR_LABEL_LATERAL_MAX);
+      const nbLignes = calculerNbLignesLabel(noeud.label, largeurBox);
+      const hauteurLabel = nbLignes * HAUTEUR_LIGNE_LABEL + 2 + HAUTEUR_LIGNE_MONTANT;
+      const basLabel = y + h / 2 + hauteurLabel / 2;
+      return Math.max(maxCol, basLabel, y + h);
+    }, max);
+  }, 0);
+  const hauteurRenduSvg = Math.max(
+    hauteurSvg + PADDING_BAS_SUPPLEMENTAIRE,
+    debordementBasMax + MARGE_BAS_SVG,
+  );
+
+  // RÈGLE À NE JAMAIS CASSER — VALIDATION GÉNÉRALE, AUCUN RUBAN SANS SOURCE
+  // ET DESTINATION RÉELLEMENT RENDUES (bug confirmé : un ruban pouvait se
+  // terminer "dans le vide" — visuellement present, sans nœud de
+  // destination visible en face). calculerRubansLiens résout ses nœuds
+  // contre positionsParColonne (nécessaire pour calculer les offsets AVANT
+  // de savoir quels nœuds seront "touchés", cf. estToucheParUnFlux
+  // ci-dessus — ordre de calcul volontairement conservé, ne jamais
+  // l'inverser), pas positionsAffichablesParColonne : un ruban dont la
+  // source ou la destination ne fait finalement PAS partie des nœuds
+  // rendus doit être retiré ici, en dernier filtre, plutôt que laissé à
+  // flotter sans nœud visible en face. Avertissement en dev uniquement,
+  // pour repérer la catégorie/transaction responsable si ça se reproduit.
+  const idsAffichablesParColonne = positionsAffichablesParColonne.map(
+    (positions) => new Set(positions.map((p) => p.noeud.id)),
+  );
+  const filtrerRubansValides = (
+    rubans: { id: string; couleur: string; d: (xGauche: number, xDroite: number) => string }[],
+    colIndexGauche: number,
+    colIndexDroite: number,
+  ) =>
+    rubans.filter(({ id }) => {
+      const sourceId = id.slice(0, id.indexOf("->"));
+      const destId = id.slice(id.indexOf("->") + 2);
+      const sourceOk = idsAffichablesParColonne[colIndexGauche]?.has(sourceId) ?? false;
+      const destOk = idsAffichablesParColonne[colIndexDroite]?.has(destId) ?? false;
+      if (!sourceOk || !destOk) {
+        if (__DEV__) {
+          console.warn(
+            `[GraphiqueFlux] Ruban orphelin retiré (source "${sourceId}" ou destination "${destId}" non rendue) : ${id}`,
+          );
+        }
+        return false;
+      }
+      return true;
+    });
+  const rubansDirectsValides = filtrerRubansValides(rubansDirects, 0, nbColonnes - 1);
+  const rubans01Valides = filtrerRubansValides(rubans01, 0, 1);
+  const rubans12Valides = filtrerRubansValides(rubans12, 1, 2);
+
   // RÈGLE À NE JAMAIS CASSER : "Autre" est cliquable comme n'importe quel
   // nœud — le tap ouvre un panel dédié listant les catégories qu'il
   // regroupe (cf. detailAutresSelection plus bas), jamais ignoré.
@@ -941,7 +1095,7 @@ export function GraphiqueFlux({
       : null;
 
   return (
-    <Animated.View style={{ opacity: opacite }}>
+    <Animated.View style={{ opacity: opacite, overflow: "visible" }}>
       {/* RÈGLE : le titre d'une colonne reste BORNÉ à sa propre tranche
           (largeurSlot, avec une petite marge), sinon les titres de
           colonnes voisines se chevauchent (bug confirmé). Autorisé à
@@ -968,14 +1122,27 @@ export function GraphiqueFlux({
       </View>
       <View style={{ height: 8 }} />
 
-      <View style={{ width: "100%" }} onLayout={(e) => setLargeur(e.nativeEvent.layout.width)}>
-        <Svg width={largeur} height={hauteurSvg}>
+      {/* RÈGLE : overflow "visible" explicite (jamais laissé au défaut de la
+          plateforme) — c'est dans cette View que le SVG et les labels
+          positionnés en absolu (siblings, hors du flux) coexistent ; sans
+          ce style, un label dont le bas dépasse la hauteur "naturelle" du
+          SVG (dernier nœud, label 2 lignes) pouvait être rogné. */}
+      <View
+        style={{ width: "100%", overflow: "visible" }}
+        onLayout={(e) => setLargeur(e.nativeEvent.layout.width)}
+      >
+        {/* RÈGLE : hauteur RENDUE = hauteurRenduSvg (cf. calcul plus haut) —
+            jamais hauteurSvg seul ici, qui reste réservé au calcul des
+            proportions (positionnerColonne, plus haut) : lui ajouter ce
+            padding aurait changé la hauteur de CHAQUE nœud proportionnellement,
+            ce que cette correction doit explicitement éviter. */}
+        <Svg width={largeur} height={hauteurRenduSvg}>
           {/* RÈGLE : les rubans directs vers "Liquidités"/"Épargne" (colonne
               0 → dernière colonne) se dessinent EN PREMIER, donc
               visuellement "derrière" les colonnes intermédiaires —
               cohérent avec le fait que cet argent ne passe jamais par une
               catégorie. */}
-          {rubansDirects.map(({ id, couleur, d }) => (
+          {rubansDirectsValides.map(({ id, couleur, d }) => (
             <Path
               key={`rdirect-${id}`}
               d={d(xColonnes[0] + NODE_W, xColonnes[nbColonnes - 1])}
@@ -990,7 +1157,7 @@ export function GraphiqueFlux({
               }
             />
           ))}
-          {rubans01.map(({ id, couleur, d }) => (
+          {rubans01Valides.map(({ id, couleur, d }) => (
             <Path
               key={`r01-${id}`}
               d={d(xColonnes[0] + NODE_W, xColonnes[1])}
@@ -1005,7 +1172,7 @@ export function GraphiqueFlux({
               }
             />
           ))}
-          {rubans12.map(({ id, couleur, d }) => (
+          {rubans12Valides.map(({ id, couleur, d }) => (
             <Path
               key={`r12-${id}`}
               d={d(xColonnes[1] + NODE_W, xColonnes[2])}
@@ -1063,9 +1230,13 @@ export function GraphiqueFlux({
             // une colonne proche du bord (bug confirmé).
             const largeurDisponible = estColonneGauche
               ? Math.max(0, xColonnes[colIndex] - MARGE_LABEL)
-              : Math.max(0, largeur - xColonnes[colIndex] - NODE_W - MARGE_LABEL);
+              : Math.max(
+                  0,
+                  largeur - xColonnes[colIndex] - NODE_W - MARGE_LABEL - PADDING_DROIT_LABELS,
+                );
             const largeurBox = Math.min(largeurDisponible, LARGEUR_LABEL_LATERAL_MAX);
             const nbLignesLabel = calculerNbLignesLabel(noeud.label, largeurBox);
+            const largeurLabelElargie = largeurLabelSansCoupure(noeud.label, largeurBox);
             const texteMontant =
               estColonneCategories && modeAffichage === "pct"
                 ? `${pct}%`
@@ -1102,6 +1273,7 @@ export function GraphiqueFlux({
                       style={[
                         styles.noeudLabel,
                         { color: C.texte, textAlign: estColonneGauche ? "right" : "left" },
+                        largeurLabelElargie !== undefined && { width: largeurLabelElargie },
                       ]}
                       numberOfLines={nbLignesLabel}
                       ellipsizeMode="clip"

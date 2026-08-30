@@ -3,7 +3,7 @@
 // .upsert() vers Supabase — calcul pur à partir de données déjà chargées,
 // toute écriture vit dans app/store.ts (cf. RÈGLE DE SÉCURITÉ en tête de
 // ce fichier).
-import { calculerSeries, DonneesSeries } from "./series";
+import { DonneesSeries } from "./series";
 
 type EnveloppeAvecNom = {
   nom: string;
@@ -161,6 +161,44 @@ function scoreObjectifs(objectifs: ObjectifMontants[]): number | null {
   return moyenne * 100;
 }
 
+// Séquence chronologique des montants épargnés (mois archivés triés, puis
+// le mois en cours) — même construction que
+// series.ts::construirePointsMois, mais on n'a besoin ici que du montant
+// épargné (le score ne dépend pas de depenseTotal/budgetTotal).
+function sequenceEpargne(
+  historiquesMois: { mois: number; annee: number; epargne: number }[],
+  epargneMois: number,
+): number[] {
+  const historique = [...historiquesMois]
+    .sort((a, b) => a.annee * 12 + a.mois - (b.annee * 12 + b.mois))
+    .map((s) => s.epargne);
+  return [...historique, epargneMois];
+}
+
+// RÈGLE À NE JAMAIS CASSER — "CAPACITÉ D'ÉPARGNE" TOLÈRE LE PLATEAU,
+// CONTRAIREMENT À LA SÉRIE "epargne-croissante" (utils/series.ts, stricte
+// hausse `>`, utilisée pour les trophées/Séries — ne JAMAIS modifier son
+// seuil, sa définition ("progresse") est correcte telle quelle pour ce
+// qu'elle mesure) : une épargne MAINTENUE d'un mois sur l'autre (ex: 150€
+// puis à nouveau 150€) reste une bonne habitude financière — la pénaliser à
+// 0 comme si l'épargne s'était arrêtée est un faux négatif. `>=` remplace
+// donc le `>` strict UNIQUEMENT ici, plus une garde de positivité (une
+// épargne nulle ne prolonge jamais la série, même "maintenue" à 0). Même
+// construction "run touchant la fin" que series.ts::calculerRuns (dupliquée
+// ici volontairement : la sémantique diffère, ce n'est pas la même série),
+// donc directement comparable à l'ancienne échelle (le plafond "6 mois" en
+// dessous reste calibré pareil).
+function streakEpargneMaintenue(sequence: number[]): number {
+  const satisfaitParMois = sequence.map(
+    (v, i) => i > 0 && v > 0 && v >= sequence[i - 1],
+  );
+  let courant = 0;
+  for (const ok of satisfaitParMois) {
+    courant = ok ? courant + 1 : 0;
+  }
+  return courant;
+}
+
 // Fraction des jours d'une fenêtre glissante (jusqu'à 90 jours) où au moins
 // une transaction/un paiement est daté(e) ce jour-là — proxy de régularité
 // d'usage en l'absence de tout tracking d'ouverture d'app. Le dénominateur
@@ -225,12 +263,15 @@ export function calculerScoreSante(donnees: DonneesScore): ScoreSante {
       new Date(),
       donnees.historiquesMois.length + 1,
     ),
-    epargne: (() => {
-      const streak = calculerSeries(donnees).find(
-        (s) => s.type === "epargne-croissante",
-      );
-      return streak ? (Math.min(streak.enCours, 6) / 6) * 100 : null;
-    })(),
+    epargne:
+      (Math.min(
+        streakEpargneMaintenue(
+          sequenceEpargne(donnees.historiquesMois, donnees.epargneMois),
+        ),
+        6,
+      ) /
+        6) *
+      100,
     objectifs: scoreObjectifs(donnees.objectifs),
     stabilite: scoreStabilite(donnees.historiquesMois.slice(-3)),
   };
@@ -261,20 +302,19 @@ export function calculerScoreHistorique(
       finDeMois,
       indexMois + 1,
     ),
-    epargne: (() => {
-      const streak = calculerSeries({
-        enveloppes: snap.enveloppes,
-        epargneMois: snap.epargne,
-        // construirePointsMois (series.ts) n'utilise le mois/l'année du
-        // dernier point que pour l'étiqueter, jamais pour la logique de
-        // série elle-même (seule la SÉQUENCE de valeurs `.epargne` compte
-        // pour epargne-croissante) — passer la fenêtre précédente ici
-        // donne donc bien le streak "tel qu'il était" à ce mois-là.
-        historiquesMois: fenetrePrecedente,
-        seuilEpargneConstante: null,
-      }).find((s) => s.type === "epargne-croissante");
-      return streak ? (Math.min(streak.enCours, 6) / 6) * 100 : null;
-    })(),
+    // Même construction que calculerScoreSante (cf. RÈGLE sur
+    // streakEpargneMaintenue) : la fenêtre précédente + `snap.epargne` donne
+    // le streak "tel qu'il était" à ce mois archivé, jamais les mois
+    // suivants.
+    epargne:
+      (Math.min(
+        streakEpargneMaintenue(
+          sequenceEpargne(fenetrePrecedente, snap.epargne),
+        ),
+        6,
+      ) /
+        6) *
+      100,
     objectifs: scoreObjectifs(snap.objectifs),
     stabilite: scoreStabilite([...fenetrePrecedente.slice(-2), snap]),
   };
@@ -301,6 +341,18 @@ function trouverCategorieDepassee(
 const SEUIL_POSITIF = 50;
 const SEUIL_ELEVE = 75;
 
+// RÈGLE À NE JAMAIS CASSER — SEUIL DÉDIÉ À "RÉGULARITÉ", PAS SEUIL_POSITIF :
+// details.regularite mesure une fraction de jours actifs sur une fenêtre
+// glissante (scoreRegularite, jusqu'à 90 jours) — même des dépenses
+// réparties tout le long du mois (ex: 16 jours actifs sur les ~22 jours
+// écoulés) restent loin de couvrir toute la fenêtre de 90 jours, donc
+// loin des 50% de SEUIL_POSITIF, sans que ce soit réellement irrégulier.
+// Le message "irrégulière" ne doit se déclencher que pour une concentration
+// VRAIMENT extrême (1-2 jours actifs sur toute la fenêtre) — 10% en est une
+// approximation raisonnable quel que soit l'âge du compte (fenêtre 30 à 90
+// jours selon nbMoisConnus dans scoreRegularite).
+const SEUIL_IRREGULARITE = 10;
+
 // Traduit en phrases concrètes ce qui fait gagner ou perdre des points sur
 // chacun des 5 signaux — jamais une liste statique : chaque phrase découle
 // de la valeur réelle du signal ce mois-ci, avec un texte et une couleur
@@ -314,8 +366,7 @@ export function genererExplicationsScore(
   } & DonneesSeries,
   details: ScoreSante["details"],
 ): ExplicationScore[] {
-  const { enveloppes, objectifs, epargneMois, historiquesMois, seuilEpargneConstante } =
-    donnees;
+  const { enveloppes, objectifs, epargneMois, historiquesMois } = donnees;
   const explications: ExplicationScore[] = [];
 
   if (details.budget !== null) {
@@ -348,7 +399,7 @@ export function genererExplicationsScore(
         texte: "Tu enregistres tes dépenses très régulièrement.",
         positif: true,
       });
-    } else if (pct < SEUIL_POSITIF) {
+    } else if (pct < SEUIL_IRREGULARITE) {
       explications.push({
         texte: "Tes dépenses sont enregistrées de façon irrégulière ces derniers temps.",
         positif: false,
@@ -357,22 +408,21 @@ export function genererExplicationsScore(
   }
 
   if (details.epargne !== null) {
-    const streak =
-      calculerSeries({ enveloppes, epargneMois, historiquesMois, seuilEpargneConstante }).find(
-        (s) => s.type === "epargne-croissante",
-      )?.enCours ?? 0;
+    const streak = streakEpargneMaintenue(
+      sequenceEpargne(historiquesMois, epargneMois),
+    );
     const positif = details.epargne >= (SEUIL_POSITIF / 100) * 25;
     if (positif) {
       explications.push({
         texte:
           details.epargne >= (SEUIL_ELEVE / 100) * 25
-            ? `Ton épargne progresse très régulièrement depuis ${streak} mois.`
-            : `Ton épargne progresse depuis ${streak} mois.`,
+            ? `Ton épargne progresse ou se maintient très régulièrement depuis ${streak} mois.`
+            : `Ton épargne progresse ou se maintient depuis ${streak} mois.`,
         positif: true,
       });
     } else if (streak > 0) {
       explications.push({
-        texte: `Ton épargne ne progresse que depuis ${streak} mois, pas encore assez régulière.`,
+        texte: `Ton épargne se maintient seulement depuis ${streak} mois, pas encore assez régulière.`,
         positif: false,
       });
     } else if (epargneMois <= 0) {

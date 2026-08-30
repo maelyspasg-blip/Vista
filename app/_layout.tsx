@@ -11,6 +11,7 @@ import {
   useAccessibilite,
 } from "./AccessibiliteContext";
 import { GuestContext } from "./GuestContext";
+import { JoursFeriesProvider } from "./JoursFeriesContext";
 import { PremiumProvider } from "./PremiumContext";
 import { supabase } from "../supabaseClient";
 import { reinitialiserEtatUtilisateur } from "./store";
@@ -435,7 +436,9 @@ export default function RootLayout() {
               }}
             >
               <PremiumProvider>
-                <Navigateur />
+                <JoursFeriesProvider>
+                  <Navigateur />
+                </JoursFeriesProvider>
               </PremiumProvider>
             </TutorielContext.Provider>
           </GuestContext.Provider>

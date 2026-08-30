@@ -45,6 +45,8 @@ import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
 import { FrequenceEvenement, genererOccurrencesEvenement } from "../../utils/evenements";
+import { getJoursFeries } from "../../utils/joursFeries";
+import { useJoursFeries } from "../JoursFeriesContext";
 
 const JOURS_SEMAINE = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const HEURES = Array.from({ length: 24 }, (_, i) => `${i}h`);
@@ -235,6 +237,7 @@ export default function Planning() {
   const { reduireAnimations } = useAccessibilite();
   const router = useRouter();
   const { isGuest } = useGuest();
+  const { afficherJoursFeries } = useJoursFeries();
   const params = useLocalSearchParams<{ editEventId?: string }>();
   const { planning: tutorielPlanningVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
@@ -295,7 +298,27 @@ export default function Planning() {
   const finFenetreRecurrence = new Date(anneeVue, moisVue + 3, 0);
   finFenetreRecurrence.setHours(23, 59, 59, 999);
 
-  objStore.evenements.forEach((e) => {
+  // RÈGLE : jours fériés fusionnés AVANT la boucle de construction de
+  // tousLesEvenements, traités par le MÊME code que les événements réels —
+  // seule leur id (préfixée `ferie_`, cf. utils/joursFeries.ts) les
+  // distingue plus bas pour les rendre non modifiables/non supprimables et
+  // sans lien vers un vrai Evenement en base (evenementId). Générés pour
+  // toutes les années couvertes par la fenêtre affichée (celle-ci peut
+  // chevaucher deux années civiles, ex: vue de décembre à mars) — jamais
+  // persistés, jamais envoyés à Supabase (cf. RÈGLE dans
+  // utils/joursFeries.ts). Masqués entièrement si l'utilisateur a désactivé
+  // le réglage "Afficher les jours fériés français" (Profil → Paramètres).
+  const anneesFenetreFeries = new Set([
+    debutFenetreRecurrence.getFullYear(),
+    finFenetreRecurrence.getFullYear(),
+  ]);
+  const joursFeries = afficherJoursFeries
+    ? [...anneesFenetreFeries].flatMap((annee) => getJoursFeries(annee))
+    : [];
+  const evenementsSource = [...objStore.evenements, ...joursFeries];
+
+  evenementsSource.forEach((e) => {
+    const estFerie = e.id.startsWith("ferie_");
     const dateDebut = new Date(e.date);
     dateDebut.setHours(0, 0, 0, 0);
     const dateFinBase = e.dateFin ? new Date(e.dateFin) : null;
@@ -326,8 +349,11 @@ export default function Planning() {
           montant: k === 0 ? e.montant : undefined,
           touteLaJournee: nbJoursSupplementaires > 0 ? true : e.touteLaJournee ?? false,
           date: d,
-          modifiable: true,
-          evenementId: e.id,
+          // RÈGLE : un jour férié n'est jamais modifiable/supprimable
+          // (pas un vrai Evenement en base) — cf. gererClicEvenement plus
+          // bas, qui ignore déjà tout ev.modifiable === false.
+          modifiable: !estFerie,
+          evenementId: estFerie ? undefined : e.id,
         });
       });
     };

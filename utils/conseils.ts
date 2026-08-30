@@ -878,7 +878,18 @@ function detecterSituations(
   const aujourdHui = journeeISO(new Date());
   const etatsAJour: EtatsInsightsMap = { ...etatsPrecedents };
 
-  const enveloppesSansEntree = enveloppes.filter((e) => e.type !== "Entrée");
+  // RÈGLE À NE JAMAIS CASSER — ANTI-DOUBLON PAR MOIS_COMPTAGE : `enveloppes`
+  // (le paramètre reçu, cf. objStore.enveloppes côté appelant) n'est PAS
+  // scopé au mois en cours — il contient aussi des enveloppes taguées pour
+  // un AUTRE mois via mois_comptage tant qu'elles n'ont pas été archivées
+  // (ex: une entrée d'argent datée le mois précédent mais comptant pour
+  // celui-ci). Filtré ici par estCategorieActiveCeMois avant tout calcul —
+  // toute la détection ci-dessous (budget, tendance, spike, corrélation...)
+  // part de enveloppesSansEntree/enveloppesVariables, jamais de `enveloppes`
+  // brut, donc ce seul filtre suffit à protéger toute la fonction.
+  const enveloppesSansEntree = enveloppes
+    .filter((e) => e.type !== "Entrée")
+    .filter((e) => estCategorieActiveCeMois(e, anneeActuelle, moisActuel));
   const totalDepenses = enveloppesSansEntree.reduce((acc, e) => acc + e.depense, 0);
   // RÈGLE À NE JAMAIS CASSER : cf. RÈGLE en tête de fichier — base commune à
   // TOUTE détection par catégorie ci-dessous (budget, tendance, spike,

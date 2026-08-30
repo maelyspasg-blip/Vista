@@ -1,3 +1,7 @@
+// TEMPORAIRE — à retirer avec le `return null` plus bas (masquage du
+// bandeau pour des captures d'écran) : le reste du fichier est commenté,
+// donc temporairement inutilisé, sans le supprimer.
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useRouter } from "expo-router";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,7 +23,12 @@ export function GuestBanner({ topSafeArea = false }: { topSafeArea?: boolean }) 
   const { isGuest, msRestants } = useGuest();
 
   if (!isGuest || msRestants === null) return null;
-
+  // TEMPORAIRE — à remettre avant la publication : bandeau masqué pour des
+  // captures d'écran propres. Le reste de la fonction est commenté (pas
+  // supprimé) le temps de ce masquage, pour revenir en arrière d'un coup en
+  // retirant ce commentaire + le `return null` ci-dessus.
+  return null;
+  /*
   const { fond, texte } =
     msRestants <= UNE_HEURE_MS
       ? {
@@ -60,6 +69,7 @@ export function GuestBanner({ topSafeArea = false }: { topSafeArea?: boolean }) 
       </TouchableOpacity>
     </View>
   );
+  */
 }
 
 const styles = StyleSheet.create({

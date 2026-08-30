@@ -47,6 +47,7 @@ import { RapportVisuelCarte } from "./RapportVisuelCarte";
 import { BoutonPrincipal } from "./BoutonPrincipal";
 import { GuestBanner } from "./GuestBanner";
 import { useGuest } from "./GuestContext";
+import { useJoursFeries } from "./JoursFeriesContext";
 import { SyncErrorBanner } from "./SyncErrorBanner";
 import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { reinitialiserEtatUtilisateur, useObjectifs } from "./store";
@@ -138,6 +139,7 @@ export default function Profil() {
   } = useAccessibilite();
   const objStore = useObjectifs();
   const { isGuest } = useGuest();
+  const { afficherJoursFeries, setAfficherJoursFeries } = useJoursFeries();
   const { estPremium, definirPremium, simulerNonPremium, definirSimulerNonPremium } =
     usePremium();
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Profil —
@@ -798,6 +800,24 @@ export default function Profil() {
             />
           </View>
 
+          <View style={[styles.switchRow, { marginTop: 18 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.switchLabel, { color: C.texte }]}>
+                Jours fériés français
+              </Text>
+              <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                Afficher les jours fériés dans le Planning
+              </Text>
+            </View>
+            <Switch
+              value={afficherJoursFeries}
+              onValueChange={setAfficherJoursFeries}
+              trackColor={{ false: C.separateur, true: C.purpleLight }}
+              thumbColor={afficherJoursFeries ? C.purple : "#FFF"}
+              accessibilityLabel="Jours fériés français"
+            />
+          </View>
+
           <TouchableOpacity
             style={[styles.btnSecondaire, { borderColor: C.separateur, marginTop: 18 }]}
             onPress={() => {
@@ -899,7 +919,9 @@ export default function Profil() {
               { borderColor: C.separateur, justifyContent: "space-between" },
             ]}
             onPress={() =>
-              premium ? setModalExportVisible(true) : gererTapFonctionVerrouillee()
+              premium || isGuest
+                ? setModalExportVisible(true)
+                : gererTapFonctionVerrouillee()
             }
             activeOpacity={0.7}
           >
@@ -909,7 +931,9 @@ export default function Profil() {
                 Exporter mes données (Excel)
               </Text>
             </View>
-            {!premium && (
+            {/* RÈGLE : jamais de cadenas pour un invité, cf. RÈGLE sur la
+                section "PASSER PREMIUM" plus bas. */}
+            {!premium && !isGuest && (
               <Ionicons name="lock-closed" size={14} color={C.texteMuted} />
             )}
           </TouchableOpacity>
@@ -920,7 +944,9 @@ export default function Profil() {
               { borderColor: C.separateur, marginTop: 12, justifyContent: "space-between" },
             ]}
             onPress={() =>
-              premium ? setModalRapportVisible(true) : gererTapFonctionVerrouillee()
+              premium || isGuest
+                ? setModalRapportVisible(true)
+                : gererTapFonctionVerrouillee()
             }
             activeOpacity={0.7}
           >
@@ -930,7 +956,7 @@ export default function Profil() {
                 Exporter un résumé visuel
               </Text>
             </View>
-            {!premium && (
+            {!premium && !isGuest && (
               <Ionicons name="lock-closed" size={14} color={C.texteMuted} />
             )}
           </TouchableOpacity>
@@ -1054,8 +1080,13 @@ export default function Profil() {
             non-premium (jamais affiché à quelqu'un qui a déjà accès à
             tout) — `premium` respecte déjà simulerNonPremium, donc un admin
             en train de "Simuler compte non-premium" revoit cette section
-            comme un vrai utilisateur gratuit la verrait. */}
-        {!premium && (
+            comme un vrai utilisateur gratuit la verrait. JAMAIS pour un
+            invité (isGuest) non plus : un compte d'essai est un compte de
+            découverte, pas un compte non-premium à convertir en Premium —
+            "Créer mon compte" (bloquerSiInvite) est la seule invitation à
+            lui montrer, jamais "Passer Premium". Même raisonnement pour le
+            cadenas Export/Rapport juste au-dessus. */}
+        {!premium && !isGuest && (
           <View onLayout={(e) => setYPasserPremium(e.nativeEvent.layout.y)}>
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
               PASSER PREMIUM

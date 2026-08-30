@@ -21,6 +21,7 @@ import { calculerSeries, Serie, TypeSerie } from "../../utils/series";
 import {
   budgetDuMoisArchive,
   entreesBudgetDuMois,
+  estCategorieActiveCeMois,
 } from "../../utils/budget";
 import {
   calculerScoreHistorique,
@@ -1473,17 +1474,20 @@ export default function Analytics() {
   // disponible)" pour `prochaine`) + une interception dans onValueChange
   // (cf. Picker plus bas) qui annule la sélection et affiche une alerte au
   // lieu de laisser passer.
+  // RÈGLE : un compte invité (isGuest) est exempté ici comme partout
+  // ailleurs — jamais de suffixe "(Premium)"/verrou sur le Picker pour un
+  // invité, cf. RÈGLE dans profil.tsx sur les autres éléments Premium.
   const optionsPeriode = genererOptionsPeriode(
     objStore.historiquesMois.length + 1,
   ).map((o) => ({
     ...o,
-    verrouillePremium: !premium && o.valeur > LIMITE_MOIS_GRATUIT_STATS,
+    verrouillePremium: !premium && !isGuest && o.valeur > LIMITE_MOIS_GRATUIT_STATS,
   }));
 
   // Clamp indépendant de la sélection courante du Picker : protège aussi
   // le cas d'un compte redevenu non-premium alors que nbMoisSelectionne
   // était encore réglé au-delà de la limite gratuite.
-  const nbMois = premium
+  const nbMois = premium || isGuest
     ? nbMoisSelectionne
     : Math.min(nbMoisSelectionne, LIMITE_MOIS_GRATUIT_STATS);
   // Suffixe de titre pour les sections calculées sur la période sélectionnée
@@ -1492,6 +1496,20 @@ export default function Analytics() {
 
   const moisAffiches = construireMoisPeriode(nbMois, MOIS_ACTUEL, ANNEE_ACTUELLE);
 
+  // RÈGLE À NE JAMAIS CASSER — ANTI-DOUBLON PAR MOIS_COMPTAGE : objStore.
+  // enveloppes n'est PAS scopé au mois en cours — il contient TOUTES les
+  // enveloppes vivantes, y compris celles taguées pour un AUTRE mois via
+  // mois_comptage (ex: une entrée d'argent datée en août mais comptant pour
+  // septembre reste une ligne vivante tant qu'elle n'a pas été archivée).
+  // TOUJOURS filtrer par estCategorieActiveCeMois (utils/budget.ts, même
+  // fonction que calculerResteEstimeCourant/index.tsx et
+  // enveloppesCourantes/budget.tsx) avant de sommer "le mois en cours" —
+  // sinon une telle enveloppe apparaît à la fois dans son mois par
+  // mois_comptage ET, faute de filtre, dans n'importe quelle autre requête
+  // qui prend `objStore.enveloppes` brut pour "le mois actuel". Un mois déjà
+  // archivé (snapshot) n'a pas besoin de ce filtre : c'est déjà un
+  // instantané figé "tel qu'il était à l'époque", sans mois_comptage à
+  // interroger (snapshot_enveloppes n'a pas cette colonne).
   const getDepenseMois = (
     mois: number,
     annee: number,
@@ -1502,7 +1520,9 @@ export default function Analytics() {
         enveloppeIds
           ? objStore.enveloppes.filter((e) => enveloppeIds.includes(e.id))
           : objStore.enveloppes
-      ).filter((e) => e.type !== "Entrée");
+      ).filter(
+        (e) => e.type !== "Entrée" && estCategorieActiveCeMois(e, annee, mois),
+      );
       return envsFiltrees.reduce((acc, e) => acc + e.depense, 0);
     }
     const snap = objStore.historiquesMois.find(
@@ -1527,7 +1547,9 @@ export default function Analytics() {
         enveloppeIds
           ? objStore.enveloppes.filter((e) => enveloppeIds.includes(e.id))
           : objStore.enveloppes
-      ).filter((e) => e.type !== "Entrée");
+      ).filter(
+        (e) => e.type !== "Entrée" && estCategorieActiveCeMois(e, annee, mois),
+      );
       return envsFiltrees.reduce((acc, e) => acc + e.budget, 0);
     }
     const snap = objStore.historiquesMois.find(
@@ -1553,9 +1575,8 @@ export default function Analytics() {
     enveloppeId: string,
   ): number => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
-      return (
-        objStore.enveloppes.find((e) => e.id === enveloppeId)?.depense ?? 0
-      );
+      const env = objStore.enveloppes.find((e) => e.id === enveloppeId);
+      return env && estCategorieActiveCeMois(env, annee, mois) ? env.depense : 0;
     }
     const snap = objStore.historiquesMois.find(
       (s) => s.mois === mois && s.annee === annee,
@@ -1878,9 +1899,13 @@ export default function Analytics() {
     { nom: string; montant: number; couleur: string }
   >();
   moisAffiches.forEach(({ mois, annee }) => {
+    // RÈGLE : filtré par estCategorieActiveCeMois pour le mois en cours —
+    // cf. RÈGLE ANTI-DOUBLON PAR MOIS_COMPTAGE sur getDepenseMois plus haut.
     const enveloppesMoisBrutes =
       mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
-        ? objStore.enveloppes
+        ? objStore.enveloppes.filter((e) =>
+            estCategorieActiveCeMois(e, annee, mois),
+          )
         : (objStore.historiquesMois.find(
             (s) => s.mois === mois && s.annee === annee,
           )?.enveloppes ?? []);
@@ -2001,9 +2026,18 @@ export default function Analytics() {
   ) => {
     const parCategorie = new Map<string, { nom: string; couleur: string; montant: number }>();
     moisListe.forEach(({ mois, annee }) => {
+      // RÈGLE : filtré par estCategorieActiveCeMois pour le mois en cours —
+      // cf. RÈGLE ANTI-DOUBLON PAR MOIS_COMPTAGE sur getDepenseMois plus
+      // haut (même fichier). Sans ce filtre, une enveloppe taguée pour un
+      // AUTRE mois via mois_comptage (ex: entrée d'argent datée le mois
+      // précédent mais comptant pour celui-ci) apparaissait à tort dans
+      // n'importe quelle période incluant le mois en cours, en plus de son
+      // vrai mois — double comptage.
       const enveloppesMoisBrutes =
         mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
-          ? objStore.enveloppes
+          ? objStore.enveloppes.filter((e) =>
+              estCategorieActiveCeMois(e, annee, mois),
+            )
           : (objStore.historiquesMois.find((s) => s.mois === mois && s.annee === annee)
               ?.enveloppes ?? []);
       // RÈGLE : déduplique par ID (jamais par nom ici) — protège contre une
@@ -2122,14 +2156,7 @@ export default function Analytics() {
   // id à chaque fois — rassemble tous les id ayant jamais porté ce nom
   // (même principe que construireRepartitionSurPeriode) pour ne rater
   // aucune transaction historique.
-  const bornesFlux = {
-    debut: new Date(moisFluxAffiches[0].annee, moisFluxAffiches[0].mois, 1),
-    finExclusive: new Date(
-      moisFluxAffiches[moisFluxAffiches.length - 1].annee,
-      moisFluxAffiches[moisFluxAffiches.length - 1].mois + 1,
-      1,
-    ),
-  };
+  //
   // RÈGLE À NE JAMAIS CASSER : comparaison par nom TRIMMÉ des deux côtés —
   // `nom` reçu ici est déjà trimmé (cf. cleNom dans
   // construireRepartitionSurPeriode), donc comparer contre `e.nom` brut
@@ -2138,10 +2165,27 @@ export default function Analytics() {
   // restait vide, `transactionsGroupeesParNomFlux` ne trouvait aucune
   // transaction, et la catégorie basculait à tort en Cas 2 (aucune
   // sous-catégorie affichée) malgré des transactions nommées bien réelles.
+  //
+  // RÈGLE À NE JAMAIS CASSER — CÔTÉ VIVANT FILTRÉ PAR MOIS_COMPTAGE : le
+  // côté archivé (boucle moisFluxAffiches ci-dessous) est déjà correctement
+  // scopé par construction (un id de snapshot n'existe que dans LE snapshot
+  // du mois où il a été archivé) — mais objStore.enveloppes (côté vivant)
+  // n'est PAS scopé au mois en cours, il contient aussi des enveloppes
+  // taguées pour un AUTRE mois via mois_comptage tant qu'elles n'ont pas
+  // été archivées. Sans estCategorieActiveCeMois ici, une telle enveloppe
+  // (ex: entrée d'argent datée le mois précédent mais comptant pour
+  // celui-ci) ajoutait son id inconditionnellement, et ses transactions se
+  // retrouvaient doublées entre son vrai mois et n'importe quel autre mois
+  // affiché.
   const idsPourNomCategorieFlux = (nom: string): Set<string> => {
     const ids = new Set<string>();
     objStore.enveloppes.forEach((e) => {
-      if (e.nom.trim() === nom) ids.add(e.id);
+      if (
+        e.nom.trim() === nom &&
+        estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL)
+      ) {
+        ids.add(e.id);
+      }
     });
     moisFluxAffiches.forEach(({ mois, annee }) => {
       objStore.historiquesMois
@@ -2152,15 +2196,23 @@ export default function Analytics() {
     });
     return ids;
   };
+  // RÈGLE À NE JAMAIS CASSER — APPARTENANCE PAR MOIS_COMPTAGE DE
+  // L'ENVELOPPE LIÉE, JAMAIS PAR LA DATE BRUTE DE LA TRANSACTION : `ids`
+  // (idsPourNomCategorieFlux ci-dessus) est déjà précisément scopé à
+  // moisFluxAffiches (côté vivant filtré par estCategorieActiveCeMois, côté
+  // archivé scopé par construction) — filtrer les transactions par
+  // ids.has(t.enveloppeId) suffit donc, sans filtre de date supplémentaire.
+  // Un ancien filtre par date (t.date dans les bornes calendaires de la
+  // période) provoquait un doublon : une entrée d'argent datée dans un mois
+  // mais comptant pour un autre (mois_comptage) était exclue ici tout en
+  // étant comptée dans fluxEntrees (qui lit déjà par mois_comptage via
+  // construireRepartitionSurPeriode), ou pire incluse deux fois si les deux
+  // mois faisaient partie de la période affichée.
   const transactionsGroupeesParNomFlux = (nomCategorie: string) => {
     const ids = idsPourNomCategorieFlux(nomCategorie);
     const parNom = new Map<string, number>();
     objStore.transactions
       .filter((t) => ids.has(t.enveloppeId))
-      .filter((t) => {
-        const d = new Date(t.date);
-        return d >= bornesFlux.debut && d < bornesFlux.finExclusive;
-      })
       .forEach((t) => {
         // RÈGLE : une transaction sans nom précis (vide/blanc) rejoint le
         // groupe "Non précisé" plutôt que de créer un nœud sans label.
@@ -2248,14 +2300,40 @@ export default function Analytics() {
     totalEntreesFlux - totalDepenseCategoriesFlux - totalEpargneFlux,
   );
 
+  // RÈGLE À NE JAMAIS CASSER — MÊME PRINCIPE QUE idsPourNomCategorieFlux
+  // PLUS HAUT, SANS FILTRE DE NOM : ids de TOUTES les enveloppes
+  // appartenant à moisFluxAffiches (vivante ce mois-ci via
+  // estCategorieActiveCeMois, ou archivée dans un des snapshots de la
+  // période) — sert à scoper transactionsPeriodeFlux par mois_comptage de
+  // l'enveloppe liée, jamais par la date brute de la transaction (même
+  // RÈGLE que transactionsGroupeesParNomFlux).
+  const idsEnveloppesPeriodeFlux = (): Set<string> => {
+    const ids = new Set<string>();
+    objStore.enveloppes.forEach((e) => {
+      if (estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL)) ids.add(e.id);
+    });
+    moisFluxAffiches.forEach(({ mois, annee }) => {
+      objStore.historiquesMois
+        .find((s) => s.mois === mois && s.annee === annee)
+        ?.enveloppes.forEach((e) => ids.add(e.id));
+    });
+    return ids;
+  };
+
   // "Ce que Vista a remarqué" (onglet Vista) : analyse automatique du
   // graphique de flux ci-dessus, adaptée à la période choisie (nbMoisFlux) —
   // remplace l'ancien contenu "tout historique" de cette carte, cf. RÈGLE
   // EXCEPTION DE ZONE en tête de analyserFluxFinancier (utils/bilanVista.ts).
-  const transactionsPeriodeFlux = objStore.transactions.filter((t) => {
-    const d = new Date(t.date);
-    return d >= bornesFlux.debut && d < bornesFlux.finExclusive;
-  });
+  // RÈGLE : scopé par mois_comptage de l'enveloppe liée
+  // (idsEnveloppesPeriodeFlux), pas par date brute de transaction — même
+  // risque de doublon sinon que sur transactionsGroupeesParNomFlux plus
+  // haut. La détection de "concentration sur une seule journée" dans
+  // analyserFluxFinancier utilise ensuite la date PROPRE de chaque
+  // transaction déjà correctement scopée — volontaire, elle mesure une
+  // répartition intra-période, pas une appartenance à un mois.
+  const transactionsPeriodeFlux = objStore.transactions.filter((t) =>
+    idsEnveloppesPeriodeFlux().has(t.enveloppeId),
+  );
   // RÈGLE À NE JAMAIS CASSER : `fluxCategories.cle` est une clé de
   // regroupement par NOM (peut fusionner plusieurs enveloppes recréées sous
   // le même nom au fil des mois, cf. construireRepartitionSurPeriode plus

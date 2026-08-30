@@ -387,7 +387,11 @@ export default function Budget() {
   // le mois en cours + LIMITE_MOIS_GRATUIT_BUDGET mois en arrière — la
   // limite s'applique aux DEUX sélecteurs de mois (les flèches ← → ET la
   // modale "Choisir un mois", qui permet sinon de sauter directement à
-  // n'importe quel mois archivé en contournant les flèches).
+  // n'importe quel mois archivé en contournant les flèches). Un compte
+  // invité (isGuest) est exempté aux 3 sites d'usage ci-dessous (jamais de
+  // verrou/cadenas visible pour un invité, cf. RÈGLE dans profil.tsx) —
+  // `indexMinAutorise` lui-même reste calculé pareil, seule sa
+  // CONSULTATION est court-circuitée par `!isGuest`.
   const indexActuelMois = moisDisponibles.findIndex((m) => m.estActuel);
   const indexMinAutorise =
     premium || indexActuelMois === -1
@@ -1291,7 +1295,7 @@ export default function Budget() {
           <View style={styles.selecteurMoisRow}>
             <TouchableOpacity
               onPress={() => {
-                if (!premium && indexMois <= indexMinAutorise) {
+                if (!premium && !isGuest && indexMois <= indexMinAutorise) {
                   gererTapMoisVerrouille();
                   return;
                 }
@@ -1302,7 +1306,7 @@ export default function Budget() {
               accessibilityRole="button"
               accessibilityLabel="Mois précédent"
             >
-              {!premium && indexMois <= indexMinAutorise && indexMois > 0 ? (
+              {!premium && !isGuest && indexMois <= indexMinAutorise && indexMois > 0 ? (
                 <Ionicons name="lock-closed" size={13} color={C.texteMuted} />
               ) : (
                 <Ionicons
@@ -2316,7 +2320,7 @@ export default function Budget() {
                   // ← → ci-dessus (indexMinAutorise) — cette modale permet
                   // sinon de sauter directement à un mois verrouillé sans
                   // passer par les flèches.
-                  const verrouille = !premium && idx < indexMinAutorise;
+                  const verrouille = !premium && !isGuest && idx < indexMinAutorise;
                   return (
                     <TouchableOpacity
                       key={`${m.annee}-${m.mois}`}
