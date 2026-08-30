@@ -2105,6 +2105,26 @@ export default function Analytics() {
   // palier gratuit ici, contrairement aux autres tiroirs de Stats.
   const [nbMoisFlux, setNbMoisFlux] = useState(1);
   const moisFluxAffiches = construireMoisPeriode(nbMoisFlux, MOIS_ACTUEL, ANNEE_ACTUELLE);
+  // Bornes calendaires strictes de la période affichée — 1er jour du premier
+  // mois de moisFluxAffiches au dernier jour du dernier (toujours le mois en
+  // cours, cf. construireMoisPeriode). Sert UNIQUEMENT à borner les
+  // transactions BRUTES d'une catégorie Variable persistante dans
+  // transactionsGroupeesParNomFlux plus bas — cf. RÈGLE à ce site d'appel
+  // pour pourquoi ids.has(t.enveloppeId) seul ne suffit pas.
+  const debutPeriodeFlux = new Date(
+    moisFluxAffiches[0].annee,
+    moisFluxAffiches[0].mois,
+    1,
+  );
+  const finPeriodeFlux = new Date(
+    moisFluxAffiches[moisFluxAffiches.length - 1].annee,
+    moisFluxAffiches[moisFluxAffiches.length - 1].mois + 1,
+    0,
+    23,
+    59,
+    59,
+    999,
+  );
   // Mois immédiatement avant le premier mois de moisFluxAffiches (Date gère
   // nativement le débordement d'année en passant un index de mois négatif),
   // point de départ de la "période précédente de même durée" utilisée pour
@@ -2196,23 +2216,46 @@ export default function Analytics() {
     });
     return ids;
   };
-  // RÈGLE À NE JAMAIS CASSER — APPARTENANCE PAR MOIS_COMPTAGE DE
-  // L'ENVELOPPE LIÉE, JAMAIS PAR LA DATE BRUTE DE LA TRANSACTION : `ids`
-  // (idsPourNomCategorieFlux ci-dessus) est déjà précisément scopé à
-  // moisFluxAffiches (côté vivant filtré par estCategorieActiveCeMois, côté
-  // archivé scopé par construction) — filtrer les transactions par
-  // ids.has(t.enveloppeId) suffit donc, sans filtre de date supplémentaire.
-  // Un ancien filtre par date (t.date dans les bornes calendaires de la
-  // période) provoquait un doublon : une entrée d'argent datée dans un mois
-  // mais comptant pour un autre (mois_comptage) était exclue ici tout en
-  // étant comptée dans fluxEntrees (qui lit déjà par mois_comptage via
-  // construireRepartitionSurPeriode), ou pire incluse deux fois si les deux
-  // mois faisaient partie de la période affichée.
+  // RÈGLE À NE JAMAIS CASSER — DEUX FILTRES COMPLÉMENTAIRES, JAMAIS UN SEUL :
+  // bug confirmé — `ids.has(t.enveloppeId)` SEUL ne suffit PAS ici, contrairement
+  // à ce qu'un commentaire précédent affirmait. Raison : une catégorie
+  // Variable (Alimentation, Loisirs...) est un enveloppe PERSISTANTE — le
+  // même id vit indéfiniment d'un mois sur l'autre (seul `depense` est remis
+  // à 0 au rollover, cf. archiverMoisActuelInterne dans app/store.ts),
+  // pendant qu'objStore.transactions contient TOUT l'historique de
+  // transactions jamais filtré par date (cf. chargerTransactions). Résultat :
+  // `ids` (scopé par mois_comptage de l'ENVELOPPE) inclut le même id
+  // persistant pour n'importe quelle période affichée, mais
+  // `ids.has(t.enveloppeId)` ne dit RIEN sur le MOIS de la transaction
+  // elle-même — une dépense de juillet liée à "Loisirs" réapparaissait dans
+  // le graphique de flux d'août (bug confirmé : "Voyage 240€" en juillet
+  // affiché comme dépense du mois d'août alors que Loisirs n'avait que 20€
+  // ce mois-ci). D'où le second filtre par date ci-dessous, sur
+  // [debutPeriodeFlux, finPeriodeFlux] (bornes calendaires de
+  // moisFluxAffiches, cf. site de définition plus haut).
+  //
+  // Ceci NE CONTREDIT PAS la RÈGLE "mois_comptage, jamais date brute" de
+  // idsEnveloppesPeriodeFlux/transactionsPeriodeFlux plus bas (qui reste
+  // correcte à SON site d'appel) : cette fonction-ci n'est appelée QUE pour
+  // des catégories `type === "Variable"` (cf. classificationsFlux plus bas),
+  // JAMAIS pour une catégorie "Entrée" — le scénario "date ≠ mois_comptage"
+  // (ex: salaire daté fin de mois précédent mais compté pour le suivant),
+  // qui justifiait de ne PAS filtrer par date brute côté Entrée, ne peut
+  // structurellement pas se produire ici. Le filtre de date est donc un
+  // COMPLÉMENT nécessaire à `ids`, jamais un remplacement : `ids` reste
+  // indispensable pour exclure les transactions d'une AUTRE catégorie (et
+  // agréger les id d'une catégorie recréée sous le même nom, cf. RÈGLE plus
+  // haut) — le filtre de date exclut ensuite ce qui reste mais n'appartient
+  // pas au bon mois.
   const transactionsGroupeesParNomFlux = (nomCategorie: string) => {
     const ids = idsPourNomCategorieFlux(nomCategorie);
     const parNom = new Map<string, number>();
     objStore.transactions
       .filter((t) => ids.has(t.enveloppeId))
+      .filter((t) => {
+        const d = new Date(t.date);
+        return d >= debutPeriodeFlux && d <= finPeriodeFlux;
+      })
       .forEach((t) => {
         // RÈGLE : une transaction sans nom précis (vide/blanc) rejoint le
         // groupe "Non précisé" plutôt que de créer un nœud sans label.
