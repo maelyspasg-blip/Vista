@@ -1,4 +1,7 @@
--- FONDATIONS DU MODE COUPLE — schéma seul, RIEN DE BRANCHÉ CÔTÉ APP.
+-- FONDATIONS DE L'ESPACE PARTAGÉ (anciennement "mode couple", renommé côté
+-- app — cf. utils/premium.ts:ESPACE_PARTAGE_ACTIF, utils/espacePartage.ts)
+-- — schéma seul à l'origine, désormais consommé par la modale de
+-- app/profil.tsx derrière ce même flag.
 --
 -- RÈGLE À NE JAMAIS CASSER — AUCUN IMPACT SUR LA BÊTA TESTFLIGHT ACTUELLE :
 -- cette migration est purement additive.
@@ -14,9 +17,10 @@
 --    normal) reçoit juste un champ de plus, ignoré par le mapping actuel
 --    (enveloppeDepuisLigne etc. ne lisent que les colonnes qu'ils
 --    connaissent).
--- Le flag utils/premium.ts:MODE_COUPLE_ACTIF reste à `false` tant que le
--- reste de l'app ne consomme pas ce schéma — cf. ce fichier pour le detail
--- de ce qui est volontairement laissé "non branché".
+-- Le flag utils/premium.ts:ESPACE_PARTAGE_ACTIF reste à `false` en
+-- production tant que la V1 n'est pas prête — cf. ce fichier pour le detail
+-- de ce qui reste volontairement incomplet côté app (créer un espace
+-- n'insère pas encore de ligne espaces_partages).
 
 create table if not exists public.espaces_partages (
   id uuid primary key default gen_random_uuid(),
@@ -48,8 +52,8 @@ add column if not exists attribue_a varchar(20) default 'personnel';
 -- n'importe quel utilisateur authentifié via un appel REST direct, même
 -- si aucun écran de l'app ne l'utilise encore.
 --
--- Modèle d'accès (DRAFT — à revalider avant de brancher MODE_COUPLE_ACTIF
--- en V1, cf. utils/coupleMode.ts) :
+-- Modèle d'accès (DRAFT — à revalider avant la V1 complète, cf.
+-- utils/espacePartage.ts) :
 -- - espaces_partages : SELECT ouvert à tout utilisateur authentifié — sans
 --   ça, rejoindreEspacePartage(code) ne peut jamais résoudre un code pour
 --   un utilisateur qui n'est pas encore membre (poule/œuf). Le `code`
@@ -59,7 +63,7 @@ add column if not exists attribue_a varchar(20) default 'personnel';
 --   ayant le rôle 'proprietaire' de CET espace.
 -- - membres_espace : un utilisateur voit ses propres lignes, et celles des
 --   AUTRES membres du/des espace(s) dont il fait partie (pour afficher
---   qui est dans son espace couple) — jamais celles d'un espace auquel il
+--   qui est dans son espace partagé) — jamais celles d'un espace auquel il
 --   n'appartient pas.
 alter table public.espaces_partages enable row level security;
 

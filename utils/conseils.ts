@@ -936,8 +936,17 @@ function detecterSituations(
   };
 
   // === Budget de catégorie (dépassé/imminent, arc complet) ===================
+  // RÈGLE : plancher MONTANT_MIN_CATEGORIE appliqué ici comme sur toutes les
+  // autres familles de signaux catégorie du fichier (cf. lignes 1019/1045/
+  // 1051/1078/1110/1142/1192) — bug confirmé : un budget > 0 mais minuscule
+  // (ex: 1€) produisait un ratio depense/budget totalement disproportionné
+  // (ex: 412%), rejeté in extremis par validerConseil (garde-fou > 300%,
+  // qui a fonctionné comme prévu) mais jamais généré proprement. `e.budget
+  // >= MONTANT_MIN_CATEGORIE` (au lieu de `> 0`) évite de calculer un
+  // pourcentage sur une base non significative en premier lieu, plutôt que
+  // de compter sur le filet de sécurité en aval pour rattraper le résultat.
   const candidatsBudget = enveloppesVariables
-    .filter((e) => e.budget > 0 && !categoriesDejaCitees.has(e.id))
+    .filter((e) => e.budget >= MONTANT_MIN_CATEGORIE && !categoriesDejaCitees.has(e.id))
     .map((e) => {
       const ratio = e.depense / e.budget;
       const situationId = `budget:${e.id}`;

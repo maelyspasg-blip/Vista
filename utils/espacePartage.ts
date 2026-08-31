@@ -1,17 +1,16 @@
 import { supabase } from "../supabaseClient";
 
-// RÈGLE À NE JAMAIS CASSER — FONDATIONS NON BRANCHÉES, AUCUN APPELANT DANS
-// L'APP ACTUELLE : ce fichier existe pour préparer le mode couple (V1) sans
-// toucher à la bêta TestFlight en cours — cf. utils/premium.ts:
-// MODE_COUPLE_ACTIF (reste `false` tant que ce module n'est pas branché
-// dans l'UI, cf. app/profil.tsx). Tant que MODE_COUPLE_ACTIF est `false`,
-// aucune fonction ci-dessous ne doit être importée/appelée depuis un écran
-// de l'app — ce module est un point de départ pour la V1, pas une
-// fonctionnalité active.
+// RÈGLE À NE JAMAIS CASSER — RESTE DERRIÈRE ESPACE_PARTAGE_ACTIF : ce
+// fichier est maintenant appelé depuis app/profil.tsx (modale "Espace
+// partagé"), mais UNIQUEMENT depuis du JSX déjà gardé par
+// `{ESPACE_PARTAGE_ACTIF && (...)}` (cf. utils/premium.ts) — tant que ce
+// flag reste `false`, ce code ne s'exécute jamais dans la bêta TestFlight.
+// Ne jamais appeler une fonction de ce fichier depuis un site qui n'est pas
+// lui-même derrière cette même garde.
 //
 // RÈGLE : contrairement à la convention "aucune écriture Supabase" de
 // utils/evenements.ts ou utils/premium.ts, ce fichier PEUT écrire dans
-// Supabase — le mode couple porte sur des tables entièrement nouvelles
+// Supabase — l'espace partagé porte sur des tables entièrement nouvelles
 // (espaces_partages, membres_espace) qui n'appartiennent à aucun domaine
 // déjà géré par app/store.ts, donc pas de risque de dupliquer une logique
 // d'écriture existante. Mêmes garde-fous que le reste de l'app cependant :

@@ -10,6 +10,39 @@ import {
 } from "../utils/widgetsSync";
 
 // ============================================================================
+// RÈGLE À NE JAMAIS CASSER — QUI A LE DROIT DE MODIFIER depense SUR UNE
+// ENVELOPPE : `depense` sur une enveloppe ne peut être modifié que par (1)
+// ajouterTransaction/modifierTransaction/supprimerTransaction, (2)
+// archiverMoisActuelInterne (remise à 0 en fin de mois — SEULE remise à
+// zéro légitime de ce champ), (3) une action explicite de l'utilisateur
+// (édition manuelle d'une catégorie). Jamais par un rechargement, une
+// reconnexion ou un hot-reload.
+//
+// Pourquoi ce n'est pas théorique : `etat` (plus bas dans ce fichier) est
+// une variable de MODULE, pas un state React — un hot-reload du bundler
+// (Fast Refresh) déclenché par une édition de CE fichier en développement
+// réexécute son code au niveau module, ce qui réinitialise `etat` à
+// ETAT_INITIAL (enveloppes: []). chargerEnveloppes() (plus bas) NE PASSE
+// PAS par appliquerEnveloppes() — c'est une lecture directe depuis
+// Supabase, jamais elle-même la cause d'une perte de donnée EN BASE. Le
+// risque réel est double : (a) un affichage local vide/incohérent tant que
+// chargerEnveloppes() n'a pas re-tourné après un hot-reload (cosmétique,
+// se corrige tout seul dès le prochain chargement), et (b) si un appel
+// d'écriture legitime survient PENDANT cette fenêtre avec un état local
+// partiellement reconstruit, appliquerEnveloppes() pourrait recevoir un
+// tableau incohérent. Deux filets de secours indépendants protègent contre
+// ce risque : un garde-fou dans appliquerEnveloppes() contre toute remise à
+// zéro en masse non explicite (cf. RÈGLE locale à cette fonction), et un
+// cache local (AsyncStorage, cf. sauvegarderDepenseCache/lireDepenseCache)
+// qui permet à chargerEnveloppes() de détecter et corriger une incohérence
+// base=0/cache>0 récente. Ce risque concerne UNIQUEMENT le développement
+// (Fast Refresh n'existe pas dans un build TestFlight/App Store, qui
+// n'inclut aucun serveur de développement) — ces filets restent actifs en
+// production par défense en profondeur, sans coût réel puisqu'ils ne se
+// déclenchent jamais en usage normal.
+// ============================================================================
+
+// ============================================================================
 // RÈGLE DE SÉCURITÉ — SUPPRESSIONS EN BASE (à lire avant de toucher à toute
 // fonction ci-dessous qui appelle .delete()) :
 //
@@ -484,10 +517,74 @@ function sauvegarderObjectifsSupprimes(objectifs: Objectif[]): void {
   });
 }
 
+// RÈGLE À NE JAMAIS CASSER — FILET DE SECOURS CONTRE UNE PERTE DE depense EN
+// MÉMOIRE : cf. RÈGLE en tête de fichier (hot-reload/Fast Refresh réinitialise
+// `etat` au niveau module). Miroir local, par compte ET par enveloppe, de la
+// dernière valeur de depense réellement appliquée via appliquerEnveloppes()
+// — écrit ICI uniquement, le seul endroit qui pousse un changement de
+// depense vers Supabase (jamais dans chargerEnveloppes(), qui ne fait que
+// LIRE), y compris quand depense légitimement revient à 0 (archivage
+// mensuel) : le cache reste ainsi TOUJOURS synchronisé avec ce qui vient
+// d'être écrit, jamais une valeur figée d'un mois précédent qui pourrait
+// être restaurée à tort. Lu uniquement par chargerEnveloppes() en cas
+// d'incohérence base=0/cache>0 détectée au rechargement (cf. RÈGLE
+// là-bas). Best-effort partout, jamais bloquant, jamais de throw.
+function cleDepenseCache(userId: string, enveloppeId: string): string {
+  return `vista_depenses_${userId}_${enveloppeId}`;
+}
+
+function sauvegarderDepenseCache(
+  userId: string,
+  enveloppeId: string,
+  depense: number,
+): void {
+  AsyncStorage.setItem(
+    cleDepenseCache(userId, enveloppeId),
+    JSON.stringify({ depense, sauvegardeLe: new Date().toISOString() }),
+  ).catch(() => {
+    // Best-effort : ce cache n'est qu'un filet de secours, une erreur
+    // d'écriture locale ne doit jamais perturber l'app.
+  });
+}
+
+async function lireDepenseCache(
+  userId: string,
+  enveloppeId: string,
+): Promise<{ depense: number; sauvegardeLe: string } | null> {
+  try {
+    const brut = await AsyncStorage.getItem(cleDepenseCache(userId, enveloppeId));
+    if (!brut) return null;
+    const valeur = JSON.parse(brut);
+    if (
+      typeof valeur?.depense !== "number" ||
+      typeof valeur?.sauvegardeLe !== "string"
+    ) {
+      return null;
+    }
+    return valeur;
+  } catch {
+    return null;
+  }
+}
+
+// RÈGLE À NE JAMAIS CASSER — FENÊTRE DE FRAÎCHEUR DU CACHE, JAMAIS ÉTENDUE :
+// au-delà, une valeur en cache n'est JAMAIS restaurée automatiquement, même
+// positive alors que la base indique 0. Sans cette limite, un appareil
+// resynchronisé après une longue absence — pendant laquelle un AUTRE
+// appareil aurait légitimement modifié ou remis à zéro (archivage mensuel)
+// cette même enveloppe — écraserait une donnée à jour avec une valeur
+// locale obsolète : le cache local n'est une source fiable que pour un
+// incident survenu PENDANT la session en cours (hot-reload), jamais pour
+// une synchronisation multi-appareils sur la durée.
+const FRAICHEUR_CACHE_DEPENSE_MS = 24 * 60 * 60 * 1000;
+
 // RÈGLE À NE JAMAIS CASSER — PROTECTION DONNÉES : cette fonction est la
 // plus dangereuse du fichier — elle supprime en base TOUTE enveloppe
 // absente du tableau reçu, cf. RÈGLE DE SÉCURITÉ en tête de fichier.
-function appliquerEnveloppes(nouvellesEnveloppes: Enveloppe[]) {
+function appliquerEnveloppes(
+  nouvellesEnveloppes: Enveloppe[],
+  options?: { remiseAZeroAutorisee?: boolean },
+) {
   const anciennes = etat.enveloppes;
 
   // RÈGLE À NE JAMAIS CASSER : un tableau VIDE reçu alors que l'état
@@ -509,7 +606,54 @@ function appliquerEnveloppes(nouvellesEnveloppes: Enveloppe[]) {
     return;
   }
 
+  // RÈGLE À NE JAMAIS CASSER — AUCUNE REMISE À ZÉRO EN MASSE NON EXPLICITE :
+  // détecte, PAR LOT plutôt que par enveloppe individuelle, le signal d'une
+  // perte de donnée accidentelle (cf. RÈGLE en tête de fichier) plutôt
+  // qu'une action utilisateur légitime. Volontairement PAS un test par
+  // enveloppe unique ("cette catégorie était >0, la voilà à 0 → suspect") :
+  // supprimer la dernière transaction d'UNE catégorie fait légitimement
+  // retomber SA depense à 0 (cf. point 1 de la RÈGLE en tête de fichier,
+  // "action explicite de l'utilisateur") — un garde-fou par enveloppe
+  // bloquerait ce cas normal en permanence. Une remise à zéro simultanée
+  // d'une PART IMPORTANTE des catégories Variable jusque-là positives, en
+  // revanche, n'a aucun parcours utilisateur légitime en un seul appel —
+  // seul archiverMoisActuelInterne le fait, et passe explicitement
+  // `{ remiseAZeroAutorisee: true }` pour court-circuiter ce garde-fou.
+  if (!options?.remiseAZeroAutorisee) {
+    const positivesAvant = anciennes.filter(
+      (a) => a.type === "Variable" && a.depense > 0,
+    );
+    const remisesAZeroSuspectes = positivesAvant.filter((a) => {
+      const nouvelle = nouvellesEnveloppes.find((n) => n.id === a.id);
+      return nouvelle && nouvelle.depense === 0;
+    });
+    const seuilSuspect = Math.max(2, Math.ceil(positivesAvant.length * 0.5));
+    if (positivesAvant.length > 0 && remisesAZeroSuspectes.length >= seuilSuspect) {
+      console.warn(
+        `[store] appliquerEnveloppes : remise à zéro en masse suspectée sur ${remisesAZeroSuspectes.length}/${positivesAvant.length} enveloppe(s) Variable (${remisesAZeroSuspectes.map((e) => e.nom).join(", ")}) — valeurs précédentes conservées.`,
+      );
+      signalerErreurSync(
+        "Une anomalie a empêché la remise à zéro de plusieurs catégories — anciennes valeurs conservées.",
+      );
+      const idsSuspects = new Set(remisesAZeroSuspectes.map((e) => e.id));
+      nouvellesEnveloppes = nouvellesEnveloppes.map((n) => {
+        if (!idsSuspects.has(n.id)) return n;
+        const ancienne = anciennes.find((a) => a.id === n.id)!;
+        return { ...n, depense: ancienne.depense };
+      });
+    }
+  }
+
   setEtat({ enveloppes: nouvellesEnveloppes });
+
+  if (etat.userId) {
+    const userIdCache = etat.userId;
+    nouvellesEnveloppes.forEach((e) => {
+      const ancienne = anciennes.find((a) => a.id === e.id);
+      if (ancienne && ancienne.depense === e.depense) return;
+      sauvegarderDepenseCache(userIdCache, e.id, e.depense);
+    });
+  }
 
   const idsNouvelles = new Set(nouvellesEnveloppes.map((e) => e.id));
   const enveloppesASupprimer = anciennes.filter((e) => !idsNouvelles.has(e.id));
@@ -905,21 +1049,32 @@ async function enregistrerSnapshotMoisSupabase(params: {
       return null;
     }
 
+    // RÈGLE À NE JAMAIS CASSER — UPSERT, JAMAIS UN INSERT NU : deux appels
+    // concurrents à archiverMoisActuelInterne pour le MÊME mois (course au
+    // démarrage — verifierArchivageMoisInterne tourne au montage + à
+    // l'intervalle + à chaque retour au premier plan, cf. RÈGLE sur
+    // etat.userId plus haut) provoquaient une erreur "duplicate key" sur la
+    // contrainte unique (user_id, mois, annee) — bug confirmé. Idempotent
+    // par construction : si le snapshot existe déjà pour ce mois, il est
+    // mis à jour avec les valeurs actuelles plutôt que de planter.
     const { data, error } = await supabase
       .from("snapshots_mois")
-      .insert({
-        user_id: user.id,
-        mois: params.mois,
-        annee: params.annee,
-        epargne: params.epargne,
-        disponible: params.disponible,
-        total_depense: params.totalDepense,
-      })
+      .upsert(
+        {
+          user_id: user.id,
+          mois: params.mois,
+          annee: params.annee,
+          epargne: params.epargne,
+          disponible: params.disponible,
+          total_depense: params.totalDepense,
+        },
+        { onConflict: "user_id,mois,annee" },
+      )
       .select()
       .single();
 
     if (error || !data) {
-      console.error("Supabase insert snapshots_mois a échoué :", error);
+      console.error("Supabase upsert snapshots_mois a échoué :", error);
       signalerErreurSync(
         error
           ? `Impossible d'archiver le mois : ${error.message}`
@@ -929,6 +1084,24 @@ async function enregistrerSnapshotMoisSupabase(params: {
     }
 
     const snapshotId: string = data.id;
+
+    // RÈGLE À NE JAMAIS CASSER — PURGE AVANT RÉINSERTION : conséquence
+    // directe de l'upsert ci-dessus — si ce snapshot existait déjà (retry
+    // après la course décrite plus haut), snapshot_enveloppes/
+    // snapshot_objectifs contiennent déjà SES détails pour ce snapshotId ;
+    // les réinsérer sans purge créerait des lignes en double (ces deux
+    // tables restent de simples .insert(), jamais upsertées elles-mêmes —
+    // purger puis réinsérer est plus simple qu'un upsert par ligne détail,
+    // qui n'a pas de clé naturelle stable). Sans effet si le snapshot est
+    // réellement nouveau (DELETE sur 0 ligne).
+    await supabase
+      .from("snapshot_enveloppes")
+      .delete()
+      .eq("snapshot_mois_id", snapshotId);
+    await supabase
+      .from("snapshot_objectifs")
+      .delete()
+      .eq("snapshot_mois_id", snapshotId);
 
     if (params.enveloppes.length > 0) {
       const { error: erreurEnv } = await supabase
@@ -1182,7 +1355,15 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     epargneMois: 0,
     objectifs: objectifsMaj,
   });
-  appliquerEnveloppes([...enveloppesMaj, ...entreesInserees]);
+  // RÈGLE À NE JAMAIS CASSER : SEUL appel à appliquerEnveloppes() de tout le
+  // fichier qui passe { remiseAZeroAutorisee: true } — c'est la SEULE remise
+  // à zéro légitime de depense sur un lot de catégories Variable, cf. RÈGLE
+  // en tête de fichier et RÈGLE locale à appliquerEnveloppes(). Ne jamais
+  // ajouter ce flag à un autre site d'appel sans que ce soit, comme ici,
+  // l'archivage mensuel lui-même.
+  appliquerEnveloppes([...enveloppesMaj, ...entreesInserees], {
+    remiseAZeroAutorisee: true,
+  });
   majEpargneMoisSupabase(0);
   majDernierMoisArchiveSupabase(mois, annee);
   objectifsMaj.forEach((o) => {
@@ -1694,11 +1875,55 @@ export function useObjectifs() {
         }
 
         const lignes = data ?? [];
+        const enveloppesChargees = lignes.map(enveloppeDepuisLigne);
+
+        // RÈGLE À NE JAMAIS CASSER — FILET DE SECOURS AU RECHARGEMENT : cf.
+        // RÈGLE en tête de fichier et RÈGLE sur sauvegarderDepenseCache/
+        // FRAICHEUR_CACHE_DEPENSE_MS plus haut. Uniquement les catégories
+        // Variable (le bug rapporté), et uniquement si la base indique
+        // EXACTEMENT 0 alors qu'un cache RÉCENT indique une valeur
+        // positive — une valeur non nulle en base reste TOUJOURS la source
+        // de vérité (jamais écrasée par le cache), et un cache périmé est
+        // ignoré (risque multi-appareils, cf. RÈGLE sur la fenêtre de
+        // fraîcheur).
+        const enveloppesAResynchroniser: Enveloppe[] = [];
+        const enveloppesFinales = await Promise.all(
+          enveloppesChargees.map(async (e) => {
+            if (e.type !== "Variable" || e.depense !== 0) return e;
+            const cache = await lireDepenseCache(user.id, e.id);
+            if (!cache || cache.depense <= 0) return e;
+            const age = Date.now() - new Date(cache.sauvegardeLe).getTime();
+            if (age > FRAICHEUR_CACHE_DEPENSE_MS) return e;
+            console.warn(
+              `[store] chargerEnveloppes : depense=0 en base pour "${e.nom}" mais cache local récent à ${cache.depense} — restauration + resynchronisation.`,
+            );
+            const corrigee = { ...e, depense: cache.depense };
+            enveloppesAResynchroniser.push(corrigee);
+            return corrigee;
+          }),
+        );
+
         setEtat({
-          enveloppes: lignes.map(enveloppeDepuisLigne),
+          enveloppes: enveloppesFinales,
           suggestionsIgnorees: lignes
             .filter((l) => l.suggestion_recurrence_ignoree)
             .map((l) => l.id),
+        });
+
+        enveloppesAResynchroniser.forEach((e) => {
+          supabase
+            .from("enveloppes")
+            .update({ depense: e.depense })
+            .eq("id", e.id)
+            .eq("user_id", user.id)
+            .then(({ error: erreurResync }) => {
+              if (erreurResync) {
+                console.error(
+                  "Supabase resync depense (filet de secours) a échoué :",
+                  erreurResync,
+                );
+              }
+            });
         });
       } catch (e) {
         console.error("Chargement des enveloppes a échoué :", e);

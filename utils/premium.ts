@@ -19,17 +19,21 @@ import { Platform } from "react-native";
 // nécessaire.
 export const TESTFLIGHT_MODE = true;
 
-// RÈGLE À NE JAMAIS CASSER — FONDATIONS MODE COUPLE, DÉSACTIVÉ POUR LA BÊTA :
-// tant que `false`, aucun écran de l'app ne doit rendre la section "Espace
-// couple" ni aucun élément d'UI qui en dépend — cf. site d'appel dans
-// app/profil.tsx. Le schéma Supabase (espaces_partages, membres_espace,
-// enveloppes.attribue_a, transactions.attribue_a — cf.
+// RÈGLE À NE JAMAIS CASSER — FONDATIONS ESPACE PARTAGÉ, DÉSACTIVÉ POUR LA
+// BÊTA (renommé depuis MODE_COUPLE_ACTIF) : tant que `false`, aucun écran
+// de l'app ne doit rendre la section "Espace partagé" ni aucun élément
+// d'UI/modale qui en dépend — cf. site d'appel dans app/profil.tsx. Le
+// schéma Supabase (espaces_partages, membres_espace, enveloppes.attribue_a,
+// transactions.attribue_a — cf.
 // supabase/migrations/20260830120000_mode_couple_fondations.sql) et
-// utils/coupleMode.ts existent déjà mais ne sont appelés par AUCUN code
-// applicatif tant que ce flag reste `false` : uniquement des fondations,
-// zéro effet sur la bêta TestFlight actuelle. Passer à `true` quand la V1
-// du mode couple est prête à être branchée dans l'UI.
-export const MODE_COUPLE_ACTIF = false;
+// utils/espacePartage.ts existent déjà et sont désormais appelés depuis la
+// modale de app/profil.tsx, mais UNIQUEMENT depuis du JSX gardé par ce
+// flag : zéro effet sur la bêta TestFlight tant qu'il reste `false`.
+// Repasser à `false` avant toute build de production tant que la V1 n'est
+// pas prête (rejoindre un espace fonctionne déjà ; créer un espace
+// n'insère pas encore de ligne espaces_partages, cf. RÈGLE dans
+// app/profil.tsx).
+export const ESPACE_PARTAGE_ACTIF = true;
 
 // RÈGLE : Ad Unit ID de la pub récompensée AdMob — sélectionné une seule
 // fois ici selon la plateforme (Platform.OS), jamais dupliqué ailleurs dans

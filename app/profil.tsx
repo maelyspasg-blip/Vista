@@ -9,10 +9,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Clipboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   TouchableOpacity,
@@ -53,7 +55,8 @@ import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { reinitialiserEtatUtilisateur, useObjectifs } from "./store";
 import { usePremium } from "./PremiumContext";
 import { styleModaleTablette, useEstTablette } from "./useTablette";
-import { estComptePremium, MODE_COUPLE_ACTIF } from "../utils/premium";
+import { estComptePremium, ESPACE_PARTAGE_ACTIF } from "../utils/premium";
+import { genererCodeInvitation, rejoindreEspacePartage } from "../utils/espacePartage";
 import { Theme, useTheme } from "./ThemeContext";
 import { useTutoriel } from "./TutorielContext";
 
@@ -218,6 +221,74 @@ export default function Profil() {
 
   const [modalExportVisible, setModalExportVisible] = useState(false);
   const [exportEnCours, setExportEnCours] = useState(false);
+
+  // RÈGLE : état de la modale "Espace partagé" — cf. ouvrirModalEspacePartage
+  // plus bas pour l'initialisation. `codeGenere` est recalculé à CHAQUE
+  // ouverture de la modale (jamais persisté) : cf. RÈGLE dans
+  // utils/espacePartage.ts, genererCodeInvitation() est un calcul pur, sans
+  // ligne espaces_partages créée en base pour l'instant.
+  const [modalEspacePartageVisible, setModalEspacePartageVisible] = useState(false);
+  const [ongletEspacePartage, setOngletEspacePartage] = useState<
+    "creer" | "rejoindre"
+  >("creer");
+  const [codeGenere, setCodeGenere] = useState("");
+  const [codeSaisi, setCodeSaisi] = useState("");
+  const [rejoindreEnCours, setRejoindreEnCours] = useState(false);
+  const [messageRejoindre, setMessageRejoindre] = useState<{
+    type: "succes" | "erreur";
+    texte: string;
+  } | null>(null);
+
+  const ouvrirModalEspacePartage = () => {
+    setOngletEspacePartage("creer");
+    setCodeGenere(genererCodeInvitation());
+    setCodeSaisi("");
+    setMessageRejoindre(null);
+    setRejoindreEnCours(false);
+    setModalEspacePartageVisible(true);
+  };
+
+  // RÈGLE : Clipboard du cœur react-native (déprécié mais toujours
+  // fonctionnel, cf. Libraries/Components/Clipboard/Clipboard.js) plutôt
+  // qu'expo-clipboard — celui-ci est un module natif séparé qui nécessite
+  // un rebuild du dev client pour être disponible ; le Clipboard intégré à
+  // react-native est déjà compilé dans tout build dev client standard,
+  // aucun rebuild nécessaire. setString est synchrone (pas de Promise),
+  // contrairement à expo-clipboard.
+  const copierCodeEspacePartage = () => {
+    try {
+      Clipboard.setString(codeGenere);
+    } catch (e) {
+      console.error("Copie du code d'invitation a échoué :", e);
+    }
+  };
+
+  const partagerCodeEspacePartage = async () => {
+    try {
+      await Share.share({
+        message: `Rejoins mon espace partagé Vista avec le code : ${codeGenere}`,
+      });
+    } catch (e) {
+      console.error("Partage du code d'invitation a échoué :", e);
+    }
+  };
+
+  const rejoindreEspacePartageDepuisModal = async () => {
+    const code = codeSaisi.trim();
+    if (!code || rejoindreEnCours) return;
+    setRejoindreEnCours(true);
+    setMessageRejoindre(null);
+    const espace = await rejoindreEspacePartage(code);
+    setRejoindreEnCours(false);
+    setMessageRejoindre(
+      espace
+        ? { type: "succes", texte: `Tu as rejoint l'espace ${espace.code} !` }
+        : {
+            type: "erreur",
+            texte: "Code invalide ou expiré — vérifie et réessaie.",
+          },
+    );
+  };
   const optionsMoisExport = construireOptionsMoisExport(
     objStore.historiquesMois,
   );
@@ -909,17 +980,21 @@ export default function Profil() {
           </View>
         </View>
 
-        {/* RÈGLE À NE JAMAIS CASSER — FONDATIONS MODE COUPLE, RIEN N'APPARAÎT
-            TANT QUE MODE_COUPLE_ACTIF EST false : cf. utils/premium.ts. Ne
-            jamais retirer cette garde même en développant le contenu de
-            cette section — elle protège la bêta TestFlight actuelle d'une
-            fonctionnalité pas encore prête. */}
-        {MODE_COUPLE_ACTIF && (
+        {/* RÈGLE À NE JAMAIS CASSER — FONDATIONS ESPACE PARTAGÉ, RIEN
+            N'APPARAÎT TANT QUE ESPACE_PARTAGE_ACTIF EST false : cf.
+            utils/premium.ts. Ne jamais retirer cette garde même en
+            développant le contenu de cette section — elle protège la bêta
+            TestFlight actuelle d'une fonctionnalité pas encore prête. */}
+        {ESPACE_PARTAGE_ACTIF && (
           <>
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
-              ESPACE COUPLE
+              ESPACE PARTAGÉ
             </Text>
-            <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.purple, contrasteRenforce)]}>
+            <TouchableOpacity
+              style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.purple, contrasteRenforce)]}
+              onPress={ouvrirModalEspacePartage}
+              activeOpacity={0.7}
+            >
               <Text style={[styles.switchLabel, { color: C.texte }]}>
                 Partage ton budget à deux
               </Text>
@@ -927,7 +1002,7 @@ export default function Profil() {
                 Crée ou rejoins un espace partagé pour suivre vos dépenses
                 communes.
               </Text>
-            </View>
+            </TouchableOpacity>
           </>
         )}
 
@@ -1649,6 +1724,200 @@ export default function Profil() {
         </TouchableOpacity>
       </Modal>
 
+      <Modal
+        visible={modalEspacePartageVisible}
+        transparent
+        animationType={reduireAnimations ? "none" : "slide"}
+        onRequestClose={() => setModalEspacePartageVisible(false)}
+      >
+        <TouchableOpacity
+          style={[
+            styles.modalOverlayTouch,
+            estTablette && styles.modalOverlayTouchTablette,
+          ]}
+          activeOpacity={1}
+          onPress={() => setModalEspacePartageVisible(false)}
+        >
+          <TouchableOpacity
+            style={[
+              styles.modalCard,
+              { backgroundColor: C.carte },
+              styleModaleTablette(estTablette),
+            ]}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
+            <View style={styles.modalHeaderEspacePartage}>
+              <Text style={[styles.modalTitre, { color: C.texte, marginBottom: 0 }]}>
+                Espace partagé
+              </Text>
+              <TouchableOpacity
+                onPress={() => setModalEspacePartageVisible(false)}
+                activeOpacity={0.6}
+                accessibilityRole="button"
+                accessibilityLabel="Fermer"
+              >
+                <Ionicons name="close" size={20} color={C.texteMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.ongletsEspacePartageRow}>
+              <TouchableOpacity
+                style={[
+                  styles.ongletEspacePartage,
+                  { borderColor: C.carteBorder },
+                  ongletEspacePartage === "creer" && {
+                    backgroundColor: C.purple,
+                    borderColor: C.purple,
+                  },
+                ]}
+                onPress={() => setOngletEspacePartage("creer")}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.ongletEspacePartageTexte,
+                    {
+                      color:
+                        ongletEspacePartage === "creer" ? "#FFFFFF" : C.texteMuted,
+                    },
+                  ]}
+                >
+                  Créer un espace
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.ongletEspacePartage,
+                  { borderColor: C.carteBorder },
+                  ongletEspacePartage === "rejoindre" && {
+                    backgroundColor: C.purple,
+                    borderColor: C.purple,
+                  },
+                ]}
+                onPress={() => setOngletEspacePartage("rejoindre")}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.ongletEspacePartageTexte,
+                    {
+                      color:
+                        ongletEspacePartage === "rejoindre"
+                          ? "#FFFFFF"
+                          : C.texteMuted,
+                    },
+                  ]}
+                >
+                  Rejoindre un espace
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {ongletEspacePartage === "creer" ? (
+              <View style={{ marginTop: 20 }}>
+                <Text style={[styles.codeEspacePartage, { color: C.texte }]}>
+                  {codeGenere}
+                </Text>
+                <Text
+                  style={[
+                    styles.switchSub,
+                    { color: C.texteMuted, textAlign: "center", marginTop: 4 },
+                  ]}
+                >
+                  Ce code expire dans 24h.
+                </Text>
+
+                <TouchableOpacity
+                  style={[
+                    styles.btnSecondaire,
+                    { borderColor: C.separateur, marginTop: 20 },
+                  ]}
+                  onPress={copierCodeEspacePartage}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="copy-outline" size={16} color={C.texte} />
+                  <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+                    Copier le code
+                  </Text>
+                </TouchableOpacity>
+
+                <BoutonPrincipal
+                  style={[
+                    styles.btnPrincipal,
+                    { backgroundColor: C.purple, marginTop: 12 },
+                  ]}
+                  onPress={partagerCodeEspacePartage}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.btnPrincipalTexte}>Partager</Text>
+                </BoutonPrincipal>
+              </View>
+            ) : (
+              <View style={{ marginTop: 20 }}>
+                <Text style={[styles.champLabel, { color: C.texteMuted }]}>
+                  Code d&apos;invitation
+                </Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { backgroundColor: C.fondSecondaire, color: C.texte },
+                  ]}
+                  placeholder="VISTA-XXXXXX"
+                  placeholderTextColor={C.texteMuted}
+                  value={codeSaisi}
+                  onChangeText={(v) => {
+                    setCodeSaisi(v);
+                    setMessageRejoindre(null);
+                  }}
+                  autoCapitalize="characters"
+                  returnKeyType="done"
+                />
+
+                <BoutonPrincipal
+                  style={[
+                    styles.btnPrincipal,
+                    {
+                      backgroundColor: C.purple,
+                      marginTop: 16,
+                      opacity:
+                        rejoindreEnCours || !codeSaisi.trim() ? 0.6 : 1,
+                    },
+                  ]}
+                  onPress={rejoindreEspacePartageDepuisModal}
+                  disabled={rejoindreEnCours || !codeSaisi.trim()}
+                >
+                  {rejoindreEnCours ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.btnPrincipalTexte}>Rejoindre</Text>
+                  )}
+                </BoutonPrincipal>
+
+                {messageRejoindre && (
+                  <Text
+                    style={[
+                      messageRejoindre.type === "succes"
+                        ? styles.succesTexte
+                        : styles.erreurTexte,
+                      {
+                        color:
+                          messageRejoindre.type === "succes"
+                            ? C.vert
+                            : "#E24B4A",
+                        textAlign: "center",
+                      },
+                    ]}
+                  >
+                    {messageRejoindre.texte}
+                  </Text>
+                )}
+              </View>
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <ModaleDocumentLegal
         visible={documentLegalOuvert === "confidentialite"}
         onClose={() => setDocumentLegalOuvert(null)}
@@ -1832,6 +2101,28 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   modalTitre: { fontSize: 18, fontWeight: "700", marginBottom: 18 },
+  modalHeaderEspacePartage: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 18,
+  },
+  ongletsEspacePartageRow: { flexDirection: "row", gap: 8 },
+  ongletEspacePartage: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  ongletEspacePartageTexte: { fontSize: 13, fontWeight: "600" },
+  codeEspacePartage: {
+    fontSize: 28,
+    fontWeight: "700",
+    letterSpacing: 2,
+    textAlign: "center",
+    marginTop: 8,
+  },
   exportSousTitre: { fontSize: 13, lineHeight: 18, marginBottom: 14 },
   erreurTexte: {
     fontSize: 13,
