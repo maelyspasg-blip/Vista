@@ -30,6 +30,7 @@ import {
   DonneesScore,
   genererExplicationsScore,
   MotCleScore,
+  motPourScore,
   ScoreSante,
 } from "../../utils/score";
 import {
@@ -872,80 +873,6 @@ function JaugeRepartition({
   );
 }
 
-// Mode espace partagé — "Répartition" en vue "Partagé" : une barre empilée
-// PAR CATÉGORIE (jamais une seule jauge globale comme JaugeRepartition
-// ci-dessus), subdivisée bleu "Moi" / violet "[Prénom]" / teal "Commun" —
-// mêmes couleurs que les badges d'Aperçu (cf. RÈGLE dans
-// app/(tabs)/index.tsx), pour rester cohérent visuellement dans toute
-// l'app.
-function RepartitionParPersonneBarres({
-  segments,
-  prenomPartenaire,
-  couleurs: C,
-}: {
-  segments: {
-    nom: string;
-    moi: number;
-    partenaire: number;
-    commun: number;
-    total: number;
-  }[];
-  prenomPartenaire: string | null;
-  couleurs: typeof COULEURS.clair;
-}) {
-  return (
-    <View>
-      <View style={styles.jaugeLegende}>
-        <View style={styles.jaugeLegendeItem}>
-          <View style={[styles.jaugeDot, { backgroundColor: "#60a5fa" }]} />
-          <Text style={[styles.jaugeNom, { color: C.texte }]}>Moi</Text>
-        </View>
-        <View style={styles.jaugeLegendeItem}>
-          <View style={[styles.jaugeDot, { backgroundColor: "#c084fc" }]} />
-          <Text style={[styles.jaugeNom, { color: C.texte }]}>
-            {prenomPartenaire || "Partenaire"}
-          </Text>
-        </View>
-        <View style={styles.jaugeLegendeItem}>
-          <View style={[styles.jaugeDot, { backgroundColor: "#1D9E75" }]} />
-          <Text style={[styles.jaugeNom, { color: C.texte }]}>Commun</Text>
-        </View>
-      </View>
-      {segments.map((s) => (
-        <View key={s.nom} style={styles.repartitionPersonneLigne}>
-          <Text
-            style={[styles.repartitionPersonneNom, { color: C.texte }]}
-            numberOfLines={1}
-          >
-            {s.nom}
-          </Text>
-          <View
-            style={[
-              styles.repartitionPersonneBarreFond,
-              { backgroundColor: C.separateur },
-            ]}
-          >
-            {s.moi > 0 && (
-              <View style={{ flex: s.moi, backgroundColor: "#60a5fa" }} />
-            )}
-            {s.partenaire > 0 && (
-              <View style={{ flex: s.partenaire, backgroundColor: "#c084fc" }} />
-            )}
-            {s.commun > 0 && (
-              <View style={{ flex: s.commun, backgroundColor: "#1D9E75" }} />
-            )}
-          </View>
-          <Text
-            style={[styles.repartitionPersonneMontant, { color: C.texteMuted }]}
-          >
-            {formaterMontant(s.total)} €
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
 export default function Analytics() {
   const router = useRouter();
   const estTablette = useEstTablette();
@@ -1073,6 +1000,8 @@ export default function Analytics() {
   const [modeEntreesCategorie, setModeEntreesCategorie] = useState<
     "pct" | "euro"
   >("pct");
+  const [modeRepartitionParPersonne, setModeRepartitionParPersonne] =
+    useState<"pct" | "euro">("pct");
   const [categoriesInchangeesOuvert, setCategoriesInchangeesOuvert] =
     useState(false);
   const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
@@ -1332,6 +1261,57 @@ export default function Analytics() {
     return Array.from(parNom.values()).sort((a, b) => b.total - a.total);
   })();
 
+  // Répartition par personne, reformatée pour GraphiqueBarresEmpilees — MÊME
+  // composant que "Dépenses par catégorie"/"Entrées par catégorie" plus bas
+  // (RÈGLE : jamais un composant de graphique ad hoc en plus, cf. demande
+  // explicite "même composant existant") — ici les LABELS de l'axe sont des
+  // noms de catégorie (pas des mois) et les 3 SÉRIES sont Moi/Partenaire/
+  // Commun plutôt qu'une série par catégorie. Le composant ne fait aucune
+  // hypothèse sur ce que représentent labels/series, cette réinterprétation
+  // est donc sûre.
+  const labelsRepartitionParPersonne = repartitionParPersonne.map((s) => s.nom);
+  const seriesRepartitionParPersonne: SegmentBarreEmpilee[] = [
+    {
+      cle: "moi",
+      label: "Moi",
+      couleur: "#60a5fa",
+      donnees: repartitionParPersonne.map((s) => s.moi),
+    },
+    {
+      cle: "partenaire",
+      label: membrePartenaire?.prenom || "Partenaire",
+      couleur: "#c084fc",
+      donnees: repartitionParPersonne.map((s) => s.partenaire),
+    },
+    {
+      cle: "commun",
+      label: "Commun",
+      couleur: "#1D9E75",
+      donnees: repartitionParPersonne.map((s) => s.commun),
+    },
+  ];
+
+  // "Équilibre" — ligne compacte dans "Vue d'ensemble" (vue Partagé) :
+  // même seuil (<5% d'écart = équilibré) que le bloc "Équilibre du mois"
+  // prévu pour Aperçu (pas encore construit, données partenaire non
+  // branchées) — dupliqué ici volontairement plutôt que factorisé
+  // prématurément dans un util partagé entre deux écrans qui n'existent pas
+  // encore tous les deux sous leur forme finale.
+  const totalContributionsMois = totalDepensesMoiMois + totalDepensesPartenaireMois;
+  const diffContributionMois = totalDepensesMoiMois - totalDepensesPartenaireMois;
+  const pctDiffContributionMois =
+    totalContributionsMois > 0
+      ? (Math.abs(diffContributionMois) / totalContributionsMois) * 100
+      : 0;
+  const equilibreLabel =
+    totalContributionsMois <= 0
+      ? null
+      : pctDiffContributionMois < 5
+        ? "Vous contribuez de façon équilibrée ce mois-ci"
+        : diffContributionMois > 0
+          ? `Tu as payé ${formaterMontant(Math.abs(diffContributionMois))}€ de plus ce mois-ci`
+          : `${membrePartenaire?.prenom || "Ton/ta partenaire"} a payé ${formaterMontant(Math.abs(diffContributionMois))}€ de plus ce mois-ci`;
+
   // Scores "Partenaire" et "Commun" — RÈGLE À NE JAMAIS CASSER : APPROXIMATIONS
   // ÉTIQUETÉES, JAMAIS PRÉSENTÉES COMME LE VRAI SCORE — décision explicite de
   // l'utilisateur (question posée avant cette section) : calculerScoreSante a
@@ -1354,42 +1334,33 @@ export default function Analytics() {
           historiquePaiements: [],
         } satisfies DonneesScore)
       : null;
-  const transactionsCommunesMoiMois = objStore.transactions.filter(
-    (t) =>
-      t.attribueA === "commun" &&
-      estDansMois(t.date, MOIS_ACTUEL, ANNEE_ACTUELLE),
-  );
-  // Limite connue, acceptée : `budget` reste celui de l'enveloppe entière
-  // (mienne), pas un "budget commun" séparé qui n'existe pas dans le modèle
-  // de données — seul `depense` est recalculé pour ne compter QUE la part
-  // 'commun'. Le ratio depense/budget obtenu est donc une approximation,
-  // jamais un vrai budget dédié au commun.
-  const enveloppesCommunesMoiMois = objStore.enveloppes
-    .filter((e) =>
-      transactionsCommunesMoiMois.some((t) => t.enveloppeId === e.id),
-    )
-    .map((e) => ({
-      ...e,
-      depense: transactionsCommunesMoiMois
-        .filter((t) => t.enveloppeId === e.id)
-        .reduce((acc, t) => acc + t.montant, 0),
-    }));
-  const scoreCommun: ScoreSante | null =
-    vueActive === "partage" &&
-    (enveloppesCommunesMoiMois.length > 0 ||
-      enveloppesPartenaireStats.length > 0)
-      ? calculerScoreSante({
-          enveloppes: [...enveloppesCommunesMoiMois, ...enveloppesPartenaireStats],
-          epargneMois: 0,
-          historiquesMois: [],
-          seuilEpargneConstante: null,
-          objectifs: [],
-          transactions: [
-            ...transactionsCommunesMoiMois,
-            ...transactionsPartenaireStats,
-          ],
-          historiquePaiements: [],
-        } satisfies DonneesScore)
+  // "Ensemble" — RÈGLE À NE JAMAIS CASSER : moyenne PONDÉRÉE de "Moi" (le
+  // vrai score complet, jamais recalculé) et "Partenaire" (l'estimation
+  // ci-dessus), jamais un troisième calculerScoreSante() indépendant —
+  // décision explicite de l'utilisateur (remplace l'ancien "Score commun"
+  // qui mélangeait le budget total de mes enveloppes avec la part 'commun'
+  // seulement de leur dépense, une approximation plus fragile que
+  // nécessaire). Pondération par les dépenses du mois de chaque compte :
+  // celui qui a le plus dépensé pèse plus dans "Ensemble" — si le
+  // partenaire n'a pas de score estimable, "Ensemble" retombe simplement
+  // sur mon score seul (poids partenaire nul). Pas de `details` fabriqués
+  // (jamais affichés pour "Ensemble", cf. rendu plus bas) : uniquement
+  // score + mot.
+  const scoreEnsemble: { score: number; mot: MotCleScore } | null =
+    vueActive === "partage"
+      ? scorePartenaireApprox
+        ? (() => {
+            const poidsMoi = Math.max(totalDepensesMoiMois, 1);
+            const poidsPartenaire = Math.max(totalDepensesPartenaireMois, 1);
+            const poidsTotal = poidsMoi + poidsPartenaire;
+            const score = Math.round(
+              (scoreSante.score * poidsMoi +
+                scorePartenaireApprox.score * poidsPartenaire) /
+                poidsTotal,
+            );
+            return { score, mot: motPourScore(score) };
+          })()
+        : { score: scoreSante.score, mot: scoreSante.mot }
       : null;
 
   // Note B/C/E : score "tel qu'il était" pour chaque mois archivé, avec la
@@ -3210,6 +3181,22 @@ export default function Analytics() {
               </View>
             </View>
           )}
+          {estDansUnEspace && vueActive === "partage" && equilibreLabel && (
+            <View
+              style={[
+                styles.equilibreLigne,
+                { backgroundColor: C.carte, borderColor: C.carteBorder },
+              ]}
+            >
+              <Ionicons name="scale-outline" size={14} color={C.texteMuted} />
+              <Text
+                style={[styles.equilibreLigneTexte, { color: C.texte }]}
+                numberOfLines={2}
+              >
+                {equilibreLabel}
+              </Text>
+            </View>
+          )}
           <View style={styles.kpiGrid}>
             <View
               style={[
@@ -3855,15 +3842,62 @@ export default function Analytics() {
                 vueActive === "partage" &&
                 repartitionParPersonne.length > 0 && (
                   <>
-                    <Text
+                    <View
                       style={[
-                        styles.sectionLabel,
-                        { color: C.texteMuted, marginTop: 0 },
+                        styles.sectionLabelRow,
+                        { justifyContent: "space-between", alignItems: "center" },
                       ]}
                     >
-                      Répartition par personne (
-                      {LABEL_MOIS_ACTUEL})
-                    </Text>
+                      <Text
+                        style={[
+                          styles.sectionLabel,
+                          { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                        ]}
+                      >
+                        Répartition par personne ({LABEL_MOIS_ACTUEL})
+                      </Text>
+                      <View
+                        style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                      >
+                        <TouchableOpacity
+                          onPress={() => setModeRepartitionParPersonne("pct")}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 2 }}
+                        >
+                          <Text
+                            style={[
+                              styles.toggleModeTexte,
+                              {
+                                color:
+                                  modeRepartitionParPersonne === "pct"
+                                    ? C.accent
+                                    : C.texteMuted,
+                              },
+                            ]}
+                          >
+                            %
+                          </Text>
+                        </TouchableOpacity>
+                        <Text style={{ color: C.texteMuted, fontSize: 12 }}>/</Text>
+                        <TouchableOpacity
+                          onPress={() => setModeRepartitionParPersonne("euro")}
+                          hitSlop={{ top: 6, bottom: 6, left: 2, right: 6 }}
+                        >
+                          <Text
+                            style={[
+                              styles.toggleModeTexte,
+                              {
+                                color:
+                                  modeRepartitionParPersonne === "euro"
+                                    ? C.accent
+                                    : C.texteMuted,
+                              },
+                            ]}
+                          >
+                            €
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
                     <View
                       style={[
                         styles.chartCard,
@@ -3874,10 +3908,11 @@ export default function Analytics() {
                         },
                       ]}
                     >
-                      <RepartitionParPersonneBarres
-                        segments={repartitionParPersonne}
-                        prenomPartenaire={membrePartenaire?.prenom ?? null}
+                      <GraphiqueBarresEmpilees
+                        series={seriesRepartitionParPersonne}
+                        labels={labelsRepartitionParPersonne}
                         couleurs={C}
+                        mode={modeRepartitionParPersonne}
                       />
                     </View>
                   </>
@@ -4883,11 +4918,11 @@ export default function Analytics() {
                       <Text
                         style={[styles.scorePartageLabel, { color: C.texteMuted }]}
                       >
-                        COMMUN
+                        ENSEMBLE
                       </Text>
-                      {scoreCommun ? (
+                      {scoreEnsemble ? (
                         <Text style={[styles.scoreNombre, { color: C.texte, fontSize: 26 }]}>
-                          {scoreCommun.score}
+                          {scoreEnsemble.score}
                           <Text style={[styles.scoreSur100, { color: C.texteMuted }]}>
                             /100
                           </Text>
@@ -4902,11 +4937,12 @@ export default function Analytics() {
                     </View>
                   </View>
                   <Text style={[styles.scorePartageNote, { color: C.texteMuted }]}>
-                    {membrePartenaire?.prenom || "Le score partenaire"} et le
-                    score commun sont des estimations basées uniquement sur
-                    les dépenses/entrées marquées « Commun » — pas le vrai
-                    score de {membrePartenaire?.prenom || "ton/ta partenaire"}
-                    , qui reste privé.
+                    Le score de {membrePartenaire?.prenom || "ton/ta partenaire"}
+                    {" "}
+                    est une estimation basée uniquement sur les dépenses/
+                    entrées marquées « Commun » — pas son vrai score, qui
+                    reste privé. « Ensemble » est une moyenne pondérée des
+                    deux scores.
                   </Text>
                 </View>
               )}
@@ -6663,6 +6699,17 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 0.5,
   },
+  equilibreLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 0.5,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  equilibreLigneTexte: { fontSize: 12, fontWeight: "600", flex: 1 },
   kpiLabel: {
     fontSize: 10,
     fontWeight: "700",
@@ -6734,29 +6781,6 @@ const styles = StyleSheet.create({
   jaugeDot: { width: 9, height: 9, borderRadius: 5 },
   jaugeNom: { flex: 1, fontSize: 14, fontWeight: "600" },
   jaugePct: { fontSize: 13, fontWeight: "500" },
-  repartitionPersonneLigne: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 10,
-  },
-  repartitionPersonneNom: {
-    width: 90,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  repartitionPersonneBarreFond: {
-    flex: 1,
-    flexDirection: "row",
-    height: 12,
-    borderRadius: 6,
-    overflow: "hidden",
-  },
-  repartitionPersonneMontant: {
-    width: 66,
-    fontSize: 11,
-    textAlign: "right",
-  },
   compareCard: {
     backgroundColor: "#FAFAFA",
     borderRadius: 16,

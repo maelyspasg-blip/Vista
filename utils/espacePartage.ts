@@ -67,11 +67,25 @@ export type MembreEspace = {
 // (creerEspacePartage) et le flux de jointure (rejoindreEspacePartage), où
 // il désigne bien "l'autre" par construction (on ne peut pas rejoindre son
 // propre espace).
-export type EtatEspacePartage = {
-  espace: EspacePartage;
-  membres: MembreEspace[];
-  prenomPartenaire: string | null;
-};
+//
+// RÈGLE À NE JAMAIS CASSER — "ACTIF" EXIGE 2 MEMBRES, JAMAIS 1 : un espace
+// tout juste créé n'a que son créateur comme membre — le considérer
+// "actif" à ce stade affichait la carte verte "Tu es dans l'espace partagé
+// de [Prénom]" alors que personne n'avait encore rejoint (bug corrigé).
+// `getMembreEspace()` distingue donc explicitement 3 états, jamais un
+// simple booléen/objet-ou-null : `null` (aucun espace du tout),
+// `{statut: "en_attente"}` (créé, un seul membre — le créateur, en attente
+// que quelqu'un rejoigne avec le code), `{statut: "actif"}` (2 membres —
+// prenomPartenaire est alors garanti non-null en pratique, mais typé
+// nullable par cohérence défensive avec le reste du fichier).
+export type EtatEspacePartage =
+  | { statut: "en_attente"; code: string; expireAt: string }
+  | {
+      statut: "actif";
+      espaceId: string;
+      membres: MembreEspace[];
+      prenomPartenaire: string | null;
+    };
 
 // RÈGLE : types volontairement DISTINCTS des Enveloppe/Transaction de
 // app/store.ts — ce sont des données EN LECTURE SEULE d'un AUTRE
@@ -227,10 +241,12 @@ export async function rejoindreEspacePartage(
   }
 }
 
-// Récupère l'espace partagé actif de l'utilisateur courant (s'il en a un)
-// et la liste de ses membres (lui-même inclus). Retourne `null` si
-// l'utilisateur n'est membre d'aucun espace, ou en cas d'erreur — jamais de
-// throw (cf. RÈGLE en tête de fichier).
+// Récupère l'état de l'espace partagé de l'utilisateur courant. Retourne
+// `null` si l'utilisateur n'est membre d'aucun espace, ou en cas d'erreur —
+// jamais de throw (cf. RÈGLE en tête de fichier). Sinon, distingue
+// "en_attente" (créateur seul, personne n'a encore rejoint avec le code)
+// de "actif" (2 membres) — cf. RÈGLE À NE JAMAIS CASSER sur
+// EtatEspacePartage ci-dessus.
 export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
   try {
     const {
@@ -267,33 +283,36 @@ export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
       return null;
     }
 
-    const { data: espaceRow, error: erreurEspace } = await supabase
-      .from("espaces_partages")
-      .select("*")
-      .eq("id", espaceId)
-      .maybeSingle();
+    const membres = tousLesMembres ?? [];
 
-    if (erreurEspace || !espaceRow) {
-      console.error(
-        "Supabase select espaces_partages (getMembreEspace) a échoué :",
-        erreurEspace,
-      );
-      return null;
+    if (membres.length < 2) {
+      const { data: espaceRow, error: erreurEspace } = await supabase
+        .from("espaces_partages")
+        .select("*")
+        .eq("id", espaceId)
+        .maybeSingle();
+
+      if (erreurEspace || !espaceRow) {
+        console.error(
+          "Supabase select espaces_partages (getMembreEspace, en_attente) a échoué :",
+          erreurEspace,
+        );
+        return null;
+      }
+
+      return {
+        statut: "en_attente",
+        code: espaceRow.code,
+        expireAt: espaceRow.expire_at,
+      };
     }
 
-    const autreMembre = (tousLesMembres ?? []).find(
-      (m) => m.user_id !== user.id,
-    );
+    const autreMembre = membres.find((m) => m.user_id !== user.id);
 
     return {
-      espace: {
-        id: espaceRow.id,
-        code: espaceRow.code,
-        createdAt: espaceRow.created_at,
-        expireAt: espaceRow.expire_at,
-        creeParPrenom: espaceRow.cree_par_prenom ?? null,
-      },
-      membres: (tousLesMembres ?? []).map((m) => ({
+      statut: "actif",
+      espaceId,
+      membres: membres.map((m) => ({
         id: m.id,
         espaceId: m.espace_id,
         userId: m.user_id,
@@ -309,12 +328,18 @@ export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
   }
 }
 
-// Fait quitter l'utilisateur courant de son espace partagé — supprime
-// SA/SES ligne(s) membres_espace (scopées par user_id, jamais par
-// espace_id : un utilisateur n'appartient qu'à un seul espace dans ce
-// modèle, cf. getMembreEspace ci-dessus qui ne considère que la
-// première trouvée). Ne supprime jamais l'espace ni les autres membres —
-// quitter n'est pas dissoudre. Retourne `true` en cas de succès.
+// RÈGLE À NE JAMAIS CASSER — LOGIQUE DE DÉPART ATOMIQUE, VIA RPC, JAMAIS UN
+// DELETE CLIENT DIRECT : décision explicite de l'utilisateur — à 2 membres,
+// quitter DISSOUT l'espace entier (les deux comptes sont déliés) ; à 3
+// membres ou plus, seul l'appelant est retiré, l'espace continue pour les
+// autres. Le comptage ET la décision (dissoudre vs retirer un seul membre)
+// se font DANS quitter_espace_partage() (security definer, migration
+// 20260831140000) — jamais reconstruits côté client à partir d'un nombre
+// de membres qui pourrait être périmé au moment du clic (race entre deux
+// membres qui quittent en même temps, notamment). L'appelant (app/profil.tsx)
+// peut choisir le message de confirmation à afficher AVANT l'appel à partir
+// de membres.length (juste pour l'UX), mais ne doit jamais faire confiance
+// à ce nombre pour la logique elle-même.
 export async function quitterEspacePartage(): Promise<boolean> {
   try {
     const {
@@ -322,14 +347,11 @@ export async function quitterEspacePartage(): Promise<boolean> {
     } = await supabase.auth.getUser();
     if (!user) return false;
 
-    const { error } = await supabase
-      .from("membres_espace")
-      .delete()
-      .eq("user_id", user.id);
+    const { error } = await supabase.rpc("quitter_espace_partage");
 
     if (error) {
       console.error(
-        "Supabase delete membres_espace (quitterEspacePartage) a échoué :",
+        "Supabase rpc quitter_espace_partage a échoué :",
         error,
       );
       return false;
@@ -362,6 +384,9 @@ export async function chargerDonneesPartenaire(
   partenaireId: string,
 ): Promise<DonneesPartenaire> {
   try {
+    // DEBUG TEMPORAIRE — à retirer une fois le bug de vue "Partagé"
+    // diagnostiqué.
+    console.log("[chargerDonneesPartenaire] appel pour:", partenaireId);
     const [
       { data: enveloppesData, error: erreurEnveloppes },
       { data: transactionsData, error: erreurTransactions },
@@ -377,6 +402,13 @@ export async function chargerDonneesPartenaire(
         .eq("user_id", partenaireId)
         .eq("attribue_a", "commun"),
     ]);
+
+    // DEBUG TEMPORAIRE — idem.
+    console.log(
+      "[chargerDonneesPartenaire] résultat enveloppes:",
+      enveloppesData,
+      erreurEnveloppes,
+    );
 
     if (erreurEnveloppes) {
       console.error(

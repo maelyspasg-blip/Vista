@@ -97,6 +97,16 @@ const POIDS: Record<keyof SignauxScore, number> = {
   stabilite: 10,
 };
 
+// RÈGLE À NE JAMAIS CASSER — SEULE SOURCE DU MAPPING SCORE → MOT-CLÉ :
+// réutilisée par calculerScoreDepuisSignaux ci-dessous ET par tout calcul
+// de score qui ne passe pas par cette fonction (ex: un score "Ensemble"
+// dérivé par moyenne pondérée de deux ScoreSante déjà calculés côté
+// app/(tabs)/analytics.tsx, mode espace partagé) — jamais réécrire ces deux
+// seuils (75/50) une seconde fois ailleurs.
+export function motPourScore(score: number): MotCleScore {
+  return score >= 75 ? "Solide" : score >= 50 ? "À surveiller" : "Attention";
+}
+
 // RÈGLE À NE JAMAIS CASSER : un signal absent (null) ne pénalise jamais le
 // score — son poids est redistribué proportionnellement sur les signaux
 // disponibles (ex: pas d'objectif actif → les 20 pts "Objectifs" sont
@@ -130,10 +140,7 @@ function calculerScoreDepuisSignaux(signaux: SignauxScore): ScoreSante {
   });
   score = Math.round(score);
 
-  const mot: MotCleScore =
-    score >= 75 ? "Solide" : score >= 50 ? "À surveiller" : "Attention";
-
-  return { score, mot, details };
+  return { score, mot: motPourScore(score), details };
 }
 
 // --- Calcul de chaque signal (0-100), réutilisable en live comme en

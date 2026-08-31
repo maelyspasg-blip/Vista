@@ -5,7 +5,7 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -66,6 +66,7 @@ import {
 } from "../utils/espacePartage";
 import { Theme, useTheme } from "./ThemeContext";
 import { useTutoriel } from "./TutorielContext";
+import { useEspacePartage } from "./EspacePartageContext";
 
 const OPTIONS_TAILLE_TEXTE: { valeur: TailleTexte; label: string }[] = [
   { valeur: "petit", label: "Petit" },
@@ -152,6 +153,7 @@ export default function Profil() {
   const { afficherJoursFeries, setAfficherJoursFeries } = useJoursFeries();
   const { estPremium, definirPremium, simulerNonPremium, definirSimulerNonPremium } =
     usePremium();
+  const { rafraichirEspace } = useEspacePartage();
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Profil —
   // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
   const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
@@ -240,6 +242,15 @@ export default function Profil() {
     "creer" | "rejoindre"
   >("creer");
   const [codeGenere, setCodeGenere] = useState("");
+  // RÈGLE À NE JAMAIS CASSER — LABEL PRÉ-CALCULÉ, JAMAIS Date.now() DANS LE
+  // RENDU : ce texte ("Expire dans Xh.") est calculé une fois par
+  // formaterExpirationCode (voir plus bas), appelée UNIQUEMENT depuis des
+  // gestionnaires/fonctions async (jamais directement dans le JSX) — un
+  // appel à `new Date()`/Date.now() pendant le rendu est une fonction
+  // impure au sens du React Compiler (règle react-hooks/purity) et fait
+  // échouer le lint. On stocke donc directement la CHAÎNE déjà formatée,
+  // jamais la date brute à reformater à chaque rendu.
+  const [codeExpireLabel, setCodeExpireLabel] = useState<string | null>(null);
   const [creationEspaceEnCours, setCreationEspaceEnCours] = useState(false);
   const [erreurCreationEspace, setErreurCreationEspace] = useState<
     string | null
@@ -258,16 +269,44 @@ export default function Profil() {
   // l'espace partagé de [Prénom]" (cf. rendu plus bas).
   const [espacePartageActif, setEspacePartageActif] =
     useState<EtatEspacePartage | null>(null);
+  // Même RÈGLE que codeExpireLabel plus haut : label déjà formaté, jamais
+  // une date brute reformatée dans le JSX (react-hooks/purity) — affiché
+  // sur la carte persistante "En attente de ton/ta partenaire…".
+  const [enAttenteExpireLabel, setEnAttenteExpireLabel] = useState<
+    string | null
+  >(null);
 
-  const chargerEtatEspacePartage = async () => {
+  // Calcule "Expire dans Xh" à partir d'une date d'expiration réelle —
+  // jamais un "24h" figé, faux dès que le code affiché a été RÉUTILISÉ
+  // (créé il y a un moment, cf. ouvrirModalEspacePartage ci-dessous).
+  // RÈGLE À NE JAMAIS CASSER : appelée UNIQUEMENT depuis des fonctions
+  // async/gestionnaires (jamais directement dans le JSX, cf. RÈGLE sur
+  // codeExpireLabel) — le résultat est toujours stocké en state, jamais
+  // recalculé au rendu.
+  const formaterExpirationCode = (expireAt: string): string => {
+    const msRestant = new Date(expireAt).getTime() - Date.now();
+    if (msRestant <= 0) return "Ce code a expiré.";
+    const heures = Math.max(1, Math.round(msRestant / (1000 * 60 * 60)));
+    return `Expire dans ${heures}h.`;
+  };
+
+  // useCallback([]) : identité stable entre rendus (aucune dépendance
+  // réelle — getMembreEspace() ne prend rien en paramètre) pour satisfaire
+  // exhaustive-deps sur l'effet de montage ci-dessous sans le re-déclencher
+  // à chaque rendu.
+  const chargerEtatEspacePartage = useCallback(async () => {
     const etat = await getMembreEspace();
     setEspacePartageActif(etat);
-  };
+    setEnAttenteExpireLabel(
+      etat?.statut === "en_attente" ? formaterExpirationCode(etat.expireAt) : null,
+    );
+    return etat;
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- setEspacePartageActif s'exécute après un await dans chargerEtatEspacePartage, jamais synchrone dans ce corps d'effet ; même catégorie déjà tolérée 2x plus haut dans ce fichier (lignes 167/171).
     if (ESPACE_PARTAGE_ACTIF) chargerEtatEspacePartage();
-  }, []);
+  }, [chargerEtatEspacePartage]);
 
   const creerEtAfficherEspace = async () => {
     setCreationEspaceEnCours(true);
@@ -276,6 +315,7 @@ export default function Profil() {
     setCreationEspaceEnCours(false);
     if (espace) {
       setCodeGenere(espace.code);
+      setCodeExpireLabel(formaterExpirationCode(espace.expireAt));
       chargerEtatEspacePartage();
     } else {
       setErreurCreationEspace(
@@ -284,33 +324,82 @@ export default function Profil() {
     }
   };
 
-  const ouvrirModalEspacePartage = () => {
+  const ouvrirModalEspacePartage = async () => {
     setOngletEspacePartage("creer");
     setCodeGenere("");
+    setCodeExpireLabel(null);
     setErreurCreationEspace(null);
     setCodeSaisi("");
     setMessageRejoindre(null);
     setRejoindreEnCours(false);
     setModalEspacePartageVisible(true);
+
+    // RÈGLE À NE JAMAIS CASSER — VÉRIFIE D'ABORD, NE CRÉE QUE SI BESOIN :
+    // rouvrir cette modale ne doit jamais générer un nouveau code tant
+    // qu'un espace "en attente" existant est encore valide (24h) — ça
+    // invaliderait silencieusement un code déjà partagé au partenaire.
+    // creer_espace_partage() fait la même vérification côté serveur en
+    // défense en profondeur (migration
+    // 20260831130000_creer_espace_partage_reutilise_en_attente.sql), mais
+    // on vérifie aussi ici pour éviter l'aller-retour réseau inutile et
+    // afficher directement le bon "Expire dans Xh" sans dépendre d'un
+    // format retourné par une création.
+    const etat = await chargerEtatEspacePartage();
+    if (etat?.statut === "en_attente") {
+      setCodeGenere(etat.code);
+      setCodeExpireLabel(formaterExpirationCode(etat.expireAt));
+      return;
+    }
     creerEtAfficherEspace();
   };
 
+  // RÈGLE À NE JAMAIS CASSER — MESSAGE DE CONFIRMATION SELON LE NOMBRE DE
+  // MEMBRES : purement pour l'UX (annoncer honnêtement la conséquence
+  // avant de confirmer) — la décision RÉELLE (dissoudre vs retirer un seul
+  // membre) est reprise et recomptée côté serveur dans
+  // quitter_espace_partage() (migration 20260831140000), jamais fait
+  // confiance à membres.length ici pour la logique elle-même (cf. RÈGLE
+  // dans utils/espacePartage.ts::quitterEspacePartage).
   const quitterEspacePartageAction = () => {
-    Alert.alert(
-      "Quitter l'espace partagé ?",
-      "Tu ne verras plus les données partagées.",
-      [
-        { text: "Annuler", style: "cancel" },
-        {
-          text: "Quitter",
-          style: "destructive",
-          onPress: async () => {
-            const succes = await quitterEspacePartage();
-            if (succes) chargerEtatEspacePartage();
-          },
+    const nbMembres =
+      espacePartageActif?.statut === "actif"
+        ? espacePartageActif.membres.length
+        : 0;
+    const { titre, message } =
+      nbMembres >= 3
+        ? {
+            titre: "Quitter l'espace partagé ?",
+            message:
+              "Tu vas quitter l'espace partagé. Les autres membres continueront sans toi. Continuer ?",
+          }
+        : nbMembres === 2
+          ? {
+              titre: "Quitter l'espace partagé ?",
+              message:
+                "Si tu quittes, l'espace partagé sera dissous pour vous deux. Continuer ?",
+            }
+          : {
+              titre: "Quitter l'espace partagé ?",
+              message: "Tu ne verras plus les données partagées.",
+            };
+    Alert.alert(titre, message, [
+      { text: "Annuler", style: "cancel" },
+      {
+        text: "Quitter",
+        style: "destructive",
+        onPress: async () => {
+          const succes = await quitterEspacePartage();
+          if (succes) {
+            chargerEtatEspacePartage();
+            // RÈGLE : recharge aussi le contexte global (switcher
+            // Aperçu/Budget/Stats) — chargerEtatEspacePartage ci-dessus
+            // ne met à jour que l'état LOCAL à cet écran, cf. RÈGLE dans
+            // EspacePartageContext.tsx.
+            rafraichirEspace();
+          }
         },
-      ],
-    );
+      },
+    ]);
   };
 
   // RÈGLE : Clipboard du cœur react-native (déprécié mais toujours
@@ -320,18 +409,22 @@ export default function Profil() {
   // react-native est déjà compilé dans tout build dev client standard,
   // aucun rebuild nécessaire. setString est synchrone (pas de Promise),
   // contrairement à expo-clipboard.
-  const copierCodeEspacePartage = () => {
+  // RÈGLE : paramétrées par `code` (plutôt que de lire codeGenere en dur)
+  // pour rester réutilisables à la fois par la modale de création
+  // (codeGenere) et par la carte persistante "en attente" affichée sur
+  // l'écran principal (espacePartageActif.code) — cf. rendu plus bas.
+  const copierCodeEspacePartage = (code: string) => {
     try {
-      Clipboard.setString(codeGenere);
+      Clipboard.setString(code);
     } catch (e) {
       console.error("Copie du code d'invitation a échoué :", e);
     }
   };
 
-  const partagerCodeEspacePartage = async () => {
+  const partagerCodeEspacePartage = async (code: string) => {
     try {
       await Share.share({
-        message: `Rejoins mon espace partagé Vista avec le code : ${codeGenere}`,
+        message: `Rejoins mon espace partagé Vista avec le code : ${code}`,
       });
     } catch (e) {
       console.error("Partage du code d'invitation a échoué :", e);
@@ -358,6 +451,20 @@ export default function Profil() {
     }
   };
 
+  // RÈGLE À NE JAMAIS CASSER — TOUT RÉSULTAT POSITIF FERME LA MODALE,
+  // "DÉJÀ MEMBRE" INCLUS : "déjà membre" est un succès FONCTIONNEL —
+  // l'utilisateur est de toute façon dans l'espace, ce n'est pas une
+  // erreur à corriger. Le traiter comme une erreur (modale qui reste
+  // ouverte, message rouge sous le champ) suggérait à tort que quelque
+  // chose avait échoué, poussant l'utilisateur à recliquer "Rejoindre"
+  // (nouvel appel, même résultat, en boucle) ou à chercher un autre moyen
+  // de fermer — bug corrigé. Seules les VRAIES erreurs (code_invalide,
+  // code_expire, erreur_reseau) gardent la modale ouverte avec un message
+  // sous le champ ; la croix en haut à droite, elle, ferme TOUJOURS la
+  // modale sans rien faire d'autre (jamais de logique d'annulation dessus,
+  // cf. son onPress plus bas) — que la modale soit fermée par elle ou
+  // automatiquement ici ne change jamais ce qui a déjà été fait côté
+  // serveur.
   const rejoindreEspacePartageDepuisModal = async () => {
     const code = codeSaisi.trim();
     if (!code || rejoindreEnCours) return;
@@ -365,15 +472,23 @@ export default function Profil() {
     setMessageRejoindre(null);
     const resultat = await rejoindreEspacePartage(code);
     setRejoindreEnCours(false);
-    setMessageRejoindre(
-      resultat.succes
-        ? {
-            type: "succes",
-            texte: `Tu as rejoint l'espace partagé de ${resultat.espace.creeParPrenom || "ton/ta partenaire"} !`,
-          }
-        : { type: "erreur", texte: messageEchecRejoindre(resultat.raison) },
-    );
-    if (resultat.succes) chargerEtatEspacePartage();
+
+    if (!resultat.succes && resultat.raison !== "deja_membre") {
+      setMessageRejoindre({
+        type: "erreur",
+        texte: messageEchecRejoindre(resultat.raison),
+      });
+      return;
+    }
+
+    await chargerEtatEspacePartage();
+    setModalEspacePartageVisible(false);
+    // RÈGLE : recharge aussi le contexte global (switcher
+    // Aperçu/Budget/Stats) — chargerEtatEspacePartage ci-dessus ne met à
+    // jour que l'état LOCAL à cet écran, cf. RÈGLE dans
+    // EspacePartageContext.tsx. Sans ça, le switcher restait invisible
+    // après avoir rejoint tant que l'app n'était pas remontée.
+    rafraichirEspace();
   };
   const optionsMoisExport = construireOptionsMoisExport(
     objStore.historiquesMois,
@@ -777,33 +892,46 @@ export default function Profil() {
         </Text>
         <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.purple, contrasteRenforce)]}>
           <View style={styles.avatarSection}>
-            <TouchableOpacity
-              style={[styles.avatarPreview, { backgroundColor: C.hero }]}
-              onPress={changerPhotoProfil}
-              activeOpacity={0.7}
-              disabled={televersementEnCours}
-              accessibilityRole="button"
-              accessibilityLabel="Changer la photo de profil"
-            >
-              {televersementEnCours ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : objStore.avatarUrl ? (
-                <Image
-                  source={{ uri: objStore.avatarUrl }}
-                  style={styles.avatarPreviewImage}
-                  contentFit="cover"
-                />
-              ) : (
-                <Text style={styles.avatarPreviewTexte}>
-                  {getInitiales(objStore.prenom, objStore.nom)}
-                </Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={changerPhotoProfil} activeOpacity={0.7} disabled={televersementEnCours}>
-              <Text style={[styles.avatarChangerTexte, { color: C.purple }]}>
-                Changer la photo
-              </Text>
-            </TouchableOpacity>
+            {/* RÈGLE À NE JAMAIS CASSER — PAS DE PERSONNALISATION DE PHOTO
+                POUR UN INVITÉ : décision explicite de l'utilisateur — un
+                compte test/démo garde toujours l'avatar par défaut (les
+                initiales "I"), jamais de televerserAvatar ni de lien
+                "Changer la photo" affiché. */}
+            {isGuest ? (
+              <View style={[styles.avatarPreview, { backgroundColor: C.hero }]}>
+                <Text style={styles.avatarPreviewTexte}>I</Text>
+              </View>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={[styles.avatarPreview, { backgroundColor: C.hero }]}
+                  onPress={changerPhotoProfil}
+                  activeOpacity={0.7}
+                  disabled={televersementEnCours}
+                  accessibilityRole="button"
+                  accessibilityLabel="Changer la photo de profil"
+                >
+                  {televersementEnCours ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : objStore.avatarUrl ? (
+                    <Image
+                      source={{ uri: objStore.avatarUrl }}
+                      style={styles.avatarPreviewImage}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <Text style={styles.avatarPreviewTexte}>
+                      {getInitiales(objStore.prenom, objStore.nom)}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity onPress={changerPhotoProfil} activeOpacity={0.7} disabled={televersementEnCours}>
+                  <Text style={[styles.avatarChangerTexte, { color: C.purple }]}>
+                    Changer la photo
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
             {/* RÈGLE À NE JAMAIS CASSER : simulerNonPremium masque les deux
                 badges, même pour un vrai admin — c'est le but du toggle
                 "Simuler compte non-premium" (voir OUTILS ADMIN plus bas).
@@ -1076,7 +1204,16 @@ export default function Profil() {
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
               ESPACE PARTAGÉ
             </Text>
-            {espacePartageActif ? (
+            {/* RÈGLE À NE JAMAIS CASSER — 3 ÉTATS DISTINCTS, JAMAIS UN
+                BOOLÉEN "espacePartageActif ? ... : ..." : la carte verte
+                "Tu es dans l'espace partagé de [Prénom]" ne doit s'afficher
+                QUE si l'espace a 2 membres (statut "actif") — un espace
+                tout juste créé (statut "en_attente", créateur seul) affiche
+                sa propre carte avec le code en attente, jamais la carte
+                verte (bug corrigé : elle affichait le prénom DU CRÉATEUR
+                LUI-MÊME tant que personne n'avait rejoint). Cf.
+                utils/espacePartage.ts::EtatEspacePartage. */}
+            {espacePartageActif?.statut === "actif" ? (
               <View
                 style={[
                   styles.carte,
@@ -1094,7 +1231,7 @@ export default function Profil() {
                       { color: C.texte, flex: 1 },
                     ]}
                   >
-                    Tu es dans l&apos;espace partagé de{" "}
+                    Espace partagé avec{" "}
                     {espacePartageActif.prenomPartenaire ||
                       "ton/ta partenaire"}
                   </Text>
@@ -1106,6 +1243,63 @@ export default function Profil() {
                 >
                   <Text style={styles.btnQuitterEspaceTexte}>
                     Quitter l&apos;espace
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : espacePartageActif?.statut === "en_attente" ? (
+              <View
+                style={[
+                  styles.carte,
+                  { backgroundColor: C.carte, borderColor: C.carteBorder },
+                  styleCarte(theme, C.purple, contrasteRenforce),
+                ]}
+              >
+                <Text style={[styles.switchLabel, { color: C.texte }]}>
+                  En attente de ton/ta partenaire…
+                </Text>
+                <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                  Partage ce code pour qu&apos;il/elle rejoigne ton espace.
+                </Text>
+                <Text
+                  style={[
+                    styles.codeEspacePartage,
+                    { color: C.texte, marginTop: 12 },
+                  ]}
+                >
+                  {espacePartageActif.code}
+                </Text>
+                <Text
+                  style={[
+                    styles.switchSub,
+                    { color: C.texteMuted, textAlign: "center", marginTop: 4 },
+                  ]}
+                >
+                  {enAttenteExpireLabel}
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.btnSecondaire,
+                    { borderColor: C.separateur, marginTop: 16 },
+                  ]}
+                  onPress={() =>
+                    copierCodeEspacePartage(espacePartageActif.code)
+                  }
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="copy-outline" size={16} color={C.texte} />
+                  <Text
+                    style={[styles.btnSecondaireTexte, { color: C.texte }]}
+                  >
+                    Copier le code
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={quitterEspacePartageAction}
+                  activeOpacity={0.7}
+                  style={[styles.btnQuitterEspace, { marginTop: 12 }]}
+                >
+                  <Text style={styles.btnQuitterEspaceTexte}>
+                    Annuler l&apos;espace
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1881,6 +2075,11 @@ export default function Profil() {
               <Text style={[styles.modalTitre, { color: C.texte, marginBottom: 0 }]}>
                 Espace partagé
               </Text>
+              {/* RÈGLE À NE JAMAIS CASSER : ferme SIMPLEMENT la modale,
+                  jamais aucune autre logique (annulation, reset d'un état
+                  déjà persisté côté serveur...) — un rejoint/une création
+                  déjà effectuée reste effectuée, la croix ne fait
+                  qu'arrêter d'afficher la modale. */}
               <TouchableOpacity
                 onPress={() => setModalEspacePartageVisible(false)}
                 activeOpacity={0.6}
@@ -1988,7 +2187,7 @@ export default function Profil() {
                         },
                       ]}
                     >
-                      Ce code expire dans 24h.
+                      {codeExpireLabel ?? "Ce code expire dans 24h."}
                     </Text>
 
                     <TouchableOpacity
@@ -1996,7 +2195,7 @@ export default function Profil() {
                         styles.btnSecondaire,
                         { borderColor: C.separateur, marginTop: 20 },
                       ]}
-                      onPress={copierCodeEspacePartage}
+                      onPress={() => copierCodeEspacePartage(codeGenere)}
                       activeOpacity={0.7}
                     >
                       <Ionicons name="copy-outline" size={16} color={C.texte} />
@@ -2012,7 +2211,7 @@ export default function Profil() {
                         styles.btnPrincipal,
                         { backgroundColor: C.purple, marginTop: 12 },
                       ]}
-                      onPress={partagerCodeEspacePartage}
+                      onPress={() => partagerCodeEspacePartage(codeGenere)}
                       activeOpacity={0.7}
                     >
                       <Text style={styles.btnPrincipalTexte}>Partager</Text>
@@ -2033,6 +2232,14 @@ export default function Profil() {
                   placeholder="VISTA-XXXXXX"
                   placeholderTextColor={C.texteMuted}
                   value={codeSaisi}
+                  // RÈGLE À NE JAMAIS CASSER — AUCUN APPEL SUPABASE À LA
+                  // SAISIE : ne jamais appeler rejoindreEspacePartage() (ni
+                  // aucune validation réseau du code) depuis ce handler —
+                  // uniquement au clic sur "Rejoindre"
+                  // (rejoindreEspacePartageDepuisModal). Un appel à la
+                  // frappe déclencherait rejoindre_espace_par_code() sur un
+                  // code potentiellement incomplet ET produirait un second
+                  // appel "déjà membre" au clic suivant sur "Rejoindre".
                   onChangeText={(v) => {
                     setCodeSaisi(v);
                     setMessageRejoindre(null);

@@ -10,23 +10,27 @@ import {
 import { supabase } from "../../supabaseClient";
 import { messageErreurAuth } from "../authErrors";
 import { Text } from "../Texte";
-import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
 
 const PURPLE = "#8B6FE8";
 
+// RÈGLE À NE JAMAIS CASSER — PAS DE SAISIE DE PRÉNOM POUR UN INVITÉ :
+// décision explicite de l'utilisateur — un compte test/démo n'a pas besoin
+// d'être personnalisé, "Invité" suffit. Ne jamais réintroduire un champ
+// prénom ici ; si un vrai prénom est un jour souhaité pour un invité, ce
+// serait un choix ultérieur distinct de cet écran (ex: dans profil.tsx),
+// jamais une étape obligatoire à la création.
+const PRENOM_INVITE = "Invité";
+
 export default function Invite() {
   const router = useRouter();
   const estTablette = useEstTablette();
-  const [prenom, setPrenom] = useState("");
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState("");
 
-  const formulaireValide = !!prenom.trim();
-
   const commencerEssai = async () => {
-    if (!formulaireValide || chargement) return;
+    if (chargement) return;
     setErreur("");
     setChargement(true);
 
@@ -41,7 +45,7 @@ export default function Invite() {
     if (data.user) {
       const { error: erreurProfil } = await supabase
         .from("profils")
-        .update({ prenom: prenom.trim() })
+        .update({ prenom: PRENOM_INVITE })
         .eq("user_id", data.user.id);
 
       if (erreurProfil) {
@@ -78,30 +82,13 @@ export default function Invite() {
       </View>
 
       <View style={styles.form}>
-        <Text style={styles.label}>Prénom</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Ton prénom"
-          placeholderTextColor="#CCC"
-          autoCapitalize="words"
-          value={prenom}
-          onChangeText={(v) => {
-            setPrenom(v);
-            setErreur("");
-          }}
-          editable={!chargement}
-        />
-
         {!!erreur && <Text style={styles.erreurTexte}>{erreur}</Text>}
 
         <BoutonPrincipal
-          style={[
-            styles.btnPrincipal,
-            { opacity: formulaireValide && !chargement ? 1 : 0.5 },
-          ]}
+          style={[styles.btnPrincipal, { opacity: chargement ? 0.5 : 1 }]}
           onPress={commencerEssai}
           activeOpacity={0.8}
-          disabled={!formulaireValide || chargement}
+          disabled={chargement}
         >
           {chargement ? (
             <ActivityIndicator color="#FFFFFF" />
@@ -151,25 +138,9 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
   },
-  label: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#1A1A1A",
-    marginBottom: 8,
-    letterSpacing: 0.3,
-  },
-  input: {
-    backgroundColor: "#F7F7F7",
-    borderRadius: 14,
-    padding: 16,
-    fontSize: 15,
-    color: "#1A1A1A",
-    marginBottom: 20,
-  },
   erreurTexte: {
     fontSize: 13,
     color: "#E24B4A",
-    marginTop: -10,
     marginBottom: 16,
   },
   btnPrincipal: {

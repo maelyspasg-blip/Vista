@@ -1,5 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { AppState } from "react-native";
 import {
   chargerDonneesPartenaire,
   DonneesPartenaire,
@@ -28,6 +36,15 @@ type EspacePartageContextType = {
   membrePartenaire: MembrePartenaire | null;
   vueActive: VueEspacePartage;
   setVueActive: (vue: VueEspacePartage) => void;
+  // RÈGLE : recharge impérative de estDansUnEspace/espaceId/membrePartenaire
+  // depuis Supabase — nécessaire car le Provider ne les charge qu'au
+  // montage/changement de userId (cf. useEffect plus bas) ; un événement
+  // qui change l'appartenance à un espace APRÈS le montage (rejoindre/
+  // quitter depuis profil.tsx, ou l'app qui revient au premier plan après
+  // que le partenaire a rejoint pendant qu'elle était en arrière-plan) ne
+  // déclenche jamais cet effet tout seul. À appeler explicitement après ce
+  // type d'action plutôt que d'attendre un remount.
+  rafraichirEspace: () => Promise<void>;
   // RÈGLE À NE JAMAIS CASSER — CHARGÉES UNE SEULE FOIS, ICI, JAMAIS PAR
   // ÉCRAN : vueActive est désormais un switcher global (cf. correction qui
   // a retiré le doublon de Budget) — les données du partenaire doivent donc
@@ -44,6 +61,7 @@ const EspacePartageContext = createContext<EspacePartageContextType>({
   membrePartenaire: null,
   vueActive: "personnel",
   setVueActive: () => {},
+  rafraichirEspace: async () => {},
   donneesPartenaire: null,
   chargementPartenaire: false,
 });
@@ -107,14 +125,19 @@ export function EspacePartageProvider({
     getMembreEspace()
       .then((etat) => {
         if (annule) return;
-        if (!etat) {
+        // RÈGLE À NE JAMAIS CASSER : "en_attente" (créateur seul, personne
+        // n'a encore rejoint) compte comme PAS ENCORE dans un espace pour
+        // le reste de l'app — le switcher "Partagé" et toute la logique de
+        // fusion n'ont aucun sens tant qu'il n'y a personne avec qui
+        // fusionner. Seul "actif" (2 membres) active estDansUnEspace.
+        if (!etat || etat.statut === "en_attente") {
           setEstDansUnEspace(false);
           setEspaceId(null);
           setMembrePartenaire(null);
           return;
         }
         setEstDansUnEspace(true);
-        setEspaceId(etat.espace.id);
+        setEspaceId(etat.espaceId);
         const autreMembre = etat.membres.find((m) => m.userId !== userId);
         setMembrePartenaire(
           autreMembre
@@ -131,6 +154,61 @@ export function EspacePartageProvider({
       annule = true;
     };
   }, [userId]);
+
+  // RÈGLE : recharge impérative — volontairement une fonction SÉPARÉE de
+  // l'effet de montage ci-dessus (qui reste protégé par `annule` contre une
+  // réponse tardive lors d'un changement rapide de compte) plutôt qu'une
+  // factorisation complète : un appel impératif (après une action locale,
+  // ou depuis le listener AppState ci-dessous) n'a pas besoin de ce
+  // garde-fou — l'appelant sait déjà que `userId` est le bon au moment de
+  // l'appel. Même logique de statut "en_attente"/"actif" que l'effet de
+  // montage, cf. RÈGLE juste au-dessus. Enveloppée dans useCallback([userId])
+  // pour garder une identité stable entre deux rendus tant que userId ne
+  // change pas — nécessaire pour satisfaire exhaustive-deps sur l'effet
+  // AppState ci-dessous sans le re-abonner à chaque rendu.
+  const rafraichirEspace = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const etat = await getMembreEspace();
+      if (!etat || etat.statut === "en_attente") {
+        setEstDansUnEspace(false);
+        setEspaceId(null);
+        setMembrePartenaire(null);
+        return;
+      }
+      setEstDansUnEspace(true);
+      setEspaceId(etat.espaceId);
+      const autreMembre = etat.membres.find((m) => m.userId !== userId);
+      setMembrePartenaire(
+        autreMembre
+          ? { id: autreMembre.userId, prenom: autreMembre.prenom }
+          : null,
+      );
+    } catch (e) {
+      // getMembreEspace() ne throw déjà jamais (cf. RÈGLE dans
+      // utils/espacePartage.ts) — filet de sécurité pur.
+      console.error("rafraichirEspace a échoué :", e);
+    }
+  }, [userId]);
+
+  // Recharge automatiquement quand l'app revient au premier plan — cas
+  // typique : le partenaire rejoint l'espace pendant que cette app est en
+  // arrière-plan, rien ne le saurait sinon avant un remount complet. Même
+  // pattern etatAppRef que app/(tabs)/budget.tsx (réalignement sur le mois
+  // courant au retour au premier plan) — repris ici à l'identique.
+  const etatAppRef = useRef(AppState.currentState);
+  useEffect(() => {
+    const abonnement = AppState.addEventListener("change", (etatSuivant) => {
+      if (
+        etatAppRef.current.match(/inactive|background/) &&
+        etatSuivant === "active"
+      ) {
+        rafraichirEspace();
+      }
+      etatAppRef.current = etatSuivant;
+    });
+    return () => abonnement.remove();
+  }, [rafraichirEspace]);
 
   // Charge les enveloppes/transactions 'commun' du partenaire au passage en
   // vue "Partagé" (jamais en vue "Moi", jamais sans espace actif) — cf.
@@ -176,6 +254,7 @@ export function EspacePartageProvider({
         membrePartenaire,
         vueActive,
         setVueActive,
+        rafraichirEspace,
         donneesPartenaire,
         chargementPartenaire,
       }}

@@ -687,6 +687,21 @@ export default function Dashboard() {
   // commune dans ce modèle) — passé à 0, donc le "reste estimé" fusionné
   // ignore l'épargne personnelle du partenaire, jamais la nôtre.
   const enveloppesPartenaire = donneesPartenaire?.enveloppes ?? [];
+  // DEBUG TEMPORAIRE — à retirer une fois le bug de vue "Partagé"
+  // diagnostiqué (données du partenaire absentes de l'écran) : vérifie si
+  // membrePartenaire.id est bien résolu et si chargerDonneesPartenaire()
+  // (utils/espacePartage.ts) renvoie effectivement des lignes.
+  if (vueActive === "partage") {
+    console.log("[EspacePartage] partenaireId:", membrePartenaire?.id);
+    console.log(
+      "[EspacePartage] enveloppesPartenaire:",
+      enveloppesPartenaire?.length,
+    );
+    console.log(
+      "[EspacePartage] transactionsPartenaire:",
+      donneesPartenaire?.transactions?.length,
+    );
+  }
   const resultatPartenaire =
     vueActive === "partage" && enveloppesPartenaire.length > 0
       ? calculerResteEstimeCourant(
