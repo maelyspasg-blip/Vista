@@ -30,6 +30,7 @@ import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
 import { usePremium } from "../PremiumContext";
 import { useGuest } from "../GuestContext";
+import { useEspacePartage } from "../EspacePartageContext";
 import { bloquerSiInvite } from "../guestGate";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { estComptePremium } from "../../utils/premium";
@@ -131,6 +132,7 @@ type LigneDepense = {
   montant: number;
   date: string;
   source: "transaction" | "evenement";
+  attribueA?: "personnel" | "commun";
 };
 
 type LigneAVenir = {
@@ -174,6 +176,8 @@ export default function Budget() {
   const estTablette = useEstTablette();
   const { estPremium, simulerNonPremium } = usePremium();
   const { isGuest } = useGuest();
+  const { estDansUnEspace, vueActive, membrePartenaire, donneesPartenaire } =
+    useEspacePartage();
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Budget —
   // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
   const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
@@ -199,6 +203,15 @@ export default function Budget() {
   const [nomTx, setNomTx] = useState("");
   const [montantTx, setMontantTx] = useState("");
   const [enveloppeTx, setEnveloppeTx] = useState<string | null>(null);
+  // Mode espace partagé (étape 4) : attribution de la dépense en cours de
+  // création/édition — "personnel" par défaut (cf. store.ts, colonne
+  // attribue_a). Le sélecteur correspondant n'est affiché que si
+  // estDansUnEspace, mais l'état existe toujours pour rester la seule
+  // source passée à ajouterTransaction/modifierTransaction (jamais de
+  // valeur implicite recalculée séparément à l'appel).
+  const [attributionTx, setAttributionTx] = useState<"personnel" | "commun">(
+    "personnel",
+  );
   // Id + date de la transaction en cours d'édition — null en mode création.
   // La date d'origine est préservée (pas de champ date dans ce formulaire) :
   // seuls nom/montant/catégorie sont modifiables via le clic long.
@@ -460,6 +473,163 @@ export default function Budget() {
       : b.depense - a.depense;
   });
 
+  // Mode espace partagé — vue "Partagé" de Budget : MÊME algorithme de
+  // fusion par nom et MÊME priorité de badge que app/(tabs)/index.tsx (cf.
+  // RÈGLE là-bas) — ne jamais dupliquer une variante différente ici, les
+  // deux écrans doivent fusionner les catégories exactement pareil. Pas de
+  // switcher propre à cet écran (vueActive vient uniquement du bouton
+  // d'Aperçu, décision explicite de l'utilisateur) : ce bloc réagit
+  // seulement au contexte partagé.
+  type GroupeCategoriePartagee = {
+    id: string;
+    nom: string;
+    couleur: string;
+    type: "Fixe" | "Variable" | "Entrée";
+    depense: number;
+    budget: number;
+    badge: { texte: string; couleur: string };
+  };
+  const enveloppeAUneDepenseCommuneCeMois = (enveloppeId: string) =>
+    objStore.transactions.some(
+      (t) =>
+        t.enveloppeId === enveloppeId &&
+        t.attribueA === "commun" &&
+        estDansMois(t.date, MOIS_ACTUEL, ANNEE_ACTUELLE),
+    );
+  const enveloppesPartenaireBudget = donneesPartenaire?.enveloppes ?? [];
+  const groupesFusionnesParNom: GroupeCategoriePartagee[] = (() => {
+    if (vueActive !== "partage") return [];
+    type Accumulateur = {
+      nom: string;
+      couleur: string;
+      type: "Fixe" | "Variable" | "Entrée";
+      depense: number;
+      budget: number;
+      depuisMoi: boolean;
+      depuisPartenaire: boolean;
+      communMoi: boolean;
+    };
+    const cleNom = (nom: string) => nom.trim().toLowerCase();
+    const parNom = new Map<string, Accumulateur>();
+
+    objStore.enveloppes
+      .filter(
+        (e) =>
+          e.type !== "Entrée" &&
+          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+      )
+      .forEach((e) => {
+        const cle = cleNom(e.nom);
+        const acc = parNom.get(cle) ?? {
+          nom: e.nom,
+          couleur: e.couleur,
+          type: e.type,
+          depense: 0,
+          budget: 0,
+          depuisMoi: false,
+          depuisPartenaire: false,
+          communMoi: false,
+        };
+        acc.depense += e.depense;
+        acc.budget += e.budget;
+        acc.depuisMoi = true;
+        if (enveloppeAUneDepenseCommuneCeMois(e.id)) acc.communMoi = true;
+        parNom.set(cle, acc);
+      });
+
+    enveloppesPartenaireBudget
+      .filter(
+        (e) =>
+          e.type !== "Entrée" &&
+          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+      )
+      .forEach((e) => {
+        const cle = cleNom(e.nom);
+        const acc = parNom.get(cle) ?? {
+          nom: e.nom,
+          couleur: e.couleur,
+          type: e.type,
+          depense: 0,
+          budget: 0,
+          depuisMoi: false,
+          depuisPartenaire: false,
+          communMoi: false,
+        };
+        acc.depense += e.depense;
+        acc.budget += e.budget;
+        acc.depuisPartenaire = true;
+        parNom.set(cle, acc);
+      });
+
+    return Array.from(parNom.entries())
+      .map(([cle, acc]) => ({
+        id: `fusion-${cle}`,
+        nom: acc.nom,
+        couleur: acc.couleur,
+        type: acc.type,
+        depense: acc.depense,
+        budget: acc.budget,
+        badge:
+          (acc.depuisMoi && acc.depuisPartenaire) || acc.communMoi
+            ? { texte: "Commun", couleur: "#1D9E75" }
+            : acc.depuisMoi
+              ? { texte: "Moi", couleur: "#60a5fa" }
+              : {
+                  texte: membrePartenaire?.prenom || "Partenaire",
+                  couleur: "#c084fc",
+                },
+      }))
+      .sort((a, b) => b.depense - a.depense);
+  })();
+
+  // RÈGLE À NE JAMAIS CASSER — MÊME STYLE QUE renderCarteCategorie (Moi) :
+  // réutilise volontairement styles.envCard/envRow/envNomRow/envDot/envNom/
+  // envRowRight/envMontant + BarreProgression pour un rendu visuellement
+  // identique à la vue "Moi" — cf. demande explicite "même design, mêmes
+  // jauges". Volontairement SANS le détail interactif de renderCarteCategorie
+  // (delta vs mois dernier, historique, liste de transactions dépliable,
+  // édition) : ces éléments n'ont pas d'équivalent honnête pour une
+  // catégorie fusionnée entre deux comptes distincts — carte en lecture
+  // seule ici.
+  const renderCarteCategoriePartagee = (item: GroupeCategoriePartagee) => {
+    const pct =
+      item.budget > 0 ? Math.min((item.depense / item.budget) * 100, 100) : 0;
+    return (
+      <View
+        key={item.id}
+        style={[styles.envCard, { backgroundColor: item.couleur + "22", borderColor: "transparent" }]}
+      >
+        <View style={styles.envRow}>
+          <View style={styles.envNomRow}>
+            <View style={[styles.envDot, { backgroundColor: item.couleur }]} />
+            <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
+              {item.nom}
+            </Text>
+            <View
+              style={[
+                styles.badgePartageMini,
+                { backgroundColor: item.badge.couleur },
+              ]}
+            >
+              <Text style={styles.badgePartageMiniTexte}>{item.badge.texte}</Text>
+            </View>
+          </View>
+          <View style={styles.envRowRight}>
+            <Text style={[styles.envMontant, { color: item.couleur }]}>
+              {formaterMontant(item.depense)} € / {formaterMontant(item.budget)} €
+            </Text>
+          </View>
+        </View>
+        <BarreProgression
+          pourcentage={pct}
+          couleur={item.couleur}
+          couleurFond={C.separateur}
+          hauteur={6}
+        />
+      </View>
+    );
+  };
+
   const enveloppesAVenir = objStore.enveloppes.filter((e) => {
     if (e.type !== "Fixe" || e.payee || !e.dateFixe) return false;
     const d = new Date(e.dateFixe);
@@ -666,6 +836,7 @@ export default function Budget() {
     setDateTransactionEnEdition(null);
     setCreationCategorieOuverte(false);
     setNomNouvelleCategorie("");
+    setAttributionTx("personnel");
     setModalAjoutVisible(true);
   };
 
@@ -677,6 +848,7 @@ export default function Budget() {
     setDateTransactionEnEdition(ligne.date);
     setCreationCategorieOuverte(false);
     setNomNouvelleCategorie("");
+    setAttributionTx(ligne.attribueA ?? "personnel");
     setModalAjoutVisible(true);
   };
 
@@ -721,6 +893,7 @@ export default function Budget() {
         parseMontant(montantTx),
         enveloppeTx,
         dateTransactionEnEdition ?? dateVersISO(new Date()),
+        attributionTx,
       );
       setAjoutTransactionEnCours(false);
       if (!succes) return;
@@ -736,6 +909,7 @@ export default function Budget() {
       parseMontant(montantTx),
       enveloppeTx,
       dateStr,
+      attributionTx,
     );
     setAjoutTransactionEnCours(false);
     if (!nouvelle) return;
@@ -769,6 +943,7 @@ export default function Budget() {
     setEnveloppeTx(modele.enveloppeId);
     setTransactionEnEdition(null);
     setDateTransactionEnEdition(null);
+    setAttributionTx("personnel");
     setModalAjoutVisible(true);
   };
 
@@ -868,6 +1043,7 @@ export default function Budget() {
           montant: t.montant,
           date: t.date,
           source: "transaction" as const,
+          attribueA: t.attribueA,
         })),
       ...objStore.evenements
         .filter(
@@ -1346,6 +1522,7 @@ export default function Budget() {
         </View>
       </View>
 
+
       {!moisAffiche.estActuel ? (
         <ScrollView showsVerticalScrollIndicator={false}>
           <VueMoisArchive mois={moisAffiche.mois} annee={moisAffiche.annee} />
@@ -1700,7 +1877,9 @@ export default function Budget() {
           </View>
         ))}
 
-        {categoriesAffichesTriees.map(renderCarteCategorie)}
+        {estDansUnEspace && vueActive === "partage"
+          ? groupesFusionnesParNom.map(renderCarteCategoriePartagee)
+          : categoriesAffichesTriees.map(renderCarteCategorie)}
 
         {entreesRecues.length > 0 && (
           <>
@@ -2122,6 +2301,39 @@ export default function Budget() {
                   </View>
                 )}
 
+                {estDansUnEspace && (
+                  <View style={styles.attributionRow}>
+                    {(["personnel", "commun"] as const).map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        style={[
+                          styles.attributionChip,
+                          { backgroundColor: C.fondSecondaire },
+                          attributionTx === option && {
+                            backgroundColor: "#1D9E75",
+                          },
+                        ]}
+                        onPress={() => setAttributionTx(option)}
+                        activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          option === "personnel" ? "Dépense personnelle" : "Dépense commune"
+                        }
+                      >
+                        <Text
+                          style={[
+                            styles.attributionChipTexte,
+                            { color: C.texteMuted },
+                            attributionTx === option && { color: "#FFFFFF" },
+                          ]}
+                        >
+                          {option === "personnel" ? "Personnel" : "Commun"}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
                 {enveloppeTx &&
                   objStore.modelesDepenses.some(
                     (m) => m.enveloppeId === enveloppeTx,
@@ -2396,6 +2608,18 @@ const styles = StyleSheet.create({
   },
   titre: { fontSize: 23, fontWeight: "700", letterSpacing: 1 },
   sousTitre: { fontSize: 14, marginTop: 2 },
+  attributionRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  attributionChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
+  },
+  attributionChipTexte: { fontSize: 12, fontWeight: "600" },
   selecteurMoisRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2475,6 +2699,12 @@ const styles = StyleSheet.create({
   envRowRight: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 },
   envMontant: { fontSize: 14, fontWeight: "700", flexShrink: 0 },
   chevron: { fontSize: 14, fontWeight: "700" },
+  badgePartageMini: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  badgePartageMiniTexte: { fontSize: 9, fontWeight: "700", color: "#FFFFFF" },
   envBarBg: { height: 6, borderRadius: 3, overflow: "hidden" },
   envBarFill: { height: "100%", borderRadius: 3 },
   envDeltaRow: {

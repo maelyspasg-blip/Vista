@@ -10,10 +10,12 @@ import {
   TailleTexte,
   useAccessibilite,
 } from "./AccessibiliteContext";
+import { EspacePartageProvider } from "./EspacePartageContext";
 import { GuestContext } from "./GuestContext";
 import { JoursFeriesProvider } from "./JoursFeriesContext";
 import { PremiumProvider } from "./PremiumContext";
 import { supabase } from "../supabaseClient";
+import { ESPACE_PARTAGE_ACTIF } from "../utils/premium";
 import { reinitialiserEtatUtilisateur } from "./store";
 import "./calendarLocale";
 import { ecouterOnboardingTermine } from "./onboardingCompletion";
@@ -437,7 +439,17 @@ export default function RootLayout() {
             >
               <PremiumProvider>
                 <JoursFeriesProvider>
-                  <Navigateur />
+                  {/* RÈGLE À NE JAMAIS CASSER — MONTÉ UNIQUEMENT SI
+                      ESPACE_PARTAGE_ACTIF : tant que ce flag reste `false`
+                      (bêta TestFlight), EspacePartageProvider n'existe même
+                      pas dans l'arbre — cf. utils/premium.ts. */}
+                  {ESPACE_PARTAGE_ACTIF ? (
+                    <EspacePartageProvider userId={session?.user?.id ?? null}>
+                      <Navigateur />
+                    </EspacePartageProvider>
+                  ) : (
+                    <Navigateur />
+                  )}
                 </JoursFeriesProvider>
               </PremiumProvider>
             </TutorielContext.Provider>

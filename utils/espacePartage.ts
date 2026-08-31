@@ -49,40 +49,88 @@ export type MembreEspace = {
   userId: string;
   role: string;
   createdAt: string;
+  // Dénormalisé sur la ligne au moment où CE membre a rejoint/créé
+  // l'espace (cf. RÈGLE dans creerEspacePartage/rejoindreEspacePartage) —
+  // jamais lu depuis `profils` directement, RLS l'interdirait pour
+  // n'importe qui d'autre que soi-même.
+  prenom: string | null;
 };
 
-// Caractères sans ambiguïté de lecture/saisie (exclut I/O/0/1) — un code
-// d'invitation doit rester facile à recopier à la main entre deux
-// téléphones.
-const CARACTERES_CODE_INVITATION = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const LONGUEUR_SUFFIXE_CODE = 6;
+// RÈGLE À NE JAMAIS CASSER — prenomPartenaire, JAMAIS espace.creeParPrenom
+// POUR AFFICHER "AVEC QUI" : creeParPrenom est le prénom du CRÉATEUR de
+// l'espace, qui est SOI-MÊME quand on l'a créé (bug corrigé : "Tu es dans
+// l'espace partagé de Louis" alors que Louis est l'utilisateur connecté).
+// prenomPartenaire est calculé ici en identifiant, parmi `membres`, celui
+// dont le userId N'EST PAS auth.uid() — c'est la SEULE source correcte du
+// prénom "de l'autre" côté client, quel que soit qui a créé l'espace.
+// `espace.creeParPrenom` reste utile UNIQUEMENT dans le flux de création
+// (creerEspacePartage) et le flux de jointure (rejoindreEspacePartage), où
+// il désigne bien "l'autre" par construction (on ne peut pas rejoindre son
+// propre espace).
+export type EtatEspacePartage = {
+  espace: EspacePartage;
+  membres: MembreEspace[];
+  prenomPartenaire: string | null;
+};
 
-// Génère un code d'invitation au format "VISTA-XXXXXX" — calcul pur, ne
-// touche pas Supabase. Utilisée par creerEspacePartage() ci-dessous pour
-// produire le code AVANT insertion — jamais affichée à l'utilisateur sans
-// être d'abord réellement enregistrée (cf. RÈGLE sur creerEspacePartage).
-export function genererCodeInvitation(): string {
-  let suffixe = "";
-  for (let i = 0; i < LONGUEUR_SUFFIXE_CODE; i++) {
-    suffixe +=
-      CARACTERES_CODE_INVITATION[
-        Math.floor(Math.random() * CARACTERES_CODE_INVITATION.length)
-      ];
-  }
-  return `VISTA-${suffixe}`;
-}
+// RÈGLE : types volontairement DISTINCTS des Enveloppe/Transaction de
+// app/store.ts — ce sont des données EN LECTURE SEULE d'un AUTRE
+// utilisateur (jamais de champs d'édition, jamais fusionnées dans
+// etat.enveloppes/etat.transactions), et les fonctions de mapping de
+// store.ts (enveloppeDepuisLigne etc.) ne sont pas exportées. Champs
+// strictement limités à ce que l'UI "vue partagée" affiche (cf. étape 3 du
+// mode espace partagé, app/(tabs)/index.tsx).
+//
+// RÈGLE À NE JAMAIS CASSER — CHAMPS AU-DELÀ DE L'AFFICHAGE, NÉCESSAIRES AU
+// CALCUL : recurrente/type/payee/repeteChaqueMois/moisComptage sont repris
+// ici (en plus de id/nom/depense/budget/couleur) uniquement parce que
+// utils/budget.ts::calculerResteEstimeCourant / entreesBudgetDuMois (SEULE
+// source du "reste estimé", cf. RÈGLE dans app/(tabs)/index.tsx) en ont
+// besoin pour filtrer correctement les catégories actives du mois et
+// distinguer entrées reçues/attendues. Ce type reste structurellement
+// compatible avec `Enveloppe` (app/store.ts) exprès, pour pouvoir passer un
+// EnveloppePartenaire[] directement à ces fonctions sans dupliquer la
+// formule côté partenaire — jamais recalculer resteEstime localement pour
+// le partenaire, cf. étape 4 du mode espace partagé.
+export type EnveloppePartenaire = {
+  id: string;
+  nom: string;
+  depense: number;
+  budget: number;
+  couleur: string;
+  type: "Fixe" | "Variable" | "Entrée";
+  recurrente: boolean;
+  dateFixe?: string;
+  payee?: boolean;
+  repeteChaqueMois?: boolean;
+  moisComptage?: string;
+};
 
-// RÈGLE À NE JAMAIS CASSER — LA SEULE FAÇON DE CRÉER UN ESPACE PARTAGÉ
-// VALIDE : bug confirmé — un code affiché via genererCodeInvitation() SEUL
-// (jamais inséré en base) est systématiquement rejeté par
-// rejoindreEspacePartage() ("code invalide ou expiré"), non pas à cause
-// d'un problème de policy RLS ou de requête, mais parce qu'AUCUNE ligne
-// espaces_partages n'a jamais existé pour ce code — un SELECT sur une
-// ligne qui n'existe pas retourne normalement 0 résultat, quelle que soit
-// la policy. Cette fonction insère RÉELLEMENT la ligne avant de retourner
-// le code, pour que le code affiché à l'utilisateur soit TOUJOURS
-// rejoignable immédiatement après. Ne jamais afficher un code produit par
-// genererCodeInvitation() seul dans l'UI sans passer par ici.
+export type TransactionPartenaire = {
+  id: string;
+  nom: string;
+  montant: number;
+  enveloppeId: string;
+  date: string;
+};
+
+export type DonneesPartenaire = {
+  enveloppes: EnveloppePartenaire[];
+  transactions: TransactionPartenaire[];
+};
+
+// RÈGLE À NE JAMAIS CASSER — CRÉATION ENTIÈREMENT SERVEUR, VIA RPC : la
+// génération du code ET son insertion se font maintenant DANS la fonction
+// Postgres `creer_espace_partage()` (security definer, cf. migration
+// 20260831110000), jamais côté client. Nécessaire depuis que la policy
+// SELECT sur espaces_partages est restreinte aux membres
+// (espaces_partages_select_membres) : un .insert().select() direct depuis
+// le client ne pourrait plus jamais relire la ligne qu'il vient de créer,
+// puisque son auteur n'est pas encore membre au moment de cet insert (cet
+// ajout est une étape séparée). La fonction RPC fait les deux inserts
+// (espace + membre propriétaire) et la lecture finale dans la MÊME
+// transaction security definer, qui bypass RLS en interne — l'ordre des
+// opérations n'a donc plus d'importance vis-à-vis de la lecture.
 export async function creerEspacePartage(): Promise<EspacePartage | null> {
   try {
     const {
@@ -90,48 +138,17 @@ export async function creerEspacePartage(): Promise<EspacePartage | null> {
     } = await supabase.auth.getUser();
     if (!user) return null;
 
-    // RÈGLE : le prénom du créateur est dénormalisé sur espaces_partages
-    // ICI (au moment où l'utilisateur peut encore lire SON PROPRE profil,
-    // toujours autorisé par profils_select_own) — c'est la seule fenêtre
-    // où cette information est simplement accessible ; une fois l'espace
-    // créé, un autre utilisateur qui le rejoint ne pourrait jamais lire ce
-    // même profil directement (cf. RÈGLE sur le type EspacePartage).
-    const { data: profil } = await supabase
-      .from("profils")
-      .select("prenom")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc("creer_espace_partage");
 
-    const code = genererCodeInvitation();
-    const { data: espace, error: erreurEspace } = await supabase
-      .from("espaces_partages")
-      .insert({ code, cree_par_prenom: profil?.prenom || null })
-      .select()
-      .single();
-
-    if (erreurEspace || !espace) {
+    if (error || !data || data.length === 0) {
       console.error(
-        "Supabase insert espaces_partages (creerEspacePartage) a échoué :",
-        erreurEspace,
+        "Supabase rpc creer_espace_partage a échoué :",
+        error,
       );
       return null;
     }
 
-    const { error: erreurMembre } = await supabase
-      .from("membres_espace")
-      .insert({ espace_id: espace.id, user_id: user.id, role: "proprietaire" });
-
-    if (erreurMembre) {
-      console.error(
-        "Supabase insert membres_espace (creerEspacePartage) a échoué :",
-        erreurMembre,
-      );
-      // L'espace existe et son code reste valide/rejoignable même si
-      // l'ajout du créateur comme membre a échoué ici — ne pas bloquer sur
-      // ce second insert, l'utilisateur peut retenter de rejoindre lui-même
-      // son propre espace si besoin.
-    }
-
+    const espace = data[0];
     return {
       id: espace.id,
       code: espace.code,
@@ -145,13 +162,17 @@ export async function creerEspacePartage(): Promise<EspacePartage | null> {
   }
 }
 
-// RÈGLE À NE JAMAIS CASSER — 5 CAS DISTINGUÉS, JAMAIS UN null GÉNÉRIQUE :
-// résout le code en ligne espaces_partages, vérifie qu'il n'a pas expiré,
-// vérifie que l'utilisateur n'est pas déjà membre, puis l'ajoute comme
-// membre. Chaque échec retourne une `raison` précise (jamais un message ni
-// une erreur Supabase brute, cf. RÈGLE sur RaisonEchecRejoindre) pour que
-// l'UI (app/profil.tsx) affiche un message humain adapté à CHAQUE cas —
-// jamais un message technique visible par l'utilisateur, jamais de throw.
+// RÈGLE À NE JAMAIS CASSER — 5 CAS DISTINGUÉS, JAMAIS UN null GÉNÉRIQUE, VIA
+// RPC : résolution du code + vérif expiration + vérif déjà-membre + insert
+// de la ligne membres_espace se font DANS `rejoindre_espace_par_code()`
+// (security definer, cf. migration 20260831110000), en une seule opération
+// atomique côté serveur — plus aucune requête directe du client sur
+// espaces_partages/membres_espace pour rejoindre (les policies INSERT/
+// SELECT correspondantes ont été fermées, cf. RÈGLE dans la migration). La
+// fonction retourne un `statut` texte distinct par cas — jamais une
+// exception PostgREST pour un cas métier normal, qui perdrait la
+// distinction déjà construite ici pour les 4 messages utilisateur
+// différents (cf. RaisonEchecRejoindre).
 export async function rejoindreEspacePartage(
   code: string,
 ): Promise<ResultatRejoindreEspace> {
@@ -163,67 +184,41 @@ export async function rejoindreEspacePartage(
 
     const codeNormalise = code.trim().toUpperCase();
     console.log("[espacePartage] recherche code:", codeNormalise);
-    const { data: espace, error: erreurEspace } = await supabase
-      .from("espaces_partages")
-      .select("*")
-      .eq("code", codeNormalise)
-      .maybeSingle();
-    console.log("[espacePartage] résultat:", espace, erreurEspace);
+    const { data, error } = await supabase.rpc("rejoindre_espace_par_code", {
+      p_code: codeNormalise,
+    });
+    console.log("[espacePartage] résultat:", data, error);
 
-    if (erreurEspace) {
+    if (error) {
       console.error(
-        "Supabase select espaces_partages (rejoindreEspacePartage) a échoué :",
-        erreurEspace,
+        "Supabase rpc rejoindre_espace_par_code a échoué :",
+        error,
       );
       return { succes: false, raison: "erreur_reseau" };
     }
-    // Cas 2 — code invalide : aucune ligne en base pour ce code.
-    if (!espace) return { succes: false, raison: "code_invalide" };
-    // Cas 3 — code expiré.
-    if (new Date(espace.expire_at).getTime() <= Date.now()) {
-      return { succes: false, raison: "code_expire" };
+
+    const ligne = data?.[0];
+    if (!ligne) return { succes: false, raison: "erreur_reseau" };
+
+    if (
+      ligne.statut === "code_invalide" ||
+      ligne.statut === "code_expire" ||
+      ligne.statut === "deja_membre"
+    ) {
+      return { succes: false, raison: ligne.statut };
     }
-
-    // Cas 4 — déjà membre : vérifié explicitement AVANT l'insert (la
-    // contrainte unique (espace_id, user_id) côté base, cf. migration
-    // 20260830140000, protège contre une course, mais un message humain
-    // précis a besoin de le détecter en amont plutôt que d'interpréter une
-    // erreur de contrainte après coup).
-    const { data: membreExistant, error: erreurVerifMembre } = await supabase
-      .from("membres_espace")
-      .select("id")
-      .eq("espace_id", espace.id)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (erreurVerifMembre) {
-      console.error(
-        "Supabase select membres_espace (vérif déjà membre) a échoué :",
-        erreurVerifMembre,
-      );
-      return { succes: false, raison: "erreur_reseau" };
-    }
-    if (membreExistant) return { succes: false, raison: "deja_membre" };
-
-    const { error: erreurMembre } = await supabase
-      .from("membres_espace")
-      .insert({ espace_id: espace.id, user_id: user.id, role: "membre" });
-
-    if (erreurMembre) {
-      console.error(
-        "Supabase insert membres_espace (rejoindreEspacePartage) a échoué :",
-        erreurMembre,
-      );
+    if (ligne.statut !== "succes") {
       return { succes: false, raison: "erreur_reseau" };
     }
 
     return {
       succes: true,
       espace: {
-        id: espace.id,
-        code: espace.code,
-        createdAt: espace.created_at,
-        expireAt: espace.expire_at,
-        creeParPrenom: espace.cree_par_prenom ?? null,
+        id: ligne.espace_id,
+        code: ligne.code,
+        createdAt: ligne.created_at,
+        expireAt: ligne.expire_at,
+        creeParPrenom: ligne.cree_par_prenom ?? null,
       },
     };
   } catch (e) {
@@ -232,15 +227,16 @@ export async function rejoindreEspacePartage(
   }
 }
 
-// Récupère tous les membres de l'espace partagé de l'utilisateur courant
-// (lui-même inclus) — tableau vide si l'utilisateur n'est membre d'aucun
-// espace, ou en cas d'erreur.
-export async function getMembreEspace(): Promise<MembreEspace[]> {
+// Récupère l'espace partagé actif de l'utilisateur courant (s'il en a un)
+// et la liste de ses membres (lui-même inclus). Retourne `null` si
+// l'utilisateur n'est membre d'aucun espace, ou en cas d'erreur — jamais de
+// throw (cf. RÈGLE en tête de fichier).
+export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return [];
+    if (!user) return null;
 
     const { data: mesMembres, error: erreurMesMembres } = await supabase
       .from("membres_espace")
@@ -252,9 +248,9 @@ export async function getMembreEspace(): Promise<MembreEspace[]> {
         "Supabase select membres_espace (own) a échoué :",
         erreurMesMembres,
       );
-      return [];
+      return null;
     }
-    if (!mesMembres || mesMembres.length === 0) return [];
+    if (!mesMembres || mesMembres.length === 0) return null;
 
     const espaceId = mesMembres[0].espace_id;
     const { data: tousLesMembres, error: erreurTousLesMembres } =
@@ -268,18 +264,157 @@ export async function getMembreEspace(): Promise<MembreEspace[]> {
         "Supabase select membres_espace (espace) a échoué :",
         erreurTousLesMembres,
       );
-      return [];
+      return null;
     }
 
-    return (tousLesMembres ?? []).map((m) => ({
-      id: m.id,
-      espaceId: m.espace_id,
-      userId: m.user_id,
-      role: m.role,
-      createdAt: m.created_at,
-    }));
+    const { data: espaceRow, error: erreurEspace } = await supabase
+      .from("espaces_partages")
+      .select("*")
+      .eq("id", espaceId)
+      .maybeSingle();
+
+    if (erreurEspace || !espaceRow) {
+      console.error(
+        "Supabase select espaces_partages (getMembreEspace) a échoué :",
+        erreurEspace,
+      );
+      return null;
+    }
+
+    const autreMembre = (tousLesMembres ?? []).find(
+      (m) => m.user_id !== user.id,
+    );
+
+    return {
+      espace: {
+        id: espaceRow.id,
+        code: espaceRow.code,
+        createdAt: espaceRow.created_at,
+        expireAt: espaceRow.expire_at,
+        creeParPrenom: espaceRow.cree_par_prenom ?? null,
+      },
+      membres: (tousLesMembres ?? []).map((m) => ({
+        id: m.id,
+        espaceId: m.espace_id,
+        userId: m.user_id,
+        role: m.role,
+        createdAt: m.created_at,
+        prenom: m.prenom ?? null,
+      })),
+      prenomPartenaire: autreMembre?.prenom ?? null,
+    };
   } catch (e) {
     console.error("getMembreEspace a échoué :", e);
-    return [];
+    return null;
+  }
+}
+
+// Fait quitter l'utilisateur courant de son espace partagé — supprime
+// SA/SES ligne(s) membres_espace (scopées par user_id, jamais par
+// espace_id : un utilisateur n'appartient qu'à un seul espace dans ce
+// modèle, cf. getMembreEspace ci-dessus qui ne considère que la
+// première trouvée). Ne supprime jamais l'espace ni les autres membres —
+// quitter n'est pas dissoudre. Retourne `true` en cas de succès.
+export async function quitterEspacePartage(): Promise<boolean> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    const { error } = await supabase
+      .from("membres_espace")
+      .delete()
+      .eq("user_id", user.id);
+
+    if (error) {
+      console.error(
+        "Supabase delete membres_espace (quitterEspacePartage) a échoué :",
+        error,
+      );
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("quitterEspacePartage a échoué :", e);
+    return false;
+  }
+}
+
+// RÈGLE À NE JAMAIS CASSER — 'commun' EST UNE BARRIÈRE D'ACCÈS, JAMAIS UN
+// SIMPLE FILTRE D'AFFICHAGE : la policy RLS (enveloppes_select_espace_partage/
+// transactions_select_espace_partage, cf. migration 20260831120000) ne
+// laisse de toute façon jamais passer une ligne 'personnel' d'un autre
+// utilisateur — mais le filtre `.eq("attribue_a", "commun")` ci-dessous est
+// posé explicitement EN PLUS, en défense en profondeur (même principe que
+// le filtre user_id explicite déjà utilisé partout ailleurs dans l'app,
+// cf. RÈGLE DE SÉCURITÉ dans app/store.ts) : jamais compter sur RLS comme
+// seule ligne de défense, même quand elle est censée déjà suffire.
+//
+// Charge les enveloppes ET transactions marquées 'commun' d'un AUTRE
+// membre du même espace partagé — tableaux vides si aucune donnée
+// partagée ou en cas d'erreur (jamais de throw, cf. RÈGLE en tête de
+// fichier). Lecture seule : ce module n'expose aucune fonction pour
+// modifier les données d'un autre utilisateur, les policies RLS
+// correspondantes (INSERT/UPDATE/DELETE) restent strictement "own" côté
+// base de toute façon.
+export async function chargerDonneesPartenaire(
+  partenaireId: string,
+): Promise<DonneesPartenaire> {
+  try {
+    const [
+      { data: enveloppesData, error: erreurEnveloppes },
+      { data: transactionsData, error: erreurTransactions },
+    ] = await Promise.all([
+      supabase
+        .from("enveloppes")
+        .select("*")
+        .eq("user_id", partenaireId)
+        .eq("attribue_a", "commun"),
+      supabase
+        .from("transactions")
+        .select("*")
+        .eq("user_id", partenaireId)
+        .eq("attribue_a", "commun"),
+    ]);
+
+    if (erreurEnveloppes) {
+      console.error(
+        "Supabase select enveloppes (chargerDonneesPartenaire) a échoué :",
+        erreurEnveloppes,
+      );
+    }
+    if (erreurTransactions) {
+      console.error(
+        "Supabase select transactions (chargerDonneesPartenaire) a échoué :",
+        erreurTransactions,
+      );
+    }
+
+    return {
+      enveloppes: (enveloppesData ?? []).map((e) => ({
+        id: e.id,
+        nom: e.nom,
+        depense: e.depense,
+        budget: e.budget,
+        couleur: e.couleur,
+        type: e.type,
+        recurrente: !!e.recurrente,
+        dateFixe: e.date_fixe ?? undefined,
+        payee: e.payee ?? undefined,
+        repeteChaqueMois: e.repete_chaque_mois ?? undefined,
+        moisComptage: e.mois_comptage ?? undefined,
+      })),
+      transactions: (transactionsData ?? []).map((t) => ({
+        id: t.id,
+        nom: t.nom,
+        montant: t.montant,
+        enveloppeId: t.enveloppe_id,
+        date: t.date,
+      })),
+    };
+  } catch (e) {
+    console.error("chargerDonneesPartenaire a échoué :", e);
+    return { enveloppes: [], transactions: [] };
   }
 }

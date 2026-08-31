@@ -196,6 +196,11 @@ export type Transaction = {
   montant: number;
   enveloppeId: string;
   date: string;
+  // Mode espace partagé (étape 4) : "commun" rend la dépense visible par le
+  // partenaire (cf. attribue_a côté enveloppes, migration 20260831120000) —
+  // absent/"personnel" tant que ESPACE_PARTAGE_ACTIF est à false ou hors
+  // espace, jamais None/undefined traité différemment de "personnel".
+  attribueA?: "personnel" | "commun";
 };
 
 export type ModeleDepense = {
@@ -872,6 +877,7 @@ type TransactionRow = {
   nom: string;
   montant: number;
   date: string;
+  attribue_a: "personnel" | "commun" | null;
 };
 
 function transactionDepuisLigne(l: TransactionRow): Transaction {
@@ -881,6 +887,7 @@ function transactionDepuisLigne(l: TransactionRow): Transaction {
     montant: l.montant,
     enveloppeId: l.enveloppe_id,
     date: l.date,
+    attribueA: l.attribue_a ?? "personnel",
   };
 }
 
@@ -989,6 +996,7 @@ function transactionVersColonnes(t: Omit<Transaction, "id">) {
     nom: texteSecurise(t.nom),
     montant: montantSecurise(t.montant),
     date: t.date,
+    attribue_a: t.attribueA ?? "personnel",
   };
 }
 
@@ -3062,6 +3070,7 @@ export function useObjectifs() {
       montant: number,
       enveloppeId: string,
       date: string,
+      attribueA?: "personnel" | "commun",
     ): Promise<Transaction | null> => {
       try {
         const {
@@ -3080,6 +3089,7 @@ export function useObjectifs() {
           montant,
           enveloppeId,
           date,
+          attribueA,
         };
 
         const { data, error } = await supabase
@@ -3124,12 +3134,15 @@ export function useObjectifs() {
       montant: number,
       enveloppeId: string,
       date: string,
+      attribueA?: "personnel" | "commun",
     ): Promise<boolean> => {
       const tx = etat.transactions.find((t) => t.id === id);
       if (!tx) return false;
 
       const transactionsMaj = etat.transactions.map((t) =>
-        t.id === id ? { ...t, nom, montant, enveloppeId, date } : t,
+        t.id === id
+          ? { ...t, nom, montant, enveloppeId, date, attribueA: attribueA ?? t.attribueA }
+          : t,
       );
       // Répercute le montant sur `depense` des enveloppes concernées : si la
       // catégorie change, retire l'ancien montant de l'ancienne et ajoute le
@@ -3157,7 +3170,15 @@ export function useObjectifs() {
 
       const { error } = await supabase
         .from("transactions")
-        .update(transactionVersColonnes({ nom, montant, enveloppeId, date }))
+        .update(
+          transactionVersColonnes({
+            nom,
+            montant,
+            enveloppeId,
+            date,
+            attribueA: attribueA ?? tx.attribueA,
+          }),
+        )
         .eq("id", id);
 
       if (error) {

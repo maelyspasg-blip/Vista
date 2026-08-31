@@ -58,6 +58,9 @@ import { styleModaleTablette, useEstTablette } from "./useTablette";
 import { estComptePremium, ESPACE_PARTAGE_ACTIF } from "../utils/premium";
 import {
   creerEspacePartage,
+  EtatEspacePartage,
+  getMembreEspace,
+  quitterEspacePartage,
   rejoindreEspacePartage,
   RaisonEchecRejoindre,
 } from "../utils/espacePartage";
@@ -228,9 +231,9 @@ export default function Profil() {
 
   // RÈGLE : état de la modale "Espace partagé" — cf. ouvrirModalEspacePartage
   // plus bas pour l'initialisation. `codeGenere` n'est affiché qu'UNE FOIS
-  // creerEspacePartage() résolu avec succès (cf. RÈGLE dans
-  // utils/espacePartage.ts) — jamais le résultat brut d'un
-  // genererCodeInvitation() seul, qui ne correspondrait à aucune ligne en
+  // creerEspacePartage() résolu avec succès (RPC security definer côté
+  // serveur, cf. RÈGLE dans utils/espacePartage.ts) — jamais un code
+  // deviné/généré côté client, qui ne correspondrait à aucune ligne en
   // base et serait donc toujours rejeté par rejoindreEspacePartage().
   const [modalEspacePartageVisible, setModalEspacePartageVisible] = useState(false);
   const [ongletEspacePartage, setOngletEspacePartage] = useState<
@@ -248,6 +251,24 @@ export default function Profil() {
     texte: string;
   } | null>(null);
 
+  // RÈGLE : état de l'espace partagé ACTIF de l'utilisateur (distinct de
+  // l'état de la modale ci-dessus) — `null` tant que non chargé ou si
+  // l'utilisateur n'est membre d'aucun espace ; détermine si la section
+  // affiche le bouton "Partage ton budget à deux" ou la carte "Tu es dans
+  // l'espace partagé de [Prénom]" (cf. rendu plus bas).
+  const [espacePartageActif, setEspacePartageActif] =
+    useState<EtatEspacePartage | null>(null);
+
+  const chargerEtatEspacePartage = async () => {
+    const etat = await getMembreEspace();
+    setEspacePartageActif(etat);
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- setEspacePartageActif s'exécute après un await dans chargerEtatEspacePartage, jamais synchrone dans ce corps d'effet ; même catégorie déjà tolérée 2x plus haut dans ce fichier (lignes 167/171).
+    if (ESPACE_PARTAGE_ACTIF) chargerEtatEspacePartage();
+  }, []);
+
   const creerEtAfficherEspace = async () => {
     setCreationEspaceEnCours(true);
     setErreurCreationEspace(null);
@@ -255,6 +276,7 @@ export default function Profil() {
     setCreationEspaceEnCours(false);
     if (espace) {
       setCodeGenere(espace.code);
+      chargerEtatEspacePartage();
     } else {
       setErreurCreationEspace(
         "Impossible de créer l'espace partagé — réessaie.",
@@ -271,6 +293,24 @@ export default function Profil() {
     setRejoindreEnCours(false);
     setModalEspacePartageVisible(true);
     creerEtAfficherEspace();
+  };
+
+  const quitterEspacePartageAction = () => {
+    Alert.alert(
+      "Quitter l'espace partagé ?",
+      "Tu ne verras plus les données partagées.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Quitter",
+          style: "destructive",
+          onPress: async () => {
+            const succes = await quitterEspacePartage();
+            if (succes) chargerEtatEspacePartage();
+          },
+        },
+      ],
+    );
   };
 
   // RÈGLE : Clipboard du cœur react-native (déprécié mais toujours
@@ -333,6 +373,7 @@ export default function Profil() {
           }
         : { type: "erreur", texte: messageEchecRejoindre(resultat.raison) },
     );
+    if (resultat.succes) chargerEtatEspacePartage();
   };
   const optionsMoisExport = construireOptionsMoisExport(
     objStore.historiquesMois,
@@ -1035,19 +1076,54 @@ export default function Profil() {
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
               ESPACE PARTAGÉ
             </Text>
-            <TouchableOpacity
-              style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.purple, contrasteRenforce)]}
-              onPress={ouvrirModalEspacePartage}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.switchLabel, { color: C.texte }]}>
-                Partage ton budget à deux
-              </Text>
-              <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                Crée ou rejoins un espace partagé pour suivre vos dépenses
-                communes.
-              </Text>
-            </TouchableOpacity>
+            {espacePartageActif ? (
+              <View
+                style={[
+                  styles.carte,
+                  {
+                    backgroundColor: "#1D9E7522",
+                    borderColor: "#1D9E75",
+                  },
+                ]}
+              >
+                <View style={styles.espacePartageActifRow}>
+                  <View style={styles.espacePartageActifPoint} />
+                  <Text
+                    style={[
+                      styles.switchLabel,
+                      { color: C.texte, flex: 1 },
+                    ]}
+                  >
+                    Tu es dans l&apos;espace partagé de{" "}
+                    {espacePartageActif.prenomPartenaire ||
+                      "ton/ta partenaire"}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={quitterEspacePartageAction}
+                  activeOpacity={0.7}
+                  style={styles.btnQuitterEspace}
+                >
+                  <Text style={styles.btnQuitterEspaceTexte}>
+                    Quitter l&apos;espace
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.purple, contrasteRenforce)]}
+                onPress={ouvrirModalEspacePartage}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.switchLabel, { color: C.texte }]}>
+                  Partage ton budget à deux
+                </Text>
+                <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                  Crée ou rejoins un espace partagé pour suivre vos dépenses
+                  communes.
+                </Text>
+              </TouchableOpacity>
+            )}
           </>
         )}
 
@@ -2059,6 +2135,23 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 18,
     borderWidth: 0.5,
+  },
+  espacePartageActifRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  espacePartageActifPoint: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#1D9E75",
+  },
+  btnQuitterEspace: { marginTop: 14, alignSelf: "flex-start" },
+  btnQuitterEspaceTexte: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#E24B4A",
   },
   champLabel: {
     fontSize: 12,

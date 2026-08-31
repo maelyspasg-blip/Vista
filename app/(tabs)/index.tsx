@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "expo-image";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { getInitiales } from "../../utils/initiales";
-import { calculerResteEstimeArchive, moisPrecedent } from "../../utils/exportExcel";
+import { calculerResteEstimeArchive, estDansMois, moisPrecedent } from "../../utils/exportExcel";
 import {
   calculerResteEstimeCourant,
   entreesBudgetDuMois,
@@ -55,6 +56,7 @@ import { marquerSituationsAffichees } from "../../utils/situationsSession";
 import { supabase } from "../../supabaseClient";
 import { usePremium } from "../PremiumContext";
 import { useGuest } from "../GuestContext";
+import { useEspacePartage } from "../EspacePartageContext";
 import { bloquerSiInvite } from "../guestGate";
 import { estComptePremium } from "../../utils/premium";
 import { COULEURS, useTheme } from "../ThemeContext";
@@ -272,6 +274,18 @@ export default function Dashboard() {
   const estTablette = useEstTablette();
   const { estPremium, simulerNonPremium } = usePremium();
   const { isGuest } = useGuest();
+  // RÈGLE À NE JAMAIS CASSER — donneesPartenaire/chargementPartenaire
+  // viennent du contexte (chargés une seule fois, partagés entre écrans) :
+  // ne jamais réintroduire un state local + un useEffect de chargement ici,
+  // cf. RÈGLE dans EspacePartageContext.tsx.
+  const {
+    estDansUnEspace,
+    vueActive,
+    setVueActive,
+    membrePartenaire,
+    donneesPartenaire,
+    chargementPartenaire,
+  } = useEspacePartage();
   const { theme, couleurs, toggleTheme } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const C = couleurs;
@@ -661,6 +675,211 @@ export default function Dashboard() {
     etatReste === "negatif" ? C.peachText : C.texte;
   const heroResteCouleurSombre =
     etatReste === "negatif" ? "#FFD2D2" : "#FFFFFF";
+
+  // Mode espace partagé (étape 4) — fusion "vue Partagé" : ne recalcule
+  // JAMAIS resteEstime/totalDepenseEnveloppes/disponibleEffectif pour "Moi"
+  // (déjà posés ci-dessus par calculerResteEstimeCourant, RÈGLE À NE JAMAIS
+  // CASSER) — on rappelle la MÊME fonction sur les enveloppes du
+  // partenaire pour ne jamais dupliquer la formule (EnveloppePartenaire est
+  // structurellement compatible avec Enveloppe exprès, cf.
+  // utils/espacePartage.ts). Limite connue, acceptée : epargneMois du
+  // partenaire n'est pas une donnée partagée (pas de notion d'épargne
+  // commune dans ce modèle) — passé à 0, donc le "reste estimé" fusionné
+  // ignore l'épargne personnelle du partenaire, jamais la nôtre.
+  const enveloppesPartenaire = donneesPartenaire?.enveloppes ?? [];
+  const resultatPartenaire =
+    vueActive === "partage" && enveloppesPartenaire.length > 0
+      ? calculerResteEstimeCourant(
+          enveloppesPartenaire,
+          0,
+          maintenant.getFullYear(),
+          maintenant.getMonth(),
+        )
+      : { disponibleEffectif: 0, totalDepenseEnveloppes: 0, resteEstime: 0 };
+  const resteEstimeFusionne = resteEstime + resultatPartenaire.resteEstime;
+  const totalDepenseFusionne =
+    totalDepenseEnveloppes + resultatPartenaire.totalDepenseEnveloppes;
+  const totalEntreesFusionne =
+    disponibleEffectif + resultatPartenaire.disponibleEffectif;
+
+  // RÈGLE À NE JAMAIS CASSER — FUSION PAR NOM DE CATÉGORIE : deux
+  // catégories du même nom (insensible à la casse/espaces), une dans
+  // chaque compte, deviennent UNE SEULE jauge avec les montants additionnés
+  // — jamais deux jauges distinctes dans ce cas. Décision explicite de
+  // l'utilisateur : "Courses" (moi) + "Courses" (partenaire) → une jauge
+  // fusionnée ; "Alimentation" (moi) vs "Courses" (partenaire) → deux
+  // jauges séparées, chacune gardant le badge de son propriétaire.
+  //
+  // RÈGLE — PRIORITÉ DU BADGE : Commun (teal) si la catégorie est fusionnée
+  // (présente dans les deux comptes) OU si j'ai au moins une transaction
+  // taguée 'commun' dedans ce mois-ci ; sinon Moi (bleu) si elle vient
+  // uniquement de mon compte ; sinon [Prénom] (violet) si elle vient
+  // uniquement du compte du partenaire sans fusion — cf. RÈGLE dans
+  // utils/espacePartage.ts sur pourquoi les données du partenaire sont
+  // toujours 'commun' par construction (mais pas forcément fusionnées).
+  type GroupeCartePartagee = {
+    id: string;
+    nom: string;
+    couleur: string;
+    type: "Fixe" | "Variable" | "Entrée";
+    depense: number;
+    budget: number;
+    badge: { texte: string; couleur: string };
+  };
+  const enveloppeAUneDepenseCommuneCeMois = (enveloppeId: string) =>
+    objStore.transactions.some(
+      (t) =>
+        t.enveloppeId === enveloppeId &&
+        t.attribueA === "commun" &&
+        estDansMois(t.date, maintenant.getMonth(), maintenant.getFullYear()),
+    );
+  const groupesFusionnesParNom: GroupeCartePartagee[] = (() => {
+    if (vueActive !== "partage") return [];
+    type Accumulateur = {
+      nom: string;
+      couleur: string;
+      type: "Fixe" | "Variable" | "Entrée";
+      depense: number;
+      budget: number;
+      depuisMoi: boolean;
+      depuisPartenaire: boolean;
+      communMoi: boolean;
+    };
+    const cleNom = (nom: string) => nom.trim().toLowerCase();
+    const parNom = new Map<string, Accumulateur>();
+
+    enveloppesActives.forEach((e) => {
+      const cle = cleNom(e.nom);
+      const acc = parNom.get(cle) ?? {
+        nom: e.nom,
+        couleur: e.couleur,
+        type: e.type,
+        depense: 0,
+        budget: 0,
+        depuisMoi: false,
+        depuisPartenaire: false,
+        communMoi: false,
+      };
+      acc.depense += e.depense;
+      acc.budget += e.budget;
+      acc.depuisMoi = true;
+      if (enveloppeAUneDepenseCommuneCeMois(e.id)) acc.communMoi = true;
+      parNom.set(cle, acc);
+    });
+
+    enveloppesPartenaire
+      .filter((e) =>
+        estCategorieActiveCeMois(e, maintenant.getFullYear(), maintenant.getMonth()),
+      )
+      .forEach((e) => {
+        const cle = cleNom(e.nom);
+        const acc = parNom.get(cle) ?? {
+          nom: e.nom,
+          couleur: e.couleur,
+          type: e.type,
+          depense: 0,
+          budget: 0,
+          depuisMoi: false,
+          depuisPartenaire: false,
+          communMoi: false,
+        };
+        acc.depense += e.depense;
+        acc.budget += e.budget;
+        acc.depuisPartenaire = true;
+        parNom.set(cle, acc);
+      });
+
+    return Array.from(parNom.entries()).map(([cle, acc]) => ({
+      id: `fusion-${cle}`,
+      nom: acc.nom,
+      couleur: acc.couleur,
+      type: acc.type,
+      depense: acc.depense,
+      budget: acc.budget,
+      badge:
+        (acc.depuisMoi && acc.depuisPartenaire) || acc.communMoi
+          ? { texte: "Commun", couleur: "#1D9E75" }
+          : acc.depuisMoi
+            ? { texte: "Moi", couleur: "#60a5fa" }
+            : {
+                texte: membrePartenaire?.prenom || "Partenaire",
+                couleur: "#c084fc",
+              },
+    }));
+  })();
+  const groupesFusionnesEntrees = groupesFusionnesParNom
+    .filter((g) => g.type === "Entrée")
+    .sort((a, b) => b.depense - a.depense);
+  const groupesFusionnesDepenses = groupesFusionnesParNom
+    .filter((g) => g.type !== "Entrée")
+    .sort((a, b) => b.depense - a.depense);
+
+  // RÈGLE À NE JAMAIS CASSER — MÊME STYLE QUE renderCarteEnveloppe (Moi) :
+  // réutilise volontairement styles.envCard/typePastille/envRow/envNom/
+  // envMontant + le composant BarreProgression (la "jauge") pour un rendu
+  // visuellement identique à la vue "Moi" — cf. demande explicite "même
+  // design, mêmes jauges, même police". Seule différence assumée : le
+  // badge d'attribution remplace les badges de récurrence (payée/répète),
+  // qui n'ont pas de sens sur une catégorie fusionnée entre deux comptes.
+  const renderCarteEnveloppePartagee = (item: GroupeCartePartagee) => {
+    const pct =
+      item.budget > 0 ? Math.min((item.depense / item.budget) * 100, 100) : 0;
+    return (
+      <View
+        key={item.id}
+        style={[
+          styles.envCard,
+          estTablette && styles.envCardTablette,
+          { backgroundColor: bgClair(item.couleur) },
+        ]}
+      >
+        <View
+          style={[
+            styles.typePastille,
+            {
+              backgroundColor:
+                item.type === "Entrée" ? C.accentLight : C.peachLight,
+            },
+          ]}
+        >
+          <Ionicons
+            name={item.type === "Entrée" ? "add" : "remove"}
+            size={13}
+            color={item.type === "Entrée" ? C.accentText : C.peachText}
+          />
+        </View>
+        <View style={styles.envRow}>
+          <View style={styles.envNomRow}>
+            <Text
+              style={[styles.envNom, { color: C.texte }]}
+              numberOfLines={1}
+            >
+              {item.nom}
+            </Text>
+            <View
+              style={[
+                styles.badgePartageMini,
+                { backgroundColor: item.badge.couleur },
+              ]}
+            >
+              <Text style={styles.badgePartageMiniTexte}>
+                {item.badge.texte}
+              </Text>
+            </View>
+          </View>
+          <Text style={[styles.envMontant, { color: item.couleur }]}>
+            {formaterMontant(item.depense)} € / {formaterMontant(item.budget)} €
+          </Text>
+        </View>
+        <BarreProgression
+          pourcentage={pct}
+          couleur={item.couleur}
+          couleurFond={C.separateur}
+          hauteur={6}
+        />
+      </View>
+    );
+  };
 
   const objectifsActifs = objStore.objectifs.filter((o) => !o.ferme);
   const objectifsClotures = objStore.objectifs.filter((o) => o.ferme);
@@ -1226,6 +1445,31 @@ export default function Dashboard() {
     );
   };
 
+  // Point d'info affiché UNE SEULE FOIS, à la première bascule vers la vue
+  // "Partagé" (jamais à chaque switch) — explique la fusion par nom avant
+  // que l'utilisateur ne soit surpris de voir deux jauges séparées pour
+  // des catégories qu'il pensait "les mêmes". Persisté par utilisateur,
+  // même convention que cleVueActive (EspacePartageContext.tsx).
+  const passerEnVuePartagee = async () => {
+    setVueActive("partage");
+    if (!userIdInsights) return;
+    const cle = `vista_info_fusion_categories_vue_${userIdInsights}`;
+    try {
+      const dejaVu = await AsyncStorage.getItem(cle);
+      if (!dejaVu) {
+        Alert.alert(
+          "Fusion des catégories",
+          'Pour que vos catégories se fusionnent automatiquement, assurez-vous qu\'elles portent le même nom. Ex : si tu as "Courses" et ton/ta partenaire "Alimentation", elles apparaîtront séparément.',
+        );
+        await AsyncStorage.setItem(cle, "1");
+      }
+    } catch {
+      // Best-effort : une erreur de lecture/écriture locale ne doit jamais
+      // empêcher le switch de vue lui-même, juste faire réafficher le
+      // message une fois de plus la prochaine fois.
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: C.fondPage }}>
       <AlerteBudgetBanner />
@@ -1255,6 +1499,44 @@ export default function Dashboard() {
             </Text>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            {/* RÈGLE À NE JAMAIS CASSER — SWITCHER GLOBAL, UNIQUE POINT
+                D'ENTRÉE : ce contrôle est le SEUL endroit de l'app qui
+                change vueActive (EspacePartageContext, lu par toutes les
+                pages) — ne jamais en ajouter un second ailleurs (ex.
+                Budget), cf. correction explicite qui a retiré le doublon de
+                app/(tabs)/budget.tsx. En vue "personnel" (état normal),
+                rien ne signale l'espace partagé sauf ce bouton discret ; en
+                vue "partage", le badge teal remplace le bouton et sert
+                aussi de retour à "Moi". */}
+            {estDansUnEspace &&
+              (vueActive === "partage" ? (
+                <TouchableOpacity
+                  style={styles.badgePartageActif}
+                  onPress={() => setVueActive("personnel")}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Revenir à la vue personnelle"
+                >
+                  <Text style={styles.badgePartageActifTexte}>Partagé</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.themeBouton,
+                    { backgroundColor: C.iconeBoutonFond },
+                  ]}
+                  onPress={passerEnVuePartagee}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Passer en vue partagée"
+                >
+                  <Ionicons
+                    name="people-outline"
+                    size={18}
+                    color={C.iconeBouton}
+                  />
+                </TouchableOpacity>
+              ))}
             <TouchableOpacity
               style={[
                 styles.themeBouton,
@@ -1310,6 +1592,92 @@ export default function Dashboard() {
           </View>
         </View>
 
+        {/* RÈGLE À NE JAMAIS CASSER — VUE "PARTAGÉ" : bloc entièrement
+            séparé de la vue "Moi" ci-dessous (jamais les deux affichés en
+            même temps) — cf. étape 4 du mode espace partagé. Les chiffres
+            fusionnés réutilisent calculerResteEstimeCourant (jamais une
+            formule dupliquée, cf. plus haut). */}
+        {estDansUnEspace && vueActive === "partage" && (
+          <>
+            {chargementPartenaire ? (
+              <View style={styles.chargementPartageBox}>
+                <ActivityIndicator color={C.accent} />
+                <Text
+                  style={[
+                    styles.chargementPartageTexte,
+                    { color: C.texteMuted },
+                  ]}
+                >
+                  Chargement des données partagées…
+                </Text>
+              </View>
+            ) : (
+              <>
+                <View
+                  style={[
+                    styles.heroPartage,
+                    { backgroundColor: C.carte, borderColor: C.carteBorder },
+                  ]}
+                >
+                  <Text style={[styles.heroLabel, { color: C.texteMuted }]}>
+                    RESTE ESTIMÉ FUSIONNÉ
+                  </Text>
+                  <Text style={[styles.heroAmount, { color: C.texte }]}>
+                    {formaterMontant(resteEstimeFusionne)} €
+                  </Text>
+                  <Text
+                    style={[
+                      styles.heroPartageDetail,
+                      { color: C.texteMuted },
+                    ]}
+                  >
+                    Dépensé {formaterMontant(totalDepenseFusionne)}€ · Entrées{" "}
+                    {formaterMontant(totalEntreesFusionne)}€
+                  </Text>
+                </View>
+
+                {groupesFusionnesEntrees.length > 0 && (
+                  <>
+                    <Text
+                      style={[
+                        styles.sectionTitle,
+                        { color: C.texteMuted, marginBottom: 8 },
+                      ]}
+                    >
+                      ENTRÉES D&apos;ARGENT
+                    </Text>
+                    <View style={estTablette ? styles.grilleTablette : undefined}>
+                      {groupesFusionnesEntrees.map(renderCarteEnveloppePartagee)}
+                    </View>
+                  </>
+                )}
+
+                {groupesFusionnesDepenses.length > 0 && (
+                  <>
+                    <Text
+                      style={[
+                        styles.sectionTitle,
+                        {
+                          color: C.texteMuted,
+                          marginTop: groupesFusionnesEntrees.length > 0 ? 16 : 0,
+                          marginBottom: 8,
+                        },
+                      ]}
+                    >
+                      DÉPENSES
+                    </Text>
+                    <View style={estTablette ? styles.grilleTablette : undefined}>
+                      {groupesFusionnesDepenses.map(renderCarteEnveloppePartagee)}
+                    </View>
+                  </>
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        {(!estDansUnEspace || vueActive === "personnel") && (
+        <>
         <CibleTutoriel
           id="reste-estime"
           onMesure={mesurerCibleTutoriel}
@@ -1932,6 +2300,8 @@ export default function Dashboard() {
             </View>
           </View>
         </View>
+        </>
+        )}
 
         <View style={{ height: 90 }} />
       </ScrollView>
@@ -2261,24 +2631,28 @@ export default function Dashboard() {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <TouchableOpacity
+          {/* RÈGLE À NE JAMAIS CASSER — View SIMPLE, PAS TouchableOpacity :
+              même correctif que la modale "Ton bilan" (app/(tabs)/analytics.tsx)
+              — un TouchableOpacity ici (même avec un onPress no-op côté carte
+              pour absorber le tap) interfère avec la négociation de geste du
+              ScrollView (symptôme confirmé : scroll peu fluide/qui répond
+              mal). La fermeture au tap sur le fond n'existe donc plus ici —
+              "Enregistrer", "Annuler", la croix et onRequestClose (bouton
+              retour Android) restent les 4 façons de fermer cette modale. */}
+          <View
             style={[
               styles.modalOverlayTouch,
               estTablette && styles.modalOverlayTouchTablette,
             ]}
-            activeOpacity={1}
-            onPress={fermerModalEnveloppeAvecSauvegarde}
           >
-            <TouchableOpacity
+            <View
               style={[
                 styles.modalCard,
-                { backgroundColor: C.carte },
+                { backgroundColor: C.carte, paddingHorizontal: 0 },
                 styleModaleTablette(estTablette),
               ]}
-              activeOpacity={1}
-              onPress={() => {}}
             >
-              <View style={styles.modalHeader}>
+              <View style={[styles.modalHeader, { paddingHorizontal: 26 }]}>
                 <Text style={[styles.modalTitre, { color: C.texte }]}>Modifier la catégorie</Text>
                 <TouchableOpacity
                   onPress={fermerModalEnveloppeAvecSauvegarde}
@@ -2291,7 +2665,11 @@ export default function Dashboard() {
                 </TouchableOpacity>
               </View>
               <ScrollView
-                showsVerticalScrollIndicator={false}
+                style={{ flex: 1, width: "100%" }}
+                contentContainerStyle={{ paddingHorizontal: 26 }}
+                showsVerticalScrollIndicator={true}
+                scrollEnabled
+                bounces
                 keyboardShouldPersistTaps="handled"
               >
                 <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Nom</Text>
@@ -2580,8 +2958,8 @@ export default function Dashboard() {
                   <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>Annuler</Text>
                 </TouchableOpacity>
               </ScrollView>
-            </TouchableOpacity>
-          </TouchableOpacity>
+            </View>
+          </View>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -3640,6 +4018,33 @@ const styles = StyleSheet.create({
     marginTop: 60,
     marginBottom: 24,
   },
+  badgePartageActif: {
+    backgroundColor: "#1D9E75",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+  },
+  badgePartageActifTexte: { fontSize: 12, fontWeight: "700", color: "#FFFFFF" },
+  chargementPartageBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+    gap: 10,
+  },
+  chargementPartageTexte: { fontSize: 13 },
+  heroPartage: {
+    borderRadius: 22,
+    padding: 26,
+    marginBottom: 18,
+    borderWidth: 0.5,
+  },
+  heroPartageDetail: { fontSize: 13, marginTop: 4 },
+  badgePartageMini: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  badgePartageMiniTexte: { fontSize: 9, fontWeight: "700", color: "#FFFFFF" },
   appNameRow: {
     flexDirection: "row",
     alignItems: "center",
