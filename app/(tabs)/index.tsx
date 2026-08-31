@@ -2285,8 +2285,9 @@ export default function Dashboard() {
                   activeOpacity={0.6}
                   accessibilityRole="button"
                   accessibilityLabel="Fermer"
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 >
-                  <Ionicons name="close" size={20} color={C.texteMuted} />
+                  <Ionicons name="close" size={28} color={C.texteMuted} />
                 </TouchableOpacity>
               </View>
               <ScrollView

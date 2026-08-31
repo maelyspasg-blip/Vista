@@ -56,7 +56,11 @@ import { reinitialiserEtatUtilisateur, useObjectifs } from "./store";
 import { usePremium } from "./PremiumContext";
 import { styleModaleTablette, useEstTablette } from "./useTablette";
 import { estComptePremium, ESPACE_PARTAGE_ACTIF } from "../utils/premium";
-import { genererCodeInvitation, rejoindreEspacePartage } from "../utils/espacePartage";
+import {
+  creerEspacePartage,
+  rejoindreEspacePartage,
+  RaisonEchecRejoindre,
+} from "../utils/espacePartage";
 import { Theme, useTheme } from "./ThemeContext";
 import { useTutoriel } from "./TutorielContext";
 
@@ -223,15 +227,20 @@ export default function Profil() {
   const [exportEnCours, setExportEnCours] = useState(false);
 
   // RÈGLE : état de la modale "Espace partagé" — cf. ouvrirModalEspacePartage
-  // plus bas pour l'initialisation. `codeGenere` est recalculé à CHAQUE
-  // ouverture de la modale (jamais persisté) : cf. RÈGLE dans
-  // utils/espacePartage.ts, genererCodeInvitation() est un calcul pur, sans
-  // ligne espaces_partages créée en base pour l'instant.
+  // plus bas pour l'initialisation. `codeGenere` n'est affiché qu'UNE FOIS
+  // creerEspacePartage() résolu avec succès (cf. RÈGLE dans
+  // utils/espacePartage.ts) — jamais le résultat brut d'un
+  // genererCodeInvitation() seul, qui ne correspondrait à aucune ligne en
+  // base et serait donc toujours rejeté par rejoindreEspacePartage().
   const [modalEspacePartageVisible, setModalEspacePartageVisible] = useState(false);
   const [ongletEspacePartage, setOngletEspacePartage] = useState<
     "creer" | "rejoindre"
   >("creer");
   const [codeGenere, setCodeGenere] = useState("");
+  const [creationEspaceEnCours, setCreationEspaceEnCours] = useState(false);
+  const [erreurCreationEspace, setErreurCreationEspace] = useState<
+    string | null
+  >(null);
   const [codeSaisi, setCodeSaisi] = useState("");
   const [rejoindreEnCours, setRejoindreEnCours] = useState(false);
   const [messageRejoindre, setMessageRejoindre] = useState<{
@@ -239,13 +248,29 @@ export default function Profil() {
     texte: string;
   } | null>(null);
 
+  const creerEtAfficherEspace = async () => {
+    setCreationEspaceEnCours(true);
+    setErreurCreationEspace(null);
+    const espace = await creerEspacePartage();
+    setCreationEspaceEnCours(false);
+    if (espace) {
+      setCodeGenere(espace.code);
+    } else {
+      setErreurCreationEspace(
+        "Impossible de créer l'espace partagé — réessaie.",
+      );
+    }
+  };
+
   const ouvrirModalEspacePartage = () => {
     setOngletEspacePartage("creer");
-    setCodeGenere(genererCodeInvitation());
+    setCodeGenere("");
+    setErreurCreationEspace(null);
     setCodeSaisi("");
     setMessageRejoindre(null);
     setRejoindreEnCours(false);
     setModalEspacePartageVisible(true);
+    creerEtAfficherEspace();
   };
 
   // RÈGLE : Clipboard du cœur react-native (déprécié mais toujours
@@ -273,20 +298,40 @@ export default function Profil() {
     }
   };
 
+  // RÈGLE À NE JAMAIS CASSER — JAMAIS DE MESSAGE TECHNIQUE VISIBLE : chaque
+  // raison structurée retournée par rejoindreEspacePartage() (cf.
+  // utils/espacePartage.ts) est mappée ICI vers un message humain fixe,
+  // jamais un code d'erreur Supabase ni une stack trace. "tu"/"ton" pour
+  // rester cohérent avec le reste de l'app (voix jamais vouvoyante ailleurs
+  // — ex: "Tu dépenses environ...", "Demande un nouveau code à ton
+  // partenaire").
+  const messageEchecRejoindre = (raison: RaisonEchecRejoindre): string => {
+    switch (raison) {
+      case "code_invalide":
+        return "Ce code ne correspond à aucun espace. Vérifie qu'il est bien écrit.";
+      case "code_expire":
+        return "Ce code a expiré. Demande un nouveau code à ton partenaire.";
+      case "deja_membre":
+        return "Tu fais déjà partie de cet espace partagé.";
+      case "erreur_reseau":
+        return "Impossible de rejoindre l'espace pour le moment. Réessaie dans quelques instants.";
+    }
+  };
+
   const rejoindreEspacePartageDepuisModal = async () => {
     const code = codeSaisi.trim();
     if (!code || rejoindreEnCours) return;
     setRejoindreEnCours(true);
     setMessageRejoindre(null);
-    const espace = await rejoindreEspacePartage(code);
+    const resultat = await rejoindreEspacePartage(code);
     setRejoindreEnCours(false);
     setMessageRejoindre(
-      espace
-        ? { type: "succes", texte: `Tu as rejoint l'espace ${espace.code} !` }
-        : {
-            type: "erreur",
-            texte: "Code invalide ou expiré — vérifie et réessaie.",
-          },
+      resultat.succes
+        ? {
+            type: "succes",
+            texte: `Tu as rejoint l'espace partagé de ${resultat.espace.creeParPrenom || "ton/ta partenaire"} !`,
+          }
+        : { type: "erreur", texte: messageEchecRejoindre(resultat.raison) },
     );
   };
   const optionsMoisExport = construireOptionsMoisExport(
@@ -1730,23 +1775,32 @@ export default function Profil() {
         animationType={reduireAnimations ? "none" : "slide"}
         onRequestClose={() => setModalEspacePartageVisible(false)}
       >
-        <TouchableOpacity
-          style={[
-            styles.modalOverlayTouch,
-            estTablette && styles.modalOverlayTouchTablette,
-          ]}
-          activeOpacity={1}
-          onPress={() => setModalEspacePartageVisible(false)}
+        {/* RÈGLE : même pattern que la modale "Changer de mot de passe"
+            juste au-dessus — KeyboardAvoidingView avec behavior="padding"
+            (iOS) / undefined (Android), sans offset manuel ni ScrollView
+            interne : déjà éprouvé dans ce fichier pour une modale courte à
+            champ(s) texte, le clavier iOS ne recouvre jamais le champ. */}
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <TouchableOpacity
             style={[
-              styles.modalCard,
-              { backgroundColor: C.carte },
-              styleModaleTablette(estTablette),
+              styles.modalOverlayTouch,
+              estTablette && styles.modalOverlayTouchTablette,
             ]}
             activeOpacity={1}
-            onPress={() => {}}
+            onPress={() => setModalEspacePartageVisible(false)}
           >
+            <TouchableOpacity
+              style={[
+                styles.modalCard,
+                { backgroundColor: C.carte },
+                styleModaleTablette(estTablette),
+              ]}
+              activeOpacity={1}
+              onPress={() => {}}
+            >
             <View style={styles.modalHeaderEspacePartage}>
               <Text style={[styles.modalTitre, { color: C.texte, marginBottom: 0 }]}>
                 Espace partagé
@@ -1816,42 +1870,79 @@ export default function Profil() {
 
             {ongletEspacePartage === "creer" ? (
               <View style={{ marginTop: 20 }}>
-                <Text style={[styles.codeEspacePartage, { color: C.texte }]}>
-                  {codeGenere}
-                </Text>
-                <Text
-                  style={[
-                    styles.switchSub,
-                    { color: C.texteMuted, textAlign: "center", marginTop: 4 },
-                  ]}
-                >
-                  Ce code expire dans 24h.
-                </Text>
+                {creationEspaceEnCours ? (
+                  <ActivityIndicator color={C.purple} style={{ marginTop: 12 }} />
+                ) : erreurCreationEspace ? (
+                  <>
+                    <Text
+                      style={[
+                        styles.erreurTexte,
+                        { textAlign: "center", marginTop: 0 },
+                      ]}
+                    >
+                      {erreurCreationEspace}
+                    </Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.btnSecondaire,
+                        { borderColor: C.separateur, marginTop: 16 },
+                      ]}
+                      onPress={creerEtAfficherEspace}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[styles.btnSecondaireTexte, { color: C.texte }]}
+                      >
+                        Réessayer
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <Text style={[styles.codeEspacePartage, { color: C.texte }]}>
+                      {codeGenere}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.switchSub,
+                        {
+                          color: C.texteMuted,
+                          textAlign: "center",
+                          marginTop: 4,
+                        },
+                      ]}
+                    >
+                      Ce code expire dans 24h.
+                    </Text>
 
-                <TouchableOpacity
-                  style={[
-                    styles.btnSecondaire,
-                    { borderColor: C.separateur, marginTop: 20 },
-                  ]}
-                  onPress={copierCodeEspacePartage}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="copy-outline" size={16} color={C.texte} />
-                  <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
-                    Copier le code
-                  </Text>
-                </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.btnSecondaire,
+                        { borderColor: C.separateur, marginTop: 20 },
+                      ]}
+                      onPress={copierCodeEspacePartage}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="copy-outline" size={16} color={C.texte} />
+                      <Text
+                        style={[styles.btnSecondaireTexte, { color: C.texte }]}
+                      >
+                        Copier le code
+                      </Text>
+                    </TouchableOpacity>
 
-                <BoutonPrincipal
-                  style={[
-                    styles.btnPrincipal,
-                    { backgroundColor: C.purple, marginTop: 12 },
-                  ]}
-                  onPress={partagerCodeEspacePartage}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.btnPrincipalTexte}>Partager</Text>
-                </BoutonPrincipal>
+                    <BoutonPrincipal
+                      style={[
+                        styles.btnPrincipal,
+                        { backgroundColor: C.purple, marginTop: 12 },
+                      ]}
+                      onPress={partagerCodeEspacePartage}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.btnPrincipalTexte}>Partager</Text>
+                    </BoutonPrincipal>
+                  </>
+                )}
               </View>
             ) : (
               <View style={{ marginTop: 20 }}>
@@ -1874,6 +1965,30 @@ export default function Profil() {
                   returnKeyType="done"
                 />
 
+                {/* RÈGLE : message directement sous le champ de saisie du
+                    code — rouge pour une erreur, vert pour un succès —
+                    jamais une Alert, jamais un message technique (cf.
+                    messageEchecRejoindre). */}
+                {messageRejoindre && (
+                  <Text
+                    style={[
+                      messageRejoindre.type === "succes"
+                        ? styles.succesTexte
+                        : styles.erreurTexte,
+                      {
+                        color:
+                          messageRejoindre.type === "succes"
+                            ? C.vert
+                            : "#E24B4A",
+                        textAlign: "center",
+                        marginTop: 8,
+                      },
+                    ]}
+                  >
+                    {messageRejoindre.texte}
+                  </Text>
+                )}
+
                 <BoutonPrincipal
                   style={[
                     styles.btnPrincipal,
@@ -1893,29 +2008,11 @@ export default function Profil() {
                     <Text style={styles.btnPrincipalTexte}>Rejoindre</Text>
                   )}
                 </BoutonPrincipal>
-
-                {messageRejoindre && (
-                  <Text
-                    style={[
-                      messageRejoindre.type === "succes"
-                        ? styles.succesTexte
-                        : styles.erreurTexte,
-                      {
-                        color:
-                          messageRejoindre.type === "succes"
-                            ? C.vert
-                            : "#E24B4A",
-                        textAlign: "center",
-                      },
-                    ]}
-                  >
-                    {messageRejoindre.texte}
-                  </Text>
-                )}
               </View>
             )}
+            </TouchableOpacity>
           </TouchableOpacity>
-        </TouchableOpacity>
+        </KeyboardAvoidingView>
       </Modal>
 
       <ModaleDocumentLegal

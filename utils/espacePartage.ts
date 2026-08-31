@@ -22,7 +22,26 @@ export type EspacePartage = {
   code: string;
   createdAt: string;
   expireAt: string;
+  // Prénom du créateur de l'espace, dénormalisé sur la ligne
+  // espaces_partages à la création — cf. RÈGLE sur creerEspacePartage plus
+  // bas pour pourquoi (RLS empêche de lire le profil d'un autre
+  // utilisateur avant d'être soi-même membre de son espace).
+  creeParPrenom: string | null;
 };
+
+// RÈGLE : raisons d'échec structurées, jamais un message texte brut ni une
+// erreur Supabase — c'est à l'appelant (UI) de choisir le message humain
+// affiché pour chaque raison (cf. app/profil.tsx), jamais ce module qui ne
+// doit rien savoir de la présentation.
+export type RaisonEchecRejoindre =
+  | "code_invalide"
+  | "code_expire"
+  | "deja_membre"
+  | "erreur_reseau";
+
+export type ResultatRejoindreEspace =
+  | { succes: true; espace: EspacePartage }
+  | { succes: false; raison: RaisonEchecRejoindre };
 
 export type MembreEspace = {
   id: string;
@@ -39,8 +58,9 @@ const CARACTERES_CODE_INVITATION = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const LONGUEUR_SUFFIXE_CODE = 6;
 
 // Génère un code d'invitation au format "VISTA-XXXXXX" — calcul pur, ne
-// touche pas Supabase (la création de la ligne espaces_partages
-// correspondante est une étape séparée, pas encore branchée ici).
+// touche pas Supabase. Utilisée par creerEspacePartage() ci-dessous pour
+// produire le code AVANT insertion — jamais affichée à l'utilisateur sans
+// être d'abord réellement enregistrée (cf. RÈGLE sur creerEspacePartage).
 export function genererCodeInvitation(): string {
   let suffixe = "";
   for (let i = 0; i < LONGUEUR_SUFFIXE_CODE; i++) {
@@ -52,35 +72,137 @@ export function genererCodeInvitation(): string {
   return `VISTA-${suffixe}`;
 }
 
-// Rejoint un espace partagé existant via son code d'invitation — résout le
-// code en ligne espaces_partages, vérifie qu'il n'a pas expiré, puis ajoute
-// l'utilisateur courant comme membre. Retourne l'espace rejoint, ou `null`
-// si le code est invalide/expiré ou en cas d'erreur réseau (jamais de
-// throw, cf. RÈGLE en tête de fichier).
-export async function rejoindreEspacePartage(
-  code: string,
-): Promise<EspacePartage | null> {
+// RÈGLE À NE JAMAIS CASSER — LA SEULE FAÇON DE CRÉER UN ESPACE PARTAGÉ
+// VALIDE : bug confirmé — un code affiché via genererCodeInvitation() SEUL
+// (jamais inséré en base) est systématiquement rejeté par
+// rejoindreEspacePartage() ("code invalide ou expiré"), non pas à cause
+// d'un problème de policy RLS ou de requête, mais parce qu'AUCUNE ligne
+// espaces_partages n'a jamais existé pour ce code — un SELECT sur une
+// ligne qui n'existe pas retourne normalement 0 résultat, quelle que soit
+// la policy. Cette fonction insère RÉELLEMENT la ligne avant de retourner
+// le code, pour que le code affiché à l'utilisateur soit TOUJOURS
+// rejoignable immédiatement après. Ne jamais afficher un code produit par
+// genererCodeInvitation() seul dans l'UI sans passer par ici.
+export async function creerEspacePartage(): Promise<EspacePartage | null> {
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return null;
 
+    // RÈGLE : le prénom du créateur est dénormalisé sur espaces_partages
+    // ICI (au moment où l'utilisateur peut encore lire SON PROPRE profil,
+    // toujours autorisé par profils_select_own) — c'est la seule fenêtre
+    // où cette information est simplement accessible ; une fois l'espace
+    // créé, un autre utilisateur qui le rejoint ne pourrait jamais lire ce
+    // même profil directement (cf. RÈGLE sur le type EspacePartage).
+    const { data: profil } = await supabase
+      .from("profils")
+      .select("prenom")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const code = genererCodeInvitation();
+    const { data: espace, error: erreurEspace } = await supabase
+      .from("espaces_partages")
+      .insert({ code, cree_par_prenom: profil?.prenom || null })
+      .select()
+      .single();
+
+    if (erreurEspace || !espace) {
+      console.error(
+        "Supabase insert espaces_partages (creerEspacePartage) a échoué :",
+        erreurEspace,
+      );
+      return null;
+    }
+
+    const { error: erreurMembre } = await supabase
+      .from("membres_espace")
+      .insert({ espace_id: espace.id, user_id: user.id, role: "proprietaire" });
+
+    if (erreurMembre) {
+      console.error(
+        "Supabase insert membres_espace (creerEspacePartage) a échoué :",
+        erreurMembre,
+      );
+      // L'espace existe et son code reste valide/rejoignable même si
+      // l'ajout du créateur comme membre a échoué ici — ne pas bloquer sur
+      // ce second insert, l'utilisateur peut retenter de rejoindre lui-même
+      // son propre espace si besoin.
+    }
+
+    return {
+      id: espace.id,
+      code: espace.code,
+      createdAt: espace.created_at,
+      expireAt: espace.expire_at,
+      creeParPrenom: espace.cree_par_prenom ?? null,
+    };
+  } catch (e) {
+    console.error("creerEspacePartage a échoué :", e);
+    return null;
+  }
+}
+
+// RÈGLE À NE JAMAIS CASSER — 5 CAS DISTINGUÉS, JAMAIS UN null GÉNÉRIQUE :
+// résout le code en ligne espaces_partages, vérifie qu'il n'a pas expiré,
+// vérifie que l'utilisateur n'est pas déjà membre, puis l'ajoute comme
+// membre. Chaque échec retourne une `raison` précise (jamais un message ni
+// une erreur Supabase brute, cf. RÈGLE sur RaisonEchecRejoindre) pour que
+// l'UI (app/profil.tsx) affiche un message humain adapté à CHAQUE cas —
+// jamais un message technique visible par l'utilisateur, jamais de throw.
+export async function rejoindreEspacePartage(
+  code: string,
+): Promise<ResultatRejoindreEspace> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { succes: false, raison: "erreur_reseau" };
+
+    const codeNormalise = code.trim().toUpperCase();
+    console.log("[espacePartage] recherche code:", codeNormalise);
     const { data: espace, error: erreurEspace } = await supabase
       .from("espaces_partages")
       .select("*")
-      .eq("code", code.trim().toUpperCase())
+      .eq("code", codeNormalise)
       .maybeSingle();
+    console.log("[espacePartage] résultat:", espace, erreurEspace);
 
     if (erreurEspace) {
       console.error(
         "Supabase select espaces_partages (rejoindreEspacePartage) a échoué :",
         erreurEspace,
       );
-      return null;
+      return { succes: false, raison: "erreur_reseau" };
     }
-    if (!espace) return null;
-    if (new Date(espace.expire_at).getTime() <= Date.now()) return null;
+    // Cas 2 — code invalide : aucune ligne en base pour ce code.
+    if (!espace) return { succes: false, raison: "code_invalide" };
+    // Cas 3 — code expiré.
+    if (new Date(espace.expire_at).getTime() <= Date.now()) {
+      return { succes: false, raison: "code_expire" };
+    }
+
+    // Cas 4 — déjà membre : vérifié explicitement AVANT l'insert (la
+    // contrainte unique (espace_id, user_id) côté base, cf. migration
+    // 20260830140000, protège contre une course, mais un message humain
+    // précis a besoin de le détecter en amont plutôt que d'interpréter une
+    // erreur de contrainte après coup).
+    const { data: membreExistant, error: erreurVerifMembre } = await supabase
+      .from("membres_espace")
+      .select("id")
+      .eq("espace_id", espace.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (erreurVerifMembre) {
+      console.error(
+        "Supabase select membres_espace (vérif déjà membre) a échoué :",
+        erreurVerifMembre,
+      );
+      return { succes: false, raison: "erreur_reseau" };
+    }
+    if (membreExistant) return { succes: false, raison: "deja_membre" };
 
     const { error: erreurMembre } = await supabase
       .from("membres_espace")
@@ -91,18 +213,22 @@ export async function rejoindreEspacePartage(
         "Supabase insert membres_espace (rejoindreEspacePartage) a échoué :",
         erreurMembre,
       );
-      return null;
+      return { succes: false, raison: "erreur_reseau" };
     }
 
     return {
-      id: espace.id,
-      code: espace.code,
-      createdAt: espace.created_at,
-      expireAt: espace.expire_at,
+      succes: true,
+      espace: {
+        id: espace.id,
+        code: espace.code,
+        createdAt: espace.created_at,
+        expireAt: espace.expire_at,
+        creeParPrenom: espace.cree_par_prenom ?? null,
+      },
     };
   } catch (e) {
     console.error("rejoindreEspacePartage a échoué :", e);
-    return null;
+    return { succes: false, raison: "erreur_reseau" };
   }
 }
 

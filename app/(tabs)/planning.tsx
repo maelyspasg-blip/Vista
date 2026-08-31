@@ -511,8 +511,44 @@ export default function Planning() {
       }
     });
 
-  objStore.historiquePaiements.forEach((p) => {
+  // RÈGLE À NE JAMAIS CASSER — DÉDUPLICATION PAR CATÉGORIE + DATE, JAMAIS
+  // PAR PRÉSENCE D'UNE TRANSACTION : un historiquePaiements est créé par
+  // verifierEcheancesFixesInterne() (app/store.ts) quand l'échéance d'une
+  // catégorie Fixe passe — CE MÉCANISME N'INSÈRE JAMAIS DE LIGNE
+  // `transactions` correspondante (aucun appel à ajouterTransaction dans
+  // cette fonction, vérifié). Exiger une transaction correspondante avant
+  // d'afficher un histo- ferait donc disparaître TOUS ces événements sans
+  // exception, pas seulement les doublons — les catégories Fixe payées
+  // automatiquement ne passent structurellement jamais par `transactions`
+  // (cf. RÈGLE "4 CAS DE FLUX" dans GraphiqueFlux.tsx : Fixe = Cas 2,
+  // jamais de détail transaction). La vraie protection contre un doublon
+  // (ex: verifierEcheancesFixesInterne qui se redéclenche avant que
+  // etat.historiquePaiements ait eu le temps de refléter l'ajout
+  // précédent, cf. RÈGLE sur les déclenchements multiples dans
+  // (tabs)/_layout.tsx) est une déduplication PAR ENVELOPPE + JOUR
+  // CALENDAIRE, appliquée ici au rendu.
+  // RÈGLE À NE JAMAIS CASSER — SOURCE (enveloppeId) DOIT ENCORE EXISTER,
+  // JAMAIS DE VÉRIFICATION SUR LE MONTANT : un historiquePaiements orphelin
+  // (enveloppeId ne correspondant plus à aucune enveloppe vivante, ex:
+  // catégorie supprimée puis recréée sous un nouvel id) est un vrai
+  // fantôme — filtré ici. Le MONTANT, en revanche, n'est JAMAIS comparé à
+  // la valeur actuelle de l'enveloppe : `p.montant` est un instantané du
+  // budget au moment du paiement (cf. verifierEcheancesFixesInterne,
+  // `montant: env.budget` capturé à l'échéance), c'est tout l'intérêt d'un
+  // historique — modifier le loyer aujourd'hui ne doit jamais faire
+  // disparaître les paiements passés au montant d'avant. Exiger une
+  // correspondance de montant ferait disparaître TOUT l'historique dès la
+  // moindre modification de budget sur la catégorie, pas seulement les
+  // entrées orphelines.
+  const idsEnveloppesVivantes = new Set(objStore.enveloppes.map((e) => e.id));
+  const clesHistoDejaAffichees = new Set<string>();
+  objStore.historiquePaiements
+    .filter((p) => idsEnveloppesVivantes.has(p.enveloppeId))
+    .forEach((p) => {
     const d = new Date(p.date);
+    const cle = `${p.enveloppeId}-${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if (clesHistoDejaAffichees.has(cle)) return;
+    clesHistoDejaAffichees.add(cle);
     tousLesEvenements.push({
       id: `histo-${p.id}`,
       nom: p.nom,
