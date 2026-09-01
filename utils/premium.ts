@@ -33,7 +33,7 @@ export const TESTFLIGHT_MODE = true;
 // pas prête (rejoindre un espace fonctionne déjà ; créer un espace
 // n'insère pas encore de ligne espaces_partages, cf. RÈGLE dans
 // app/profil.tsx).
-export const ESPACE_PARTAGE_ACTIF = true;
+export const ESPACE_PARTAGE_ACTIF = false;
 
 // RÈGLE : Ad Unit ID de la pub récompensée AdMob — sélectionné une seule
 // fois ici selon la plateforme (Platform.OS), jamais dupliqué ailleurs dans

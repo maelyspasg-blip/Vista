@@ -132,7 +132,6 @@ type LigneDepense = {
   montant: number;
   date: string;
   source: "transaction" | "evenement";
-  attribueA?: "personnel" | "commun";
 };
 
 type LigneAVenir = {
@@ -203,15 +202,11 @@ export default function Budget() {
   const [nomTx, setNomTx] = useState("");
   const [montantTx, setMontantTx] = useState("");
   const [enveloppeTx, setEnveloppeTx] = useState<string | null>(null);
-  // Mode espace partagé (étape 4) : attribution de la dépense en cours de
-  // création/édition — "personnel" par défaut (cf. store.ts, colonne
-  // attribue_a). Le sélecteur correspondant n'est affiché que si
-  // estDansUnEspace, mais l'état existe toujours pour rester la seule
-  // source passée à ajouterTransaction/modifierTransaction (jamais de
-  // valeur implicite recalculée séparément à l'appel).
-  const [attributionTx, setAttributionTx] = useState<"personnel" | "commun">(
-    "personnel",
-  );
+  // Toggle €/% de la barre de contribution (vue Partagé) — par carte
+  // fusionnée, même mécanique que app/(tabs)/index.tsx.
+  const [contributionEnPourcentage, setContributionEnPourcentage] = useState<
+    Record<string, boolean>
+  >({});
   // Id + date de la transaction en cours d'édition — null en mode création.
   // La date d'origine est préservée (pas de champ date dans ce formulaire) :
   // seuls nom/montant/catégorie sont modifiables via le clic long.
@@ -487,15 +482,22 @@ export default function Budget() {
     type: "Fixe" | "Variable" | "Entrée";
     depense: number;
     budget: number;
+    moiDepense: number;
+    partenaireDepense: number;
+    fusionnee: boolean;
+    moiIds: string[];
+    moiPartage: boolean;
     badge: { texte: string; couleur: string };
   };
-  const enveloppeAUneDepenseCommuneCeMois = (enveloppeId: string) =>
-    objStore.transactions.some(
-      (t) =>
-        t.enveloppeId === enveloppeId &&
-        t.attribueA === "commun" &&
-        estDansMois(t.date, MOIS_ACTUEL, ANNEE_ACTUELLE),
-    );
+  // RÈGLE À NE JAMAIS CASSER — VUE "PARTAGÉ" : TOUTES LES CATÉGORIES DES
+  // DEUX COMPTES, LE FLAGGING SE FAIT DEPUIS CETTE VUE : même bascule que
+  // app/(tabs)/index.tsx (cf. RÈGLE là-bas) — plus de filtre `partage =
+  // true` NI en lecture côté mien NI côté serveur pour le partenaire (RLS
+  // rouverte à toute la co-appartenance, migration 20260831160000) :
+  // `enveloppes.partage` n'est plus une barrière d'accès, uniquement le
+  // champ qui décide du badge affiché, persisté par le toggle Commun/
+  // Personnel sur MES cartes (remplace la modale "Gérer mes catégories
+  // partagées", retirée de app/profil.tsx).
   const enveloppesPartenaireBudget = donneesPartenaire?.enveloppes ?? [];
   const groupesFusionnesParNom: GroupeCategoriePartagee[] = (() => {
     if (vueActive !== "partage") return [];
@@ -505,9 +507,13 @@ export default function Budget() {
       type: "Fixe" | "Variable" | "Entrée";
       depense: number;
       budget: number;
+      moiDepense: number;
+      partenaireDepense: number;
       depuisMoi: boolean;
       depuisPartenaire: boolean;
-      communMoi: boolean;
+      moiIds: string[];
+      moiPartage: boolean;
+      partenairePartage: boolean;
     };
     const cleNom = (nom: string) => nom.trim().toLowerCase();
     const parNom = new Map<string, Accumulateur>();
@@ -526,14 +532,20 @@ export default function Budget() {
           type: e.type,
           depense: 0,
           budget: 0,
+          moiDepense: 0,
+          partenaireDepense: 0,
           depuisMoi: false,
           depuisPartenaire: false,
-          communMoi: false,
+          moiIds: [],
+          moiPartage: false,
+          partenairePartage: false,
         };
         acc.depense += e.depense;
         acc.budget += e.budget;
+        acc.moiDepense += e.depense;
         acc.depuisMoi = true;
-        if (enveloppeAUneDepenseCommuneCeMois(e.id)) acc.communMoi = true;
+        acc.moiIds.push(e.id);
+        if (e.partage) acc.moiPartage = true;
         parNom.set(cle, acc);
       });
 
@@ -551,36 +563,63 @@ export default function Budget() {
           type: e.type,
           depense: 0,
           budget: 0,
+          moiDepense: 0,
+          partenaireDepense: 0,
           depuisMoi: false,
           depuisPartenaire: false,
-          communMoi: false,
+          moiIds: [],
+          moiPartage: false,
+          partenairePartage: false,
         };
         acc.depense += e.depense;
         acc.budget += e.budget;
+        acc.partenaireDepense += e.depense;
         acc.depuisPartenaire = true;
+        if (e.partage) acc.partenairePartage = true;
         parNom.set(cle, acc);
       });
 
     return Array.from(parNom.entries())
-      .map(([cle, acc]) => ({
-        id: `fusion-${cle}`,
-        nom: acc.nom,
-        couleur: acc.couleur,
-        type: acc.type,
-        depense: acc.depense,
-        budget: acc.budget,
-        badge:
-          (acc.depuisMoi && acc.depuisPartenaire) || acc.communMoi
-            ? { texte: "Commun", couleur: "#1D9E75" }
-            : acc.depuisMoi
-              ? { texte: "Moi", couleur: "#60a5fa" }
-              : {
-                  texte: membrePartenaire?.prenom || "Partenaire",
-                  couleur: "#c084fc",
-                },
-      }))
+      .map(([cle, acc]) => {
+        const fusionnee = acc.depuisMoi && acc.depuisPartenaire;
+        return {
+          id: `fusion-${cle}`,
+          nom: acc.nom,
+          couleur: acc.couleur,
+          type: acc.type,
+          depense: acc.depense,
+          budget: acc.budget,
+          moiDepense: acc.moiDepense,
+          partenaireDepense: acc.partenaireDepense,
+          fusionnee,
+          moiIds: acc.moiIds,
+          moiPartage: acc.moiPartage,
+          badge:
+            fusionnee || (acc.depuisMoi && acc.moiPartage)
+              ? { texte: "Commun", couleur: "#1D9E75" }
+              : acc.depuisMoi
+                ? { texte: "Moi", couleur: "#60a5fa" }
+                : acc.partenairePartage
+                  ? { texte: "Commun", couleur: "#1D9E75" }
+                  : {
+                      texte: membrePartenaire?.prenom || "Partenaire",
+                      couleur: "#c084fc",
+                    },
+        };
+      })
       .sort((a, b) => b.depense - a.depense);
   })();
+
+  // Même chemin d'écriture que app/(tabs)/index.tsx — cf. RÈGLE là-bas.
+  const basculerPartageCategorie = (ids: string[], nouvelleValeur: boolean) => {
+    if (ids.length === 0) return;
+    const idsSet = new Set(ids);
+    objStore.modifierEnveloppes(
+      objStore.enveloppes.map((e) =>
+        idsSet.has(e.id) ? { ...e, partage: nouvelleValeur } : e,
+      ),
+    );
+  };
 
   // RÈGLE À NE JAMAIS CASSER — MÊME STYLE QUE renderCarteCategorie (Moi) :
   // réutilise volontairement styles.envCard/envRow/envNomRow/envDot/envNom/
@@ -590,10 +629,18 @@ export default function Budget() {
   // (delta vs mois dernier, historique, liste de transactions dépliable,
   // édition) : ces éléments n'ont pas d'équivalent honnête pour une
   // catégorie fusionnée entre deux comptes distincts — carte en lecture
-  // seule ici.
+  // seule ici. Barre de contribution (même logique que index.tsx) sous la
+  // jauge principale si les DEUX comptes ont dépensé dans la catégorie
+  // fusionnée ce mois-ci — sinon juste le badge, sans barre.
   const renderCarteCategoriePartagee = (item: GroupeCategoriePartagee) => {
     const pct =
       item.budget > 0 ? Math.min((item.depense / item.budget) * 100, 100) : 0;
+    const afficherContribution =
+      item.fusionnee && item.moiDepense > 0 && item.partenaireDepense > 0;
+    const enPourcentage = !!contributionEnPourcentage[item.id];
+    const pctMoi =
+      item.depense > 0 ? (item.moiDepense / item.depense) * 100 : 0;
+    const pctPartenaire = 100 - pctMoi;
     return (
       <View
         key={item.id}
@@ -605,14 +652,35 @@ export default function Budget() {
             <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
               {item.nom}
             </Text>
-            <View
-              style={[
-                styles.badgePartageMini,
-                { backgroundColor: item.badge.couleur },
-              ]}
-            >
-              <Text style={styles.badgePartageMiniTexte}>{item.badge.texte}</Text>
-            </View>
+            {item.moiIds.length > 0 ? (
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={[
+                  styles.badgePartageMini,
+                  { backgroundColor: item.badge.couleur },
+                ]}
+                onPress={() =>
+                  basculerPartageCategorie(item.moiIds, !item.moiPartage)
+                }
+                accessibilityRole="button"
+                accessibilityLabel={
+                  item.moiPartage
+                    ? `Passer ${item.nom} en personnel`
+                    : `Passer ${item.nom} en commun`
+                }
+              >
+                <Text style={styles.badgePartageMiniTexte}>{item.badge.texte}</Text>
+              </TouchableOpacity>
+            ) : (
+              <View
+                style={[
+                  styles.badgePartageMini,
+                  { backgroundColor: item.badge.couleur },
+                ]}
+              >
+                <Text style={styles.badgePartageMiniTexte}>{item.badge.texte}</Text>
+              </View>
+            )}
           </View>
           <View style={styles.envRowRight}>
             <Text style={[styles.envMontant, { color: item.couleur }]}>
@@ -626,6 +694,39 @@ export default function Budget() {
           couleurFond={C.separateur}
           hauteur={6}
         />
+        {afficherContribution && (
+          <TouchableOpacity
+            activeOpacity={0.7}
+            style={styles.contributionBarreFond}
+            onPress={() =>
+              setContributionEnPourcentage((prev) => ({
+                ...prev,
+                [item.id]: !prev[item.id],
+              }))
+            }
+          >
+            <View style={{ flex: item.moiDepense, backgroundColor: "#60a5fa" }} />
+            <View
+              style={{ flex: item.partenaireDepense, backgroundColor: "#c084fc" }}
+            />
+          </TouchableOpacity>
+        )}
+        {afficherContribution && (
+          <View style={styles.contributionLegendeRow}>
+            <Text style={[styles.contributionLegendeTexte, { color: "#60a5fa" }]}>
+              Moi{" "}
+              {enPourcentage
+                ? `${Math.round(pctMoi)}%`
+                : `${formaterMontant(item.moiDepense)}€`}
+            </Text>
+            <Text style={[styles.contributionLegendeTexte, { color: "#c084fc" }]}>
+              {membrePartenaire?.prenom || "Partenaire"}{" "}
+              {enPourcentage
+                ? `${Math.round(pctPartenaire)}%`
+                : `${formaterMontant(item.partenaireDepense)}€`}
+            </Text>
+          </View>
+        )}
       </View>
     );
   };
@@ -836,7 +937,6 @@ export default function Budget() {
     setDateTransactionEnEdition(null);
     setCreationCategorieOuverte(false);
     setNomNouvelleCategorie("");
-    setAttributionTx("personnel");
     setModalAjoutVisible(true);
   };
 
@@ -848,7 +948,6 @@ export default function Budget() {
     setDateTransactionEnEdition(ligne.date);
     setCreationCategorieOuverte(false);
     setNomNouvelleCategorie("");
-    setAttributionTx(ligne.attribueA ?? "personnel");
     setModalAjoutVisible(true);
   };
 
@@ -893,7 +992,6 @@ export default function Budget() {
         parseMontant(montantTx),
         enveloppeTx,
         dateTransactionEnEdition ?? dateVersISO(new Date()),
-        attributionTx,
       );
       setAjoutTransactionEnCours(false);
       if (!succes) return;
@@ -909,7 +1007,6 @@ export default function Budget() {
       parseMontant(montantTx),
       enveloppeTx,
       dateStr,
-      attributionTx,
     );
     setAjoutTransactionEnCours(false);
     if (!nouvelle) return;
@@ -943,7 +1040,6 @@ export default function Budget() {
     setEnveloppeTx(modele.enveloppeId);
     setTransactionEnEdition(null);
     setDateTransactionEnEdition(null);
-    setAttributionTx("personnel");
     setModalAjoutVisible(true);
   };
 
@@ -1043,7 +1139,6 @@ export default function Budget() {
           montant: t.montant,
           date: t.date,
           source: "transaction" as const,
-          attribueA: t.attribueA,
         })),
       ...objStore.evenements
         .filter(
@@ -2301,39 +2396,6 @@ export default function Budget() {
                   </View>
                 )}
 
-                {estDansUnEspace && (
-                  <View style={styles.attributionRow}>
-                    {(["personnel", "commun"] as const).map((option) => (
-                      <TouchableOpacity
-                        key={option}
-                        style={[
-                          styles.attributionChip,
-                          { backgroundColor: C.fondSecondaire },
-                          attributionTx === option && {
-                            backgroundColor: "#1D9E75",
-                          },
-                        ]}
-                        onPress={() => setAttributionTx(option)}
-                        activeOpacity={0.7}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          option === "personnel" ? "Dépense personnelle" : "Dépense commune"
-                        }
-                      >
-                        <Text
-                          style={[
-                            styles.attributionChipTexte,
-                            { color: C.texteMuted },
-                            attributionTx === option && { color: "#FFFFFF" },
-                          ]}
-                        >
-                          {option === "personnel" ? "Personnel" : "Commun"}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-
                 {enveloppeTx &&
                   objStore.modelesDepenses.some(
                     (m) => m.enveloppeId === enveloppeTx,
@@ -2608,18 +2670,6 @@ const styles = StyleSheet.create({
   },
   titre: { fontSize: 23, fontWeight: "700", letterSpacing: 1 },
   sousTitre: { fontSize: 14, marginTop: 2 },
-  attributionRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 4,
-    marginBottom: 16,
-  },
-  attributionChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 16,
-  },
-  attributionChipTexte: { fontSize: 12, fontWeight: "600" },
   selecteurMoisRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2705,6 +2755,19 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   badgePartageMiniTexte: { fontSize: 9, fontWeight: "700", color: "#FFFFFF" },
+  contributionBarreFond: {
+    flexDirection: "row",
+    height: 5,
+    borderRadius: 3,
+    overflow: "hidden",
+    marginTop: 6,
+  },
+  contributionLegendeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  contributionLegendeTexte: { fontSize: 10, fontWeight: "700" },
   envBarBg: { height: 6, borderRadius: 3, overflow: "hidden" },
   envBarFill: { height: "100%", borderRadius: 3 },
   envDeltaRow: {

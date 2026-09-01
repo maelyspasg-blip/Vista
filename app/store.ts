@@ -161,6 +161,13 @@ export type Enveloppe = {
   // (1er jour du mois, ex. "2026-08-01"), indépendant de dateFixe — permet
   // de recevoir un salaire le 28 juillet mais de le compter pour août.
   moisComptage?: string;
+  // Mode espace partagé : cette catégorie est-elle visible du partenaire
+  // (vue "Partagé" d'Aperçu/Budget) ? Réglable uniquement via la modale
+  // "Gérer mes catégories partagées" (app/profil.tsx) — jamais déduit d'une
+  // transaction individuelle (cf. RÈGLE dans la migration
+  // 20260831150000_espace_partage_partage_par_categorie.sql). `false` par
+  // défaut (colonne DB par défaut à false).
+  partage?: boolean;
 };
 
 export type PaiementHistorique = {
@@ -409,6 +416,7 @@ type EnveloppeRow = {
   repete_chaque_mois: boolean | null;
   afficher_dans_planning: boolean | null;
   mois_comptage: string | null;
+  partage: boolean | null;
 };
 
 function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
@@ -426,6 +434,7 @@ function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
     repeteChaqueMois: l.repete_chaque_mois ?? undefined,
     afficherDansPlanning: l.afficher_dans_planning ?? undefined,
     moisComptage: l.mois_comptage ?? undefined,
+    partage: l.partage ?? false,
   };
 }
 
@@ -464,6 +473,7 @@ function enveloppeVersColonnes(e: Omit<Enveloppe, "id">) {
     repete_chaque_mois: e.repeteChaqueMois ?? null,
     afficher_dans_planning: e.afficherDansPlanning ?? null,
     mois_comptage: e.moisComptage ?? null,
+    partage: e.partage ?? false,
   };
 }
 
@@ -471,6 +481,7 @@ function enveloppesEgales(a: Enveloppe, b: Enveloppe): boolean {
   return (
     a.nom === b.nom &&
     a.depense === b.depense &&
+    !!a.partage === !!b.partage &&
     a.budget === b.budget &&
     a.couleur === b.couleur &&
     a.recurrente === b.recurrente &&

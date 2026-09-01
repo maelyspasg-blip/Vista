@@ -118,6 +118,11 @@ export type EnveloppePartenaire = {
   payee?: boolean;
   repeteChaqueMois?: boolean;
   moisComptage?: string;
+  // Le partenaire a-t-il lui-même marqué CETTE catégorie "Commun" ? Affiché
+  // en lecture seule (jamais modifiable depuis mon compte, RLS UPDATE reste
+  // strictement "own") — sert uniquement à choisir le bon badge pour une
+  // catégorie du partenaire non fusionnée avec une des miennes.
+  partage?: boolean;
 };
 
 export type TransactionPartenaire = {
@@ -268,7 +273,35 @@ export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
     }
     if (!mesMembres || mesMembres.length === 0) return null;
 
-    const espaceId = mesMembres[0].espace_id;
+    // RÈGLE À NE JAMAIS CASSER — PRÉFÉRER LA LIAISON PERMANENTE, JAMAIS "LE
+    // PREMIER TROUVÉ" : si l'utilisateur a plusieurs lignes membres_espace
+    // (cas normalement rare — espace orphelin pas nettoyé, ancien essai
+    // resté en base...), prendre le premier au hasard pouvait renvoyer un
+    // vieil espace expiré/abandonné plutôt que la vraie liaison active.
+    // Un espace "permanent" a son expire_at posé à 2099-12-31 par
+    // desactiver_expiration_espace() dès qu'un 2e membre rejoint (migration
+    // 20260831140000) — on le préfère explicitement s'il existe.
+    let espaceId = mesMembres[0].espace_id;
+    if (mesMembres.length > 1) {
+      const espaceIds = mesMembres.map((m) => m.espace_id);
+      const { data: espacesRows, error: erreurEspaces } = await supabase
+        .from("espaces_partages")
+        .select("id, expire_at")
+        .in("id", espaceIds);
+
+      if (erreurEspaces) {
+        console.error(
+          "Supabase select espaces_partages (getMembreEspace, désambiguïsation) a échoué :",
+          erreurEspaces,
+        );
+      } else {
+        const espacePermanent = (espacesRows ?? []).find(
+          (e) => new Date(e.expire_at).getFullYear() >= 2099,
+        );
+        if (espacePermanent) espaceId = espacePermanent.id;
+      }
+    }
+
     const { data: tousLesMembres, error: erreurTousLesMembres } =
       await supabase
         .from("membres_espace")
@@ -363,52 +396,32 @@ export async function quitterEspacePartage(): Promise<boolean> {
   }
 }
 
-// RÈGLE À NE JAMAIS CASSER — 'commun' EST UNE BARRIÈRE D'ACCÈS, JAMAIS UN
-// SIMPLE FILTRE D'AFFICHAGE : la policy RLS (enveloppes_select_espace_partage/
-// transactions_select_espace_partage, cf. migration 20260831120000) ne
-// laisse de toute façon jamais passer une ligne 'personnel' d'un autre
-// utilisateur — mais le filtre `.eq("attribue_a", "commun")` ci-dessous est
-// posé explicitement EN PLUS, en défense en profondeur (même principe que
-// le filtre user_id explicite déjà utilisé partout ailleurs dans l'app,
-// cf. RÈGLE DE SÉCURITÉ dans app/store.ts) : jamais compter sur RLS comme
-// seule ligne de défense, même quand elle est censée déjà suffire.
+// RÈGLE À NE JAMAIS CASSER — ACCÈS COMPLET ENTRE MEMBRES D'UN MÊME ESPACE,
+// DÉCISION EXPLICITE DE L'UTILISATEUR (confirmée via question posée avant
+// cette version) : une fois deux comptes liés, chacun voit TOUTES les
+// catégories ET TOUTES les transactions de l'autre — `enveloppes.partage`
+// n'est plus une barrière d'ACCÈS, seulement une préférence d'AFFICHAGE
+// (quel badge — Commun/Moi/[Prénom] — montrer sur une carte, cf.
+// app/(tabs)/index.tsx et budget.tsx). Ceci REMPLACE le modèle
+// "attribue_a='commun' uniquement" choisi à l'étape 3 de ce chantier :
+// cette restriction précédente a été explicitement levée, voir la policy
+// RLS correspondante (migration 20260831160000) qui n'exige plus
+// `partage = true`, seulement `partage_un_espace_avec(user_id)`.
 //
-// Charge les enveloppes ET transactions marquées 'commun' d'un AUTRE
-// membre du même espace partagé — tableaux vides si aucune donnée
-// partagée ou en cas d'erreur (jamais de throw, cf. RÈGLE en tête de
-// fichier). Lecture seule : ce module n'expose aucune fonction pour
-// modifier les données d'un autre utilisateur, les policies RLS
-// correspondantes (INSERT/UPDATE/DELETE) restent strictement "own" côté
-// base de toute façon.
+// Charge TOUTES les enveloppes et transactions d'un AUTRE membre du même
+// espace partagé — tableaux vides si l'espace n'a pas encore de données ou
+// en cas d'erreur (jamais de throw, cf. RÈGLE en tête de fichier). Lecture
+// seule : ce module n'expose aucune fonction pour modifier les données
+// d'un autre utilisateur, les policies RLS correspondantes (INSERT/UPDATE/
+// DELETE) restent strictement "own" côté base de toute façon.
 export async function chargerDonneesPartenaire(
   partenaireId: string,
 ): Promise<DonneesPartenaire> {
   try {
-    // DEBUG TEMPORAIRE — à retirer une fois le bug de vue "Partagé"
-    // diagnostiqué.
-    console.log("[chargerDonneesPartenaire] appel pour:", partenaireId);
-    const [
-      { data: enveloppesData, error: erreurEnveloppes },
-      { data: transactionsData, error: erreurTransactions },
-    ] = await Promise.all([
-      supabase
-        .from("enveloppes")
-        .select("*")
-        .eq("user_id", partenaireId)
-        .eq("attribue_a", "commun"),
-      supabase
-        .from("transactions")
-        .select("*")
-        .eq("user_id", partenaireId)
-        .eq("attribue_a", "commun"),
-    ]);
-
-    // DEBUG TEMPORAIRE — idem.
-    console.log(
-      "[chargerDonneesPartenaire] résultat enveloppes:",
-      enveloppesData,
-      erreurEnveloppes,
-    );
+    const { data: enveloppesData, error: erreurEnveloppes } = await supabase
+      .from("enveloppes")
+      .select("*")
+      .eq("user_id", partenaireId);
 
     if (erreurEnveloppes) {
       console.error(
@@ -416,6 +429,32 @@ export async function chargerDonneesPartenaire(
         erreurEnveloppes,
       );
     }
+
+    const enveloppes = (enveloppesData ?? []).map((e) => ({
+      id: e.id,
+      nom: e.nom,
+      depense: e.depense,
+      budget: e.budget,
+      couleur: e.couleur,
+      type: e.type,
+      recurrente: !!e.recurrente,
+      dateFixe: e.date_fixe ?? undefined,
+      payee: e.payee ?? undefined,
+      repeteChaqueMois: e.repete_chaque_mois ?? undefined,
+      moisComptage: e.mois_comptage ?? undefined,
+      partage: e.partage ?? false,
+    }));
+
+    if (enveloppes.length === 0) {
+      return { enveloppes: [], transactions: [] };
+    }
+
+    const { data: transactionsData, error: erreurTransactions } =
+      await supabase
+        .from("transactions")
+        .select("*")
+        .eq("user_id", partenaireId);
+
     if (erreurTransactions) {
       console.error(
         "Supabase select transactions (chargerDonneesPartenaire) a échoué :",
@@ -424,19 +463,7 @@ export async function chargerDonneesPartenaire(
     }
 
     return {
-      enveloppes: (enveloppesData ?? []).map((e) => ({
-        id: e.id,
-        nom: e.nom,
-        depense: e.depense,
-        budget: e.budget,
-        couleur: e.couleur,
-        type: e.type,
-        recurrente: !!e.recurrente,
-        dateFixe: e.date_fixe ?? undefined,
-        payee: e.payee ?? undefined,
-        repeteChaqueMois: e.repete_chaque_mois ?? undefined,
-        moisComptage: e.mois_comptage ?? undefined,
-      })),
+      enveloppes,
       transactions: (transactionsData ?? []).map((t) => ({
         id: t.id,
         nom: t.nom,

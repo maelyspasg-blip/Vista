@@ -53,7 +53,7 @@ import { genererInsightsPeriode } from "../../utils/tendancesPeriode";
 // demande explicite. Le nom _COMPLETS reste pour éviter de renommer tous
 // les usages existants (LABEL_MOIS_ACTUEL, "Variation d'un mois à
 // l'autre", etc.), pas parce qu'il coexiste encore avec une version courte.
-import { estDansMois, MOIS_LABELS as MOIS_LABELS_COMPLETS } from "../../utils/exportExcel";
+import { MOIS_LABELS as MOIS_LABELS_COMPLETS } from "../../utils/exportExcel";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { useGuest } from "../GuestContext";
 import { bloquerSiInvite } from "../guestGate";
@@ -1201,13 +1201,14 @@ export default function Analytics() {
 
   // "Répartition" empilée par personne — regroupée par NOM de catégorie
   // (les deux comptes ont des enveloppes distinctes, jamais le même id).
-  // RÈGLE — MÊME PRIORITÉ "COMMUN" QUE LES BADGES D'APERÇU : une dépense
-  // 'commun' compte dans le segment "Commun", jamais "Moi", même si c'est
-  // moi qui l'ai payée — cf. même RÈGLE dans app/(tabs)/index.tsx. Les
-  // dépenses du partenaire chargées ici sont TOUJOURS 'commun' (cf.
-  // utils/espacePartage.ts), donc n'alimentent jamais le segment violet
-  // "partenaire" en pratique — gardé dans le type pour rester correct si la
-  // portée des données visibles change un jour.
+  // RÈGLE À NE JAMAIS CASSER — NIVEAU ENVELOPPE, PAS TRANSACTION : le
+  // partage se décide par catégorie (enveloppes.partage), jamais par
+  // transaction individuelle — même bascule que app/(tabs)/index.tsx (cf.
+  // RÈGLE là-bas). Seules MES enveloppes `partage = true` entrent dans ce
+  // calcul (jamais toutes mes catégories actives comme avant). Une
+  // catégorie du même nom des deux côtés (fusion) bascule tout son montant
+  // dans le segment "Commun", jamais moitié "Moi" moitié "[Prénom]" — même
+  // priorité que le badge "Commun" d'Aperçu/Budget.
   type SegmentRepartitionPartagee = {
     nom: string;
     couleur: string;
@@ -1219,46 +1220,52 @@ export default function Analytics() {
   const repartitionParPersonne: SegmentRepartitionPartagee[] = (() => {
     if (vueActive !== "partage") return [];
     const parNom = new Map<string, SegmentRepartitionPartagee>();
-    const enveloppesMoiParId = new Map(
-      objStore.enveloppes.map((e) => [e.id, e]),
-    );
-    objStore.transactions
-      .filter((t) => estDansMois(t.date, MOIS_ACTUEL, ANNEE_ACTUELLE))
-      .forEach((t) => {
-        const env = enveloppesMoiParId.get(t.enveloppeId);
-        if (!env || env.type === "Entrée") return;
-        const ligne = parNom.get(env.nom) ?? {
-          nom: env.nom,
-          couleur: env.couleur,
+    objStore.enveloppes
+      .filter(
+        (e) =>
+          e.type !== "Entrée" &&
+          e.partage &&
+          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+      )
+      .forEach((e) => {
+        const ligne = parNom.get(e.nom) ?? {
+          nom: e.nom,
+          couleur: e.couleur,
           moi: 0,
           partenaire: 0,
           commun: 0,
           total: 0,
         };
-        if (t.attribueA === "commun") ligne.commun += t.montant;
-        else ligne.moi += t.montant;
-        ligne.total += t.montant;
-        parNom.set(env.nom, ligne);
+        ligne.moi += e.depense;
+        ligne.total += e.depense;
+        parNom.set(e.nom, ligne);
       });
-    const enveloppesPartenaireParId = new Map(
-      enveloppesPartenaireStats.map((e) => [e.id, e]),
-    );
-    transactionsPartenaireStats.forEach((t) => {
-      const env = enveloppesPartenaireParId.get(t.enveloppeId);
-      if (!env || env.type === "Entrée") return;
-      const ligne = parNom.get(env.nom) ?? {
-        nom: env.nom,
-        couleur: env.couleur,
-        moi: 0,
-        partenaire: 0,
-        commun: 0,
-        total: 0,
-      };
-      ligne.commun += t.montant;
-      ligne.total += t.montant;
-      parNom.set(env.nom, ligne);
-    });
-    return Array.from(parNom.values()).sort((a, b) => b.total - a.total);
+    enveloppesPartenaireStats
+      .filter(
+        (e) =>
+          e.type !== "Entrée" &&
+          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+      )
+      .forEach((e) => {
+        const ligne = parNom.get(e.nom) ?? {
+          nom: e.nom,
+          couleur: e.couleur,
+          moi: 0,
+          partenaire: 0,
+          commun: 0,
+          total: 0,
+        };
+        ligne.partenaire += e.depense;
+        ligne.total += e.depense;
+        parNom.set(e.nom, ligne);
+      });
+    return Array.from(parNom.values())
+      .map((ligne) =>
+        ligne.moi > 0 && ligne.partenaire > 0
+          ? { ...ligne, commun: ligne.moi + ligne.partenaire, moi: 0, partenaire: 0 }
+          : ligne,
+      )
+      .sort((a, b) => b.total - a.total);
   })();
 
   // Répartition par personne, reformatée pour GraphiqueBarresEmpilees — MÊME
