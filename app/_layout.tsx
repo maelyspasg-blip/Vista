@@ -10,6 +10,7 @@ import {
   TailleTexte,
   useAccessibilite,
 } from "./AccessibiliteContext";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { EspacePartageProvider } from "./EspacePartageContext";
 import { GuestContext } from "./GuestContext";
 import { JoursFeriesProvider } from "./JoursFeriesContext";
@@ -72,7 +73,22 @@ function Navigateur() {
   );
 }
 
+// RÈGLE À NE JAMAIS CASSER — ErrorBoundary AU PLUS HAUT NIVEAU POSSIBLE :
+// enveloppe RootLayoutInterne DE L'EXTÉRIEUR (pas juste son JSX de retour)
+// pour capturer aussi une exception levée pendant SES PROPRES hooks/effets
+// de rendu (useState/useEffect/etc. ci-dessous), pas seulement dans les
+// providers qu'il monte. Cf. RÈGLE détaillée sur la portée réelle de ce
+// composant dans app/ErrorBoundary.tsx — ne protège pas contre un crash
+// natif au démarrage (hors de portée de React).
 export default function RootLayout() {
+  return (
+    <ErrorBoundary>
+      <RootLayoutInterne />
+    </ErrorBoundary>
+  );
+}
+
+function RootLayoutInterne() {
   const router = useRouter();
   const segments = useSegments();
   const [session, setSession] = useState<Session | null>(null);
