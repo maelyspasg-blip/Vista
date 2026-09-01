@@ -696,6 +696,17 @@ const SEUIL_OBJECTIF_PROCHE_MIN = 75; // %
 const SEUIL_OBJECTIF_PROCHE_MAX = 95; // %
 const NB_MOIS_MEILLEUR_MOIS = 3;
 const SEUIL_JOUR_MIN_MEILLEUR_MOIS = 5; // évite un "meilleur mois" trivial dès le 1er jour
+// RÈGLE À NE JAMAIS CASSER — DÉLAI MINIMUM AVANT COMPARAISON AU MOIS
+// PRÉCÉDENT : demande du 2026-09-01 — un conseil qui compare `e.depense`/
+// resteEstime du mois EN COURS (encore partiel, forcément petit tôt dans le
+// mois) à une donnée du mois précédent OU d'une moyenne historique (mois
+// COMPLETS) produit un ratio artificiellement énorme et non représentatif
+// avant que suffisamment de jours se soient écoulés (ex: "baisse de 95%"
+// le 2 du mois, simplement parce que rien n'a encore été dépensé). Distinct
+// de SEUIL_JOUR_MIN_MEILLEUR_MOIS ci-dessus (protection différente, déjà
+// bien calibrée pour sa propre famille "meilleur mois", non concernée par
+// cette demande) : ne pas fusionner les deux seuils.
+const SEUIL_JOUR_COMPARAISON_MOIS_PRECEDENT = 10;
 
 // --- Textes des familles à arc complet (ajouterSituationSuivie) -----------
 
@@ -900,6 +911,14 @@ function detecterSituations(
   const jourActuel = new Date().getDate();
   const joursRestantsDansMois = joursDansMois(moisActuel, anneeActuelle) - jourActuel;
   const ratioReste = disponibleEffectif > 0 ? resteEstime / disponibleEffectif : 0;
+  // RÈGLE À NE JAMAIS CASSER — cf. SEUIL_JOUR_COMPARAISON_MOIS_PRECEDENT plus
+  // haut : gate TOUTE situation qui compare une donnée du mois EN COURS
+  // (encore partielle) à une donnée du mois précédent ou à une moyenne
+  // historique de mois complets — jamais une famille qui ne fait QUE
+  // comparer des mois déjà archivés entre eux, ni une alerte sur le mois en
+  // cours seul (budget dépassé, déficit projeté...), qui reste légitime dès
+  // le 1er du mois.
+  const comparaisonMoisPrecedentDisponible = jourActuel >= SEUIL_JOUR_COMPARAISON_MOIS_PRECEDENT;
 
   const { mois: moisPrec, annee: anneePrec } = moisPrecedent(moisActuel, anneeActuelle);
   const snapshotMoisPrecedent = historiquesMois.find(
@@ -1018,7 +1037,7 @@ function detecterSituations(
   }
 
   // === Compensation entre catégories ==========================================
-  if (snapshotMoisPrecedent) {
+  if (snapshotMoisPrecedent && comparaisonMoisPrecedentDisponible) {
     const deltasCategories = enveloppesVariables
       .filter((e) => !categoriesDejaCitees.has(e.id))
       .map((e) => {
@@ -1049,7 +1068,7 @@ function detecterSituations(
   }
 
   // === Deux catégories qui évoluent ensemble ==================================
-  if (snapshotMoisPrecedent) {
+  if (snapshotMoisPrecedent && comparaisonMoisPrecedentDisponible) {
     const hausseCorrelees = enveloppesVariables
       .filter((e) => e.depense >= MONTANT_MIN_CATEGORIE && !categoriesDejaCitees.has(e.id))
       .map((e) => {
@@ -1076,39 +1095,49 @@ function detecterSituations(
   }
 
   // === Tendance individuelle : hausse (arc complet, projection fin de mois) ===
-  const candidatsTendance = enveloppesVariables
-    .filter((e) => !categoriesDejaCitees.has(e.id))
-    .map((e) => {
-      const moyenne = moyenneRecenteCategorie(e.id);
-      const rythmeJournalier = jourActuel > 0 ? e.depense / jourActuel : 0;
-      const projection = rythmeJournalier * joursDansMois(moisActuel, anneeActuelle);
-      const pctProjete = moyenne > 0 ? ((projection - moyenne) / moyenne) * 100 : 0;
-      const situationId = `tendance:${e.id}`;
-      const estActive = moyenne >= MONTANT_MIN_CATEGORIE && pctProjete >= SEUIL_HAUSSE_CATEGORIE * 100;
-      return { e, pctProjete, estActive, situationId };
-    })
-    .filter(({ estActive, situationId }) => estActive || etatsPrecedents[situationId] !== undefined)
-    .sort((a, b) => b.pctProjete - a.pctProjete);
-  if (candidatsTendance.length > 0) {
-    const { e, pctProjete, estActive, situationId } = candidatsTendance[0];
-    categoriesDejaCitees.add(e.id);
-    ajouterSituationSuivie(situations, etatsAJour, {
-      situationId,
-      estActive,
-      valeurGravite: Math.max(0, pctProjete),
-      vocabulaire: "observation",
-      priorite: "evolutive",
-      etatsPrecedents,
-      aujourdHui,
-      texteParEtat: (etat) => texteTendanceCategorie(e, pctProjete, etat),
-      categorieId: e.id,
-      pourcentagesAffiches: [Math.round(Math.max(0, pctProjete))],
-      compteurResolutions,
-    });
+  // RÈGLE : bloc entier sauté (pas juste estActive forcé à false) avant
+  // SEUIL_JOUR_COMPARAISON_MOIS_PRECEDENT — situation "arc complet" suivie
+  // dans etatsAJour (ajouterSituationSuivie) : passer estActive=false alors
+  // qu'un mois précédent l'avait laissée CONFIRMÉE déclencherait à tort une
+  // transition RESOLU ("c'est corrigé !"), alors que la vraie raison est
+  // juste "pas encore assez de jours écoulés pour la recalculer" — sauter
+  // l'appel entier laisse etatsAJour intact (recopié de etatsPrecedents en
+  // tête de fonction), donc simplement "en pause" jusqu'au 10 du mois.
+  if (comparaisonMoisPrecedentDisponible) {
+    const candidatsTendance = enveloppesVariables
+      .filter((e) => !categoriesDejaCitees.has(e.id))
+      .map((e) => {
+        const moyenne = moyenneRecenteCategorie(e.id);
+        const rythmeJournalier = jourActuel > 0 ? e.depense / jourActuel : 0;
+        const projection = rythmeJournalier * joursDansMois(moisActuel, anneeActuelle);
+        const pctProjete = moyenne > 0 ? ((projection - moyenne) / moyenne) * 100 : 0;
+        const situationId = `tendance:${e.id}`;
+        const estActive = moyenne >= MONTANT_MIN_CATEGORIE && pctProjete >= SEUIL_HAUSSE_CATEGORIE * 100;
+        return { e, pctProjete, estActive, situationId };
+      })
+      .filter(({ estActive, situationId }) => estActive || etatsPrecedents[situationId] !== undefined)
+      .sort((a, b) => b.pctProjete - a.pctProjete);
+    if (candidatsTendance.length > 0) {
+      const { e, pctProjete, estActive, situationId } = candidatsTendance[0];
+      categoriesDejaCitees.add(e.id);
+      ajouterSituationSuivie(situations, etatsAJour, {
+        situationId,
+        estActive,
+        valeurGravite: Math.max(0, pctProjete),
+        vocabulaire: "observation",
+        priorite: "evolutive",
+        etatsPrecedents,
+        aujourdHui,
+        texteParEtat: (etat) => texteTendanceCategorie(e, pctProjete, etat),
+        categorieId: e.id,
+        pourcentagesAffiches: [Math.round(Math.max(0, pctProjete))],
+        compteurResolutions,
+      });
+    }
   }
 
   // === Tendance individuelle : baisse (bonne nouvelle, ponctuelle) ============
-  if (snapshotMoisPrecedent) {
+  if (snapshotMoisPrecedent && comparaisonMoisPrecedentDisponible) {
     const candidatBaisse = enveloppesVariables
       .filter((e) => !categoriesDejaCitees.has(e.id))
       .map((e) => {
@@ -1331,7 +1360,16 @@ function detecterSituations(
   }
 
   // === Marge qui se dégrade (arc complet) ==========================================
-  if (resteEstimePrecedent !== null && disponibleEffectif > 0) {
+  // RÈGLE : même raisonnement que "Tendance individuelle : hausse" plus
+  // haut — bloc entier sauté (jamais estActive forcé à false) pour ne pas
+  // déclencher à tort une RESOLU sur une situation "marge:global" déjà
+  // CONFIRMÉE simplement parce qu'on ne peut pas encore comparer au mois
+  // précédent.
+  if (
+    resteEstimePrecedent !== null &&
+    disponibleEffectif > 0 &&
+    comparaisonMoisPrecedentDisponible
+  ) {
     const ratioRestePrecedent = resteEstimePrecedent / disponibleEffectif;
     const degradation = ratioRestePrecedent - ratioReste;
     ajouterSituationSuivie(situations, etatsAJour, {
@@ -1350,7 +1388,16 @@ function detecterSituations(
   }
 
   // === Comportement global : tendance sur plusieurs mois ============================
-  if (derniersMoisArchives.length === NB_MOIS_MOYENNE_CATEGORIE) {
+  // RÈGLE : le sous-cas "comportement:degradation" est un arc complet suivi
+  // (ajouterSituationSuivie) — même raisonnement de bloc entier sauté que
+  // "Marge qui se dégrade" ci-dessus. resteEstime (mois en cours, encore
+  // partiel) intervient dans enAmelioration/enDegradation/retour_normale,
+  // donc comparaisonMoisPrecedentDisponible gate le bloc en entier plutôt
+  // que chaque branche séparément.
+  if (
+    derniersMoisArchives.length === NB_MOIS_MOYENNE_CATEGORIE &&
+    comparaisonMoisPrecedentDisponible
+  ) {
     const marges = derniersMoisArchives.map(margeSnapshot);
     const enAmelioration =
       marges[0] < marges[1] && marges[1] < marges[2] && resteEstime >= marges[2];

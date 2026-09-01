@@ -104,11 +104,28 @@ export default function TabLayout() {
   const objStore = useObjectifs();
 
   useEffect(() => {
-    const verifierEtat = () => {
+    // RÈGLE À NE JAMAIS CASSER — ARCHIVAGE TOUJOURS EN PREMIER, ATTENDU
+    // AVANT LES AUTRES VÉRIFICATIONS : les autres verifier* (échéances
+    // fixes, événements financiers, motifs récurrents) lisent/écrivent sur
+    // etat.enveloppes — les lancer AVANT que verifierArchivageMois() ait
+    // fini de rattraper un éventuel retard (snapshot + remise à zéro +
+    // reconduction des entrées récurrentes) les ferait tourner sur des
+    // données d'un mois précédent encore présentes, avec le risque qu'ils
+    // marquent une échéance "payée" ou créent un événement à partir de
+    // montants qui vont être écrasés une fraction de seconde plus tard par
+    // l'archivage. verifierArchivageMois() retourne maintenant sa Promise
+    // explicitement pour permettre cet ordre (les autres restent
+    // fire-and-forget, indépendants les uns des autres). Même raisonnement
+    // pour verifierIntegriteDonnees() (vérification d'intégrité
+    // Variable-only, cf. RÈGLE dans app/store.ts) : attendue juste après
+    // l'archivage, jamais avant, pour ne comparer depense aux transactions
+    // QUE sur le mois déjà rattrapé.
+    const verifierEtat = async () => {
+      await objStore.verifierArchivageMois();
+      await objStore.verifierIntegriteDonnees();
       objStore.verifierEcheancesFixes();
       objStore.verifierVersementsObjectifs();
       objStore.verifierEvenementsFinanciers();
-      objStore.verifierArchivageMois();
       objStore.verifierMotifsRecurrents();
     };
 
@@ -122,7 +139,7 @@ export default function TabLayout() {
         objStore.chargerHistoriquePaiements(),
         objStore.chargerHistoriquesMois(),
       ]);
-      verifierEtat();
+      await verifierEtat();
     })();
 
     const intervalle = setInterval(verifierEtat, INTERVALLE_VERIFICATION_MS);

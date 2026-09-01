@@ -4485,7 +4485,14 @@ export default function Analytics() {
                               actif && styles.chipTexteActif,
                             ]}
                           >
-                            {formaterPeriode(m)}
+                            {/* "Mois en cours" plutôt que "1 mois" (seul ce
+                                chip-ci, pas formaterPeriode globalement qui
+                                sert aussi au picker "PÉRIODE" plus haut,
+                                lignes 255/3037) : plus explicite pour
+                                l'utilisateur que la période "1 mois" du
+                                graphique de flux correspond au mois en
+                                cours, pas à une fenêtre glissante. */}
+                            {m === 1 ? "Mois en cours" : formaterPeriode(m)}
                           </Text>
                         </TouchableOpacity>
                       );

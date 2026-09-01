@@ -36,7 +36,6 @@ import { calculerScrollAutoTutoriel } from "../../utils/tutorielScroll";
 import { BarreProgression, useLargeurAnimee } from "../BarreProgression";
 import { NombreAnime } from "../NombreAnime";
 import { CocheAnimee } from "../CocheAnimee";
-import { SegmentHachure } from "../SegmentHachure";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { Enveloppe, Objectif, useObjectifs } from "../store";
@@ -272,6 +271,10 @@ const ACCESSORY_ID = "numericDone";
 export default function Dashboard() {
   const objStore = useObjectifs();
   const estTablette = useEstTablette();
+  // RÈGLE À NE JAMAIS CASSER — height FIXE POUR "Modifier la catégorie",
+  // MÊME CAUSE/CORRECTIF QUE "Ton bilan" (app/(tabs)/analytics.tsx,
+  // HAUTEUR_MODALE_TON_BILAN) : voir RÈGLE au site d'appel plus bas.
+  const HAUTEUR_MODALE_ENVELOPPE = Dimensions.get("window").height * 0.88;
   const { estPremium, simulerNonPremium } = usePremium();
   const { isGuest } = useGuest();
   // RÈGLE À NE JAMAIS CASSER — donneesPartenaire/chargementPartenaire
@@ -595,12 +598,13 @@ export default function Dashboard() {
   // montant reporté au mois suivant via "Reporter le reste non dépensé au
   // mois prochain" (qui ne reporte que les flux déjà réalisés, voir
   // archiverMoisActuelInterne dans store.ts) — voir "Détail des calculs".
-  // ⚠️ Doit toujours produire le segment "Dépense prévue" (hachures oranges)
+  // ⚠️ Doit toujours produire le segment "Dépense prévue" (peach éclairci)
   // sur la jauge "Reste estimé" ci-dessous dès que totalDepensePrevue est >
-  // 0 — voir `{totalDepensePrevue > 0 && <SegmentHachure ...>}` plus bas (x2
-  // : barre + légende). Si le segment semble manquer alors que ce total est
-  // bien > 0, le bug est côté rendu SVG natif (cf. SegmentHachure.tsx), pas
-  // ici.
+  // 0 — voir `{totalDepensePrevue > 0 && <Animated.View ... />}` plus bas
+  // (x2 : barre + légende). Segment volontairement une simple Animated.View
+  // de couleur (jamais un Svg mesuré via onLayout, cf. RÈGLE au site
+  // d'affichage) : un ancien rendu via SegmentHachure (hachures SVG)
+  // pouvait rester invisible sur device malgré ce total > 0.
   // RÈGLE À NE JAMAIS CASSER : SEULE source de ces 4 valeurs — ne jamais
   // recalculer resteEstime/disponibleEffectif/totalDepenseEnveloppes/
   // totalDepensePrevue localement ailleurs (ex. le bloc coach de Stats,
@@ -1927,14 +1931,35 @@ export default function Dashboard() {
                 />
               )
             )}
-            {/* Segment "Dépense prévue" — ne jamais retirer cette condition
-                ni le SegmentHachure : cf. commentaire sur totalDepensePrevue
-                plus haut et la règle dans SegmentHachure.tsx (dimensions Svg
-                toujours numériques, jamais "100%"). */}
+            {/* Segment "Dépense prévue" — ne jamais retirer cette condition :
+                cf. commentaire sur totalDepensePrevue plus haut. Couleur
+                pleine mais éclaircie (opacity) plutôt que le SegmentHachure
+                (SVG) utilisé avant : RÈGLE À NE JAMAIS CASSER — ce segment
+                doit rester une simple Animated.View de couleur, JAMAIS un
+                Svg mesuré via onLayout. Les segments "Dépensé"/"Épargne"
+                voisins (Animated.View + width interpolée, sans mesure
+                intermédiaire) s'affichent de façon fiable ; SegmentHachure
+                nécessitait un aller-retour onLayout AVANT de pouvoir
+                dessiner quoi que ce soit (Svg exige des dimensions
+                numériques, jamais un pourcentage) — sur un vrai appareil,
+                ce round-trip pouvait ne jamais aboutir pour une largeur
+                pilotée par Animated (useNativeDriver: false, qui mute la
+                vue nativement sans toujours redéclencher onLayout), laissant
+                le segment invisible malgré un totalDepensePrevue et une
+                largeur calculée corrects — symptôme rapporté à plusieurs
+                reprises malgré un calcul déjà vérifié correct. Un simple
+                remplissage plus clair élimine cette classe de bug : plus
+                besoin de mesurer quoi que ce soit avant de s'afficher. */}
             {totalDepensePrevue > 0 && (
-              <SegmentHachure
-                style={[styles.barSegment, { width: largeurPrevuAnimee }]}
-                couleur={C.peach}
+              <Animated.View
+                style={[
+                  styles.barSegment,
+                  {
+                    width: largeurPrevuAnimee,
+                    backgroundColor: C.peach,
+                    opacity: 0.35,
+                  },
+                ]}
               />
             )}
           </View>
@@ -2020,10 +2045,16 @@ export default function Dashboard() {
             )}
             {/* Entrée de légende du segment "Dépense prévue" — garder en
                 phase avec le segment de la barre ci-dessus (même condition,
-                même totalDepensePrevue). */}
+                même totalDepensePrevue, même style plus clair plutôt que
+                SegmentHachure — cf. RÈGLE sur le segment principal). */}
             {totalDepensePrevue > 0 && (
               <View style={styles.heroLegendeItem}>
-                <SegmentHachure style={styles.heroLegendeDot} couleur={C.peach} />
+                <View
+                  style={[
+                    styles.heroLegendeDot,
+                    { backgroundColor: C.peach, opacity: 0.35 },
+                  ]}
+                />
                 <Text
                   style={[
                     styles.heroSub,
@@ -2782,7 +2813,22 @@ export default function Dashboard() {
             <View
               style={[
                 styles.modalCard,
-                { backgroundColor: C.carte, paddingHorizontal: 0 },
+                {
+                  backgroundColor: C.carte,
+                  paddingHorizontal: 0,
+                  // RÈGLE À NE JAMAIS CASSER — height FIXE, JAMAIS maxHeight
+                  // SEUL AVEC UN ENFANT flex:1 : bug corrigé (même cause,
+                  // même correctif que "Ton bilan" dans
+                  // app/(tabs)/analytics.tsx, cf. RÈGLE là-bas) —
+                  // styles.modalCard n'a qu'un maxHeight ("90%"), pas de
+                  // height propre ; un ScrollView enfant en flex:1 (juste en
+                  // dessous) n'a alors aucune base de hauteur à partir de
+                  // laquelle se dimensionner et s'effondre, laissant la
+                  // modale n'occuper qu'une bande en bas de l'écran au lieu
+                  // du formulaire complet. Une height CALCULÉE (pas
+                  // pourcentage CSS) donne cette base.
+                  height: HAUTEUR_MODALE_ENVELOPPE,
+                },
                 styleModaleTablette(estTablette),
               ]}
             >

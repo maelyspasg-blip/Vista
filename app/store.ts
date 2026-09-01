@@ -651,6 +651,10 @@ function appliquerEnveloppes(
       signalerErreurSync(
         "Une anomalie a empêché la remise à zéro de plusieurs catégories — anciennes valeurs conservées.",
       );
+      journaliserOperationAudit("remise_a_zero_bloquee", {
+        nbSuspectes: remisesAZeroSuspectes.length,
+        noms: remisesAZeroSuspectes.map((e) => e.nom),
+      });
       const idsSuspects = new Set(remisesAZeroSuspectes.map((e) => e.id));
       nouvellesEnveloppes = nouvellesEnveloppes.map((n) => {
         if (!idsSuspects.has(n.id)) return n;
@@ -679,6 +683,11 @@ function appliquerEnveloppes(
       `[store] appliquerEnveloppes : suppression de ${enveloppesASupprimer.length} enveloppe(s) — ${enveloppesASupprimer.map((e) => e.nom).join(", ")}.`,
     );
     sauvegarderEnveloppesSupprimees(enveloppesASupprimer);
+    journaliserOperationAudit("suppression_enveloppes", {
+      nb: enveloppesASupprimer.length,
+      ids: enveloppesASupprimer.map((e) => e.id),
+      noms: enveloppesASupprimer.map((e) => e.nom),
+    });
   }
 
   enveloppesASupprimer.forEach((e) => {
@@ -1104,26 +1113,49 @@ async function enregistrerSnapshotMoisSupabase(params: {
 
     const snapshotId: string = data.id;
 
-    // RÈGLE À NE JAMAIS CASSER — PURGE AVANT RÉINSERTION : conséquence
-    // directe de l'upsert ci-dessus — si ce snapshot existait déjà (retry
-    // après la course décrite plus haut), snapshot_enveloppes/
-    // snapshot_objectifs contiennent déjà SES détails pour ce snapshotId ;
-    // les réinsérer sans purge créerait des lignes en double (ces deux
-    // tables restent de simples .insert(), jamais upsertées elles-mêmes —
-    // purger puis réinsérer est plus simple qu'un upsert par ligne détail,
-    // qui n'a pas de clé naturelle stable). Sans effet si le snapshot est
-    // réellement nouveau (DELETE sur 0 ligne).
-    await supabase
+    // RÈGLE À NE JAMAIS CASSER — INSÉRER PUIS SEULEMENT ENSUITE SUPPRIMER
+    // L'ANCIEN, JAMAIS L'INVERSE (point 2/4 de la RÈGLE "Sécurité maximale"
+    // du 2026-09-01) : l'ancienne version faisait DELETE puis INSERT — un
+    // échec réseau/Supabase entre les deux (delete réussi, insert échoué)
+    // laissait le snapshot sans AUCUN détail, silencieusement, sans
+    // possibilité de rollback puisque l'ancien contenu était déjà perdu.
+    // Corrigé : les anciennes lignes de détail sont conservées jusqu'à ce
+    // que les nouvelles soient insérées ET vérifiées (comptage exact) — à
+    // aucun instant un snapshot ayant déjà du détail ne se retrouve vide.
+    const { data: ancienesLignesEnv, error: erreurLectureEnv } = await supabase
       .from("snapshot_enveloppes")
-      .delete()
+      .select("id")
       .eq("snapshot_mois_id", snapshotId);
-    await supabase
-      .from("snapshot_objectifs")
-      .delete()
-      .eq("snapshot_mois_id", snapshotId);
+    if (erreurLectureEnv) {
+      console.error(
+        "[store] Lecture des lignes snapshot_enveloppes existantes a échoué :",
+        erreurLectureEnv,
+      );
+    }
+    const idsAnciennesLignesEnv = (ancienesLignesEnv ?? []).map((l) => l.id);
+
+    // RÈGLE À NE JAMAIS CASSER — PROTECTION CONTRE L'ÉCRASEMENT PAR DES
+    // DONNÉES MOINS COMPLÈTES : si un détail existe déjà pour ce snapshot
+    // avec PLUS de lignes que ce qu'on s'apprête à écrire, refuse
+    // l'opération ENTIÈRE plutôt que de risquer de remplacer un archivage
+    // complet par un partiel (ex: appel concurrent avec un etat.enveloppes
+    // pas encore complètement hydraté). Un nombre égal ou supérieur reste
+    // autorisé (retry légitime, cf. RÈGLE UPSERT plus haut).
+    if (
+      idsAnciennesLignesEnv.length > 0 &&
+      idsAnciennesLignesEnv.length > params.enveloppes.length
+    ) {
+      console.error(
+        `[store] Snapshot ${snapshotId} : ${idsAnciennesLignesEnv.length} ligne(s) de catégories déjà archivées, seulement ${params.enveloppes.length} nouvelle(s) fournie(s) — snapshot potentiellement incomplet, archivage annulé, rien n'a été modifié.`,
+      );
+      signalerErreurSync(
+        "Impossible d'archiver le mois : les données semblent incomplètes par rapport à un archivage déjà existant.",
+      );
+      return null;
+    }
 
     if (params.enveloppes.length > 0) {
-      const { error: erreurEnv } = await supabase
+      const { data: lignesInserees, error: erreurEnv } = await supabase
         .from("snapshot_enveloppes")
         .insert(
           params.enveloppes.map((e) => ({
@@ -1135,20 +1167,71 @@ async function enregistrerSnapshotMoisSupabase(params: {
             couleur: e.couleur,
             type: e.type,
           })),
-        );
-      if (erreurEnv) {
+        )
+        .select();
+      if (
+        erreurEnv ||
+        !lignesInserees ||
+        lignesInserees.length !== params.enveloppes.length
+      ) {
         console.error(
-          "Supabase insert snapshot_enveloppes a échoué :",
+          "Supabase insert snapshot_enveloppes a échoué ou incomplet :",
           erreurEnv,
+          `attendu=${params.enveloppes.length} inséré=${lignesInserees?.length ?? 0}`,
         );
         signalerErreurSync(
-          `Impossible d'archiver le détail des catégories : ${erreurEnv.message}`,
+          erreurEnv
+            ? `Impossible d'archiver le détail des catégories : ${erreurEnv.message}`
+            : "Impossible d'archiver le détail des catégories : insertion incomplète.",
         );
+        return null;
       }
+      if (idsAnciennesLignesEnv.length > 0) {
+        await supabase
+          .from("snapshot_enveloppes")
+          .delete()
+          .in("id", idsAnciennesLignesEnv);
+      }
+    } else if (idsAnciennesLignesEnv.length > 0) {
+      // Un détail existant avait des lignes, la nouvelle liste est vide :
+      // ne jamais vider un détail déjà archivé, cf. RÈGLE ci-dessus.
+      console.error(
+        `[store] Snapshot ${snapshotId} : ${idsAnciennesLignesEnv.length} ligne(s) déjà archivées, 0 nouvelle fournie — archivage annulé, rien n'a été modifié.`,
+      );
+      signalerErreurSync(
+        "Impossible d'archiver le mois : aucune catégorie à archiver alors qu'un archivage existant en contient.",
+      );
+      return null;
+    }
+
+    const { data: anciennesLignesObj, error: erreurLectureObj } =
+      await supabase
+        .from("snapshot_objectifs")
+        .select("id")
+        .eq("snapshot_mois_id", snapshotId);
+    if (erreurLectureObj) {
+      console.error(
+        "[store] Lecture des lignes snapshot_objectifs existantes a échoué :",
+        erreurLectureObj,
+      );
+    }
+    const idsAnciennesLignesObj = (anciennesLignesObj ?? []).map((l) => l.id);
+
+    if (
+      idsAnciennesLignesObj.length > 0 &&
+      idsAnciennesLignesObj.length > params.objectifs.length
+    ) {
+      console.error(
+        `[store] Snapshot ${snapshotId} : ${idsAnciennesLignesObj.length} objectif(s) déjà archivé(s), seulement ${params.objectifs.length} nouveau(x) fourni(s) — archivage annulé, rien n'a été modifié.`,
+      );
+      signalerErreurSync(
+        "Impossible d'archiver le mois : les objectifs semblent incomplets par rapport à un archivage déjà existant.",
+      );
+      return null;
     }
 
     if (params.objectifs.length > 0) {
-      const { error: erreurObj } = await supabase
+      const { data: lignesInserees, error: erreurObj } = await supabase
         .from("snapshot_objectifs")
         .insert(
           params.objectifs.map((o) => ({
@@ -1158,16 +1241,39 @@ async function enregistrerSnapshotMoisSupabase(params: {
             actuel: o.actuel,
             cible: o.cible,
           })),
-        );
-      if (erreurObj) {
+        )
+        .select();
+      if (
+        erreurObj ||
+        !lignesInserees ||
+        lignesInserees.length !== params.objectifs.length
+      ) {
         console.error(
-          "Supabase insert snapshot_objectifs a échoué :",
+          "Supabase insert snapshot_objectifs a échoué ou incomplet :",
           erreurObj,
+          `attendu=${params.objectifs.length} inséré=${lignesInserees?.length ?? 0}`,
         );
         signalerErreurSync(
-          `Impossible d'archiver le détail des objectifs : ${erreurObj.message}`,
+          erreurObj
+            ? `Impossible d'archiver le détail des objectifs : ${erreurObj.message}`
+            : "Impossible d'archiver le détail des objectifs : insertion incomplète.",
         );
+        return null;
       }
+      if (idsAnciennesLignesObj.length > 0) {
+        await supabase
+          .from("snapshot_objectifs")
+          .delete()
+          .in("id", idsAnciennesLignesObj);
+      }
+    } else if (idsAnciennesLignesObj.length > 0) {
+      // Liste d'objectifs vide légitime (compte sans objectif) : purge
+      // simplement l'ancien détail, contrairement aux enveloppes ci-dessus
+      // qui ne devraient jamais être vides pour un archivage réel.
+      await supabase
+        .from("snapshot_objectifs")
+        .delete()
+        .in("id", idsAnciennesLignesObj);
     }
 
     return snapshotId;
@@ -1180,6 +1286,112 @@ async function enregistrerSnapshotMoisSupabase(params: {
   }
 }
 
+// RÈGLE À NE JAMAIS CASSER — LOG D'AUDIT, JAMAIS UNE CONDITION DE SUCCÈS :
+// point 5 de la RÈGLE "Sécurité maximale" du 2026-09-01 — journalise les
+// opérations destructives (archivage, remise à zéro bloquée, suppression
+// d'enveloppes) dans public.audit_operations pour pouvoir reconstituer après
+// coup ce qui s'est passé en cas d'incident. Appelée APRÈS que l'opération a
+// réussi ou échoué, jamais avant, et jamais awaited par un appelant qui en
+// dépendrait pour continuer — un échec de journalisation ne doit JAMAIS
+// bloquer ni annuler l'opération qu'elle décrit. Aucune ligne de cette table
+// n'est jamais supprimée par l'app (cf. RLS de la migration
+// supabase/migrations/20260901090000_audit_operations.sql : select/insert
+// uniquement, aucune policy update/delete exposée).
+function journaliserOperationAudit(
+  operation: string,
+  details: Record<string, unknown>,
+): void {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("audit_operations")
+      .insert({ user_id: user.id, operation, details })
+      .then(({ error }) => {
+        if (error) {
+          console.error(
+            `[store] Journalisation d'audit "${operation}" a échoué :`,
+            error,
+          );
+        }
+      });
+  });
+}
+
+// RÈGLE À NE JAMAIS CASSER — SAUVEGARDE AVANT ARCHIVAGE, FILET DE SECOURS
+// MANUEL (PAS UNE RESTAURATION AUTOMATIQUE) : point 1 de la RÈGLE "Sécurité
+// maximale" du 2026-09-01, volontairement scopé à l'archivage mensuel
+// plutôt qu'à CHAQUE opération touchant depense (ajout/suppression de
+// transaction compris) — ce périmètre plus large toucherait quasiment tous
+// les points d'écriture de ce fichier pour un bénéfice marginal, puisque
+// archiverMoisActuelInterne ci-dessous n'applique désormais SA remise à
+// zéro qu'APRÈS validation complète du snapshot par
+// enregistrerSnapshotMoisSupabase (cf. RÈGLE là-bas) : il n'existe donc plus
+// de fenêtre où un échec en cours de route laisserait un état partiel à
+// restaurer automatiquement — l'opération soit s'exécute en entier, soit
+// n'a aucun effet local. Cette sauvegarde reste un filet de secours pour un
+// support/débogage manuel après coup, même logique que
+// sauvegarderEnveloppesSupprimees/sauvegarderObjectifsSupprimes plus haut
+// dans ce fichier : best-effort, ne bloque et ne conditionne jamais
+// l'archivage réel. Rotation : les 3 sauvegardes les plus récentes par
+// compte sont conservées, les plus anciennes purgées à chaque nouvel appel.
+const NB_BACKUPS_ARCHIVAGE_CONSERVES = 3;
+
+function cleBackupArchivage(userId: string, timestamp: number): string {
+  return `vista_backup_complet_${userId}_${timestamp}`;
+}
+
+async function purgerAnciensBackupsArchivage(userId: string): Promise<void> {
+  try {
+    const prefixe = `vista_backup_complet_${userId}_`;
+    const toutesLesCles = await AsyncStorage.getAllKeys();
+    const clesBackup = toutesLesCles
+      .filter((c) => c.startsWith(prefixe))
+      .sort((a, b) => Number(b.slice(prefixe.length)) - Number(a.slice(prefixe.length)));
+    const aSupprimer = clesBackup.slice(NB_BACKUPS_ARCHIVAGE_CONSERVES);
+    if (aSupprimer.length > 0) {
+      await AsyncStorage.multiRemove(aSupprimer);
+    }
+  } catch (e) {
+    console.warn(
+      "[store] Purge des anciennes sauvegardes d'archivage a échoué :",
+      e,
+    );
+  }
+}
+
+async function sauvegarderBackupArchivage(
+  userId: string,
+  donnees: {
+    mois: number;
+    annee: number;
+    enveloppes: Enveloppe[];
+    objectifs: Objectif[];
+    epargneMois: number;
+    dernierMoisArchive: { mois: number; annee: number } | null;
+  },
+): Promise<void> {
+  try {
+    const timestamp = Date.now();
+    await AsyncStorage.setItem(
+      cleBackupArchivage(userId, timestamp),
+      JSON.stringify({
+        horodatage: new Date(timestamp).toISOString(),
+        ...donnees,
+      }),
+    );
+    await purgerAnciensBackupsArchivage(userId);
+  } catch (e) {
+    console.warn(
+      "[store] Sauvegarde de secours avant archivage a échoué :",
+      e,
+    );
+  }
+}
+
+// RÈGLE À NE JAMAIS CASSER — CETTE FONCTION EST LA SEULE AUTORISÉE À
+// REMETTRE depense À 0 SUR LES ENVELOPPES. ELLE DOIT TOUJOURS CRÉER ET
+// VALIDER LE SNAPSHOT AVANT TOUTE REMISE À ZÉRO. TOUTE MODIFICATION DE CET
+// ORDRE EST UNE RÉGRESSION CRITIQUE.
 async function archiverMoisActuelInterne(mois: number, annee: number) {
   // RÈGLE À NE JAMAIS CASSER — GARDE CONTRE LA RACE AU DÉMARRAGE : voir la
   // même RÈGLE dans verifierArchivageMoisInterne — répétée ici car cette
@@ -1193,6 +1405,20 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     (s) => s.mois === mois && s.annee === annee,
   );
   if (dejaArchive) return;
+
+  // Point 1 de la RÈGLE "Sécurité maximale" — cf. RÈGLE détaillée sur
+  // sauvegarderBackupArchivage plus haut : filet de secours manuel, awaité
+  // pour garantir qu'il est écrit avant toute suite, mais son échec
+  // éventuel (déjà catché à l'intérieur) ne doit jamais empêcher
+  // l'archivage réel de continuer.
+  await sauvegarderBackupArchivage(etat.userId, {
+    mois,
+    annee,
+    enveloppes: etat.enveloppes,
+    objectifs: etat.objectifs,
+    epargneMois: etat.epargneMois,
+    dernierMoisArchive: etat.dernierMoisArchive,
+  });
 
   const moisArchiveISO = premierJourMoisISO(annee, mois);
   // Une entrée "Entrée" ne fait partie de ce mois que si son mois de
@@ -1227,6 +1453,14 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
   }));
   const epargne = etat.epargneMois;
 
+  // Point 3 de la demande du 2026-09-01 (diagnostic sans intervention SQL) :
+  // journalise le point de départ de l'archivage AVANT tout appel réseau,
+  // pour pouvoir situer un échec éventuel (les console.error existants plus
+  // bas complètent ce log, jamais ne le remplacent).
+  console.log(
+    `[archivage] Début ${mois + 1}/${annee} : ${enveloppesSnapshot.length} enveloppe(s) à snapshoter, ${objectifsSnapshot.length} objectif(s).`,
+  );
+
   const enveloppesSansEntree = etat.enveloppes.filter(
     (e) => e.type !== "Entrée",
   );
@@ -1245,8 +1479,39 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
   );
   const totalDepense = depenseReelle + etat.epargneMois;
 
+  // RÈGLE À NE JAMAIS CASSER — REMISE À ZÉRO UNIQUEMENT POUR LES CATÉGORIES
+  // PERMANENTES (Fixe repeteChaqueMois OU Variable recurrente), JAMAIS LES
+  // PONCTUELLES : demande du 2026-09-01, même notion de "permanente" que
+  // utils/budget.ts:estCategorieActiveCeMois (dupliquée ici, pas importée —
+  // même convention que moisComptageEffectif, cf. RÈGLE là-bas : utils/ ne
+  // doit pas dépendre de store.ts et l'inverse non plus). Une catégorie
+  // ponctuelle est déjà entièrement capturée dans enveloppesSnapshot
+  // ci-dessus AVANT ce point — sa ligne live devient vestigiale après
+  // archivage (invisible ensuite via estCategorieActiveCeMois, son
+  // moisComptage/dateFixe n'étant jamais avancés) : la laisser intacte
+  // plutôt que de la remettre à zéro évite qu'un éventuel bug de filtrage
+  // ailleurs ne l'affiche avec un depense=0 trompeur (elle afficherait alors
+  // sa vraie dernière valeur, plus honnête qu'un faux 0). Ancien bug
+  // corrigé au passage, contenu dans ce même changement : réinitialiser
+  // payee=false pour TOUTE catégorie Fixe (y compris une facture ponctuelle
+  // déjà payée) produisait un flip-flop — verifierEcheancesFixesInterne
+  // (qui n'avance dateFixe QUE dans son branchement repeteChaqueMois, cf.
+  // RÈGLE là-bas) revoyait alors un dateFixe resté dans le passé sur une
+  // catégorie "non payée" et la re-marquait payée avec cette ancienne date.
+  // Une Fixe récurrente repart "non payée" chaque mois (son dateFixe avance
+  // en parallèle) ; une catégorie ponctuelle (Fixe ou Variable) n'est plus
+  // du tout touchée par cette map désormais, payee compris.
+  let nbEnveloppesRemisesAZero = 0;
   const enveloppesMaj = etat.enveloppes.map((e) => {
-    if (e.type === "Entrée" && !estDuMoisArchive(e)) return e;
+    if (e.type === "Entrée") {
+      if (!estDuMoisArchive(e)) return e;
+      nbEnveloppesRemisesAZero += 1;
+      return { ...e, depense: 0 };
+    }
+    const estPermanente =
+      e.type === "Fixe" ? !!e.repeteChaqueMois : !!e.recurrente;
+    if (!estPermanente) return e;
+    nbEnveloppesRemisesAZero += 1;
     return {
       ...e,
       depense: 0,
@@ -1264,8 +1529,37 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     objectifs: objectifsSnapshot,
   });
 
+  // RÈGLE À NE JAMAIS CASSER — ABANDON SANS AUCUNE MUTATION LOCALE SI LE
+  // SNAPSHOT N'EST PAS VALIDÉ : point 2 de la RÈGLE "Sécurité maximale" du
+  // 2026-09-01. Avant cette garde, un échec Supabase (snapshotId null)
+  // retombait sur un id `local-${Date.now()}` et l'archivage continuait
+  // quand même — remise à zéro de depense sur etat.enveloppes ET avancement
+  // de dernierMoisArchive alors qu'AUCUN snapshot n'existait côté serveur.
+  // Conséquence, confirmée en relisant verifierArchivageMoisInterne : le
+  // mois suivant, dernierMoisArchive étant déjà avancé, la boucle de
+  // rattrapage ne retentait plus JAMAIS d'archiver ce mois — perte de
+  // données silencieuse et définitive. Ici, tant qu'on n'a pas retourné
+  // avant ce point, aucun setEtat/appliquerEnveloppes n'a encore eu lieu :
+  // un abandon laisse etat strictement intact, prêt pour un nouvel essai au
+  // prochain verifierArchivageMois() (intervalle, retour au premier plan,
+  // prochain lancement).
+  if (!snapshotId) {
+    console.error(
+      `[store] Archivage de ${mois + 1}/${annee} ANNULÉ : le snapshot n'a pas pu être créé/validé côté Supabase — aucune remise à zéro effectuée.`,
+    );
+    signalerErreurSync(
+      "Impossible d'archiver le mois : rien n'a été modifié, un nouvel essai sera fait automatiquement.",
+    );
+    journaliserOperationAudit("archivage_mois_echec", {
+      mois,
+      annee,
+      raison: "snapshot_non_valide",
+    });
+    return;
+  }
+
   const snapshot: SnapshotMois = {
-    id: snapshotId ?? `local-${Date.now()}`,
+    id: snapshotId,
     mois,
     annee,
     enveloppes: enveloppesSnapshot,
@@ -1388,49 +1682,158 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
   objectifsMaj.forEach((o) => {
     majObjectifSupabase(o.id, { contribution_mois: 0 });
   });
+  journaliserOperationAudit("archivage_mois", {
+    mois,
+    annee,
+    snapshotId,
+    nbEnveloppesArchivees: enveloppesSnapshot.length,
+    nbEnveloppesRemisesAZero,
+    nbEntreesReconduites: entreesInserees.length,
+    epargneArchivee: epargne,
+    totalDepenseArchivee: totalDepense,
+    budgetDuMoisArchive: budgetDuMois,
+  });
+  // Point 3 de la demande du 2026-09-01 : mois archivé, nombre d'enveloppes
+  // snapshotées et nombre effectivement remises à zéro, pour diagnostiquer
+  // un archivage sans jamais avoir besoin d'ouvrir Supabase.
+  console.log(
+    `[archivage] Terminé ${mois + 1}/${annee} : snapshot=${snapshotId}, snapshotées=${enveloppesSnapshot.length}, remises à zéro=${nbEnveloppesRemisesAZero}, entrées reconduites=${entreesInserees.length}.`,
+  );
 }
 
-function verifierArchivageMoisInterne() {
-  // RÈGLE À NE JAMAIS CASSER — GARDE CONTRE LA RACE AU DÉMARRAGE : cette
-  // fonction est déclenchée par un useEffect au montage de app/(tabs)/
-  // _layout.tsx (et par le setInterval/AppState qui suivent) — au tout
-  // premier lancement, elle peut s'exécuter avant que
-  // supabase.auth.onAuthStateChange n'ait livré son premier événement (cf.
-  // RÈGLE sur etat.userId plus haut). Sans cette garde, elle continuerait
-  // jusqu'à archiverMoisActuelInterne -> enregistrerSnapshotMoisSupabase,
-  // qui échouerait avec "aucun utilisateur connecté" — un cycle du
-  // setInterval (60s) ou le prochain retour au premier plan (AppState)
-  // suffit à réessayer une fois la session résolue, jamais besoin de
-  // rattraper cet appel manqué autrement.
+// RÈGLE À NE JAMAIS CASSER — RATTRAPE TOUS LES MOIS EN RETARD EN UNE SEULE
+// PASSE, JAMAIS UN SEUL PAS PAR APPEL : bug corrigé — l'ancienne version
+// n'avançait le curseur (dernierMoisArchive) que d'un mois par appel. Si
+// l'app restait fermée à cheval sur PLUSIEURS frontières de mois (ou que le
+// setInterval/AppState de app/(tabs)/_layout.tsx ne retombait pas assez tôt
+// pile sur chaque frontière), un ou plusieurs mois intermédiaires
+// n'étaient jamais archivés : ni snapshot créé, ni depense des catégories
+// Fixe/Variable remise à 0, ni entrées "Entrée" récurrentes reconduites
+// pour le(s) mois suivant(s) (les trois se font DANS
+// archiverMoisActuelInterne) — symptôme observé : catégories Variable
+// affichant encore les montants d'un mois précédent, entrées récurrentes
+// absentes de Budget pour le mois en cours. La boucle ci-dessous appelle
+// archiverMoisActuelInterne mois par mois, en attendant CHAQUE appel avant
+// de recalculer le suivant (jamais en parallèle : chaque appel dépend de
+// etat.dernierMoisArchive/etat.enveloppes mis à jour par le précédent) —
+// jusqu'à rattraper le mois en cours. `limiteIterations` est un filet de
+// sécurité pur contre une boucle infinie si archiverMoisActuelInterne
+// échouait silencieusement sans jamais faire avancer dernierMoisArchive
+// (ex: etat.userId redevenu null en cours de route) — jamais atteint en
+// usage normal, largement au-dessus de tout retard plausible.
+async function verifierArchivageMoisInterne() {
+  if (!etat.userId) return;
+
+  const moisCourant = 5;
+  const anneeCourante = 2026;
+  let limiteIterations = 60;
+
+  while (limiteIterations > 0) {
+    limiteIterations -= 1;
+
+    const maintenant = new Date();
+    const moisActuel = maintenant.getMonth();
+    const anneeActuelle = maintenant.getFullYear();
+    const dernier = etat.dernierMoisArchive;
+
+    if (dernier === null) {
+      if (moisActuel > moisCourant || anneeActuelle > anneeCourante) {
+        await archiverMoisActuelInterne(moisCourant, anneeCourante);
+        // Filet de sécurité : si l'archivage a échoué silencieusement
+        // (dernierMoisArchive toujours null), on sort plutôt que de
+        // boucler indéfiniment sur le même appel.
+        if (etat.dernierMoisArchive === null) return;
+        continue;
+      }
+      return;
+    }
+
+    // `dernier` est le dernier mois déjà archivé : on regarde si le mois
+    // suivant est lui aussi terminé, auquel cas on l'archive à son tour.
+    const prochain = new Date(dernier.annee, dernier.mois + 1, 1);
+    const moisAArchiver = prochain.getMonth();
+    const anneeAArchiver = prochain.getFullYear();
+    const estMoisEnCours =
+      moisAArchiver === moisActuel && anneeAArchiver === anneeActuelle;
+
+    if (estMoisEnCours) return;
+
+    await archiverMoisActuelInterne(moisAArchiver, anneeAArchiver);
+
+    // Filet de sécurité : le curseur n'a pas avancé malgré l'appel — sort
+    // plutôt que de reboucler sur le même mois indéfiniment.
+    if (
+      etat.dernierMoisArchive?.mois === dernier.mois &&
+      etat.dernierMoisArchive?.annee === dernier.annee
+    ) {
+      return;
+    }
+  }
+}
+
+// RÈGLE À NE JAMAIS CASSER — VARIABLE UNIQUEMENT, JAMAIS FIXE : point 3 de
+// la RÈGLE "Sécurité maximale" du 2026-09-01, scope confirmé explicitement
+// avec l'utilisateur. `depense` des catégories Variable provient
+// exclusivement des transactions (ajouterTransaction/modifierTransaction/
+// supprimerTransaction, cf. RÈGLE en tête de fichier) — les recalculer
+// depuis la somme des transactions du mois en cours est donc une vraie
+// vérification d'intégrité, jamais destructrice pour ce type. `depense`
+// d'une catégorie Fixe, en revanche, est posée par
+// verifierEcheancesFixesInterne() via historique_paiements, SANS jamais
+// créer de ligne dans `transactions` (RÈGLE déjà en place depuis le
+// chantier espace partagé) : recalculer depuis `transactions` remettrait à
+// 0 CHAQUE catégorie Fixe déjà payée ce mois-ci (loyer compris) à chaque
+// lancement de l'app — l'inverse de la protection recherchée. Ne jamais
+// étendre cette vérification aux catégories Fixe.
+async function verifierIntegriteDepensesInterne() {
   if (!etat.userId) return;
 
   const maintenant = new Date();
-  const moisActuel = maintenant.getMonth();
-  const anneeActuelle = maintenant.getFullYear();
-  const dernier = etat.dernierMoisArchive;
+  const prefixeMoisActuel = premierJourMoisISO(
+    maintenant.getFullYear(),
+    maintenant.getMonth(),
+  ).slice(0, 7);
 
-  if (dernier === null) {
-    const moisCourant = 5;
-    const anneeCourante = 2026;
-    if (moisActuel > moisCourant || anneeActuelle > anneeCourante) {
-      archiverMoisActuelInterne(moisCourant, anneeCourante);
+  const enveloppesVariables = etat.enveloppes.filter(
+    (e) => e.type === "Variable",
+  );
+  if (enveloppesVariables.length === 0) return;
+
+  const enveloppesCorrigees = new Map<string, Enveloppe>();
+
+  enveloppesVariables.forEach((e) => {
+    const sommeTransactions = etat.transactions
+      .filter(
+        (t) => t.enveloppeId === e.id && t.date.startsWith(prefixeMoisActuel),
+      )
+      .reduce((acc, t) => acc + t.montant, 0);
+    const sommeArrondie = Math.round(sommeTransactions * 100) / 100;
+    if (Math.abs(sommeArrondie - e.depense) > 0.01) {
+      console.warn(
+        `[store] Incohérence d'intégrité détectée sur "${e.nom}" : depense=${e.depense}, somme des transactions du mois=${sommeArrondie} — correction automatique appliquée.`,
+      );
+      journaliserOperationAudit("correction_integrite_depense", {
+        enveloppeId: e.id,
+        nom: e.nom,
+        depenseAvant: e.depense,
+        depenseApres: sommeArrondie,
+      });
+      enveloppesCorrigees.set(e.id, { ...e, depense: sommeArrondie });
     }
-    return;
-  }
+  });
 
-  // `dernier` est le dernier mois déjà archivé : on regarde si le mois
-  // suivant est lui aussi terminé, auquel cas on l'archive à son tour.
-  // Ça fait avancer le curseur d'un mois à chaque appel jusqu'à rattraper
-  // le mois en cours (jamais archivé tant qu'il n'est pas terminé).
-  const prochain = new Date(dernier.annee, dernier.mois + 1, 1);
-  const moisAArchiver = prochain.getMonth();
-  const anneeAArchiver = prochain.getFullYear();
-  const estMoisEnCours =
-    moisAArchiver === moisActuel && anneeAArchiver === anneeActuelle;
+  if (enveloppesCorrigees.size === 0) return;
 
-  if (!estMoisEnCours) {
-    archiverMoisActuelInterne(moisAArchiver, anneeAArchiver);
-  }
+  const enveloppesMaj = etat.enveloppes.map(
+    (e) => enveloppesCorrigees.get(e.id) ?? e,
+  );
+  // Pas de { remiseAZeroAutorisee: true } ici (RÈGLE réservée à
+  // archiverMoisActuelInterne, cf. RÈGLE sur appliquerEnveloppes) : le
+  // garde-fou de remise à zéro en masse d'appliquerEnveloppes doit
+  // continuer à s'appliquer normalement à cette correction — s'il bloque,
+  // c'est le signe d'une anomalie plus large qui mérite d'être investiguée,
+  // pas contournée.
+  appliquerEnveloppes(enveloppesMaj);
 }
 
 const TOLERANCE_MOTIF_RECURRENT = 0.2; // ±20%
@@ -2839,8 +3242,22 @@ export function useObjectifs() {
       archiverMoisActuelInterne(mois, annee);
     },
 
-    verifierArchivageMois: () => {
-      verifierArchivageMoisInterne();
+    // RÈGLE À NE JAMAIS CASSER : retourne la Promise (contrairement aux
+    // autres verifier* ci-dessous, fire-and-forget) — app/(tabs)/_layout.tsx
+    // l'attend explicitement AVANT de lancer les autres vérifications
+    // périodiques, pour qu'elles s'exécutent sur l'état déjà rattrapé
+    // (enveloppes remises à zéro/snapshot créé), jamais sur un état d'un
+    // mois précédent encore présent le temps que l'archivage se termine.
+    verifierArchivageMois: (): Promise<void> => {
+      return verifierArchivageMoisInterne();
+    },
+
+    // RÈGLE : point 3 de la RÈGLE "Sécurité maximale" — retourne aussi sa
+    // Promise pour permettre à app/(tabs)/_layout.tsx de l'attendre APRÈS
+    // verifierArchivageMois() (jamais avant : la vérification doit porter
+    // sur le mois déjà rattrapé, pas sur un mois précédent encore présent).
+    verifierIntegriteDonnees: (): Promise<void> => {
+      return verifierIntegriteDepensesInterne();
     },
 
     verifierEvenementsFinanciers: () => {

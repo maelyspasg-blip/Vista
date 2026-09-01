@@ -739,22 +739,44 @@ export default function Budget() {
 
   // Comptée pour le mois via moisComptage (pas dateFixe) — même critère que
   // entreesBudgetDuMois, pour rester cohérent avec le total Budget affiché
-  // juste au-dessus de cette section.
+  // juste au-dessus de cette section. RÈGLE À NE JAMAIS CASSER : les DEUX
+  // listes (reçues/à venir) utilisent le MÊME critère de mois
+  // (moisComptageEffectif) — bug corrigé où "à venir" filtrait par le mois
+  // de dateFixe au lieu de moisComptage, une incohérence avec "reçues" (et
+  // avec entreesBudgetDuMois) qui pouvait faire disparaître ou mal classer
+  // une entrée reçue un mois mais comptée pour un autre (cf. commentaire
+  // sur Enveloppe.moisComptage, app/store.ts : "recevoir un salaire le 28
+  // juillet mais le compter pour août").
   const moisActuelISO = `${ANNEE_ACTUELLE}-${String(MOIS_ACTUEL + 1).padStart(2, "0")}-01`;
+  const aujourdhui = new Date();
+  aujourdhui.setHours(0, 0, 0, 0);
+  // RÈGLE À NE JAMAIS CASSER — depense ET mois_comptage FONT SEULS FOI,
+  // JAMAIS payee (ni dateFixe) COMME CRITÈRE : bug corrigé — la version
+  // précédente retombait sur payee/dateFixe dès que dateFixe était défini,
+  // ce qui reclassait à tort en "Reçue" une entrée récurrente dont
+  // l'échéance PRÉCÉDENTE (mois dernier) avait déjà été marquée payee=true
+  // avant que la reconduction du mois en cours (archiverMoisActuelInterne)
+  // ne pose sa propre ligne depense=0/payee=false — tant que
+  // moisComptageEffectif filtre déjà sur le mois en cours, seul depense
+  // distingue une entrée réellement reçue CE mois d'une entrée encore
+  // attendue : payee n'ajoute rien et peut désynchroniser (ex: reconduction
+  // partiellement échouée, cf. RÈGLE sur l'archivage dans app/store.ts).
+  const entreeEstEffectivementRecue = (e: Enveloppe): boolean => e.depense > 0;
   const entreesRecues = objStore.enveloppes
     .filter(
       (e) =>
         e.type === "Entrée" &&
-        e.payee &&
-        moisComptageEffectif(e) === moisActuelISO,
+        moisComptageEffectif(e) === moisActuelISO &&
+        entreeEstEffectivementRecue(e),
     )
     .sort((a, b) => b.budget - a.budget);
 
-  const entreesAVenir = objStore.enveloppes.filter((e) => {
-    if (e.type !== "Entrée" || e.payee || !e.dateFixe) return false;
-    const d = new Date(e.dateFixe);
-    return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
-  });
+  const entreesAVenir = objStore.enveloppes.filter(
+    (e) =>
+      e.type === "Entrée" &&
+      moisComptageEffectif(e) === moisActuelISO &&
+      !entreeEstEffectivementRecue(e),
+  );
 
   const evenementsAVenir = objStore.evenements.filter((e) => {
     if (!e.estFinancier || !e.montant) return false;
@@ -769,9 +791,6 @@ export default function Budget() {
       e.montant &&
       (!e.categorieLiee || e.categorieLiee === "Aucune"),
   );
-
-  const aujourdhui = new Date();
-  aujourdhui.setHours(0, 0, 0, 0);
 
   const autresDepensesPayees = autresDepenses
     .filter((e) => {
