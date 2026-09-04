@@ -47,6 +47,7 @@ import { useTutoriel } from "../TutorielContext";
 import { FrequenceEvenement, genererOccurrencesEvenement } from "../../utils/evenements";
 import { getJoursFeries } from "../../utils/joursFeries";
 import { useJoursFeries } from "../JoursFeriesContext";
+import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
 
 const JOURS_SEMAINE = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const HEURES = Array.from({ length: 24 }, (_, i) => `${i}h`);
@@ -1048,7 +1049,10 @@ export default function Planning() {
   return (
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
       <View style={styles.header}>
-        <Text style={[styles.titre, { color: C.texte }]}>Planning</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <SwitcherEspacePartage />
+          <Text style={[styles.titre, { color: C.texte }]}>Planning</Text>
+        </View>
         <TouchableOpacity
           style={[styles.btnPlus, { backgroundColor: C.purple }]}
           activeOpacity={0.7}

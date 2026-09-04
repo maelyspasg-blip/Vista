@@ -76,6 +76,7 @@ import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
 import { TiroirStats } from "../TiroirStats";
 import { useEspacePartage } from "../EspacePartageContext";
+import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
 
 const MOIS_ACTUEL = new Date().getMonth();
 const ANNEE_ACTUELLE = new Date().getFullYear();
@@ -2869,11 +2870,14 @@ export default function Analytics() {
     >
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <View style={[styles.header, styles.headerRow]}>
-          <View>
-            <Text style={[styles.titre, { color: C.texte }]}>Statistiques</Text>
-            <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
-              {MOIS_LABELS_COMPLETS[MOIS_ACTUEL]} {ANNEE_ACTUELLE}
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <SwitcherEspacePartage />
+            <View>
+              <Text style={[styles.titre, { color: C.texte }]}>Statistiques</Text>
+              <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
+                {MOIS_LABELS_COMPLETS[MOIS_ACTUEL]} {ANNEE_ACTUELLE}
+              </Text>
+            </View>
           </View>
           <CibleTutoriel
             id="bilan"

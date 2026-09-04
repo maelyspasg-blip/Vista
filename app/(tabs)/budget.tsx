@@ -31,6 +31,7 @@ import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
 import { usePremium } from "../PremiumContext";
 import { useGuest } from "../GuestContext";
 import { useEspacePartage } from "../EspacePartageContext";
+import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
 import { bloquerSiInvite } from "../guestGate";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { estComptePremium } from "../../utils/premium";
@@ -50,6 +51,7 @@ import {
   estCategorieActiveCeMois,
   moisComptageEffectif,
 } from "../../utils/budget";
+import type { CategorieFusionnee } from "../../utils/espacePartage";
 import { InfoBulle } from "../InfoBulle";
 import { NombreAnime } from "../NombreAnime";
 import { Text } from "../Texte";
@@ -175,7 +177,7 @@ export default function Budget() {
   const estTablette = useEstTablette();
   const { estPremium, simulerNonPremium } = usePremium();
   const { isGuest } = useGuest();
-  const { estDansUnEspace, vueActive, membrePartenaire, donneesPartenaire } =
+  const { estDansUnEspace, vueActive, membrePartenaire, categoriesFusionnees } =
     useEspacePartage();
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Budget —
   // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
@@ -468,147 +470,16 @@ export default function Budget() {
       : b.depense - a.depense;
   });
 
-  // Mode espace partagé — vue "Partagé" de Budget : MÊME algorithme de
-  // fusion par nom et MÊME priorité de badge que app/(tabs)/index.tsx (cf.
-  // RÈGLE là-bas) — ne jamais dupliquer une variante différente ici, les
-  // deux écrans doivent fusionner les catégories exactement pareil. Pas de
-  // switcher propre à cet écran (vueActive vient uniquement du bouton
-  // d'Aperçu, décision explicite de l'utilisateur) : ce bloc réagit
-  // seulement au contexte partagé.
-  type GroupeCategoriePartagee = {
-    id: string;
-    nom: string;
-    couleur: string;
-    type: "Fixe" | "Variable" | "Entrée";
-    depense: number;
-    budget: number;
-    moiDepense: number;
-    partenaireDepense: number;
-    fusionnee: boolean;
-    moiIds: string[];
-    moiPartage: boolean;
-    badge: { texte: string; couleur: string };
-  };
-  // RÈGLE À NE JAMAIS CASSER — VUE "PARTAGÉ" : TOUTES LES CATÉGORIES DES
-  // DEUX COMPTES, LE FLAGGING SE FAIT DEPUIS CETTE VUE : même bascule que
-  // app/(tabs)/index.tsx (cf. RÈGLE là-bas) — plus de filtre `partage =
-  // true` NI en lecture côté mien NI côté serveur pour le partenaire (RLS
-  // rouverte à toute la co-appartenance, migration 20260831160000) :
-  // `enveloppes.partage` n'est plus une barrière d'accès, uniquement le
-  // champ qui décide du badge affiché, persisté par le toggle Commun/
-  // Personnel sur MES cartes (remplace la modale "Gérer mes catégories
-  // partagées", retirée de app/profil.tsx).
-  const enveloppesPartenaireBudget = donneesPartenaire?.enveloppes ?? [];
-  const groupesFusionnesParNom: GroupeCategoriePartagee[] = (() => {
-    if (vueActive !== "partage") return [];
-    type Accumulateur = {
-      nom: string;
-      couleur: string;
-      type: "Fixe" | "Variable" | "Entrée";
-      depense: number;
-      budget: number;
-      moiDepense: number;
-      partenaireDepense: number;
-      depuisMoi: boolean;
-      depuisPartenaire: boolean;
-      moiIds: string[];
-      moiPartage: boolean;
-      partenairePartage: boolean;
-    };
-    const cleNom = (nom: string) => nom.trim().toLowerCase();
-    const parNom = new Map<string, Accumulateur>();
-
-    objStore.enveloppes
-      .filter(
-        (e) =>
-          e.type !== "Entrée" &&
-          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
-      )
-      .forEach((e) => {
-        const cle = cleNom(e.nom);
-        const acc = parNom.get(cle) ?? {
-          nom: e.nom,
-          couleur: e.couleur,
-          type: e.type,
-          depense: 0,
-          budget: 0,
-          moiDepense: 0,
-          partenaireDepense: 0,
-          depuisMoi: false,
-          depuisPartenaire: false,
-          moiIds: [],
-          moiPartage: false,
-          partenairePartage: false,
-        };
-        acc.depense += e.depense;
-        acc.budget += e.budget;
-        acc.moiDepense += e.depense;
-        acc.depuisMoi = true;
-        acc.moiIds.push(e.id);
-        if (e.partage) acc.moiPartage = true;
-        parNom.set(cle, acc);
-      });
-
-    enveloppesPartenaireBudget
-      .filter(
-        (e) =>
-          e.type !== "Entrée" &&
-          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
-      )
-      .forEach((e) => {
-        const cle = cleNom(e.nom);
-        const acc = parNom.get(cle) ?? {
-          nom: e.nom,
-          couleur: e.couleur,
-          type: e.type,
-          depense: 0,
-          budget: 0,
-          moiDepense: 0,
-          partenaireDepense: 0,
-          depuisMoi: false,
-          depuisPartenaire: false,
-          moiIds: [],
-          moiPartage: false,
-          partenairePartage: false,
-        };
-        acc.depense += e.depense;
-        acc.budget += e.budget;
-        acc.partenaireDepense += e.depense;
-        acc.depuisPartenaire = true;
-        if (e.partage) acc.partenairePartage = true;
-        parNom.set(cle, acc);
-      });
-
-    return Array.from(parNom.entries())
-      .map(([cle, acc]) => {
-        const fusionnee = acc.depuisMoi && acc.depuisPartenaire;
-        return {
-          id: `fusion-${cle}`,
-          nom: acc.nom,
-          couleur: acc.couleur,
-          type: acc.type,
-          depense: acc.depense,
-          budget: acc.budget,
-          moiDepense: acc.moiDepense,
-          partenaireDepense: acc.partenaireDepense,
-          fusionnee,
-          moiIds: acc.moiIds,
-          moiPartage: acc.moiPartage,
-          badge:
-            fusionnee || (acc.depuisMoi && acc.moiPartage)
-              ? { texte: "Commun", couleur: "#1D9E75" }
-              : acc.depuisMoi
-                ? { texte: "Moi", couleur: "#60a5fa" }
-                : acc.partenairePartage
-                  ? { texte: "Commun", couleur: "#1D9E75" }
-                  : {
-                      texte: membrePartenaire?.prenom || "Partenaire",
-                      couleur: "#c084fc",
-                    },
-        };
-      })
-      .sort((a, b) => b.depense - a.depense);
-  })();
+  // Mode espace partagé — vue "Partagé" de Budget : lit désormais
+  // categoriesFusionnees depuis EspacePartageContext (SOURCE UNIQUE, cf.
+  // RÈGLE dans utils/espacePartage.ts) plutôt que de recalculer sa propre
+  // fusion localement — ancienne duplication de l'algorithme d'
+  // app/(tabs)/index.tsx retirée le 2026-09-04. Trié par depense
+  // décroissante ici (le contexte ne trie pas, chaque écran applique son
+  // propre ordre d'affichage).
+  const categoriesFusionneesTriees = [...categoriesFusionnees].sort(
+    (a, b) => b.depense - a.depense,
+  );
 
   // Même chemin d'écriture que app/(tabs)/index.tsx — cf. RÈGLE là-bas.
   const basculerPartageCategorie = (ids: string[], nouvelleValeur: boolean) => {
@@ -632,7 +503,7 @@ export default function Budget() {
   // seule ici. Barre de contribution (même logique que index.tsx) sous la
   // jauge principale si les DEUX comptes ont dépensé dans la catégorie
   // fusionnée ce mois-ci — sinon juste le badge, sans barre.
-  const renderCarteCategoriePartagee = (item: GroupeCategoriePartagee) => {
+  const renderCarteCategoriePartagee = (item: CategorieFusionnee) => {
     const pct =
       item.budget > 0 ? Math.min((item.depense / item.budget) * 100, 100) : 0;
     const afficherContribution =
@@ -1575,6 +1446,8 @@ export default function Budget() {
   return (
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
       <View style={[styles.header, { backgroundColor: C.fondPage }]}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <SwitcherEspacePartage />
         <View>
           <Text style={[styles.titre, { color: C.texte }]}>Budget</Text>
           <CibleTutoriel
@@ -1633,6 +1506,7 @@ export default function Budget() {
             </TouchableOpacity>
           </View>
           </CibleTutoriel>
+        </View>
         </View>
       </View>
 
@@ -1992,7 +1866,7 @@ export default function Budget() {
         ))}
 
         {estDansUnEspace && vueActive === "partage"
-          ? groupesFusionnesParNom.map(renderCarteCategoriePartagee)
+          ? categoriesFusionneesTriees.map(renderCarteCategoriePartagee)
           : categoriesAffichesTriees.map(renderCarteCategorie)}
 
         {entreesRecues.length > 0 && (

@@ -1,4 +1,6 @@
 import { supabase } from "../supabaseClient";
+import type { Enveloppe } from "../app/store";
+import { estCategorieActiveCeMois } from "./budget";
 
 // RÈGLE À NE JAMAIS CASSER — RESTE DERRIÈRE ESPACE_PARTAGE_ACTIF : ce
 // fichier est maintenant appelé depuis app/profil.tsx (modale "Espace
@@ -476,4 +478,151 @@ export async function chargerDonneesPartenaire(
     console.error("chargerDonneesPartenaire a échoué :", e);
     return { enveloppes: [], transactions: [] };
   }
+}
+
+// RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE DE LA FUSION PAR NOM, JAMAIS
+// DUPLIQUÉE PAR ÉCRAN : décision du 2026-09-04 — cette fonction remplace les
+// implémentations auparavant dupliquées indépendamment dans
+// app/(tabs)/index.tsx (groupesFusionnesParNom) et référencées par
+// app/(tabs)/budget.tsx (qui interdisait déjà explicitement d'en écrire une
+// variante locale). Exposée via EspacePartageContext (categoriesFusionnees,
+// mémoïsée), jamais recalculée indépendamment par chaque écran consommateur.
+// Deux catégories du même nom (insensible casse/espaces), une dans chaque
+// compte, deviennent TOUJOURS une seule ligne fusionnée avec badge "Commun"
+// (teal) — que l'une ou l'autre soit par ailleurs marquée Commun ou pas.
+// Sans fusion : badge "Moi" (bleu) si `enveloppe.partage` est false, badge
+// "Commun" (teal, sans répartition puisque solo) si `enveloppe.partage` est
+// true côté mien ou côté partenaire ; badge "[Prénom]" (violet) pour une
+// catégorie du partenaire seule, jamais marquée Commun.
+export type CategorieFusionnee = Enveloppe & {
+  fusionnee: boolean;
+  // Ids réels de MES enveloppes contribuant à cette ligne (normalement une
+  // seule ; plusieurs seulement si j'ai par erreur deux catégories du même
+  // nom) — jamais l'id de la ligne elle-même, cf. basculerPartageCategorie.
+  moiIds: string[];
+  moiPartage: boolean;
+  moiDepense: number;
+  partenaireDepense: number;
+  badge: { texte: string; couleur: string };
+};
+
+export function fusionnerCategoriesParNom(
+  mesEnveloppes: Enveloppe[],
+  enveloppesPartenaire: EnveloppePartenaire[],
+  prenomPartenaire: string | null,
+  annee: number,
+  mois: number,
+): CategorieFusionnee[] {
+  const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
+  const cleNom = (nom: string) => nom.trim().toLowerCase();
+
+  type Accumulateur = {
+    nom: string;
+    couleur: string;
+    type: "Fixe" | "Variable" | "Entrée";
+    depense: number;
+    budget: number;
+    moiDepense: number;
+    partenaireDepense: number;
+    moiEnveloppe: Enveloppe | null;
+    depuisPartenaire: boolean;
+    moiIds: string[];
+    moiPartage: boolean;
+    partenairePartage: boolean;
+  };
+  const parNom = new Map<string, Accumulateur>();
+  const nouvelAccumulateur = (e: {
+    nom: string;
+    couleur: string;
+    type: "Fixe" | "Variable" | "Entrée";
+  }): Accumulateur => ({
+    nom: e.nom,
+    couleur: e.couleur,
+    type: e.type,
+    depense: 0,
+    budget: 0,
+    moiDepense: 0,
+    partenaireDepense: 0,
+    moiEnveloppe: null,
+    depuisPartenaire: false,
+    moiIds: [],
+    moiPartage: false,
+    partenairePartage: false,
+  });
+
+  mesEnveloppes
+    .filter((e) => estCategorieActiveCeMois(e, annee, mois))
+    .forEach((e) => {
+      const cle = cleNom(e.nom);
+      const acc = parNom.get(cle) ?? nouvelAccumulateur(e);
+      acc.depense += e.depense;
+      acc.budget += e.budget;
+      acc.moiDepense += e.depense;
+      acc.moiEnveloppe = e;
+      acc.moiIds.push(e.id);
+      if (e.partage) acc.moiPartage = true;
+      parNom.set(cle, acc);
+    });
+
+  enveloppesPartenaire
+    .filter((e) => estCategorieActiveCeMois(e, annee, mois))
+    .forEach((e) => {
+      const cle = cleNom(e.nom);
+      const acc = parNom.get(cle) ?? nouvelAccumulateur(e);
+      acc.depense += e.depense;
+      acc.budget += e.budget;
+      acc.partenaireDepense += e.depense;
+      acc.depuisPartenaire = true;
+      if (e.partage) acc.partenairePartage = true;
+      parNom.set(cle, acc);
+    });
+
+  return Array.from(parNom.entries()).map(([cle, acc]) => {
+    const fusionnee = !!acc.moiEnveloppe && acc.depuisPartenaire;
+    const badge =
+      fusionnee || (!!acc.moiEnveloppe && acc.moiPartage)
+        ? { texte: "Commun", couleur: "#1D9E75" }
+        : acc.moiEnveloppe
+          ? { texte: "Moi", couleur: "#60a5fa" }
+          : acc.partenairePartage
+            ? { texte: "Commun", couleur: "#1D9E75" }
+            : { texte: prenomPartenaire || "Partenaire", couleur: "#c084fc" };
+
+    // "Moi seul" : objet réel préservé tel quel (id authentique) — l'édition
+    // reste désactivée en vue Partagée de toute façon (cf. RÈGLE
+    // app/(tabs)/index.tsx), mais garder le vrai id évite de perdre cette
+    // possibilité si elle est un jour rouverte. Fusionnée ou partenaire
+    // seul : ligne synthétique, recurrente forcée à true + moisComptage
+    // forcé au mois courant pour garantir que estCategorieActiveCeMois/
+    // moisComptageEffectif (appelés en interne par calculerResteEstimeCourant/
+    // entreesBudgetDuMois) la considèrent toujours active — sûr car
+    // construite uniquement à partir de lignes déjà actives ce mois-ci.
+    if (acc.moiEnveloppe && !acc.depuisPartenaire) {
+      return {
+        ...acc.moiEnveloppe,
+        fusionnee: false,
+        moiIds: acc.moiIds,
+        moiPartage: acc.moiPartage,
+        moiDepense: acc.moiDepense,
+        partenaireDepense: 0,
+        badge,
+      };
+    }
+    return {
+      id: `fusion-${cle}`,
+      nom: acc.nom,
+      couleur: acc.couleur,
+      type: acc.type,
+      depense: acc.depense,
+      budget: acc.budget,
+      recurrente: true,
+      moisComptage: moisISO,
+      fusionnee,
+      moiIds: acc.moiIds,
+      moiPartage: acc.moiPartage,
+      moiDepense: acc.moiDepense,
+      partenaireDepense: acc.partenaireDepense,
+      badge,
+    };
+  });
 }

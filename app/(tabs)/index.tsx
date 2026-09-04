@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "expo-image";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { getInitiales } from "../../utils/initiales";
@@ -9,6 +8,7 @@ import {
   entreesBudgetDuMois,
   estCategorieActiveCeMois,
 } from "../../utils/budget";
+import type { CategorieFusionnee } from "../../utils/espacePartage";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -56,6 +56,7 @@ import { supabase } from "../../supabaseClient";
 import { usePremium } from "../PremiumContext";
 import { useGuest } from "../GuestContext";
 import { useEspacePartage } from "../EspacePartageContext";
+import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
 import { bloquerSiInvite } from "../guestGate";
 import { estComptePremium } from "../../utils/premium";
 import { COULEURS, useTheme } from "../ThemeContext";
@@ -277,17 +278,17 @@ export default function Dashboard() {
   const HAUTEUR_MODALE_ENVELOPPE = Dimensions.get("window").height * 0.88;
   const { estPremium, simulerNonPremium } = usePremium();
   const { isGuest } = useGuest();
-  // RÈGLE À NE JAMAIS CASSER — donneesPartenaire/chargementPartenaire
-  // viennent du contexte (chargés une seule fois, partagés entre écrans) :
-  // ne jamais réintroduire un state local + un useEffect de chargement ici,
-  // cf. RÈGLE dans EspacePartageContext.tsx.
+  // RÈGLE À NE JAMAIS CASSER — chargementPartenaire/categoriesFusionnees
+  // viennent du contexte (chargées/calculées une seule fois, partagées
+  // entre écrans) : ne jamais réintroduire un state local + un useEffect de
+  // chargement, ni une fusion locale dupliquée, cf. RÈGLE dans
+  // EspacePartageContext.tsx et utils/espacePartage.ts.
   const {
     estDansUnEspace,
     vueActive,
-    setVueActive,
     membrePartenaire,
-    donneesPartenaire,
     chargementPartenaire,
+    categoriesFusionnees,
   } = useEspacePartage();
   const { theme, couleurs, toggleTheme } = useTheme();
   const { reduireAnimations } = useAccessibilite();
@@ -444,6 +445,29 @@ export default function Dashboard() {
   const enveloppes = objStore.enveloppes;
   const setEnveloppes = (nouvellesEnveloppes: Enveloppe[]) =>
     objStore.modifierEnveloppes(nouvellesEnveloppes);
+  // RÈGLE À NE JAMAIS CASSER — MÊME JSX POUR "MOI" ET "PARTAGÉ", SEULES CES
+  // TROIS VARIABLES CHANGENT : décision du 2026-09-04 — hero/jauge/"Nos
+  // conseils"/graphique/cartes catégorie sont un seul bloc JSX (plus bas
+  // dans ce composant), jamais deux blocs séparés. `enveloppesAffichees`
+  // pilote TOUT calcul dérivé (enveloppesActives, budgetMois,
+  // calculerResteEstimeCourant, donut...) sauf `genererConseils`, qui reste
+  // délibérément branché sur `objStore.enveloppes`/`objStore.epargneMois`
+  // même en vue "partage" : ce moteur fait correspondre ses situations à des
+  // lignes réelles de historiquesMois (snapshots PAR COMPTE) — une catégorie
+  // fusionnée synthétique (utils/espacePartage.ts:CategorieFusionnee) n'y
+  // correspondrait jamais, cassant silencieusement la détection de
+  // tendance. "Nos conseils" reste donc personnel quel que soit vueActive,
+  // ce qui est en réalité l'exemple le plus littéral de "même JSX" : zéro
+  // branchement nécessaire à cet endroit précis.
+  const affichagePartage = estDansUnEspace && vueActive === "partage";
+  const enveloppesAffichees: Enveloppe[] = affichagePartage
+    ? categoriesFusionnees
+    : objStore.enveloppes;
+  // epargneMois n'a pas d'équivalent partagé (jamais mélangé à l'épargne
+  // personnelle du partenaire, cf. RÈGLE historique sur les totaux fusionnés
+  // — désormais héritée automatiquement par calculerResteEstimeCourant
+  // puisque c'est la seule chose qui distingue encore "Moi" de "Partagé").
+  const epargneMoisAffiche = affichagePartage ? 0 : objStore.epargneMois;
   const [deltaRestePourcentage, setDeltaRestePourcentage] = useState(false);
   const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(false);
   const [triCategories, setTriCategories] = useState<
@@ -536,7 +560,7 @@ export default function Dashboard() {
   // Variable non récurrente, Fixe qui ne se répète pas. Une catégorie
   // permanente (récurrente) reste toujours affichée. Voir
   // utils/budget.ts:estCategorieActiveCeMois pour le détail par type.
-  const enveloppesActives = enveloppes.filter((e) =>
+  const enveloppesActives = enveloppesAffichees.filter((e) =>
     estCategorieActiveCeMois(e, maintenant.getFullYear(), maintenant.getMonth()),
   );
   const enveloppesTriees = [...enveloppesActives].sort((a, b) => {
@@ -565,7 +589,7 @@ export default function Dashboard() {
     (e) => e.type !== "Entrée",
   );
   const budgetMois = entreesBudgetDuMois(
-    enveloppes,
+    enveloppesAffichees,
     maintenant.getFullYear(),
     maintenant.getMonth(),
   );
@@ -611,8 +635,8 @@ export default function Dashboard() {
   // app/(tabs)/analytics.tsx) ; toujours appeler calculerResteEstimeCourant.
   const { disponibleEffectif, totalDepenseEnveloppes, totalDepensePrevue, resteEstime } =
     calculerResteEstimeCourant(
-      enveloppes,
-      objStore.epargneMois,
+      enveloppesAffichees,
+      epargneMoisAffiche,
       maintenant.getFullYear(),
       maintenant.getMonth(),
     );
@@ -631,7 +655,7 @@ export default function Dashboard() {
   const pctEpargneEstime =
     disponibleEffectif > 0
       ? Math.min(
-          (objStore.epargneMois / disponibleEffectif) * 100,
+          (epargneMoisAffiche / disponibleEffectif) * 100,
           100 - pctDepenseEstime - pctPrevuEstime,
         )
       : 0;
@@ -687,185 +711,6 @@ export default function Dashboard() {
   const heroResteCouleurSombre =
     etatReste === "negatif" ? "#FFD2D2" : "#FFFFFF";
 
-  // RÈGLE À NE JAMAIS CASSER — VUE "PARTAGÉ" : TOUTES LES CATÉGORIES DES
-  // DEUX COMPTES, LE FLAGGING SE FAIT DEPUIS CETTE VUE : décision explicite
-  // de l'utilisateur — plus de filtre `partage = true` NI en lecture côté
-  // mien NI côté serveur pour le partenaire (RLS rouverte à toute la
-  // co-appartenance à un espace, migration 20260831160000) : une fois deux
-  // comptes liés, chacun voit TOUTES les catégories et transactions de
-  // l'autre. `enveloppes.partage` n'est plus une barrière d'accès,
-  // uniquement le champ qui décide du badge affiché (Commun/Moi/[Prénom]),
-  // persisté par le toggle sur MES propres cartes ci-dessous (remplace la
-  // modale "Gérer mes catégories partagées", retirée de app/profil.tsx).
-  const enveloppesPartenaire = donneesPartenaire?.enveloppes ?? [];
-
-  // Totaux fusionnés — TOUTES catégories actives des deux comptes (mes
-  // catégories dans leur totalité + celles, déjà visibles, du partenaire),
-  // cohérent avec "toutes les catégories" affichées juste en dessous.
-  // Réutilise calculerResteEstimeCourant (même RÈGLE "SEULE source" que la
-  // vue "Moi" ci-dessus) plutôt que d'inventer une formule parallèle.
-  // epargneMois à 0 côté partenaire (pas une donnée partagée) ; côté mien,
-  // le vrai epargneMois n'est volontairement PAS ajouté non plus ici — ces
-  // totaux "vue Partagé" restent un agrégat des CATÉGORIES, jamais mélangés
-  // à mon épargne personnelle qui n'a pas d'équivalent partagé.
-  const resultatMoiPartage =
-    vueActive === "partage" && enveloppesActives.length > 0
-      ? calculerResteEstimeCourant(
-          enveloppesActives,
-          0,
-          maintenant.getFullYear(),
-          maintenant.getMonth(),
-        )
-      : { disponibleEffectif: 0, totalDepenseEnveloppes: 0, resteEstime: 0 };
-  const resultatPartenaire =
-    vueActive === "partage" && enveloppesPartenaire.length > 0
-      ? calculerResteEstimeCourant(
-          enveloppesPartenaire,
-          0,
-          maintenant.getFullYear(),
-          maintenant.getMonth(),
-        )
-      : { disponibleEffectif: 0, totalDepenseEnveloppes: 0, resteEstime: 0 };
-  const resteEstimeFusionne =
-    resultatMoiPartage.resteEstime + resultatPartenaire.resteEstime;
-  const totalDepenseFusionne =
-    resultatMoiPartage.totalDepenseEnveloppes +
-    resultatPartenaire.totalDepenseEnveloppes;
-  const totalEntreesFusionne =
-    resultatMoiPartage.disponibleEffectif + resultatPartenaire.disponibleEffectif;
-
-  // RÈGLE À NE JAMAIS CASSER — FUSION PAR NOM DE CATÉGORIE, AUTOMATIQUE ET
-  // INDÉPENDANTE DU TOGGLE : deux catégories du même nom (insensible à la
-  // casse/espaces), une dans chaque compte, deviennent TOUJOURS une seule
-  // jauge fusionnée avec barre de contribution — que l'une ou l'autre soit
-  // marquée Commun ou pas. Une catégorie fusionnée est par définition
-  // affichée comme "Commun" (badge teal). Sans fusion : badge "Moi" (bleu)
-  // si `enveloppe.partage` est false, badge "Commun" (teal, sans barre de
-  // contribution puisque solo) si `enveloppe.partage` est true — le toggle
-  // change UNIQUEMENT ce badge et persiste enveloppes.partage ; badge
-  // "[Prénom]" (violet) pour une catégorie du partenaire non fusionnée
-  // (toujours partage=true par construction, cf. RLS).
-  type GroupeCartePartagee = {
-    id: string;
-    nom: string;
-    couleur: string;
-    type: "Fixe" | "Variable" | "Entrée";
-    depense: number;
-    budget: number;
-    moiDepense: number;
-    partenaireDepense: number;
-    fusionnee: boolean;
-    moiIds: string[];
-    moiPartage: boolean;
-    badge: { texte: string; couleur: string };
-  };
-  const groupesFusionnesParNom: GroupeCartePartagee[] = (() => {
-    if (vueActive !== "partage") return [];
-    type Accumulateur = {
-      nom: string;
-      couleur: string;
-      type: "Fixe" | "Variable" | "Entrée";
-      depense: number;
-      budget: number;
-      moiDepense: number;
-      partenaireDepense: number;
-      depuisMoi: boolean;
-      depuisPartenaire: boolean;
-      moiIds: string[];
-      moiPartage: boolean;
-      partenairePartage: boolean;
-    };
-    const cleNom = (nom: string) => nom.trim().toLowerCase();
-    const parNom = new Map<string, Accumulateur>();
-
-    enveloppesActives.forEach((e) => {
-      const cle = cleNom(e.nom);
-      const acc = parNom.get(cle) ?? {
-        nom: e.nom,
-        couleur: e.couleur,
-        type: e.type,
-        depense: 0,
-        budget: 0,
-        moiDepense: 0,
-        partenaireDepense: 0,
-        depuisMoi: false,
-        depuisPartenaire: false,
-        moiIds: [],
-        moiPartage: false,
-        partenairePartage: false,
-      };
-      acc.depense += e.depense;
-      acc.budget += e.budget;
-      acc.moiDepense += e.depense;
-      acc.depuisMoi = true;
-      acc.moiIds.push(e.id);
-      if (e.partage) acc.moiPartage = true;
-      parNom.set(cle, acc);
-    });
-
-    enveloppesPartenaire
-      .filter((e) =>
-        estCategorieActiveCeMois(e, maintenant.getFullYear(), maintenant.getMonth()),
-      )
-      .forEach((e) => {
-        const cle = cleNom(e.nom);
-        const acc = parNom.get(cle) ?? {
-          nom: e.nom,
-          couleur: e.couleur,
-          type: e.type,
-          depense: 0,
-          budget: 0,
-          moiDepense: 0,
-          partenaireDepense: 0,
-          depuisMoi: false,
-          depuisPartenaire: false,
-          moiIds: [],
-          moiPartage: false,
-          partenairePartage: false,
-        };
-        acc.depense += e.depense;
-        acc.budget += e.budget;
-        acc.partenaireDepense += e.depense;
-        acc.depuisPartenaire = true;
-        if (e.partage) acc.partenairePartage = true;
-        parNom.set(cle, acc);
-      });
-
-    return Array.from(parNom.entries()).map(([cle, acc]) => {
-      const fusionnee = acc.depuisMoi && acc.depuisPartenaire;
-      return {
-        id: `fusion-${cle}`,
-        nom: acc.nom,
-        couleur: acc.couleur,
-        type: acc.type,
-        depense: acc.depense,
-        budget: acc.budget,
-        moiDepense: acc.moiDepense,
-        partenaireDepense: acc.partenaireDepense,
-        fusionnee,
-        moiIds: acc.moiIds,
-        moiPartage: acc.moiPartage,
-        badge:
-          fusionnee || (acc.depuisMoi && acc.moiPartage)
-            ? { texte: "Commun", couleur: "#1D9E75" }
-            : acc.depuisMoi
-              ? { texte: "Moi", couleur: "#60a5fa" }
-              : acc.partenairePartage
-                ? { texte: "Commun", couleur: "#1D9E75" }
-                : {
-                    texte: membrePartenaire?.prenom || "Partenaire",
-                    couleur: "#c084fc",
-                  },
-      };
-    });
-  })();
-  const groupesFusionnesEntrees = groupesFusionnesParNom
-    .filter((g) => g.type === "Entrée")
-    .sort((a, b) => b.depense - a.depense);
-  const groupesFusionnesDepenses = groupesFusionnesParNom
-    .filter((g) => g.type !== "Entrée")
-    .sort((a, b) => b.depense - a.depense);
-
   // Toggle Commun/Personnel — écrit enveloppes.partage sur TOUTES mes
   // enveloppes contribuant à ce groupe (normalement une seule ; plusieurs
   // seulement si j'ai par erreur deux catégories du même nom). Réutilise
@@ -881,144 +726,6 @@ export default function Dashboard() {
     );
   };
 
-  // RÈGLE À NE JAMAIS CASSER — MÊME STYLE QUE renderCarteEnveloppe (Moi) :
-  // réutilise volontairement styles.envCard/typePastille/envRow/envNom/
-  // envMontant + le composant BarreProgression (la "jauge") pour un rendu
-  // visuellement identique à la vue "Moi" — cf. demande explicite "même
-  // design, mêmes jauges, même police". Seule différence assumée : le
-  // badge d'attribution remplace les badges de récurrence (payée/répète),
-  // qui n'ont pas de sens sur une catégorie fusionnée entre deux comptes ;
-  // une catégorie fusionnée ajoute en plus une barre de contribution
-  // bleu/violet sous la jauge principale — jamais affichée si une des deux
-  // parts est à 0€ (cf. demande explicite "si une seule personne a des
-  // dépenses, pas de barre, juste le badge").
-  const renderCarteEnveloppePartagee = (item: GroupeCartePartagee) => {
-    const pct =
-      item.budget > 0 ? Math.min((item.depense / item.budget) * 100, 100) : 0;
-    const afficherContribution =
-      item.fusionnee && item.moiDepense > 0 && item.partenaireDepense > 0;
-    const enPourcentage = !!contributionEnPourcentage[item.id];
-    const pctMoi =
-      item.depense > 0 ? (item.moiDepense / item.depense) * 100 : 0;
-    const pctPartenaire = 100 - pctMoi;
-    return (
-      <View
-        key={item.id}
-        style={[
-          styles.envCard,
-          estTablette && styles.envCardTablette,
-          { backgroundColor: bgClair(item.couleur) },
-        ]}
-      >
-        <View
-          style={[
-            styles.typePastille,
-            {
-              backgroundColor:
-                item.type === "Entrée" ? C.accentLight : C.peachLight,
-            },
-          ]}
-        >
-          <Ionicons
-            name={item.type === "Entrée" ? "add" : "remove"}
-            size={13}
-            color={item.type === "Entrée" ? C.accentText : C.peachText}
-          />
-        </View>
-        <View style={styles.envRow}>
-          <View style={styles.envNomRow}>
-            <Text
-              style={[styles.envNom, { color: C.texte }]}
-              numberOfLines={1}
-            >
-              {item.nom}
-            </Text>
-            {item.moiIds.length > 0 ? (
-              <TouchableOpacity
-                activeOpacity={0.7}
-                style={[
-                  styles.badgePartageMini,
-                  { backgroundColor: item.badge.couleur },
-                ]}
-                onPress={() =>
-                  basculerPartageCategorie(item.moiIds, !item.moiPartage)
-                }
-                accessibilityRole="button"
-                accessibilityLabel={
-                  item.moiPartage
-                    ? `Passer ${item.nom} en personnel`
-                    : `Passer ${item.nom} en commun`
-                }
-              >
-                <Text style={styles.badgePartageMiniTexte}>
-                  {item.badge.texte}
-                </Text>
-              </TouchableOpacity>
-            ) : (
-              <View
-                style={[
-                  styles.badgePartageMini,
-                  { backgroundColor: item.badge.couleur },
-                ]}
-              >
-                <Text style={styles.badgePartageMiniTexte}>
-                  {item.badge.texte}
-                </Text>
-              </View>
-            )}
-          </View>
-          <Text style={[styles.envMontant, { color: item.couleur }]}>
-            {formaterMontant(item.depense)} € / {formaterMontant(item.budget)} €
-          </Text>
-        </View>
-        <BarreProgression
-          pourcentage={pct}
-          couleur={item.couleur}
-          couleurFond={C.separateur}
-          hauteur={6}
-        />
-        {afficherContribution && (
-          <TouchableOpacity
-            activeOpacity={0.7}
-            style={styles.contributionBarreFond}
-            onPress={() =>
-              setContributionEnPourcentage((prev) => ({
-                ...prev,
-                [item.id]: !prev[item.id],
-              }))
-            }
-          >
-            <View
-              style={{ flex: item.moiDepense, backgroundColor: "#60a5fa" }}
-            />
-            <View
-              style={{
-                flex: item.partenaireDepense,
-                backgroundColor: "#c084fc",
-              }}
-            />
-          </TouchableOpacity>
-        )}
-        {afficherContribution && (
-          <View style={styles.contributionLegendeRow}>
-            <Text style={[styles.contributionLegendeTexte, { color: "#60a5fa" }]}>
-              Moi{" "}
-              {enPourcentage
-                ? `${Math.round(pctMoi)}%`
-                : `${formaterMontant(item.moiDepense)}€`}
-            </Text>
-            <Text style={[styles.contributionLegendeTexte, { color: "#c084fc" }]}>
-              {membrePartenaire?.prenom || "Partenaire"}{" "}
-              {enPourcentage
-                ? `${Math.round(pctPartenaire)}%`
-                : `${formaterMontant(item.partenaireDepense)}€`}
-            </Text>
-          </View>
-        )}
-      </View>
-    );
-  };
-
   const objectifsActifs = objStore.objectifs.filter((o) => !o.ferme);
   const objectifsClotures = objStore.objectifs.filter((o) => o.ferme);
   const objectifsAvecContribution = objectifsActifs.filter(
@@ -1030,18 +737,18 @@ export default function Dashboard() {
   );
   const epargneGenerique = Math.max(
     0,
-    objStore.epargneMois - contributionObjectifsTotal,
+    epargneMoisAffiche - contributionObjectifsTotal,
   );
   // Répartit pctEpargneEstime (déjà le total épargne+objectifs) entre les
   // deux sous-segments affichés quand la légende "Argent immobilisé" est
   // dépliée — les deux se recombinent exactement en pctEpargneEstime.
   const pctEpargneGeneriqueEstime =
-    objStore.epargneMois > 0
-      ? (epargneGenerique / objStore.epargneMois) * pctEpargneEstime
+    epargneMoisAffiche > 0
+      ? (epargneGenerique / epargneMoisAffiche) * pctEpargneEstime
       : 0;
   const pctObjectifsEstime =
-    objStore.epargneMois > 0
-      ? (contributionObjectifsTotal / objStore.epargneMois) * pctEpargneEstime
+    epargneMoisAffiche > 0
+      ? (contributionObjectifsTotal / epargneMoisAffiche) * pctEpargneEstime
       : 0;
   const largeurEpargneGeneriqueAnimee = useLargeurAnimee(pctEpargneGeneriqueEstime);
   const largeurObjectifsAnimee = useLargeurAnimee(pctObjectifsEstime);
@@ -1468,8 +1175,35 @@ export default function Dashboard() {
     fermerVersementPonctuel();
   };
 
-  const renderCarteEnveloppe = (env: Enveloppe) => {
+  // RÈGLE À NE JAMAIS CASSER — MÊME CARTE POUR "MOI" ET "PARTAGÉ" : accepte
+  // en plus, optionnellement, les champs de CategorieFusionnee
+  // (utils/espacePartage.ts) — présents à l'exécution uniquement quand
+  // `env` vient de `categoriesFusionnees` (vue "partage"), jamais pour une
+  // vraie Enveloppe personnelle. En vue "partage", la carte entière devient
+  // non éditable (RÈGLE : lecture seule partout, y compris les catégories
+  // non fusionnées — pas d'id réel unique pour une ligne fusionnée, cf.
+  // décision explicite du 2026-09-04) ; seul le badge d'attribution reste
+  // tappable pour basculerPartageCategorie, et une barre de contribution
+  // bleu/violet s'ajoute sous la jauge pour les catégories fusionnées.
+  const renderCarteEnveloppe = (
+    env: Enveloppe &
+      Partial<
+        Pick<
+          CategorieFusionnee,
+          "badge" | "fusionnee" | "moiIds" | "moiPartage" | "moiDepense" | "partenaireDepense"
+        >
+      >,
+  ) => {
     const pct = Math.min((env.depense / env.budget) * 100, 100);
+    const afficherContribution =
+      affichagePartage &&
+      !!env.fusionnee &&
+      (env.moiDepense ?? 0) > 0 &&
+      (env.partenaireDepense ?? 0) > 0;
+    const enPourcentage = !!contributionEnPourcentage[env.id];
+    const pctMoi =
+      env.depense > 0 ? ((env.moiDepense ?? 0) / env.depense) * 100 : 0;
+    const pctPartenaire = 100 - pctMoi;
     return (
       <TouchableOpacity
         key={env.id}
@@ -1478,8 +1212,9 @@ export default function Dashboard() {
           estTablette && styles.envCardTablette,
           { backgroundColor: bgClair(env.couleur) },
         ]}
-        activeOpacity={0.7}
-        onPress={() => ouvrirEditionEnveloppe(env)}
+        activeOpacity={affichagePartage ? 1 : 0.7}
+        disabled={affichagePartage}
+        onPress={affichagePartage ? undefined : () => ouvrirEditionEnveloppe(env)}
       >
         <View
           style={[
@@ -1501,7 +1236,41 @@ export default function Dashboard() {
             <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
               {env.nom}
             </Text>
-            {env.type === "Fixe" ? (
+            {affichagePartage && env.badge ? (
+              env.moiIds && env.moiIds.length > 0 ? (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={[
+                    styles.badgePartageMini,
+                    { backgroundColor: env.badge.couleur },
+                  ]}
+                  onPress={() =>
+                    basculerPartageCategorie(env.moiIds!, !env.moiPartage)
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    env.moiPartage
+                      ? `Passer ${env.nom} en personnel`
+                      : `Passer ${env.nom} en commun`
+                  }
+                >
+                  <Text style={styles.badgePartageMiniTexte}>
+                    {env.badge.texte}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <View
+                  style={[
+                    styles.badgePartageMini,
+                    { backgroundColor: env.badge.couleur },
+                  ]}
+                >
+                  <Text style={styles.badgePartageMiniTexte}>
+                    {env.badge.texte}
+                  </Text>
+                </View>
+              )
+            ) : !affichagePartage && env.type === "Fixe" ? (
               <View style={styles.badgesRow}>
                 {env.payee ? (
                   <View
@@ -1533,7 +1302,7 @@ export default function Dashboard() {
                   </View>
                 )}
               </View>
-            ) : env.type === "Entrée" ? (
+            ) : !affichagePartage && env.type === "Entrée" ? (
               <View style={styles.badgesRow}>
                 {env.dateFixe && (
                   <View
@@ -1557,6 +1326,7 @@ export default function Dashboard() {
                 )}
               </View>
             ) : (
+              !affichagePartage &&
               env.recurrente && (
                 <View
                   style={[
@@ -1579,33 +1349,46 @@ export default function Dashboard() {
           couleurFond={C.separateur}
           hauteur={6}
         />
+        {afficherContribution && (
+          <TouchableOpacity
+            activeOpacity={0.7}
+            style={styles.contributionBarreFond}
+            onPress={() =>
+              setContributionEnPourcentage((prev) => ({
+                ...prev,
+                [env.id]: !prev[env.id],
+              }))
+            }
+          >
+            <View
+              style={{ flex: env.moiDepense ?? 0, backgroundColor: "#60a5fa" }}
+            />
+            <View
+              style={{
+                flex: env.partenaireDepense ?? 0,
+                backgroundColor: "#c084fc",
+              }}
+            />
+          </TouchableOpacity>
+        )}
+        {afficherContribution && (
+          <View style={styles.contributionLegendeRow}>
+            <Text style={[styles.contributionLegendeTexte, { color: "#60a5fa" }]}>
+              Moi{" "}
+              {enPourcentage
+                ? `${Math.round(pctMoi)}%`
+                : `${formaterMontant(env.moiDepense ?? 0)}€`}
+            </Text>
+            <Text style={[styles.contributionLegendeTexte, { color: "#c084fc" }]}>
+              {membrePartenaire?.prenom || "Partenaire"}{" "}
+              {enPourcentage
+                ? `${Math.round(pctPartenaire)}%`
+                : `${formaterMontant(env.partenaireDepense ?? 0)}€`}
+            </Text>
+          </View>
+        )}
       </TouchableOpacity>
     );
-  };
-
-  // Point d'info affiché UNE SEULE FOIS, à la première bascule vers la vue
-  // "Partagé" (jamais à chaque switch) — explique la fusion par nom avant
-  // que l'utilisateur ne soit surpris de voir deux jauges séparées pour
-  // des catégories qu'il pensait "les mêmes". Persisté par utilisateur,
-  // même convention que cleVueActive (EspacePartageContext.tsx).
-  const passerEnVuePartagee = async () => {
-    setVueActive("partage");
-    if (!userIdInsights) return;
-    const cle = `vista_info_fusion_categories_vue_${userIdInsights}`;
-    try {
-      const dejaVu = await AsyncStorage.getItem(cle);
-      if (!dejaVu) {
-        Alert.alert(
-          "Fusion des catégories",
-          'Pour que vos catégories se fusionnent automatiquement, assurez-vous qu\'elles portent le même nom. Ex : si tu as "Courses" et ton/ta partenaire "Alimentation", elles apparaîtront séparément.',
-        );
-        await AsyncStorage.setItem(cle, "1");
-      }
-    } catch {
-      // Best-effort : une erreur de lecture/écriture locale ne doit jamais
-      // empêcher le switch de vue lui-même, juste faire réafficher le
-      // message une fois de plus la prochaine fois.
-    }
   };
 
   return (
@@ -1620,61 +1403,26 @@ export default function Dashboard() {
         scrollEventThrottle={16}
       >
         <View style={[styles.header, { backgroundColor: C.fondPage }]}>
-          <View>
-            <View style={styles.appNameRow}>
-              <Image
-                source={require("../../assets/images/vista-logo-mark.png")}
-                style={styles.appLogo}
-                contentFit="contain"
-              />
-              <Text style={[styles.appName, { color: C.texte }]}>Vista</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <SwitcherEspacePartage />
+            <View>
+              <View style={styles.appNameRow}>
+                <Image
+                  source={require("../../assets/images/vista-logo-mark.png")}
+                  style={styles.appLogo}
+                  contentFit="contain"
+                />
+                <Text style={[styles.appName, { color: C.texte }]}>Vista</Text>
+              </View>
+              <Text style={[styles.subtitle, { color: C.texteMuted }]}>
+                {new Date().toLocaleDateString("fr-FR", {
+                  month: "long",
+                  year: "numeric",
+                })}
+              </Text>
             </View>
-            <Text style={[styles.subtitle, { color: C.texteMuted }]}>
-              {new Date().toLocaleDateString("fr-FR", {
-                month: "long",
-                year: "numeric",
-              })}
-            </Text>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            {/* RÈGLE À NE JAMAIS CASSER — SWITCHER GLOBAL, UNIQUE POINT
-                D'ENTRÉE : ce contrôle est le SEUL endroit de l'app qui
-                change vueActive (EspacePartageContext, lu par toutes les
-                pages) — ne jamais en ajouter un second ailleurs (ex.
-                Budget), cf. correction explicite qui a retiré le doublon de
-                app/(tabs)/budget.tsx. En vue "personnel" (état normal),
-                rien ne signale l'espace partagé sauf ce bouton discret ; en
-                vue "partage", le badge teal remplace le bouton et sert
-                aussi de retour à "Moi". */}
-            {estDansUnEspace &&
-              (vueActive === "partage" ? (
-                <TouchableOpacity
-                  style={styles.badgePartageActif}
-                  onPress={() => setVueActive("personnel")}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel="Revenir à la vue personnelle"
-                >
-                  <Text style={styles.badgePartageActifTexte}>Partagé</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  style={[
-                    styles.themeBouton,
-                    { backgroundColor: C.iconeBoutonFond },
-                  ]}
-                  onPress={passerEnVuePartagee}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel="Passer en vue partagée"
-                >
-                  <Ionicons
-                    name="people-outline"
-                    size={18}
-                    color={C.iconeBouton}
-                  />
-                </TouchableOpacity>
-              ))}
             <TouchableOpacity
               style={[
                 styles.themeBouton,
@@ -1730,91 +1478,24 @@ export default function Dashboard() {
           </View>
         </View>
 
-        {/* RÈGLE À NE JAMAIS CASSER — VUE "PARTAGÉ" : bloc entièrement
-            séparé de la vue "Moi" ci-dessous (jamais les deux affichés en
-            même temps) — cf. étape 4 du mode espace partagé. Les chiffres
-            fusionnés réutilisent calculerResteEstimeCourant (jamais une
-            formule dupliquée, cf. plus haut). */}
-        {estDansUnEspace && vueActive === "partage" && (
-          <>
-            {chargementPartenaire ? (
-              <View style={styles.chargementPartageBox}>
-                <ActivityIndicator color={C.accent} />
-                <Text
-                  style={[
-                    styles.chargementPartageTexte,
-                    { color: C.texteMuted },
-                  ]}
-                >
-                  Chargement des données partagées…
-                </Text>
-              </View>
-            ) : (
-              <>
-                <View
-                  style={[
-                    styles.heroPartage,
-                    { backgroundColor: C.carte, borderColor: C.carteBorder },
-                  ]}
-                >
-                  <Text style={[styles.heroLabel, { color: C.texteMuted }]}>
-                    RESTE ESTIMÉ FUSIONNÉ
-                  </Text>
-                  <Text style={[styles.heroAmount, { color: C.texte }]}>
-                    {formaterMontant(resteEstimeFusionne)} €
-                  </Text>
-                  <Text
-                    style={[
-                      styles.heroPartageDetail,
-                      { color: C.texteMuted },
-                    ]}
-                  >
-                    Dépensé {formaterMontant(totalDepenseFusionne)}€ · Entrées{" "}
-                    {formaterMontant(totalEntreesFusionne)}€
-                  </Text>
-                </View>
-
-                {groupesFusionnesEntrees.length > 0 && (
-                  <>
-                    <Text
-                      style={[
-                        styles.sectionTitle,
-                        { color: C.texteMuted, marginBottom: 8 },
-                      ]}
-                    >
-                      ENTRÉES D&apos;ARGENT
-                    </Text>
-                    <View style={estTablette ? styles.grilleTablette : undefined}>
-                      {groupesFusionnesEntrees.map(renderCarteEnveloppePartagee)}
-                    </View>
-                  </>
-                )}
-
-                {groupesFusionnesDepenses.length > 0 && (
-                  <>
-                    <Text
-                      style={[
-                        styles.sectionTitle,
-                        {
-                          color: C.texteMuted,
-                          marginTop: groupesFusionnesEntrees.length > 0 ? 16 : 0,
-                          marginBottom: 8,
-                        },
-                      ]}
-                    >
-                      DÉPENSES
-                    </Text>
-                    <View style={estTablette ? styles.grilleTablette : undefined}>
-                      {groupesFusionnesDepenses.map(renderCarteEnveloppePartagee)}
-                    </View>
-                  </>
-                )}
-              </>
-            )}
-          </>
-        )}
-
-        {(!estDansUnEspace || vueActive === "personnel") && (
+        {/* RÈGLE À NE JAMAIS CASSER — MÊME JSX POUR "MOI" ET "PARTAGÉ",
+            SEULES LES DONNÉES INJECTÉES CHANGENT : décision du 2026-09-04 —
+            hero/jauge/"Nos conseils"/graphique/cartes catégorie sont un seul
+            et même bloc ci-dessous, piloté par enveloppesAffichees/
+            epargneMoisAffiche (calculées en tête de composant). Ne jamais
+            réintroduire deux blocs JSX séparés ici — la seule branche encore
+            nécessaire est l'attente du chargement des données du
+            partenaire. */}
+        {affichagePartage && chargementPartenaire ? (
+          <View style={styles.chargementPartageBox}>
+            <ActivityIndicator color={C.accent} />
+            <Text
+              style={[styles.chargementPartageTexte, { color: C.texteMuted }]}
+            >
+              Chargement des données partagées…
+            </Text>
+          </View>
+        ) : (
         <>
         <CibleTutoriel
           id="reste-estime"
@@ -1922,7 +1603,7 @@ export default function Dashboard() {
                 )}
               </>
             ) : (
-              objStore.epargneMois > 0 && (
+              epargneMoisAffiche > 0 && (
                 <Animated.View
                   style={[
                     styles.barSegment,
@@ -1980,7 +1661,7 @@ export default function Dashboard() {
                 Dépensé {formaterMontant(totalDepenseEnveloppes)}€
               </Text>
             </View>
-            {objStore.epargneMois > 0 && (
+            {epargneMoisAffiche > 0 && (
               <TouchableOpacity
                 style={styles.heroLegendeItem}
                 activeOpacity={0.7}
@@ -1998,7 +1679,7 @@ export default function Dashboard() {
                     },
                   ]}
                 >
-                  Argent immobilisé {formaterMontant(objStore.epargneMois)}€
+                  Argent immobilisé {formaterMontant(epargneMoisAffiche)}€
                 </Text>
                 <Ionicons
                   name={argentImmobiliseOuvert ? "chevron-up" : "chevron-down"}
@@ -4198,13 +3879,6 @@ const styles = StyleSheet.create({
     marginTop: 60,
     marginBottom: 24,
   },
-  badgePartageActif: {
-    backgroundColor: "#1D9E75",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 14,
-  },
-  badgePartageActifTexte: { fontSize: 12, fontWeight: "700", color: "#FFFFFF" },
   chargementPartageBox: {
     alignItems: "center",
     justifyContent: "center",
@@ -4212,13 +3886,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   chargementPartageTexte: { fontSize: 13 },
-  heroPartage: {
-    borderRadius: 22,
-    padding: 26,
-    marginBottom: 18,
-    borderWidth: 0.5,
-  },
-  heroPartageDetail: { fontSize: 13, marginTop: 4 },
   badgePartageMini: {
     paddingHorizontal: 7,
     paddingVertical: 2,

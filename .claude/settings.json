@@ -1,4 +1,11 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"style={\\\\[styles.modalCard, { backgroundColor: C.carte }\\\\]}\" \"/Users/maelys/vista/app/\\(tabs\\)/index.tsx\")",
+      "Bash(cat /tmp/tsc_out8.txt)",
+      "Read(//private/tmp/**)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -14,10 +21,5 @@
   },
   "enabledPlugins": {
     "expo@claude-plugins-official": true
-  },
-  "permissions": {
-    "allow": [
-      "Bash(grep -n \"style={\\\\[styles.modalCard, { backgroundColor: C.carte }\\\\]}\" \"/Users/maelys/vista/app/\\(tabs\\)/index.tsx\")"
-    ]
   }
 }

@@ -4,15 +4,19 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { AppState } from "react-native";
 import {
+  CategorieFusionnee,
   chargerDonneesPartenaire,
   DonneesPartenaire,
+  fusionnerCategoriesParNom,
   getMembreEspace,
 } from "../utils/espacePartage";
+import { useObjectifs } from "./store";
 
 // RÈGLE À NE JAMAIS CASSER — RESTE DERRIÈRE ESPACE_PARTAGE_ACTIF : ce
 // Provider n'est monté dans app/_layout.tsx que si
@@ -53,6 +57,14 @@ type EspacePartageContextType = {
   // chaque changement d'onglet. `null` tant que non chargé/vue "personnel".
   donneesPartenaire: DonneesPartenaire | null;
   chargementPartenaire: boolean;
+  // RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE DE LA FUSION PAR NOM, CALCULÉE
+  // ICI ET NULLE PART AILLEURS : cf. RÈGLE détaillée sur
+  // fusionnerCategoriesParNom (utils/espacePartage.ts). Mémoïsée, recalculée
+  // uniquement quand ses entrées changent — jamais recalculée localement par
+  // un écran consommateur (Aperçu, Budget...). Tableau vide hors vue
+  // "partage"/hors espace actif, jamais `null` (simplifie les consommateurs :
+  // toujours un tableau à mapper).
+  categoriesFusionnees: CategorieFusionnee[];
 };
 
 const EspacePartageContext = createContext<EspacePartageContextType>({
@@ -64,6 +76,7 @@ const EspacePartageContext = createContext<EspacePartageContextType>({
   rafraichirEspace: async () => {},
   donneesPartenaire: null,
   chargementPartenaire: false,
+  categoriesFusionnees: [],
 });
 
 function cleVueActive(userId: string): string {
@@ -89,6 +102,7 @@ export function EspacePartageProvider({
   const [donneesPartenaire, setDonneesPartenaire] =
     useState<DonneesPartenaire | null>(null);
   const [chargementPartenaire, setChargementPartenaire] = useState(false);
+  const objStore = useObjectifs();
 
   // RÈGLE À NE JAMAIS CASSER — TOUT RÉINITIALISER SI userId CHANGE (jamais
   // seulement au premier montage) : un changement de userId signifie soit
@@ -235,6 +249,32 @@ export function EspacePartageProvider({
     };
   }, [vueActive, estDansUnEspace, membrePartenaire]);
 
+  // RÈGLE À NE JAMAIS CASSER : cf. RÈGLE détaillée sur categoriesFusionnees
+  // ci-dessus — calculée UNE SEULE FOIS ici, jamais dans un écran
+  // consommateur. `maintenant` lu directement dans le corps du composant
+  // (jamais Date.now() mémorisé dans un state) — même convention que
+  // `maintenant`/`MOIS_ACTUEL` dans app/(tabs)/index.tsx, purement pour
+  // dériver annee/mois, aucun effet de bord.
+  const categoriesFusionnees = useMemo<CategorieFusionnee[]>(() => {
+    if (vueActive !== "partage" || !estDansUnEspace || !donneesPartenaire) {
+      return [];
+    }
+    const maintenant = new Date();
+    return fusionnerCategoriesParNom(
+      objStore.enveloppes,
+      donneesPartenaire.enveloppes,
+      membrePartenaire?.prenom ?? null,
+      maintenant.getFullYear(),
+      maintenant.getMonth(),
+    );
+  }, [
+    vueActive,
+    estDansUnEspace,
+    donneesPartenaire,
+    objStore.enveloppes,
+    membrePartenaire,
+  ]);
+
   const setVueActive = (vue: VueEspacePartage) => {
     setVueActiveState(vue);
     if (userId) {
@@ -257,6 +297,7 @@ export function EspacePartageProvider({
         rafraichirEspace,
         donneesPartenaire,
         chargementPartenaire,
+        categoriesFusionnees,
       }}
     >
       {children}
