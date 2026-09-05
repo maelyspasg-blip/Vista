@@ -1419,10 +1419,12 @@ export default function Analytics() {
   // retirés maintenant que la cause est identifiée). Une catégorie est
   // "commune" si son NOM (trim+lowercase) existe des DEUX côtés ce mois-ci
   // — symétrique par construction (contrairement à l'ancien filtre, qui ne
-  // s'appliquait qu'à mes propres catégories). N'affecte QUE
-  // contributionsCommunes (Balance + nomsCommuns, réutilisé par Graphique 2
-  // "évolution des dépenses communes") — repartitionParPersonne (Graphique
-  // 3) garde volontairement son propre filtre `.partage`, pas demandé ici.
+  // s'appliquait qu'à mes propres catégories). Alimente contributionsCommunes
+  // (Balance + nomsCommuns, réutilisé par Graphique 2 "évolution des
+  // dépenses communes") — repartitionParPersonne (Graphique 3, cf. RÈGLE à
+  // son site de définition plus bas) applique désormais exactement la même
+  // politique, sur demande explicite, pour une cohérence totale entre les
+  // graphiques de la vue partagée.
   const contributionsCommunes = (() => {
     if (vueActive !== "partage") {
       return {
@@ -1466,11 +1468,16 @@ export default function Analytics() {
 
   // "Répartition" empilée par personne — regroupée par NOM de catégorie
   // (les deux comptes ont des enveloppes distinctes, jamais le même id).
-  // RÈGLE À NE JAMAIS CASSER — NIVEAU ENVELOPPE, PAS TRANSACTION : le
-  // partage se décide par catégorie (enveloppes.partage), jamais par
-  // transaction individuelle — même bascule que app/(tabs)/index.tsx (cf.
-  // RÈGLE là-bas). Seules MES enveloppes `partage = true` entrent dans ce
-  // calcul (jamais toutes mes catégories actives comme avant). Une
+  // RÈGLE À NE JAMAIS CASSER — "COMMUN" SE DÉCIDE PAR FUSION DE NOM, JAMAIS
+  // PAR enveloppe.partage : même correction que contributionsCommunes
+  // ci-dessus (ce toggle manuel, désactivé par défaut, masquait cette
+  // répartition en quasi-totalité pour quiconque ne l'avait jamais activé —
+  // TOUTES mes catégories actives entrent maintenant dans ce calcul, comme
+  // celles du partenaire, jamais seulement celles marquées `partage`).
+  // Clé de regroupement trim+lowercase (même convention que
+  // fusionnerCategoriesParNom, utils/espacePartage.ts) — la casse/l'espace
+  // du nom affiché (`ligne.nom`) reste celle rencontrée en premier (mon
+  // côté, traité avant celui du partenaire), jamais recalculée. Une
   // catégorie du même nom des deux côtés (fusion) bascule tout son montant
   // dans le segment "Commun", jamais moitié "Moi" moitié "[Prénom]" — même
   // priorité que le badge "Commun" d'Aperçu/Budget.
@@ -1484,16 +1491,17 @@ export default function Analytics() {
   };
   const repartitionParPersonne: SegmentRepartitionPartagee[] = (() => {
     if (vueActive !== "partage") return [];
+    const cleNomRepartition = (nom: string) => nom.trim().toLowerCase();
     const parNom = new Map<string, SegmentRepartitionPartagee>();
     objStore.enveloppes
       .filter(
         (e) =>
           e.type !== "Entrée" &&
-          e.partage &&
           estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
       )
       .forEach((e) => {
-        const ligne = parNom.get(e.nom) ?? {
+        const cle = cleNomRepartition(e.nom);
+        const ligne = parNom.get(cle) ?? {
           nom: e.nom,
           couleur: e.couleur,
           moi: 0,
@@ -1503,7 +1511,7 @@ export default function Analytics() {
         };
         ligne.moi += e.depense;
         ligne.total += e.depense;
-        parNom.set(e.nom, ligne);
+        parNom.set(cle, ligne);
       });
     enveloppesPartenaireStats
       .filter(
@@ -1512,7 +1520,8 @@ export default function Analytics() {
           estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
       )
       .forEach((e) => {
-        const ligne = parNom.get(e.nom) ?? {
+        const cle = cleNomRepartition(e.nom);
+        const ligne = parNom.get(cle) ?? {
           nom: e.nom,
           couleur: e.couleur,
           moi: 0,
@@ -1522,7 +1531,7 @@ export default function Analytics() {
         };
         ligne.partenaire += e.depense;
         ligne.total += e.depense;
-        parNom.set(e.nom, ligne);
+        parNom.set(cle, ligne);
       });
     return Array.from(parNom.values())
       .map((ligne) =>
@@ -1534,9 +1543,9 @@ export default function Analytics() {
   })();
 
   // RÈGLE : Graphique 1 (donut de contribution) — simple ré-agrégation de
-  // repartitionParPersonne (déjà la bonne population : mes catégories
-  // `partage`, toutes celles du partenaire), jamais un nouveau calcul
-  // indépendant qui pourrait diverger.
+  // repartitionParPersonne (toutes catégories actives des deux côtés,
+  // fusionnées par nom — cf. RÈGLE à son site de définition), jamais un
+  // nouveau calcul indépendant qui pourrait diverger.
   const totauxDonutCouple = repartitionParPersonne.reduce(
     (acc, l) => ({
       moi: acc.moi + l.moi,
@@ -1585,7 +1594,9 @@ export default function Analytics() {
   // Fixe (loyer...). Le SET de noms "commun" (contributionsCommunes.
   // nomsCommuns, calculé plus haut) est déterminé sur l'état ACTUEL
   // uniquement et appliqué rétroactivement aux mois passés — même limite
-  // déjà acceptée par repartitionParPersonne (partage n'est pas historisé).
+  // déjà acceptée par repartitionParPersonne (la fusion par nom n'est
+  // jamais recalculée sur l'historique, seulement sur les catégories
+  // actives aujourd'hui).
   const moisEvolutionCommune = construireMoisPeriode(
     6,
     MOIS_ACTUEL,
