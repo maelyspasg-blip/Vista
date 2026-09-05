@@ -1409,19 +1409,20 @@ export default function Analytics() {
   const revenusCombines = totalEntreesMoiMois + totalEntreesPartenaireMois;
   const depensesCombinees = totalDepensesMoiMois + totalDepensesPartenaireMois;
 
-  // RÈGLE À NE JAMAIS CASSER — BASE DE LA BALANCE (Graphique 4) : MÊME
-  // FILTRE QUE repartitionParPersonne juste en dessous (mine :
-  // `.partage===true` ; partenaire : toutes catégories non-Entrée actives,
-  // cf. RÈGLE "accès complet entre membres" dans utils/espacePartage.ts) —
-  // les deux DOIVENT s'accorder (`moiCommun + partenaireCommun` doit égaler
-  // `repartitionParPersonne.reduce((a,l)=>a+l.commun,0)` plus la part
-  // "moi"/"partenaire" non fusionnée). Contrairement à
-  // repartitionParPersonne, qui collapse moi/partenaire en un seul nombre
-  // "commun" une fois une catégorie fusionnée, la balance a besoin du VRAI
-  // split (qui a payé quoi) — jamais totalDepensesMoiMois/
-  // totalDepensesPartenaireMois (qui incluent les dépenses 100%
-  // personnelles, non pertinentes pour "qui doit quoi sur les frais
-  // communs").
+  // RÈGLE À NE JAMAIS CASSER — BASE DE LA BALANCE (Graphique 4) : "COMMUN"
+  // SE DÉCIDE PAR FUSION DE NOM (les deux comptes ont une catégorie du même
+  // nom), JAMAIS PAR enveloppe.partage : ce toggle manuel (Profil → "Gérer
+  // mes catégories partagées") est désactivé par défaut sur toute nouvelle
+  // catégorie — l'utiliser comme filtre d'ENTRÉE dans ce calcul masquait la
+  // balance en permanence pour quiconque n'était jamais allé le basculer à
+  // la main (bug confirmé, diagnostiqué via les logs [Balance] ci-dessus,
+  // retirés maintenant que la cause est identifiée). Une catégorie est
+  // "commune" si son NOM (trim+lowercase) existe des DEUX côtés ce mois-ci
+  // — symétrique par construction (contrairement à l'ancien filtre, qui ne
+  // s'appliquait qu'à mes propres catégories). N'affecte QUE
+  // contributionsCommunes (Balance + nomsCommuns, réutilisé par Graphique 2
+  // "évolution des dépenses communes") — repartitionParPersonne (Graphique
+  // 3) garde volontairement son propre filtre `.partage`, pas demandé ici.
   const contributionsCommunes = (() => {
     if (vueActive !== "partage") {
       return {
@@ -1432,43 +1433,34 @@ export default function Analytics() {
       };
     }
     const cleNom = (nom: string) => nom.trim().toLowerCase();
-    const parNom = new Map<string, { moi: number; partenaire: number }>();
-    objStore.enveloppes
-      .filter(
-        (e) =>
-          e.type !== "Entrée" &&
-          e.partage &&
-          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
-      )
-      .forEach((e) => {
-        const cle = cleNom(e.nom);
-        const ligne = parNom.get(cle) ?? { moi: 0, partenaire: 0 };
-        ligne.moi += e.depense;
-        parNom.set(cle, ligne);
-      });
-    enveloppesPartenaireStats
-      .filter(
-        (e) =>
-          e.type !== "Entrée" &&
-          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
-      )
-      .forEach((e) => {
-        const cle = cleNom(e.nom);
-        const ligne = parNom.get(cle) ?? { moi: 0, partenaire: 0 };
-        ligne.partenaire += e.depense;
-        parNom.set(cle, ligne);
-      });
-    let moiCommun = 0;
-    let partenaireCommun = 0;
-    parNom.forEach((ligne) => {
-      moiCommun += ligne.moi;
-      partenaireCommun += ligne.partenaire;
-    });
+    const mesEnveloppesActives = objStore.enveloppes.filter(
+      (e) =>
+        e.type !== "Entrée" &&
+        estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+    );
+    const enveloppesPartenaireActives = enveloppesPartenaireStats.filter(
+      (e) =>
+        e.type !== "Entrée" &&
+        estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+    );
+    const nomsMoi = new Set(mesEnveloppesActives.map((e) => cleNom(e.nom)));
+    const nomsPartenaire = new Set(
+      enveloppesPartenaireActives.map((e) => cleNom(e.nom)),
+    );
+    const nomsCommuns = new Set(
+      [...nomsMoi].filter((nom) => nomsPartenaire.has(nom)),
+    );
+    const moiCommun = mesEnveloppesActives
+      .filter((e) => nomsCommuns.has(cleNom(e.nom)))
+      .reduce((acc, e) => acc + e.depense, 0);
+    const partenaireCommun = enveloppesPartenaireActives
+      .filter((e) => nomsCommuns.has(cleNom(e.nom)))
+      .reduce((acc, e) => acc + e.depense, 0);
     return {
       moiCommun,
       partenaireCommun,
       totalCommun: moiCommun + partenaireCommun,
-      nomsCommuns: new Set(parNom.keys()),
+      nomsCommuns,
     };
   })();
 
