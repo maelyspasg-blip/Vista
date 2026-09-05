@@ -909,8 +909,14 @@ export async function supprimerEvenementPartenaire(id: string): Promise<boolean>
 export type SnapshotMoisPartenaire = {
   mois: number;
   annee: number;
+  // RÈGLE : ajouté pour "Évolution dans le temps" consolidée
+  // (app/(tabs)/analytics.tsx) — snapshots_mois.epargne, déjà lisible pour
+  // le partenaire via snapshots_mois_select_espace_partage (migration
+  // 20260905101000), aucune nouvelle policy nécessaire pour ce champ.
+  epargne: number;
   enveloppes: {
     nom: string;
+    couleur: string;
     depense: number;
     budget: number;
     type: "Fixe" | "Variable" | "Entrée";
@@ -923,7 +929,7 @@ export async function chargerHistoriqueMoisPartenaire(
   try {
     const { data: snapshotsData, error: erreurSnapshots } = await supabase
       .from("snapshots_mois")
-      .select("id, mois, annee")
+      .select("id, mois, annee, epargne")
       .eq("user_id", partenaireId);
 
     if (erreurSnapshots) {
@@ -939,7 +945,7 @@ export async function chargerHistoriqueMoisPartenaire(
 
     const { data: enveloppesData, error: erreurEnveloppes } = await supabase
       .from("snapshot_enveloppes")
-      .select("snapshot_mois_id, nom, depense, budget, type")
+      .select("snapshot_mois_id, nom, couleur, depense, budget, type")
       .in(
         "snapshot_mois_id",
         snapshots.map((s) => s.id),
@@ -956,10 +962,12 @@ export async function chargerHistoriqueMoisPartenaire(
     return snapshots.map((s) => ({
       mois: s.mois,
       annee: s.annee,
+      epargne: s.epargne ?? 0,
       enveloppes: (enveloppesData ?? [])
         .filter((e) => e.snapshot_mois_id === s.id)
         .map((e) => ({
           nom: e.nom,
+          couleur: e.couleur,
           depense: e.depense,
           budget: e.budget,
           type: e.type,
@@ -968,6 +976,27 @@ export async function chargerHistoriqueMoisPartenaire(
   } catch (e) {
     console.error("chargerHistoriqueMoisPartenaire a échoué :", e);
     return [];
+  }
+}
+
+// RÈGLE À NE JAMAIS CASSER — PASSE PAR LA RPC epargne_mois_partenaire,
+// JAMAIS UN SELECT DIRECT SUR profils : cf. RÈGLE détaillée dans la
+// migration supabase/migrations/20260905110000_epargne_mois_partenaire_rpc.sql
+// — profils n'a jamais de lecture cross-compte ouverte en RLS dans ce
+// projet, seule une RPC étroite (qui ne renvoie que ce champ) peut exposer
+// l'épargne du mois en cours du partenaire. `null` si hors espace/erreur,
+// jamais de throw (cf. RÈGLE en tête de fichier).
+export async function epargneMoisPartenaire(): Promise<number | null> {
+  try {
+    const { data, error } = await supabase.rpc("epargne_mois_partenaire");
+    if (error) {
+      console.error("Supabase rpc epargne_mois_partenaire a échoué :", error);
+      return null;
+    }
+    return typeof data === "number" ? data : null;
+  } catch (e) {
+    console.error("epargneMoisPartenaire a échoué :", e);
+    return null;
   }
 }
 

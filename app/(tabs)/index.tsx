@@ -1404,7 +1404,6 @@ export default function Dashboard() {
       >
         <View style={[styles.header, { backgroundColor: C.fondPage }]}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <SwitcherEspacePartage />
             <View>
               <View style={styles.appNameRow}>
                 <Image
@@ -1421,6 +1420,7 @@ export default function Dashboard() {
                 })}
               </Text>
             </View>
+            <SwitcherEspacePartage />
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <TouchableOpacity

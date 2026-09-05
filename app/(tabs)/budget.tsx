@@ -1447,7 +1447,6 @@ export default function Budget() {
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
       <View style={[styles.header, { backgroundColor: C.fondPage }]}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <SwitcherEspacePartage />
         <View>
           <Text style={[styles.titre, { color: C.texte }]}>Budget</Text>
           <CibleTutoriel
@@ -1507,6 +1506,7 @@ export default function Budget() {
           </View>
           </CibleTutoriel>
         </View>
+        <SwitcherEspacePartage />
         </View>
       </View>
 

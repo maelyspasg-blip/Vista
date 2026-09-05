@@ -1429,8 +1429,8 @@ export default function Planning() {
     <View style={[styles.container, { backgroundColor: C.fondPage }]}>
       <View style={styles.header}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <SwitcherEspacePartage />
           <Text style={[styles.titre, { color: C.texte }]}>Planning</Text>
+          <SwitcherEspacePartage />
         </View>
         <TouchableOpacity
           style={[styles.btnPlus, { backgroundColor: C.purple }]}

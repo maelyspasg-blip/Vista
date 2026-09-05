@@ -15,7 +15,7 @@ import {
   View,
 } from "react-native";
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from "react-native-svg";
-import { Enveloppe, useObjectifs } from "../store";
+import { Enveloppe, SnapshotMois, Transaction, useObjectifs } from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { calculerSeries, Serie, TypeSerie } from "../../utils/series";
 import {
@@ -79,8 +79,12 @@ import { useEspacePartage } from "../EspacePartageContext";
 import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
 import {
   chargerRemboursementsMois,
+  EnveloppePartenaire,
+  epargneMoisPartenaire,
   marquerRembourse,
   RemboursementEspace,
+  SnapshotMoisPartenaire,
+  TransactionPartenaire,
 } from "../../utils/espacePartage";
 
 const MOIS_ACTUEL = new Date().getMonth();
@@ -1066,6 +1070,28 @@ export default function Analytics() {
       annule = true;
     };
   }, [estDansUnEspace, vueActive, espaceId]);
+  // RÈGLE : épargne du MOIS EN COURS du partenaire — historiqueMoisPartenaire
+  // (EspacePartageContext) couvre déjà les mois archivés (snapshots_mois.
+  // epargne, cf. RÈGLE sur SnapshotMoisPartenaire, utils/espacePartage.ts),
+  // mais le mois en cours n'a par définition pas encore de snapshot. Chargé
+  // localement (comme remboursements ci-dessus) : seul "Évolution dans le
+  // temps" (ce fichier) en a besoin.
+  const [epargneMoisPartenaireActuelle, setEpargneMoisPartenaireActuelle] =
+    useState<number | null>(null);
+  useEffect(() => {
+    if (!estDansUnEspace || vueActive !== "partage") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- réinitialisation synchrone volontaire en quittant la vue Partagé, même précédent que remboursements ci-dessus.
+      setEpargneMoisPartenaireActuelle(null);
+      return;
+    }
+    let annule = false;
+    epargneMoisPartenaire().then((valeur) => {
+      if (!annule) setEpargneMoisPartenaireActuelle(valeur);
+    });
+    return () => {
+      annule = true;
+    };
+  }, [estDansUnEspace, vueActive]);
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Stats — voir
   // estComptePremium (utils/premium.ts) pour ce qu'il combine.
   const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
@@ -2300,6 +2326,77 @@ export default function Analytics() {
     ({ mois, annee }) => getDisponibleMois(mois, annee) ?? 0,
   );
 
+  // RÈGLE À NE JAMAIS CASSER — "ÉVOLUTION DANS LE TEMPS" CONSOLIDÉE (vue
+  // partagée) : équivalents de getDepenseMois/getDisponibleMois/getEpargneMois
+  // ci-dessus, mais pour le PARTENAIRE — mois courant via
+  // enveloppesPartenaireStats (a de vrais ids/valeurs à jour), mois archivés
+  // via historiqueMoisPartenaire (EspacePartageContext). Jamais fusionnées
+  // avec les fonctions "moi" ci-dessus (predicats/branches légèrement
+  // différents), toujours COMBINÉES en une passe séparée juste en dessous —
+  // ces variables alimentent aussi "Dépensé vs dépenses prévues" (toujours
+  // recalculé même avec un filtre catégorie actif), jamais un endroit où la
+  // vue partagée doit interférer.
+  const getDepenseMoisPartenaire = (mois: number, annee: number): number => {
+    if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
+      return enveloppesPartenaireStats
+        .filter(
+          (e) =>
+            e.type !== "Entrée" && estCategorieActiveCeMois(e, annee, mois),
+        )
+        .reduce((acc, e) => acc + e.depense, 0);
+    }
+    const snap = historiqueMoisPartenaire.find(
+      (s) => s.mois === mois && s.annee === annee,
+    );
+    if (!snap) return 0;
+    return snap.enveloppes
+      .filter((e) => e.type !== "Entrée")
+      .reduce((acc, e) => acc + e.depense, 0);
+  };
+  const getDisponibleMoisPartenaire = (mois: number, annee: number): number => {
+    if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
+      return entreesBudgetDuMois(enveloppesPartenaireStats, annee, mois).total;
+    }
+    const snap = historiqueMoisPartenaire.find(
+      (s) => s.mois === mois && s.annee === annee,
+    );
+    if (!snap) return 0;
+    return snap.enveloppes
+      .filter((e) => e.type === "Entrée")
+      .reduce((acc, e) => acc + e.depense, 0);
+  };
+  const getEpargneMoisPartenaire = (mois: number, annee: number): number => {
+    if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
+      return epargneMoisPartenaireActuelle ?? 0;
+    }
+    const snap = historiqueMoisPartenaire.find(
+      (s) => s.mois === mois && s.annee === annee,
+    );
+    return snap?.epargne ?? 0;
+  };
+  const affichagePartageEvolution = estDansUnEspace && vueActive === "partage";
+  const donneesReellesConsolidees = affichagePartageEvolution
+    ? moisAffiches.map(
+        ({ mois, annee }) =>
+          (getDepenseMois(mois, annee) ?? 0) +
+          getDepenseMoisPartenaire(mois, annee),
+      )
+    : donneesReelles;
+  const donneesDisponibleConsolidees = affichagePartageEvolution
+    ? moisAffiches.map(
+        ({ mois, annee }) =>
+          (getDisponibleMois(mois, annee) ?? 0) +
+          getDisponibleMoisPartenaire(mois, annee),
+      )
+    : donneesDisponible;
+  const donneesEpargneConsolidees = affichagePartageEvolution
+    ? moisAffiches.map(
+        ({ mois, annee }) =>
+          (getEpargneMois(mois, annee) ?? 0) +
+          getEpargneMoisPartenaire(mois, annee),
+      )
+    : donneesEpargne;
+
   // Variation totale réel vs prévu sur toute la période affichée (pas un
   // mois précis) — indicateur affiché sous le titre de "Dépensé vs dépenses
   // prévues".
@@ -2637,9 +2734,22 @@ export default function Analytics() {
   // 3), qui a son propre sélecteur de période indépendant — SEULE fonction
   // qui sait agréger des dépenses/entrées réelles sur une période de mois
   // donnée, ne jamais la dupliquer.
+  // RÈGLE À NE JAMAIS CASSER — enveloppesSource/historiquesMoisSource,
+  // PARAMÈTRES OPTIONNELS AVEC VALEUR PAR DÉFAUT = objStore.* : ajoutés pour
+  // le graphique de flux consolidé (vue partagée, mois courant uniquement),
+  // qui doit reconstruire EXACTEMENT la même répartition pour le partenaire
+  // (enveloppesPartenaireStats à la place de objStore.enveloppes). Défauts
+  // = comportement exact d'avant cet ajout : chaque site d'appel SOLO
+  // existant (repartitionDepenses, repartitionEntrees, fluxEntrees,
+  // fluxCategories...) continue de fonctionner sans aucune modification.
+  // Types acceptés structurellement compatibles avec EnveloppePartenaire
+  // (déjà conçu pour ça, cf. RÈGLE sur EnveloppePartenaire dans
+  // utils/espacePartage.ts) et SnapshotMoisPartenaire.
   const construireRepartitionSurPeriode = (
     predicat: (e: { type: string; depense: number; nom: string }) => boolean,
     moisListe: { mois: number; annee: number }[],
+    enveloppesSource: Enveloppe[] | EnveloppePartenaire[] = objStore.enveloppes,
+    historiquesMoisSource: SnapshotMois[] | SnapshotMoisPartenaire[] = objStore.historiquesMois,
   ) => {
     const parCategorie = new Map<string, { nom: string; couleur: string; montant: number }>();
     moisListe.forEach(({ mois, annee }) => {
@@ -2650,22 +2760,29 @@ export default function Analytics() {
       // précédent mais comptant pour celui-ci) apparaissait à tort dans
       // n'importe quelle période incluant le mois en cours, en plus de son
       // vrai mois — double comptage.
-      const enveloppesMoisBrutes =
-        mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
-          ? objStore.enveloppes.filter((e) =>
-              estCategorieActiveCeMois(e, annee, mois),
-            )
-          : (objStore.historiquesMois.find((s) => s.mois === mois && s.annee === annee)
-              ?.enveloppes ?? []);
       // RÈGLE : déduplique par ID (jamais par nom ici) — protège contre une
       // même ligne apparaissant deux fois dans le tableau (glitch d'état),
       // sans jeter la dépense d'une VRAIE deuxième catégorie qui porterait
       // le même nom : c'est la boucle ci-dessous (regroupement par
-      // `e.nom` + somme) qui se charge de fusionner ces cas-là.
+      // `e.nom` + somme) qui se charge de fusionner ces cas-là. Dédupliqué
+      // DANS la même branche que le filtre (plutôt que dans un second
+      // ternary séparé sur la même condition, comme avant cette
+      // généralisation) : historiquesMoisSource peut désormais être un type
+      // sans `id` (SnapshotMoisPartenaire, jamais utilisé en pratique sans
+      // id puisque ce chemin n'est emprunté qu'au mois courant, mais
+      // TypeScript ne peut pas relier deux ternaires indépendants pour le
+      // prouver) — regrouper les deux évite toute ambiguïté de type.
       const enveloppesMois =
         mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
-          ? [...new Map(enveloppesMoisBrutes.map((e) => [e.id, e])).values()]
-          : enveloppesMoisBrutes;
+          ? [
+              ...new Map(
+                enveloppesSource
+                  .filter((e) => estCategorieActiveCeMois(e, annee, mois))
+                  .map((e) => [e.id, e]),
+              ).values(),
+            ]
+          : (historiquesMoisSource.find((s) => s.mois === mois && s.annee === annee)
+              ?.enveloppes ?? []);
       enveloppesMois.forEach((e) => {
         if (!predicat(e)) return;
         // RÈGLE : clé normalisée, même raison que topDepensesParCategorie
@@ -2721,7 +2838,19 @@ export default function Analytics() {
   // Graphique réservé Premium (cf. PremiumVerrou dans le JSX) : pas de
   // palier gratuit ici, contrairement aux autres tiroirs de Stats.
   const [nbMoisFlux, setNbMoisFlux] = useState(1);
-  const moisFluxAffiches = construireMoisPeriode(nbMoisFlux, MOIS_ACTUEL, ANNEE_ACTUELLE);
+  // RÈGLE À NE JAMAIS CASSER — VERROUILLÉ AU MOIS EN COURS EN VUE PARTAGÉE
+  // (décision explicite de l'utilisateur) : reproduire le détail par
+  // transaction nommée du partenaire (Cas 1, colonne Destination) sur des
+  // mois ARCHIVÉS demanderait un id d'enveloppe exploitable dans son
+  // historique (SnapshotMoisPartenaire n'en a pas, cf. RÈGLE sur ce type
+  // dans utils/espacePartage.ts) — un chantier à part, écarté. Ignore donc
+  // `nbMoisFlux` (même s'il a été changé avant de passer en vue partagée)
+  // tant que affichagePartageFlux est vrai — jamais besoin de resynchroniser
+  // le state du sélecteur lui-même, qui reste simplement masqué (cf. JSX).
+  const affichagePartageFlux = estDansUnEspace && vueActive === "partage";
+  const moisFluxAffiches = affichagePartageFlux
+    ? construireMoisPeriode(1, MOIS_ACTUEL, ANNEE_ACTUELLE)
+    : construireMoisPeriode(nbMoisFlux, MOIS_ACTUEL, ANNEE_ACTUELLE);
   // Bornes calendaires strictes de la période affichée — 1er jour du premier
   // mois de moisFluxAffiches au dernier jour du dernier (toujours le mois en
   // cours, cf. construireMoisPeriode). Sert UNIQUEMENT à borner les
@@ -2776,6 +2905,37 @@ export default function Analytics() {
     (e) => e.type !== "Entrée" && e.depense > 0,
     moisFluxAffiches,
   );
+  // RÈGLE À NE JAMAIS CASSER — ÉQUIVALENT PARTENAIRE, MOIS EN COURS
+  // UNIQUEMENT (cf. RÈGLE sur affichagePartageFlux plus haut) : mêmes
+  // fonctions généralisées que "moi" ci-dessus, jamais un pipeline
+  // dupliqué — seule la source change (enveloppesPartenaireStats a de
+  // vrais ids, exploitables ici puisqu'on ne regarde jamais l'archive du
+  // partenaire pour ce graphique). `historiquesMoisSource` volontairement
+  // omis (reste objStore.historiquesMois par défaut) : sans effet ici
+  // puisque moisFluxAffiches ne contient que le mois courant en vue
+  // partagée, qui n'est jamais archivé.
+  const fluxEntreesPartenaire = affichagePartageFlux
+    ? construireRepartitionSurPeriode(
+        (e) => e.type === "Entrée" && e.depense > 0 && e.nom !== "Budget",
+        moisFluxAffiches,
+        enveloppesPartenaireStats,
+      )
+    : [];
+  const fluxNoeudsEntreesPartenaire: NoeudFlux[] = fluxEntreesPartenaire.map(
+    (e) => ({
+      id: e.cle,
+      label: e.label,
+      couleur: e.couleur,
+      montant: e.montant,
+    }),
+  );
+  const fluxCategoriesPartenaire = affichagePartageFlux
+    ? construireRepartitionSurPeriode(
+        (e) => e.type !== "Entrée" && e.depense > 0,
+        moisFluxAffiches,
+        enveloppesPartenaireStats,
+      )
+    : [];
   const fluxCategoriesPrecedentes = construireRepartitionSurPeriode(
     (e) => e.type !== "Entrée" && e.depense > 0,
     moisFluxPrecedents,
@@ -2814,9 +2974,23 @@ export default function Analytics() {
   // celui-ci) ajoutait son id inconditionnellement, et ses transactions se
   // retrouvaient doublées entre son vrai mois et n'importe quel autre mois
   // affiché.
-  const idsPourNomCategorieFlux = (nom: string): Set<string> => {
+  // RÈGLE À NE JAMAIS CASSER — enveloppesSource/historiquesMoisSource,
+  // MÊME CONVENTION QUE construireRepartitionSurPeriode PLUS HAUT : ajoutés
+  // pour le graphique de flux consolidé (vue partagée). `historiquesMoisSource`
+  // n'est PAS unioné avec un type partenaire : le flux consolidé se
+  // limite au mois en cours (décision explicite de l'utilisateur, cf.
+  // RÈGLE sur moisFluxAffichesEffectifs plus bas) — l'appel côté partenaire
+  // passe donc toujours `[]` ici (aucune recherche d'archive n'est
+  // pertinente), jamais des données SnapshotMoisPartenaire (qui n'ont pas
+  // d'id d'enveloppe exploitable, cf. RÈGLE sur ce type dans
+  // utils/espacePartage.ts).
+  const idsPourNomCategorieFlux = (
+    nom: string,
+    enveloppesSource: Enveloppe[] | EnveloppePartenaire[] = objStore.enveloppes,
+    historiquesMoisSource: SnapshotMois[] = objStore.historiquesMois,
+  ): Set<string> => {
     const ids = new Set<string>();
-    objStore.enveloppes.forEach((e) => {
+    enveloppesSource.forEach((e) => {
       if (
         e.nom.trim() === nom &&
         estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL)
@@ -2825,7 +2999,7 @@ export default function Analytics() {
       }
     });
     moisFluxAffiches.forEach(({ mois, annee }) => {
-      objStore.historiquesMois
+      historiquesMoisSource
         .find((s) => s.mois === mois && s.annee === annee)
         ?.enveloppes.forEach((e) => {
           if (e.nom.trim() === nom) ids.add(e.id);
@@ -2864,10 +3038,24 @@ export default function Analytics() {
   // agréger les id d'une catégorie recréée sous le même nom, cf. RÈGLE plus
   // haut) — le filtre de date exclut ensuite ce qui reste mais n'appartient
   // pas au bon mois.
-  const transactionsGroupeesParNomFlux = (nomCategorie: string) => {
-    const ids = idsPourNomCategorieFlux(nomCategorie);
+  // RÈGLE : mêmes paramètres optionnels que idsPourNomCategorieFlux
+  // ci-dessus (mêmes valeurs par défaut, même raison pour
+  // historiquesMoisSource resté non-unioné) — transactionsSource accepte en
+  // plus TransactionPartenaire[] (structurellement compatible avec
+  // Transaction pour les champs lus ici : id/nom/montant/enveloppeId/date).
+  const transactionsGroupeesParNomFlux = (
+    nomCategorie: string,
+    enveloppesSource: Enveloppe[] | EnveloppePartenaire[] = objStore.enveloppes,
+    historiquesMoisSource: SnapshotMois[] = objStore.historiquesMois,
+    transactionsSource: Transaction[] | TransactionPartenaire[] = objStore.transactions,
+  ) => {
+    const ids = idsPourNomCategorieFlux(
+      nomCategorie,
+      enveloppesSource,
+      historiquesMoisSource,
+    );
     const parNom = new Map<string, number>();
-    objStore.transactions
+    transactionsSource
       .filter((t) => ids.has(t.enveloppeId))
       .filter((t) => {
         const d = new Date(t.date);
@@ -2936,6 +3124,74 @@ export default function Analytics() {
     .filter((c) => c.cas === 1)
     .map(({ cat }) => ({ id: cat.cle, label: cat.label, couleur: cat.couleur, montant: cat.montant }));
 
+  // RÈGLE À NE JAMAIS CASSER — CLASSIFICATION PARTENAIRE, MÊME LOGIQUE QUE
+  // "MOI" CI-DESSUS, JAMAIS UN PIPELINE DIFFÉRENT : cf. RÈGLE sur
+  // fluxCategoriesPartenaire plus haut — mois en cours uniquement, ids
+  // réels via enveloppesPartenaireStats/transactionsPartenaireStats.
+  const classificationsFluxPartenaire = affichagePartageFlux
+    ? fluxCategoriesPartenaire.map((cat) => {
+        const type = enveloppesPartenaireStats.find(
+          (e) => e.nom.trim() === cat.label,
+        )?.type;
+        const brut =
+          type === "Variable"
+            ? transactionsGroupeesParNomFlux(
+                cat.label,
+                enveloppesPartenaireStats,
+                [],
+                transactionsPartenaireStats,
+              ).sort((a, b) => b.montant - a.montant)
+            : [];
+        if (brut.length < 1) {
+          return { cas: 2 as const, cat };
+        }
+        const sommeDetail = brut.reduce((acc, d) => acc + d.montant, 0);
+        const ecart = cat.montant - sommeDetail;
+        const detail =
+          ecart > 0.005 ? [...brut, { nom: "Autre", montant: ecart }] : brut;
+        return { cas: 1 as const, cat, detail };
+      })
+    : [];
+  const fluxNoeudsCategoriesPartenaire: NoeudFlux[] = classificationsFluxPartenaire
+    .filter((c) => c.cas === 1)
+    .map(({ cat }) => ({ id: cat.cle, label: cat.label, couleur: cat.couleur, montant: cat.montant }));
+  // RÈGLE À NE JAMAIS CASSER — BADGE Moi/Partenaire/Commun, DEMANDE
+  // EXPLICITE : NoeudFlux (GraphiqueFlux.tsx) n'a aucun champ dédié pour un
+  // badge — encodé en suffixe de `label` plutôt que de modifier le
+  // composant (qui doit rester EXACTEMENT inchangé, cf. RÈGLE en tête de
+  // GraphiqueFlux.tsx). Fusion par id (nom) : un id présent des deux côtés
+  // devient "Commun", jamais moitié affiché sous un badge moitié sous
+  // l'autre.
+  const fluxNoeudsCategoriesFusionnees: NoeudFlux[] = affichagePartageFlux
+    ? (() => {
+        const nomsMoi = new Set(fluxNoeudsCategories.map((n) => n.id));
+        const nomsPartenaire = new Set(
+          fluxNoeudsCategoriesPartenaire.map((n) => n.id),
+        );
+        const parId = new Map<string, NoeudFlux>();
+        [...fluxNoeudsCategories, ...fluxNoeudsCategoriesPartenaire].forEach(
+          (n) => {
+            const existant = parId.get(n.id);
+            parId.set(
+              n.id,
+              existant
+                ? { ...existant, montant: existant.montant + n.montant }
+                : n,
+            );
+          },
+        );
+        return [...parId.values()].map((n) => {
+          const badge =
+            nomsMoi.has(n.id) && nomsPartenaire.has(n.id)
+              ? "Commun"
+              : nomsPartenaire.has(n.id)
+                ? membrePartenaire?.prenom || "Partenaire"
+                : "Moi";
+          return { ...n, label: `${n.label} · ${badge}` };
+        });
+      })()
+    : fluxNoeudsCategories;
+
   // RÈGLE À NE JAMAIS CASSER : "Liquidités" = totalEntrées - totalDépensé -
   // totalÉpargné (TOUTE dépense de catégorie, Cas 1 ET Cas 2 confondus —
   // jamais seulement les catégories visibles en colonne 2), JAMAIS
@@ -2958,6 +3214,28 @@ export default function Analytics() {
   const totalLiquiditesFlux = Math.max(
     0,
     totalEntreesFlux - totalDepenseCategoriesFlux - totalEpargneFlux,
+  );
+  // RÈGLE À NE JAMAIS CASSER — LIQUIDITÉS CONSOLIDÉES, FORMULE DISTINCTE ET
+  // PLUS SIMPLE, DEMANDE EXPLICITE : "entrées combinées - dépenses
+  // combinées", JAMAIS moins l'épargne (contrairement à totalLiquiditesFlux
+  // ci-dessus, la version solo) — aucun nœud "Épargne" dans la vue
+  // consolidée non plus (cf. RÈGLE au site d'assemblage plus bas). Les deux
+  // formules n'ont pas besoin de coexister dans un seul calcul : la vue
+  // solo garde exactement son comportement actuel, la vue consolidée a la
+  // sienne, propre.
+  const totalEntreesFluxPartenaire = fluxEntreesPartenaire.reduce(
+    (acc, e) => acc + e.montant,
+    0,
+  );
+  const totalDepenseCategoriesFluxPartenaire = fluxCategoriesPartenaire.reduce(
+    (acc, c) => acc + c.montant,
+    0,
+  );
+  const totalLiquiditesFluxConsolide = Math.max(
+    0,
+    totalEntreesFlux +
+      totalEntreesFluxPartenaire -
+      (totalDepenseCategoriesFlux + totalDepenseCategoriesFluxPartenaire),
   );
 
   // RÈGLE À NE JAMAIS CASSER — MÊME PRINCIPE QUE idsPourNomCategorieFlux
@@ -3131,6 +3409,207 @@ export default function Analytics() {
   const fluxNoeudsDestination: NoeudFlux[] = [...blocsDestination]
     .sort((a, b) => b.sortKey - a.sortKey)
     .flatMap((bloc) => bloc.ids.map((id) => noeudsDestinationParId.get(id)).filter((n): n is NoeudFlux => !!n));
+
+  // RÈGLE À NE JAMAIS CASSER — ÉQUIVALENT PARTENAIRE : même boucle
+  // EXACTEMENT que celle qui construit fluxLiensVersDestination/
+  // noeudsDestinationParLabel/noeudsAutresParId/
+  // noeudsDirectsCategoriesParId/idsCategoriesDirectes/blocsDestination
+  // ci-dessus, jamais une variante — seules les variables cibles changent
+  // (suffixées Partenaire), rien de la boucle "moi" n'est touché. Les ids
+  // "Autre" sont préfixés `partenaire:` : ils ne doivent JAMAIS fusionner
+  // avec les miens (cf. RÈGLE "Autre n'est jamais fusionné entre
+  // catégories" dans GraphiqueFlux.tsx, qui s'étend ici entre comptes) —
+  // contrairement aux ids de transaction nommée/catégorie directe
+  // (volontairement PAS préfixés), qui doivent au contraire fusionner par
+  // construction avec ceux de "moi" s'ils portent le même nom.
+  const fluxLiensVersDestinationPartenaire: LienFlux[] = [];
+  const noeudsDestinationParLabelPartenaire = new Map<string, NoeudFlux>();
+  const noeudsAutresParIdPartenaire = new Map<string, NoeudFlux>();
+  const noeudsDirectsCategoriesParIdPartenaire = new Map<string, NoeudFlux>();
+  const idsCategoriesDirectesPartenaire: string[] = [];
+  const blocsDestinationPartenaire: { sortKey: number; ids: string[] }[] = [];
+  if (affichagePartageFlux) {
+    classificationsFluxPartenaire.forEach((classe) => {
+      const { cat } = classe;
+      if (classe.cas === 1) {
+        const idsNouveaux: string[] = [];
+        classe.detail.forEach((d) => {
+          if (d.nom === "Autre") {
+            const idNoeud = `partenaire:${cat.cle}__autre`;
+            noeudsAutresParIdPartenaire.set(idNoeud, {
+              id: idNoeud,
+              label: "Autre",
+              couleur: cat.couleur,
+              montant: d.montant,
+              groupeId: cat.cle,
+            });
+            fluxLiensVersDestinationPartenaire.push({
+              sourceId: cat.cle,
+              destId: idNoeud,
+              montant: d.montant,
+            });
+            idsNouveaux.push(idNoeud);
+            return;
+          }
+          const existant = noeudsDestinationParLabelPartenaire.get(d.nom);
+          if (existant) {
+            noeudsDestinationParLabelPartenaire.set(d.nom, {
+              ...existant,
+              montant: existant.montant + d.montant,
+            });
+            fluxLiensVersDestinationPartenaire.push({
+              sourceId: cat.cle,
+              destId: existant.id,
+              montant: d.montant,
+            });
+          } else {
+            const idNoeud = `transaction__${d.nom}`;
+            noeudsDestinationParLabelPartenaire.set(d.nom, {
+              id: idNoeud,
+              label: d.nom,
+              couleur: cat.couleur,
+              montant: d.montant,
+              groupeId: cat.cle,
+            });
+            fluxLiensVersDestinationPartenaire.push({
+              sourceId: cat.cle,
+              destId: idNoeud,
+              montant: d.montant,
+            });
+            idsNouveaux.push(idNoeud);
+          }
+        });
+        if (idsNouveaux.length > 0) {
+          blocsDestinationPartenaire.push({ sortKey: cat.montant, ids: idsNouveaux });
+        }
+        return;
+      }
+      idsCategoriesDirectesPartenaire.push(cat.cle);
+      noeudsDirectsCategoriesParIdPartenaire.set(cat.cle, {
+        id: cat.cle,
+        label: cat.label,
+        couleur: cat.couleur,
+        montant: cat.montant,
+      });
+      blocsDestinationPartenaire.push({ sortKey: cat.montant, ids: [cat.cle] });
+    });
+  }
+
+  // RÈGLE À NE JAMAIS CASSER — FUSION COLONNE 3 (Destination), PAR ID :
+  // les ids de transaction nommée (`transaction__${nom}`) et de catégorie
+  // directe (`cat.cle`, un nom) sont VOLONTAIREMENT partagés entre "moi" et
+  // "partenaire" (cf. RÈGLE juste au-dessus) — la fusion se fait donc PAR
+  // CONSTRUCTION en sommant les montants d'un même id, jamais un second
+  // mécanisme de correspondance par nom. Liquidités consolidée = UN SEUL
+  // nœud (jamais "moi"/"partenaire" séparés, cf. RÈGLE sur
+  // totalLiquiditesFluxConsolide) ; aucun nœud "Épargne" dans cette vue.
+  const noeudsDestinationParIdFusionne = affichagePartageFlux
+    ? (() => {
+        const combine = new Map<string, NoeudFlux>();
+        const fusionner = (n: NoeudFlux) => {
+          const existant = combine.get(n.id);
+          combine.set(
+            n.id,
+            existant
+              ? { ...existant, montant: existant.montant + n.montant }
+              : n,
+          );
+        };
+        [
+          ...noeudsDestinationParLabel.values(),
+          ...noeudsDestinationParLabelPartenaire.values(),
+        ].forEach(fusionner);
+        [...noeudsAutresParId.values(), ...noeudsAutresParIdPartenaire.values()].forEach(
+          fusionner,
+        );
+        [
+          ...noeudsDirectsCategoriesParId.values(),
+          ...noeudsDirectsCategoriesParIdPartenaire.values(),
+        ].forEach(fusionner);
+        if (totalLiquiditesFluxConsolide > 0) {
+          combine.set(ID_NOEUD_LIQUIDITES, {
+            id: ID_NOEUD_LIQUIDITES,
+            label: "Liquidités",
+            couleur: C.texteMuted,
+            montant: totalLiquiditesFluxConsolide,
+          });
+        }
+        return combine;
+      })()
+    : noeudsDestinationParId;
+  // RÈGLE : blocs "moi" + "partenaire" combinés puis DÉDUPLIQUÉS — un id
+  // fusionné (ex: "Loyer" catégorie directe des deux côtés) peut apparaître
+  // dans un bloc "moi" ET un bloc "partenaire" : jamais rendu deux fois,
+  // jamais un groupe éclaté (cf. RÈGLE "un bloc ne doit jamais être éclaté"
+  // dans GraphiqueFlux.tsx). sortKey recalculé depuis le montant RÉELLEMENT
+  // FUSIONNÉ (noeudsDestinationParIdFusionne), jamais le montant d'un seul
+  // côté, pour trier par le vrai total combiné. blocsDestination "moi"
+  // exclut ici son bloc Liquidités/Épargne (formule différente en vue
+  // consolidée, cf. RÈGLE sur totalLiquiditesFluxConsolide) — un seul bloc
+  // Liquidités combiné est ajouté séparément à la fin.
+  const blocsDestinationFusionnes = affichagePartageFlux
+    ? (() => {
+        const blocsMoiSansLiquiditesNiEpargne = blocsDestination.filter(
+          (bloc) =>
+            !bloc.ids.includes(ID_NOEUD_LIQUIDITES) &&
+            !bloc.ids.includes(ID_NOEUD_EPARGNE),
+        );
+        const idsDejaVus = new Set<string>();
+        const blocs: { sortKey: number; ids: string[] }[] = [];
+        [...blocsMoiSansLiquiditesNiEpargne, ...blocsDestinationPartenaire].forEach(
+          (bloc) => {
+            const idsRestants = bloc.ids.filter((id) => !idsDejaVus.has(id));
+            idsRestants.forEach((id) => idsDejaVus.add(id));
+            if (idsRestants.length === 0) return;
+            const sortKey = idsRestants.reduce(
+              (acc, id) =>
+                acc + (noeudsDestinationParIdFusionne.get(id)?.montant ?? 0),
+              0,
+            );
+            blocs.push({ sortKey, ids: idsRestants });
+          },
+        );
+        if (totalLiquiditesFluxConsolide > 0) {
+          blocs.push({
+            sortKey: totalLiquiditesFluxConsolide,
+            ids: [ID_NOEUD_LIQUIDITES],
+          });
+        }
+        return blocs;
+      })()
+    : blocsDestination;
+  const fluxNoeudsDestinationFusionnes: NoeudFlux[] = affichagePartageFlux
+    ? [...blocsDestinationFusionnes]
+        .sort((a, b) => b.sortKey - a.sortKey)
+        .flatMap((bloc) =>
+          bloc.ids
+            .map((id) => noeudsDestinationParIdFusionne.get(id))
+            .filter((n): n is NoeudFlux => !!n),
+        )
+    : fluxNoeudsDestination;
+  const fluxNoeudsEntreesFusionnees: NoeudFlux[] = affichagePartageFlux
+    ? (() => {
+        const parId = new Map<string, NoeudFlux>();
+        [...fluxNoeudsEntrees, ...fluxNoeudsEntreesPartenaire].forEach((n) => {
+          const existant = parId.get(n.id);
+          parId.set(
+            n.id,
+            existant
+              ? { ...existant, montant: existant.montant + n.montant }
+              : n,
+          );
+        });
+        return [...parId.values()];
+      })()
+    : fluxNoeudsEntrees;
+  const idsNoeudsDirectsFusionnes = affichagePartageFlux
+    ? [...new Set([...idsCategoriesDirectes, ...idsCategoriesDirectesPartenaire])]
+    : [
+        ...idsCategoriesDirectes,
+        ...(totalEpargneFlux > 0 ? [ID_NOEUD_EPARGNE] : []),
+        ...(totalLiquiditesFlux > 0 ? [ID_NOEUD_LIQUIDITES] : []),
+      ];
+
   const [modeAffichageFlux, setModeAffichageFlux] = useState<"euro" | "pct">("euro");
 
   // Défini ici (état de la page, pas au niveau module comme les autres
@@ -3196,6 +3675,16 @@ export default function Analytics() {
     // symétrique à celui-ci — sinon un compte sans les données correspon-
     // dantes bloque tout le tutoriel Stats, pas seulement cette étape.
     .filter((e) => e.id !== "tiroir-repartition" || repartitionTiroirVisible)
+    // Même raisonnement, encore : "tiroir-par-categorie" ("Entrées et
+    // dépenses par catégorie") ne se monte plus du tout en vue partagée
+    // (cf. RÈGLE au site de rendu, plus bas — trop individuel pour avoir une
+    // valeur "couple") — sans ce filtre, un compte en vue Partagé bloquerait
+    // le tutoriel Stats sur cette étape devenue non montée.
+    .filter(
+      (e) =>
+        e.id !== "tiroir-par-categorie" ||
+        !(estDansUnEspace && vueActive === "partage"),
+    )
     // Même raisonnement que pour "tiroir-repartition" : le tiroir "Ce
     // mois-ci" (header ET contenu) n'est monté du tout que si
     // objectifsAvecDelta.length > 0 (voir le JSX plus bas, gated par
@@ -3265,13 +3754,13 @@ export default function Analytics() {
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <View style={[styles.header, styles.headerRow]}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <SwitcherEspacePartage />
             <View>
               <Text style={[styles.titre, { color: C.texte }]}>Statistiques</Text>
               <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
                 {MOIS_LABELS_COMPLETS[MOIS_ACTUEL]} {ANNEE_ACTUELLE}
               </Text>
             </View>
+            <SwitcherEspacePartage />
           </View>
           <CibleTutoriel
             id="bilan"
@@ -4110,19 +4599,19 @@ export default function Analytics() {
                       cle: "disponible",
                       label: "Budget",
                       couleur: C.purple,
-                      donnees: donneesDisponible,
+                      donnees: donneesDisponibleConsolidees,
                     },
                     {
                       cle: "epargne",
                       label: "Épargne",
                       couleur: C.bleuGris,
-                      donnees: donneesEpargne,
+                      donnees: donneesEpargneConsolidees,
                     },
                     {
                       cle: "depenses",
                       label: "Dépenses",
                       couleur: C.accent,
-                      donnees: donneesReelles,
+                      donnees: donneesReellesConsolidees,
                     },
                   ]}
                   labels={labels}
@@ -4151,11 +4640,11 @@ export default function Analytics() {
             ]}
           >
             {(() => {
-              const maxBrutEpargne = Math.max(...donneesEpargne, 1);
+              const maxBrutEpargne = Math.max(...donneesEpargneConsolidees, 1);
               const ticksEpargne = calculerTicksY(maxBrutEpargne);
               const maxEpargne = ticksEpargne[ticksEpargne.length - 1];
               const indicesAffichesEpargne = indicesLabelsAffiches(
-                donneesEpargne.length,
+                donneesEpargneConsolidees.length,
               );
               return (
                 <View style={styles.epargneChartRow}>
@@ -4171,7 +4660,7 @@ export default function Analytics() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <View style={styles.barresEpargneValeursRow}>
-                      {donneesEpargne.map((val, i) => (
+                      {donneesEpargneConsolidees.map((val, i) => (
                         <Text
                           key={i}
                           style={[styles.barreEpargneVal, { color: C.bleuGris }]}
@@ -4203,7 +4692,7 @@ export default function Analytics() {
                         />
                       ))}
                       <View style={styles.barresEpargne}>
-                        {donneesEpargne.map((val, i) => {
+                        {donneesEpargneConsolidees.map((val, i) => {
                           const h = Math.round(
                             (val / maxEpargne) * HAUTEUR_TRACK_EPARGNE,
                           );
@@ -4628,6 +5117,12 @@ export default function Analytics() {
           </CibleTutoriel>
         )}
 
+        {/* RÈGLE : masqué entièrement en vue partagée — "Entrées et dépenses
+            par catégorie" est un détail trop individuel pour avoir une
+            valeur "couple" (demande explicite). Cf. le filtre symétrique
+            sur ETAPES_STATS plus haut, sinon le tutoriel Stats resterait
+            bloqué sur cette étape pour un compte en vue Partagé. */}
+        {!(estDansUnEspace && vueActive === "partage") && (
         <CibleTutoriel
           id="tiroir-par-categorie"
           onMesure={mesurerCibleTutoriel}
@@ -4804,6 +5299,7 @@ export default function Analytics() {
           )}
         </TiroirStats>
         </CibleTutoriel>
+        )}
 
         {objectifsAvecDelta.length > 0 && (
           <CibleTutoriel
@@ -5088,7 +5584,15 @@ export default function Analytics() {
               {premium || isGuest ? (
                 <>
                   <View style={styles.chipRow}>
-                    {[1, 3, 6, 12].map((m) => {
+                    {/* RÈGLE À NE JAMAIS CASSER : sélecteur de période masqué
+                        en vue partagée — décision explicite de l'utilisateur,
+                        le flux consolidé se limite au mois en cours (cf.
+                        RÈGLE sur affichagePartageFlux plus haut). moisFluxAffiches
+                        retombe déjà sur 1 mois automatiquement quel que soit
+                        nbMoisFlux, ce masquage n'est qu'une cohérence
+                        visuelle en plus. */}
+                    {!affichagePartageFlux &&
+                      [1, 3, 6, 12].map((m) => {
                       const actif = nbMoisFlux === m;
                       return (
                         <TouchableOpacity
@@ -5133,23 +5637,50 @@ export default function Analytics() {
                     </TouchableOpacity>
                   </View>
 
-                  {fluxNoeudsEntrees.length > 0 && fluxNoeudsDestination.length > 0 ? (
+                  {(affichagePartageFlux
+                    ? fluxNoeudsEntreesFusionnees.length > 0 &&
+                      fluxNoeudsDestinationFusionnes.length > 0
+                    : fluxNoeudsEntrees.length > 0 &&
+                      fluxNoeudsDestination.length > 0) ? (
                     <GraphiqueFlux
                       colonnes={[
-                        { titre: "Entrées d'argent", noeuds: fluxNoeudsEntrees },
-                        { titre: "Catégories", noeuds: fluxNoeudsCategories },
-                        { titre: "Destination", noeuds: fluxNoeudsDestination },
+                        {
+                          titre: "Entrées d'argent",
+                          noeuds: affichagePartageFlux
+                            ? fluxNoeudsEntreesFusionnees
+                            : fluxNoeudsEntrees,
+                        },
+                        {
+                          titre: "Catégories",
+                          noeuds: affichagePartageFlux
+                            ? fluxNoeudsCategoriesFusionnees
+                            : fluxNoeudsCategories,
+                        },
+                        {
+                          titre: "Destination",
+                          noeuds: affichagePartageFlux
+                            ? fluxNoeudsDestinationFusionnes
+                            : fluxNoeudsDestination,
+                        },
                       ]}
-                      liensVersDestination={fluxLiensVersDestination}
-                      idsNoeudsDirects={[
-                        ...idsCategoriesDirectes,
-                        ...(totalEpargneFlux > 0 ? [ID_NOEUD_EPARGNE] : []),
-                        ...(totalLiquiditesFlux > 0 ? [ID_NOEUD_LIQUIDITES] : []),
-                      ]}
+                      liensVersDestination={
+                        affichagePartageFlux
+                          ? [...fluxLiensVersDestination, ...fluxLiensVersDestinationPartenaire]
+                          : fluxLiensVersDestination
+                      }
+                      idsNoeudsDirects={idsNoeudsDirectsFusionnes}
                       couleurs={C}
                       fondCarte={C.carte}
                       reduireAnimations={reduireAnimations}
-                      variationParNoeud={fluxVariationParCategorie}
+                      // RÈGLE : pas de variation affichée en vue partagée —
+                      // fluxVariationParCategorie ne compare que MON mois
+                      // précédent, jamais celui du partenaire (hors scope,
+                      // le flux consolidé se limite au mois en cours) ;
+                      // omis plutôt qu'à moitié fusionné. Prop optionnelle
+                      // (GraphiqueFlux.tsx), aucun changement de composant.
+                      variationParNoeud={
+                        affichagePartageFlux ? undefined : fluxVariationParCategorie
+                      }
                       modeAffichage={modeAffichageFlux}
                     />
                   ) : (
