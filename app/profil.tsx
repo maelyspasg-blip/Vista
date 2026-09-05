@@ -55,7 +55,7 @@ import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { reinitialiserEtatUtilisateur, useObjectifs } from "./store";
 import { usePremium } from "./PremiumContext";
 import { styleModaleTablette, useEstTablette } from "./useTablette";
-import { estComptePremium, ESPACE_PARTAGE_ACTIF } from "../utils/premium";
+import { estComptePremium, estEspacePartageActif } from "../utils/premium";
 import {
   creerEspacePartage,
   EtatEspacePartage,
@@ -305,8 +305,8 @@ export default function Profil() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- setEspacePartageActif s'exécute après un await dans chargerEtatEspacePartage, jamais synchrone dans ce corps d'effet ; même catégorie déjà tolérée 2x plus haut dans ce fichier (lignes 167/171).
-    if (ESPACE_PARTAGE_ACTIF) chargerEtatEspacePartage();
-  }, [chargerEtatEspacePartage]);
+    if (estEspacePartageActif(objStore.isAdmin)) chargerEtatEspacePartage();
+  }, [chargerEtatEspacePartage, objStore.isAdmin]);
 
   const creerEtAfficherEspace = async () => {
     setCreationEspaceEnCours(true);
@@ -1195,11 +1195,14 @@ export default function Profil() {
         </View>
 
         {/* RÈGLE À NE JAMAIS CASSER — FONDATIONS ESPACE PARTAGÉ, RIEN
-            N'APPARAÎT TANT QUE ESPACE_PARTAGE_ACTIF EST false : cf.
-            utils/premium.ts. Ne jamais retirer cette garde même en
-            développant le contenu de cette section — elle protège la bêta
-            TestFlight actuelle d'une fonctionnalité pas encore prête. */}
-        {ESPACE_PARTAGE_ACTIF && (
+            N'APPARAÎT POUR UN COMPTE NON-ADMIN TANT QUE
+            ESPACE_PARTAGE_ACTIF EST false : cf. utils/premium.ts —
+            estEspacePartageActif(isAdmin) laisse un admin voir cette
+            section même bêta, jamais un compte non-admin. Ne jamais
+            retirer cette garde même en développant le contenu de cette
+            section — elle protège la bêta TestFlight actuelle d'une
+            fonctionnalité pas encore prête pour le grand public. */}
+        {estEspacePartageActif(objStore.isAdmin) && (
           <>
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
               ESPACE PARTAGÉ
@@ -1317,6 +1320,42 @@ export default function Profil() {
                   communes.
                 </Text>
               </TouchableOpacity>
+            )}
+            {/* RÈGLE : n'a de sens QUE si un partenaire est effectivement là
+                pour recevoir le masquage (statut "actif") — affiché en
+                "en_attente"/sans espace, ce toggle serait prématuré et sans
+                effet visible pour personne. */}
+            {espacePartageActif?.statut === "actif" && (
+              <View
+                style={[
+                  styles.carte,
+                  { backgroundColor: C.carte, borderColor: C.carteBorder },
+                  styleCarte(theme, C.purple, contrasteRenforce),
+                ]}
+              >
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.switchLabel, { color: C.texte }]}>
+                      Masquer mes événements personnels
+                    </Text>
+                    <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                      {espacePartageActif.prenomPartenaire ||
+                        "Ton/ta partenaire"}{" "}
+                      ne verra que tes événements communs dans Planning.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={objStore.masquerEvenementsPersonnels}
+                    onValueChange={objStore.modifierMasquerEvenementsPersonnels}
+                    trackColor={{ false: C.separateur, true: C.purpleLight }}
+                    thumbColor={
+                      objStore.masquerEvenementsPersonnels
+                        ? C.purple
+                        : "#FFF"
+                    }
+                  />
+                </View>
+              </View>
             )}
           </>
         )}

@@ -195,6 +195,14 @@ export type Evenement = {
   touteLaJournee?: boolean;
   notifierActif?: boolean;
   montantApplique?: boolean;
+  // Mode Planning partagé : "commun" (défaut serveur) rend l'événement
+  // visible par le partenaire et modifiable/supprimable par les deux ;
+  // "personnel" reste visible du partenaire SAUF si celui-ci a activé
+  // "Masquer mes événements personnels" (cf. profils.masquer_evenements_
+  // personnels, RLS evenements_select_espace_partage). Absent traité comme
+  // "commun", jamais comme "personnel" — cf. RÈGLE sur le défaut serveur
+  // dans supabase/migrations/20260905090000_planning_partage_schema.sql.
+  visibilite?: "commun" | "personnel";
 };
 
 export type Transaction = {
@@ -268,6 +276,11 @@ type EtatStore = {
   enveloppes: Enveloppe[];
   argentDisponibleReportAuto: boolean;
   seuilEpargneConstante: number | null;
+  // Planning partagé : masque MES événements 'personnel' aux yeux de mon
+  // partenaire (cf. RLS evenements_select_espace_partage) — ne concerne
+  // jamais mes événements 'commun', toujours visibles. Défaut false (rien
+  // de masqué).
+  masquerEvenementsPersonnels: boolean;
   prenom: string;
   nom: string;
   avatarUrl: string | null;
@@ -307,6 +320,7 @@ const ETAT_INITIAL: EtatStore = {
   enveloppes: [],
   argentDisponibleReportAuto: false,
   seuilEpargneConstante: null,
+  masquerEvenementsPersonnels: false,
   prenom: "",
   nom: "",
   avatarUrl: null,
@@ -820,6 +834,7 @@ type EvenementRow = {
   toute_la_journee: boolean | null;
   notifier_actif: boolean | null;
   montant_applique: boolean | null;
+  visibilite: string | null;
 };
 
 function heureDepuisColonneSupabase(heure: string): string {
@@ -853,6 +868,7 @@ function evenementDepuisLigne(l: EvenementRow): Evenement {
     touteLaJournee: l.toute_la_journee ?? undefined,
     notifierActif: l.notifier_actif ?? undefined,
     montantApplique: l.montant_applique ?? undefined,
+    visibilite: l.visibilite === "personnel" ? "personnel" : "commun",
   };
 }
 
@@ -872,6 +888,7 @@ function evenementVersColonnes(e: Omit<Evenement, "id">) {
     toute_la_journee: e.touteLaJournee ?? null,
     notifier_actif: e.notifierActif ?? null,
     montant_applique: e.montantApplique ?? null,
+    visibilite: e.visibilite ?? "commun",
   };
 }
 
@@ -2140,6 +2157,27 @@ function majReportAutoBudgetSupabase(reportAuto: boolean) {
   });
 }
 
+function majMasquerEvenementsPersonnelsSupabase(masquer: boolean) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({ masquer_evenements_personnels: masquer })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error(
+            "Supabase update masquer_evenements_personnels a échoué :",
+            error,
+          );
+          signalerErreurSync(
+            `Impossible de sauvegarder ce réglage : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
 function majSeuilEpargneConstanteSupabase(seuil: number | null) {
   supabase.auth.getUser().then(({ data: { user } }) => {
     if (!user) return;
@@ -2261,6 +2299,7 @@ export function useObjectifs() {
     estAdmin: () => local.isAdmin,
     notificationsActives: local.notificationsActives,
     alertesBudget: local.alertesBudget,
+    masquerEvenementsPersonnels: local.masquerEvenementsPersonnels,
     alerteBudgetActuelle: local.alerteBudgetActuelle,
     transactions: local.transactions,
     modelesDepenses: local.modelesDepenses,
@@ -2411,7 +2450,7 @@ export function useObjectifs() {
             supabase
               .from("profils")
               .select(
-                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, seuil_epargne_constante, prenom, nom, avatar_url, is_admin, notifications_actives, alertes_budget, dernier_mois_archive_mois, dernier_mois_archive_annee",
+                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, seuil_epargne_constante, prenom, nom, avatar_url, is_admin, notifications_actives, alertes_budget, dernier_mois_archive_mois, dernier_mois_archive_annee, masquer_evenements_personnels",
               )
               .eq("user_id", user.id)
               .single(),
@@ -2450,6 +2489,9 @@ export function useObjectifs() {
             etat.argentDisponibleReportAuto,
           seuilEpargneConstante:
             profil?.seuil_epargne_constante ?? etat.seuilEpargneConstante,
+          masquerEvenementsPersonnels:
+            profil?.masquer_evenements_personnels ??
+            etat.masquerEvenementsPersonnels,
           prenom: profil?.prenom ?? etat.prenom,
           nom: profil?.nom ?? etat.nom,
           avatarUrl: profil?.avatar_url ?? etat.avatarUrl,
@@ -3141,6 +3183,11 @@ export function useObjectifs() {
       majReportAutoBudgetSupabase(reportAuto);
     },
 
+    modifierMasquerEvenementsPersonnels: (masquer: boolean) => {
+      setEtat({ masquerEvenementsPersonnels: masquer });
+      majMasquerEvenementsPersonnelsSupabase(masquer);
+    },
+
     modifierSeuilEpargneConstante: (seuil: number | null) => {
       setEtat({ seuilEpargneConstante: seuil });
       majSeuilEpargneConstanteSupabase(seuil);
@@ -3427,6 +3474,8 @@ export function useObjectifs() {
         colonnes.toute_la_journee = champs.touteLaJournee ?? null;
       if ("notifierActif" in champs)
         colonnes.notifier_actif = champs.notifierActif ?? null;
+      if ("visibilite" in champs)
+        colonnes.visibilite = champs.visibilite ?? "commun";
 
       const champsFinanciers =
         "estFinancier" in champs ||

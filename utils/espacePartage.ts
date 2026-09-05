@@ -1,5 +1,5 @@
 import { supabase } from "../supabaseClient";
-import type { Enveloppe } from "../app/store";
+import type { Enveloppe, Evenement } from "../app/store";
 import { estCategorieActiveCeMois } from "./budget";
 
 // RÈGLE À NE JAMAIS CASSER — RESTE DERRIÈRE ESPACE_PARTAGE_ACTIF : ce
@@ -625,4 +625,198 @@ export function fusionnerCategoriesParNom(
       badge,
     };
   });
+}
+
+// RÈGLE : type volontairement DISTINCT d'Evenement (app/store.ts) — mêmes
+// raisons que EnveloppePartenaire plus haut : données EN LECTURE SEULE d'un
+// AUTRE utilisateur (jamais fusionnées dans etat.evenements), limitées aux
+// champs que app/(tabs)/planning.tsx affiche/fusionne. La RLS
+// evenements_select_espace_partage (migration 20260905091000) filtre déjà
+// ce qui est renvoyé (commun, ou personnel non masqué) — cette fonction ne
+// fait qu'un SELECT brut, aucun filtrage client-side supplémentaire.
+export type EvenementPartenaire = {
+  id: string;
+  nom: string;
+  date: string;
+  dateFin?: string;
+  heure: string;
+  duree: number;
+  couleur: string;
+  estFinancier: boolean;
+  montant?: number;
+  // RÈGLE : catégorieLiee/notifierActif/montantApplique sont repris ici
+  // (contrairement à EnveloppePartenaire, qui n'en a pas besoin) uniquement
+  // pour que modifierEvenementPartenaire (plus bas) puisse les RÉÉCRIRE
+  // inchangés lors d'une sauvegarde partielle du formulaire d'édition
+  // (app/(tabs)/planning.tsx) — jamais éditables depuis mon compte pour un
+  // événement du partenaire (categorieLiee référence une enveloppe qui
+  // n'existe pas forcément chez moi), mais round-trip nécessaire pour ne
+  // jamais les écraser silencieusement à l'enregistrement.
+  categorieLiee?: string;
+  notifierActif?: boolean;
+  montantApplique?: boolean;
+  recurrent?: boolean;
+  frequence?: "jour" | "semaine" | "mois" | "an";
+  touteLaJournee?: boolean;
+  visibilite: "commun" | "personnel";
+};
+
+function heureDepuisColonneSupabasePartenaire(heure: string): string {
+  const [hStr, mStr] = heure.split(":");
+  const h = parseInt(hStr, 10) || 0;
+  const m = parseInt(mStr, 10) || 0;
+  return `${h}h${String(m).padStart(2, "0")}`;
+}
+
+export async function chargerEvenementsPartenaire(
+  partenaireId: string,
+): Promise<EvenementPartenaire[]> {
+  try {
+    const { data, error } = await supabase
+      .from("evenements")
+      .select("*")
+      .eq("user_id", partenaireId);
+
+    if (error) {
+      console.error(
+        "Supabase select evenements (chargerEvenementsPartenaire) a échoué :",
+        error,
+      );
+      return [];
+    }
+
+    return (data ?? []).map((e) => ({
+      id: e.id,
+      nom: e.nom,
+      date: e.date,
+      dateFin: e.date_fin ?? undefined,
+      heure: heureDepuisColonneSupabasePartenaire(e.heure),
+      duree: e.duree,
+      couleur: e.couleur,
+      estFinancier: e.est_financier,
+      montant: e.montant ?? undefined,
+      categorieLiee: e.categorie_liee ?? undefined,
+      notifierActif: e.notifier_actif ?? undefined,
+      montantApplique: e.montant_applique ?? undefined,
+      recurrent: e.recurrent ?? undefined,
+      frequence: e.frequence ?? undefined,
+      touteLaJournee: e.toute_la_journee ?? undefined,
+      visibilite: e.visibilite === "personnel" ? "personnel" : "commun",
+    }));
+  } catch (e) {
+    console.error("chargerEvenementsPartenaire a échoué :", e);
+    return [];
+  }
+}
+
+export type StatutFusionEvenements =
+  | "succes"
+  | "deja_fusionne"
+  | "introuvable"
+  | "non_autorise"
+  | "erreur_reseau";
+
+// RÈGLE À NE JAMAIS CASSER — PASSE PAR LA RPC fusionner_evenements, JAMAIS
+// UN INSERT+DELETE CÔTÉ CLIENT : cf. RÈGLE détaillée dans la migration
+// supabase/migrations/20260905092000_planning_partage_fusion_rpc.sql —
+// atomicité nécessaire car les deux comptes peuvent détecter et tenter de
+// fusionner la même paire en même temps.
+export async function fusionnerEvenements(
+  monEvenementId: string,
+  evenementPartenaireId: string,
+): Promise<StatutFusionEvenements> {
+  try {
+    const { data, error } = await supabase.rpc("fusionner_evenements", {
+      p_mon_evenement_id: monEvenementId,
+      p_evenement_partenaire_id: evenementPartenaireId,
+    });
+
+    if (error) {
+      console.error("Supabase rpc fusionner_evenements a échoué :", error);
+      return "erreur_reseau";
+    }
+
+    const ligne = data?.[0];
+    if (!ligne) return "erreur_reseau";
+    return ligne.statut as StatutFusionEvenements;
+  } catch (e) {
+    console.error("fusionnerEvenements a échoué :", e);
+    return "erreur_reseau";
+  }
+}
+
+function texteSecurisePartenaire(valeur: string, max = 100): string {
+  return valeur.trim().slice(0, max);
+}
+
+function montantSecurisePartenaire(valeur: number): number {
+  return Number.isFinite(valeur) && valeur >= 0 ? valeur : 0;
+}
+
+function heureVersColonneSupabasePartenaire(heure: string): string {
+  const [hStr, mStr] = heure.split(/[h:]/);
+  const h = Math.min(23, Math.max(0, parseInt(hStr, 10) || 0));
+  const m = Math.min(59, Math.max(0, parseInt(mStr, 10) || 0));
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// RÈGLE À NE JAMAIS CASSER — ÉCRITURE DIRECTE, JAMAIS objStore.modifierEvenement :
+// cette fonction cible un événement qui n'existe PAS dans etat.evenements
+// (il appartient au partenaire) — passer par le store local le laisserait
+// introuvable dans etat.evenements et n'écrirait rien. S'appuie uniquement
+// sur la policy RLS evenements_update_espace_partage (visibilite='commun'
+// requis côté serveur, revérifié par Postgres — jamais fait confiance à ce
+// que l'appelant a filtré côté client). L'appelant (app/(tabs)/planning.tsx)
+// est responsable de rafraîchir evenementsPartenaire après coup — cette
+// fonction ne touche aucun state.
+export async function modifierEvenementPartenaire(
+  id: string,
+  champs: Omit<Evenement, "id">,
+): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from("evenements")
+      .update({
+        nom: texteSecurisePartenaire(champs.nom),
+        date: champs.date,
+        date_fin: champs.dateFin ?? null,
+        heure: heureVersColonneSupabasePartenaire(champs.heure),
+        duree: champs.duree,
+        couleur: champs.couleur,
+        est_financier: champs.estFinancier,
+        montant:
+          champs.montant != null ? montantSecurisePartenaire(champs.montant) : null,
+        categorie_liee: champs.categorieLiee ?? null,
+        recurrent: champs.recurrent ?? null,
+        frequence: champs.frequence ?? null,
+        toute_la_journee: champs.touteLaJournee ?? null,
+      })
+      .eq("id", id);
+
+    if (error) {
+      console.error("Supabase update evenement (partenaire) a échoué :", error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("modifierEvenementPartenaire a échoué :", e);
+    return false;
+  }
+}
+
+// RÈGLE : même raisonnement que modifierEvenementPartenaire — s'appuie
+// uniquement sur evenements_delete_espace_partage (commun uniquement),
+// jamais objStore.supprimerEvenement.
+export async function supprimerEvenementPartenaire(id: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from("evenements").delete().eq("id", id);
+    if (error) {
+      console.error("Supabase delete evenement (partenaire) a échoué :", error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("supprimerEvenementPartenaire a échoué :", e);
+    return false;
+  }
 }

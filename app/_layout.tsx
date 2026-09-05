@@ -16,7 +16,7 @@ import { GuestContext } from "./GuestContext";
 import { JoursFeriesProvider } from "./JoursFeriesContext";
 import { PremiumProvider } from "./PremiumContext";
 import { supabase } from "../supabaseClient";
-import { ESPACE_PARTAGE_ACTIF } from "../utils/premium";
+import { estEspacePartageActif } from "../utils/premium";
 import { reinitialiserEtatUtilisateur } from "./store";
 import "./calendarLocale";
 import { ecouterOnboardingTermine } from "./onboardingCompletion";
@@ -109,6 +109,12 @@ function RootLayoutInterne() {
     null,
   );
   const [isGuest, setIsGuest] = useState(false);
+  // RÈGLE À NE JAMAIS CASSER — SUIVI ICI UNIQUEMENT POUR estEspacePartageActif
+  // (utils/premium.ts) : ce layout ne passe pas par objStore (app/store.ts,
+  // pas encore chargé à ce niveau), donc isAdmin doit être lu directement
+  // depuis `profils` dans les deux effets ci-dessous — mêmes sites que
+  // is_guest, jamais une troisième requête séparée.
+  const [isAdmin, setIsAdmin] = useState(false);
   const [guestExpiresAt, setGuestExpiresAt] = useState<string | null>(null);
   const [msRestantsEssai, setMsRestantsEssai] = useState<number | null>(null);
   const [estGuestExpire, setEstGuestExpire] = useState(false);
@@ -221,6 +227,7 @@ function RootLayoutInterne() {
           .eq("user_id", data.session.user.id)
           .single();
         setOnboardingComplete(profil?.onboarding_complete ?? true);
+        setIsAdmin(!!profil?.is_admin);
         setTutoriel({
           apercu: profil?.tutoriel_apercu_vu ?? true,
           budget: profil?.tutoriel_budget_vu ?? true,
@@ -287,6 +294,7 @@ function RootLayoutInterne() {
           setGuestExpiresAt(null);
           setMsRestantsEssai(null);
           setOnboardingComplete(null);
+          setIsAdmin(false);
           dernierUserIdRef.current = null;
           // RÈGLE À NE JAMAIS CASSER — PROTECTION CONTRE LES DONNÉES QUI
           // FUITENT D'UN COMPTE À L'AUTRE : cf. RÈGLE détaillée sur
@@ -323,6 +331,7 @@ function RootLayoutInterne() {
           .single()
           .then(({ data: profil }) => {
             setOnboardingComplete(profil?.onboarding_complete ?? true);
+            setIsAdmin(!!profil?.is_admin);
             // Un admin n'est jamais traité comme invité restreint, même si
             // is_guest est techniquement vrai en base : bannière d'essai,
             // flou des stats et expiration forcée en dépendent tous via cet
@@ -455,11 +464,13 @@ function RootLayoutInterne() {
             >
               <PremiumProvider>
                 <JoursFeriesProvider>
-                  {/* RÈGLE À NE JAMAIS CASSER — MONTÉ UNIQUEMENT SI
-                      ESPACE_PARTAGE_ACTIF : tant que ce flag reste `false`
+                  {/* RÈGLE À NE JAMAIS CASSER — MONTÉ SI
+                      estEspacePartageActif(isAdmin) : tant qu'un compte
+                      n'est ni admin ni couvert par ESPACE_PARTAGE_ACTIF
                       (bêta TestFlight), EspacePartageProvider n'existe même
-                      pas dans l'arbre — cf. utils/premium.ts. */}
-                  {ESPACE_PARTAGE_ACTIF ? (
+                      pas dans l'arbre — cf. utils/premium.ts. Un admin voit
+                      toujours la fonctionnalité, même bêta. */}
+                  {estEspacePartageActif(isAdmin) ? (
                     <EspacePartageProvider userId={session?.user?.id ?? null}>
                       <Navigateur />
                     </EspacePartageProvider>

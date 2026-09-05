@@ -12,16 +12,19 @@ import { AppState } from "react-native";
 import {
   CategorieFusionnee,
   chargerDonneesPartenaire,
+  chargerEvenementsPartenaire,
   DonneesPartenaire,
+  EvenementPartenaire,
   fusionnerCategoriesParNom,
   getMembreEspace,
 } from "../utils/espacePartage";
 import { useObjectifs } from "./store";
 
-// RÈGLE À NE JAMAIS CASSER — RESTE DERRIÈRE ESPACE_PARTAGE_ACTIF : ce
+// RÈGLE À NE JAMAIS CASSER — RESTE DERRIÈRE estEspacePartageActif : ce
 // Provider n'est monté dans app/_layout.tsx que si
-// utils/premium.ts:ESPACE_PARTAGE_ACTIF est `true` — tant qu'il reste
-// `false`, ce contexte n'existe pas du tout dans l'arbre, aucun écran ne
+// utils/premium.ts:estEspacePartageActif(isAdmin) est vrai (ESPACE_PARTAGE_ACTIF
+// pour tout le monde, ou compte admin même en bêta) — pour tout autre
+// compte, ce contexte n'existe pas du tout dans l'arbre, aucun écran ne
 // peut donc en dépendre par accident. Un écran qui utilise useEspacePartage()
 // hors de ce Provider retombe silencieusement sur les valeurs par défaut
 // ci-dessous (estDansUnEspace: false) plutôt que de planter — jamais de
@@ -57,6 +60,19 @@ type EspacePartageContextType = {
   // chaque changement d'onglet. `null` tant que non chargé/vue "personnel".
   donneesPartenaire: DonneesPartenaire | null;
   chargementPartenaire: boolean;
+  // RÈGLE : chargés EN MÊME TEMPS que donneesPartenaire (même effet, même
+  // chargementPartenaire) plutôt qu'un second cycle de chargement séparé —
+  // cf. app/(tabs)/planning.tsx, seul consommateur actuel. Tableau vide hors
+  // vue "partage"/hors espace actif, jamais `null`.
+  evenementsPartenaire: EvenementPartenaire[];
+  // RÈGLE : à appeler après une fusion/modification/suppression d'un
+  // événement du partenaire (app/(tabs)/planning.tsx) — ces écritures
+  // passent par utils/espacePartage.ts (modifierEvenementPartenaire/
+  // supprimerEvenementPartenaire/fusionnerEvenements), jamais par le store
+  // local, donc rien ne redéclenche l'effet de chargement ci-dessus tout
+  // seul. Recharge uniquement les événements (pas les enveloppes), plus
+  // léger qu'attendre un aller-retour complet de vueActive.
+  rafraichirEvenementsPartenaire: () => Promise<void>;
   // RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE DE LA FUSION PAR NOM, CALCULÉE
   // ICI ET NULLE PART AILLEURS : cf. RÈGLE détaillée sur
   // fusionnerCategoriesParNom (utils/espacePartage.ts). Mémoïsée, recalculée
@@ -76,6 +92,8 @@ const EspacePartageContext = createContext<EspacePartageContextType>({
   rafraichirEspace: async () => {},
   donneesPartenaire: null,
   chargementPartenaire: false,
+  evenementsPartenaire: [],
+  rafraichirEvenementsPartenaire: async () => {},
   categoriesFusionnees: [],
 });
 
@@ -101,6 +119,9 @@ export function EspacePartageProvider({
   const [vueActive, setVueActiveState] = useState<VueEspacePartage>("personnel");
   const [donneesPartenaire, setDonneesPartenaire] =
     useState<DonneesPartenaire | null>(null);
+  const [evenementsPartenaire, setEvenementsPartenaire] = useState<
+    EvenementPartenaire[]
+  >([]);
   const [chargementPartenaire, setChargementPartenaire] = useState(false);
   const objStore = useObjectifs();
 
@@ -224,30 +245,49 @@ export function EspacePartageProvider({
     return () => abonnement.remove();
   }, [rafraichirEspace]);
 
-  // Charge les enveloppes/transactions 'commun' du partenaire au passage en
-  // vue "Partagé" (jamais en vue "Moi", jamais sans espace actif) — cf.
-  // utils/espacePartage.ts::chargerDonneesPartenaire, seule fonction
-  // autorisée à lire les données d'un autre compte. Centralisé ici (plutôt
-  // que dans chaque écran) pour ne charger qu'une fois par passage en vue
-  // Partagé, partagé ensuite par Aperçu/Stats/futur Planning.
+  // Charge les enveloppes/transactions ET les événements 'commun' (ou
+  // 'personnel' non masqué) du partenaire au passage en vue "Partagé"
+  // (jamais en vue "Moi", jamais sans espace actif) — cf.
+  // utils/espacePartage.ts::chargerDonneesPartenaire/
+  // chargerEvenementsPartenaire, seules fonctions autorisées à lire les
+  // données d'un autre compte. Centralisé ici (plutôt que dans chaque
+  // écran) pour ne charger qu'une fois par passage en vue Partagé, partagé
+  // ensuite par Aperçu/Budget/Stats/Planning. Un seul Promise.all, un seul
+  // chargementPartenaire pour les deux — jamais deux cycles de chargement
+  // séparés qui pourraient laisser l'un des deux visiblement en retard.
   useEffect(() => {
     if (vueActive !== "partage" || !estDansUnEspace || !membrePartenaire) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- réinitialisation synchrone volontaire en quittant la vue Partagé, même précédent que la remise à zéro de userId plus haut dans ce fichier.
       setDonneesPartenaire(null);
+      setEvenementsPartenaire([]);
       return;
     }
     let annule = false;
     (async () => {
       setChargementPartenaire(true);
-      const donnees = await chargerDonneesPartenaire(membrePartenaire.id);
+      const [donnees, evenements] = await Promise.all([
+        chargerDonneesPartenaire(membrePartenaire.id),
+        chargerEvenementsPartenaire(membrePartenaire.id),
+      ]);
       if (annule) return;
       setDonneesPartenaire(donnees);
+      setEvenementsPartenaire(evenements);
       setChargementPartenaire(false);
     })();
     return () => {
       annule = true;
     };
   }, [vueActive, estDansUnEspace, membrePartenaire]);
+
+  // RÈGLE : cf. RÈGLE détaillée sur rafraichirEvenementsPartenaire
+  // ci-dessus. useCallback pour une identité stable (même besoin que
+  // rafraichirEspace) — évite de re-déclencher un effet consommateur à
+  // chaque rendu si un écran l'ajoute un jour à un tableau de dépendances.
+  const rafraichirEvenementsPartenaire = useCallback(async () => {
+    if (!membrePartenaire) return;
+    const evenements = await chargerEvenementsPartenaire(membrePartenaire.id);
+    setEvenementsPartenaire(evenements);
+  }, [membrePartenaire]);
 
   // RÈGLE À NE JAMAIS CASSER : cf. RÈGLE détaillée sur categoriesFusionnees
   // ci-dessus — calculée UNE SEULE FOIS ici, jamais dans un écran
@@ -297,6 +337,8 @@ export function EspacePartageProvider({
         rafraichirEspace,
         donneesPartenaire,
         chargementPartenaire,
+        evenementsPartenaire,
+        rafraichirEvenementsPartenaire,
         categoriesFusionnees,
       }}
     >

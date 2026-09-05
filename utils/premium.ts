@@ -35,6 +35,21 @@ export const TESTFLIGHT_MODE = true;
 // app/profil.tsx).
 export const ESPACE_PARTAGE_ACTIF = false;
 
+// RÈGLE À NE JAMAIS CASSER — SEUL POINT D'ENTRÉE POUR SAVOIR SI L'ESPACE
+// PARTAGÉ DOIT ÊTRE VISIBLE, JAMAIS ESPACE_PARTAGE_ACTIF DIRECTEMENT DANS UN
+// SITE GARDÉ : décision du 2026-09-05 — un compte admin doit pouvoir tester
+// la fonctionnalité même pendant la bêta (ESPACE_PARTAGE_ACTIF=false), sans
+// jamais l'exposer aux utilisateurs bêta non-admin. `ESPACE_PARTAGE_ACTIF`
+// lui-même reste une constante évaluée au chargement du module, bien avant
+// qu'un utilisateur (et donc isAdmin) ne soit connu — c'est pour ça qu'il
+// ne peut pas dépendre de isAdmin directement (un `const X = isAdmin ? ... `
+// au niveau module n'aurait aucune valeur d'isAdmin à lire). Cette fonction
+// est donc TOUJOURS appelée avec le isAdmin déjà résolu de l'utilisateur
+// courant, jamais l'inverse.
+export function estEspacePartageActif(isAdmin: boolean): boolean {
+  return ESPACE_PARTAGE_ACTIF || isAdmin;
+}
+
 // RÈGLE : Ad Unit ID de la pub récompensée AdMob — sélectionné une seule
 // fois ici selon la plateforme (Platform.OS), jamais dupliqué ailleurs dans
 // le code (InsightVerrouille.tsx l'importe directement).

@@ -3,7 +3,8 @@
     "allow": [
       "Bash(grep -n \"style={\\\\[styles.modalCard, { backgroundColor: C.carte }\\\\]}\" \"/Users/maelys/vista/app/\\(tabs\\)/index.tsx\")",
       "Bash(cat /tmp/tsc_out8.txt)",
-      "Read(//private/tmp/**)"
+      "Read(//private/tmp/**)",
+      "Bash(tee /tmp/tsc_final.txt)"
     ]
   },
   "hooks": {

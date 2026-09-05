@@ -1,13 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import {
   useFocusEffect,
   useLocalSearchParams,
   useRouter,
 } from "expo-router";
-import { ReactNode, useCallback, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -48,6 +50,13 @@ import { FrequenceEvenement, genererOccurrencesEvenement } from "../../utils/eve
 import { getJoursFeries } from "../../utils/joursFeries";
 import { useJoursFeries } from "../JoursFeriesContext";
 import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
+import { useEspacePartage } from "../EspacePartageContext";
+import {
+  EvenementPartenaire,
+  fusionnerEvenements,
+  modifierEvenementPartenaire,
+  supprimerEvenementPartenaire,
+} from "../../utils/espacePartage";
 
 const JOURS_SEMAINE = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const HEURES = Array.from({ length: 24 }, (_, i) => `${i}h`);
@@ -178,6 +187,26 @@ type EvenementUnifie = {
   date: Date;
   modifiable: boolean;
   evenementId?: string;
+  // RÈGLE À NE JAMAIS CASSER — PLANNING PARTAGÉ : "moi" par défaut pour tout
+  // ce qui vient de objStore.evenements/jours fériés (jamais recalculé au
+  // cas par cas) ; "partenaire" uniquement pour les lignes ajoutées depuis
+  // evenementsPartenaire (cf. EspacePartageContext). `visibilite` n'est
+  // significative QUE pour distinguer un commun d'un personnel affiché
+  // (jamais lue pour les jours fériés/échéances Fixe, qui n'ont pas de vraie
+  // ligne `evenements`) — cf. RÈGLE sur `modifiable` déjà en place.
+  proprietaire: "moi" | "partenaire";
+  visibilite: "commun" | "personnel";
+};
+
+// RÈGLE À NE JAMAIS CASSER — DÉTECTION DE DOUBLONS SUR LES LISTES BRUTES,
+// JAMAIS LES OCCURRENCES DÉPLIÉES : monEvenement/evenementPartenaire viennent
+// directement de objStore.evenements/evenementsPartenaire (une ligne par
+// événement récurrent, pas une par occurrence affichée) — comparer après
+// dépliage produirait une suggestion par occurrence au lieu d'une seule par
+// paire d'événements.
+type SuggestionFusion = {
+  monEvenement: Evenement;
+  evenementPartenaire: EvenementPartenaire;
 };
 
 /**
@@ -243,6 +272,14 @@ export default function Planning() {
   const router = useRouter();
   const { isGuest } = useGuest();
   const { afficherJoursFeries } = useJoursFeries();
+  const {
+    estDansUnEspace,
+    vueActive,
+    membrePartenaire,
+    evenementsPartenaire,
+    rafraichirEvenementsPartenaire,
+  } = useEspacePartage();
+  const affichagePartage = estDansUnEspace && vueActive === "partage";
   const params = useLocalSearchParams<{ editEventId?: string }>();
   const { planning: tutorielPlanningVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
@@ -289,11 +326,38 @@ export default function Planning() {
     useState<FrequenceEvenement>("semaine");
   const [journeeEntiereEvent, setJourneeEntiereEvent] = useState(false);
   const [notifierEvent, setNotifierEvent] = useState(false);
+  const [visibiliteEvent, setVisibiliteEvent] = useState<
+    "commun" | "personnel"
+  >("commun");
   const [evenementEnEditionId, setEvenementEnEditionId] = useState<
     string | null
   >(null);
+  // RÈGLE À NE JAMAIS CASSER — DISTINGUE L'ÉCRITURE : un événement du
+  // partenaire n'existe jamais dans etat.evenements (cf. RÈGLE sur
+  // modifierEvenementPartenaire/supprimerEvenementPartenaire, utils/
+  // espacePartage.ts) — sauvegarderModificationEvenement/
+  // supprimerEvenementEnEdition doivent donc emprunter un chemin d'écriture
+  // différent quand ce flag est vrai, jamais objStore.modifierEvenement/
+  // supprimerEvenement (qui ne trouveraient rien à modifier).
+  const [evenementEnEditionEstPartenaire, setEvenementEnEditionEstPartenaire] =
+    useState(false);
   const [creationEvenementEnCours, setCreationEvenementEnCours] =
     useState(false);
+
+  const [suggestionsFusion, setSuggestionsFusion] = useState<
+    SuggestionFusion[]
+  >([]);
+  const [pairesFusionIgnorees, setPairesFusionIgnorees] = useState<
+    Set<string>
+  >(new Set());
+  // RÈGLE À NE JAMAIS CASSER — UNE SEULE TENTATIVE DE FUSION AUTO PAR PAIRE
+  // PAR SESSION : sans ce ref, chaque re-render déclenché par la fusion
+  // elle-même (chargerObjectifs()/rafraichirEvenementsPartenaire() font
+  // changer les tableaux sources) relancerait fusionnerEvenements sur la
+  // même paire avant que les lignes d'origine aient disparu des listes
+  // locales — la RPC est idempotente (cf. migration) donc ce n'est jamais
+  // dangereux, seulement redondant.
+  const pairesFusionTentees = useRef<Set<string>>(new Set());
 
   const tousLesEvenements: EvenementUnifie[] = [];
 
@@ -320,9 +384,31 @@ export default function Planning() {
   const joursFeries = afficherJoursFeries
     ? [...anneesFenetreFeries].flatMap((annee) => getJoursFeries(annee))
     : [];
-  const evenementsSource = [...objStore.evenements, ...joursFeries];
+  // RÈGLE À NE JAMAIS CASSER — PLANNING PARTAGÉ : evenementsPartenaire
+  // (EvenementPartenaire[], cf. EspacePartageContext) rejoint le MÊME
+  // pipeline de construction que jours fériés/événements réels (jamais un
+  // second pipeline de rendu parallèle) — seul `proprietaire`, porté par ce
+  // wrapper plutôt que par le champ `visibilite` (qui, lui, distingue
+  // commun/personnel indépendamment de qui l'a créé), permet de retrouver
+  // qui possède chaque ligne plus bas (badges, permissions d'édition).
+  const evenementsSource: {
+    evenement: Evenement | EvenementPartenaire;
+    proprietaire: "moi" | "partenaire";
+  }[] = [
+    ...objStore.evenements.map((e) => ({
+      evenement: e,
+      proprietaire: "moi" as const,
+    })),
+    ...(affichagePartage
+      ? evenementsPartenaire.map((e) => ({
+          evenement: e,
+          proprietaire: "partenaire" as const,
+        }))
+      : []),
+    ...joursFeries.map((e) => ({ evenement: e, proprietaire: "moi" as const })),
+  ];
 
-  evenementsSource.forEach((e) => {
+  evenementsSource.forEach(({ evenement: e, proprietaire }) => {
     const estFerie = e.id.startsWith("ferie_");
     const dateDebut = new Date(e.date);
     dateDebut.setHours(0, 0, 0, 0);
@@ -359,6 +445,8 @@ export default function Planning() {
           // bas, qui ignore déjà tout ev.modifiable === false.
           modifiable: !estFerie,
           evenementId: estFerie ? undefined : e.id,
+          proprietaire,
+          visibilite: e.visibilite ?? "commun",
         });
       });
     };
@@ -413,6 +501,8 @@ export default function Planning() {
             touteLaJournee: true,
             date: d,
             modifiable: false,
+            proprietaire: "moi",
+            visibilite: "commun",
           });
         }
       } else {
@@ -427,6 +517,8 @@ export default function Planning() {
           touteLaJournee: true,
           date: dateOrigine,
           modifiable: false,
+          proprietaire: "moi",
+          visibilite: "commun",
         });
       }
     });
@@ -474,6 +566,8 @@ export default function Planning() {
             touteLaJournee: true,
             date: d,
             modifiable: false,
+            proprietaire: "moi",
+            visibilite: "commun",
           });
         }
       } else {
@@ -488,6 +582,8 @@ export default function Planning() {
           touteLaJournee: true,
           date: dateOrigine,
           modifiable: false,
+          proprietaire: "moi",
+          visibilite: "commun",
         });
       }
     });
@@ -508,6 +604,8 @@ export default function Planning() {
           touteLaJournee: true,
           date: d,
           modifiable: false,
+          proprietaire: "moi",
+          visibilite: "commun",
         });
       }
     });
@@ -561,6 +659,8 @@ export default function Planning() {
       touteLaJournee: true,
       date: d,
       modifiable: false,
+      proprietaire: "moi",
+      visibilite: "commun",
     });
   });
 
@@ -568,7 +668,8 @@ export default function Planning() {
   // DES SOURCES SYNTHÉTIQUES CONNUES : un événement construit depuis
   // evenementsSource (evenementId défini, cf. boucle plus haut) doit
   // TOUJOURS avoir sa source réelle encore présente dans
-  // objStore.evenements au moment du rendu — sinon (transaction/onglet
+  // objStore.evenements (ou evenementsPartenaire, cf. RÈGLE PLANNING
+  // PARTAGÉ juste au-dessus) au moment du rendu — sinon (transaction/onglet
   // désynchronisé, suppression pas encore répercutée) il est retiré ici en
   // dernier filtre plutôt que laissé affiché sans rien de réel derrière.
   // Ce filtre NE TOUCHE JAMAIS les entrées synthétiques (Fixe, objectif,
@@ -576,10 +677,212 @@ export default function Planning() {
   // undefined` PAR CONSTRUCTION (jamais une vraie ligne `evenements` en
   // base, cf. RÈGLE sur les blocs Fixe/entrées/jours fériés plus haut) —
   // leur appliquer ce même test les ferait toutes disparaître à tort.
-  const idsEvenementsReels = new Set(objStore.evenements.map((e) => e.id));
+  // RÈGLE À NE JAMAIS CASSER — UNION AVEC evenementsPartenaire, JAMAIS
+  // objStore.evenements SEUL : une ligne du partenaire a bien un
+  // evenementId défini (son propre id réel, cf. boucle evenementsSource)
+  // mais n'apparaît évidemment jamais dans objStore.evenements (qui ne
+  // contient que MES lignes) — sans cette union, ce filtre "anti-fantôme"
+  // retirait silencieusement TOUTES les pastilles du partenaire, quel que
+  // soit leur statut réel en base.
+  const idsEvenementsReels = new Set([
+    ...objStore.evenements.map((e) => e.id),
+    ...evenementsPartenaire.map((e) => e.id),
+  ]);
   const tousLesEvenementsValides = tousLesEvenements.filter(
     (ev) => ev.evenementId === undefined || idsEvenementsReels.has(ev.evenementId),
   );
+
+  // RÈGLE À NE JAMAIS CASSER — PAIRES IGNORÉES PERSISTÉES EN LOCAL
+  // (AsyncStorage), PAS UNE NOUVELLE TABLE SERVEUR : même famille que
+  // vista_info_fusion_categories_vue_* (SwitcherEspacePartage.tsx) —
+  // "Garder séparé" est une préférence mineure, par appareil, jamais
+  // synchronisée entre comptes ni entre appareils. Limite assumée : la
+  // suggestion peut réapparaître côté partenaire ou sur un autre appareil.
+  useEffect(() => {
+    if (!affichagePartage) return;
+    const userId = objStore.userId;
+    if (!userId) return;
+    let annule = false;
+    AsyncStorage.getItem(`vista_paires_ignorees_${userId}`)
+      .then((brut) => {
+        if (annule || !brut) return;
+        setPairesFusionIgnorees(new Set(JSON.parse(brut) as string[]));
+      })
+      .catch(() => {
+        // Best-effort : une erreur de lecture locale ne bloque jamais la
+        // détection de doublons, juste la mémoire des paires ignorées.
+      });
+    return () => {
+      annule = true;
+    };
+  }, [affichagePartage, objStore.userId]);
+
+  // RÈGLE À NE JAMAIS CASSER — COMPARAISON SUR LES LISTES BRUTES, JAMAIS
+  // tousLesEvenements (qui déplie les récurrences) : cf. RÈGLE sur
+  // SuggestionFusion plus haut. Nom insensible casse/espaces + même date
+  // exacte (champ `date`, jamais dateFin) ; écart d'heure nul (ou l'un des
+  // deux "toute la journée") → fusion automatique via la RPC idempotente,
+  // jamais laissée au choix (signal jugé sans ambiguïté) ; écart < 60
+  // minutes → suggestion affichée, fusion laissée au choix de l'utilisateur
+  // (respecte pairesFusionIgnorees, "Garder séparé").
+  useEffect(() => {
+    if (!affichagePartage) return;
+
+    const suggestions: SuggestionFusion[] = [];
+
+    objStore.evenements.forEach((monEvenement) => {
+      evenementsPartenaire.forEach((evenementPartenaire) => {
+        if (
+          monEvenement.nom.trim().toLowerCase() !==
+          evenementPartenaire.nom.trim().toLowerCase()
+        )
+          return;
+        if (monEvenement.date !== evenementPartenaire.date) return;
+
+        const cle = `${monEvenement.id}:${evenementPartenaire.id}`;
+        const uneDesDeuxTouteLaJournee =
+          (monEvenement.touteLaJournee ?? false) ||
+          (evenementPartenaire.touteLaJournee ?? false);
+        const ecartMinutes = Math.abs(
+          heureEnMinutes(monEvenement.heure) -
+            heureEnMinutes(evenementPartenaire.heure),
+        );
+
+        if (uneDesDeuxTouteLaJournee || ecartMinutes === 0) {
+          // RÈGLE À NE JAMAIS CASSER — UNE SEULE TENTATIVE PAR PAIRE : cf.
+          // RÈGLE sur pairesFusionTentees à sa déclaration — sans ce garde,
+          // le re-render déclenché par chargerEvenements()/
+          // rafraichirEvenementsPartenaire() juste en dessous relancerait
+          // la RPC en boucle tant que les lignes d'origine n'ont pas
+          // disparu des listes locales.
+          if (pairesFusionTentees.current.has(cle)) return;
+          pairesFusionTentees.current.add(cle);
+          fusionnerEvenements(monEvenement.id, evenementPartenaire.id).then(
+            (statut) => {
+              if (statut === "succes") {
+                objStore.chargerEvenements();
+                rafraichirEvenementsPartenaire();
+              }
+            },
+          );
+          return;
+        }
+
+        if (ecartMinutes < 60 && !pairesFusionIgnorees.has(cle)) {
+          suggestions.push({ monEvenement, evenementPartenaire });
+        }
+      });
+    });
+
+    setSuggestionsFusion(suggestions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    affichagePartage,
+    objStore.evenements,
+    evenementsPartenaire,
+    pairesFusionIgnorees,
+  ]);
+
+  const confirmerSuggestionFusion = async (suggestion: SuggestionFusion) => {
+    const cle = `${suggestion.monEvenement.id}:${suggestion.evenementPartenaire.id}`;
+    const statut = await fusionnerEvenements(
+      suggestion.monEvenement.id,
+      suggestion.evenementPartenaire.id,
+    );
+    if (statut === "succes" || statut === "deja_fusionne") {
+      pairesFusionTentees.current.add(cle);
+      setSuggestionsFusion((liste) =>
+        liste.filter(
+          (s) =>
+            !(
+              s.monEvenement.id === suggestion.monEvenement.id &&
+              s.evenementPartenaire.id === suggestion.evenementPartenaire.id
+            ),
+        ),
+      );
+      objStore.chargerEvenements();
+      rafraichirEvenementsPartenaire();
+    }
+  };
+
+  const ignorerSuggestionFusion = (suggestion: SuggestionFusion) => {
+    const cle = `${suggestion.monEvenement.id}:${suggestion.evenementPartenaire.id}`;
+    setSuggestionsFusion((liste) =>
+      liste.filter(
+        (s) =>
+          !(
+            s.monEvenement.id === suggestion.monEvenement.id &&
+            s.evenementPartenaire.id === suggestion.evenementPartenaire.id
+          ),
+      ),
+    );
+    setPairesFusionIgnorees((precedentes) => {
+      const suivantes = new Set(precedentes);
+      suivantes.add(cle);
+      const userId = objStore.userId;
+      if (userId) {
+        AsyncStorage.setItem(
+          `vista_paires_ignorees_${userId}`,
+          JSON.stringify([...suivantes]),
+        ).catch(() => {
+          // Best-effort : cf. RÈGLE sur le chargement initial plus haut.
+        });
+      }
+      return suivantes;
+    });
+  };
+
+  // RÈGLE À NE JAMAIS CASSER — MÊME CONVENTION COULEUR QUE CategorieFusionnee
+  // (utils/espacePartage.ts, badges Moi/[Prénom]/Commun déjà utilisés sur
+  // Aperçu/Budget) : bleu #60a5fa "Moi", violet #c084fc "[Prénom]" pour le
+  // partenaire, teal #1D9E75 "Commun" — jamais une palette différente ici,
+  // la cohérence visuelle entre les 3 écrans partagés est le but explicite
+  // de ce chantier. Retourne null hors vue partagée (badge sans objet : tout
+  // est "à moi" par construction quand affichagePartage est faux).
+  const infoBadgeProprietaire = (
+    ev: EvenementUnifie,
+  ): { texte: string; couleur: string } | null => {
+    if (!affichagePartage) return null;
+    if (ev.visibilite === "commun") return { texte: "C", couleur: "#1D9E75" };
+    if (ev.proprietaire === "partenaire") {
+      return {
+        texte: (membrePartenaire?.prenom || "P").charAt(0).toUpperCase(),
+        couleur: "#c084fc",
+      };
+    }
+    return {
+      texte: (objStore.prenom || "M").charAt(0).toUpperCase(),
+      couleur: "#60a5fa",
+    };
+  };
+
+  const renderBadgeProprietaire = (ev: EvenementUnifie): ReactNode => {
+    const info = infoBadgeProprietaire(ev);
+    if (!info) return null;
+    return (
+      <View
+        style={[styles.badgeProprietaire, { backgroundColor: info.couleur }]}
+      >
+        <Text style={styles.badgeProprietaireTexte}>{info.texte}</Text>
+      </View>
+    );
+  };
+
+  // RÈGLE : pastille sans initiale (juste la couleur), pour semaine/mois —
+  // cf. RÈGLE sur badgeProprietaireMini (styles) : le badge complet à 14px
+  // dominerait un texte d'événement descendu à 8-10px dans ces vues.
+  const renderBadgeProprietaireMini = (ev: EvenementUnifie): ReactNode => {
+    const info = infoBadgeProprietaire(ev);
+    if (!info) return null;
+    return (
+      <View
+        style={[
+          styles.badgeProprietaireMini,
+          { backgroundColor: info.couleur },
+        ]}
+      />
+    );
+  };
 
   const evsJour = (date: Date) =>
     tousLesEvenementsValides.filter((e) => memeJour(e.date, date));
@@ -680,7 +983,9 @@ export default function Planning() {
     // Activé par défaut si les notifications globales le sont — l'utilisateur
     // reste libre de désactiver pour CET événement précis via le switch.
     setNotifierEvent(objStore.notificationsActives);
+    setVisibiliteEvent("commun");
     setEvenementEnEditionId(null);
+    setEvenementEnEditionEstPartenaire(false);
     setModalCreationVisible(true);
   };
 
@@ -704,12 +1009,25 @@ export default function Planning() {
     setFrequenceEvent("semaine");
     setJourneeEntiereEvent(false);
     setNotifierEvent(objStore.notificationsActives);
+    setVisibiliteEvent("commun");
     setEvenementEnEditionId(null);
+    setEvenementEnEditionEstPartenaire(false);
     setModalCreationVisible(true);
   };
 
-  const ouvrirEditionEvenement = (ev: Evenement) => {
+  // RÈGLE À NE JAMAIS CASSER — ACCEPTE UN ÉVÉNEMENT DU PARTENAIRE : `ev` peut
+  // être une EvenementPartenaire (visibilite forcément 'commun' à ce stade,
+  // cf. gererClicEvenement plus bas qui ne route ici que pour un commun —
+  // un personnel du partenaire n'est jamais modifiable, RLS l'interdit de
+  // toute façon). `estPartenaire` pilote le chemin d'écriture utilisé par
+  // sauvegarderModificationEvenement/supprimerEvenementEnEdition, jamais
+  // déduit une seconde fois ailleurs.
+  const ouvrirEditionEvenement = (
+    ev: Evenement | EvenementPartenaire,
+    estPartenaire = false,
+  ) => {
     setEvenementEnEditionId(ev.id);
+    setEvenementEnEditionEstPartenaire(estPartenaire);
     setNomEvent(ev.nom);
     setDateEvent(new Date(ev.date));
     setMultiJoursEvent(!!ev.dateFin);
@@ -731,6 +1049,7 @@ export default function Planning() {
     setRecurrentEvent(ev.recurrent ?? false);
     setFrequenceEvent(ev.frequence ?? "semaine");
     setNotifierEvent(ev.notifierActif ?? false);
+    setVisibiliteEvent(ev.visibilite ?? "commun");
     setModalCreationVisible(true);
   };
 
@@ -762,7 +1081,7 @@ export default function Planning() {
   const sauvegarderModificationEvenement = async () => {
     if (!nomEvent || evenementEnEditionId === null) return;
     const montant = estFinancierEvent ? parseMontant(montantEvent) || 0 : undefined;
-    objStore.modifierEvenement(evenementEnEditionId, {
+    const champs = {
       nom: nomEvent,
       date: dateVersISO(dateEvent),
       dateFin: multiJoursEvent ? dateVersISO(dateFinEvent) : undefined,
@@ -776,7 +1095,28 @@ export default function Planning() {
       recurrent: recurrentEvent,
       frequence: recurrentEvent ? frequenceEvent : undefined,
       notifierActif: notifierEvent,
-    });
+      visibilite: visibiliteEvent,
+    };
+
+    // RÈGLE À NE JAMAIS CASSER — CHEMIN D'ÉCRITURE DIRECT POUR UN ÉVÉNEMENT
+    // DU PARTENAIRE : ni notification (n'a de sens que pour MES propres
+    // rappels), ni objStore.modifierEvenement (la ligne n'existe pas dans
+    // etat.evenements) — cf. RÈGLE sur modifierEvenementPartenaire,
+    // utils/espacePartage.ts. La RLS evenements_update_espace_partage
+    // rejette de toute façon tout changement de visibilite vers 'personnel'
+    // (WITH CHECK exige 'commun'), donc `visibilite` envoyé ici n'a aucun
+    // effet néfaste même si le toggle restait visible par erreur.
+    if (evenementEnEditionEstPartenaire) {
+      const ok = await modifierEvenementPartenaire(
+        evenementEnEditionId,
+        champs as Omit<Evenement, "id">,
+      );
+      if (ok) await rafraichirEvenementsPartenaire();
+      setModalCreationVisible(false);
+      return;
+    }
+
+    objStore.modifierEvenement(evenementEnEditionId, champs);
     // Les notifications déjà programmées pour cet événement (sous son
     // ancien type/date/heure) sont toujours annulées, même si notifierEvent
     // est maintenant false — sinon une notification obsolète (mauvaise
@@ -802,35 +1142,73 @@ export default function Planning() {
 
   const supprimerEvenementEnEdition = () => {
     if (evenementEnEditionId === null) return;
-    objStore.supprimerEvenement(evenementEnEditionId);
-    setModalCreationVisible(false);
+    const id = evenementEnEditionId;
+    const executerSuppression = async () => {
+      if (evenementEnEditionEstPartenaire) {
+        const ok = await supprimerEvenementPartenaire(id);
+        if (ok) await rafraichirEvenementsPartenaire();
+      } else {
+        objStore.supprimerEvenement(id);
+      }
+      setModalCreationVisible(false);
+    };
+    // RÈGLE À NE JAMAIS CASSER — CONFIRMATION SPÉCIFIQUE POUR UN COMMUN :
+    // supprimer un événement 'commun' (le mien ou celui du partenaire,
+    // les deux passent par ici) le retire pour les DEUX comptes — jamais
+    // une suppression directe sans prévenir, contrairement à un événement
+    // personnel.
+    if (visibiliteEvent === "commun" && estDansUnEspace) {
+      Alert.alert(
+        "Événement partagé",
+        `Cet événement est partagé avec ${membrePartenaire?.prenom || "ton/ta partenaire"}. Supprimer pour vous deux ?`,
+        [
+          { text: "Annuler", style: "cancel" },
+          {
+            text: "Supprimer",
+            style: "destructive",
+            onPress: executerSuppression,
+          },
+        ],
+      );
+      return;
+    }
+    executerSuppression();
   };
 
   const dupliquerEvenement = () => {
     setEvenementEnEditionId(null);
+    setEvenementEnEditionEstPartenaire(false);
     setDateEvent(dateActuelle);
     setMultiJoursEvent(false);
     setDateFinEvent(dateActuelle);
     setCalendrierOuvert("aucun");
   };
 
+  // RÈGLE À NE JAMAIS CASSER — ROUTE VERS LA BONNE SOURCE SELON proprietaire :
+  // un événement du partenaire n'est jamais dans objStore.evenements — cf.
+  // RÈGLE sur EvenementUnifie.proprietaire plus haut dans ce fichier. Un
+  // événement 'personnel' du partenaire n'apparaît jamais ici de toute
+  // façon (RLS ne le charge que si 'commun', ou 'personnel' non masqué —
+  // mais même dans ce dernier cas il n'est affiché qu'en lecture, jamais
+  // modifiable : cf. condition ci-dessous, un clic dessus ne fait rien).
   const gererClicEvenement = (ev: EvenementUnifie) => {
-    // eslint-disable-next-line no-console
-    console.log("[DEBUG gererClicEvenement]", {
-      id: ev.id,
-      nom: ev.nom,
-      modifiable: ev.modifiable,
-      evenementId: ev.evenementId,
-      sourceTrouvee: ev.evenementId
-        ? !!objStore.evenements.find((e) => e.id === ev.evenementId)
-        : null,
-    });
     // Non modifiable = généré à partir d'une catégorie Fixe, d'un objectif
     // récurrent ou d'un historique de paiement (pas un vrai Evenement en
     // base) — rien à éditer ici. On ne navigue plus ailleurs dans ce cas :
     // ça sortait l'utilisateur de Planning de façon inattendue sans qu'il
     // ait demandé à changer d'onglet.
     if (!ev.modifiable) return;
+    if (ev.proprietaire === "partenaire") {
+      // Un personnel du partenaire est affiché (si non masqué) mais jamais
+      // éditable depuis mon compte — seul un commun l'est (RLS UPDATE/
+      // DELETE le confirme de toute façon, ceci évite juste d'ouvrir un
+      // formulaire pour rien).
+      if (ev.visibilite !== "commun") return;
+      const source = evenementsPartenaire.find((e) => e.id === ev.evenementId);
+      if (!source) return;
+      ouvrirEditionEvenement(source, true);
+      return;
+    }
     const source = objStore.evenements.find((e) => e.id === ev.evenementId);
     if (!source) return;
     ouvrirEditionEvenement(source);
@@ -854,6 +1232,7 @@ export default function Planning() {
       frequence: recurrentEvent ? frequenceEvent : undefined,
       touteLaJournee: journeeEntiereEvent || multiJoursEvent,
       notifierActif: notifierEvent,
+      visibilite: visibiliteEvent,
     });
     setCreationEvenementEnCours(false);
     if (!nouvel) return;
@@ -1062,6 +1441,64 @@ export default function Planning() {
         </TouchableOpacity>
       </View>
 
+      {affichagePartage &&
+        suggestionsFusion.map((suggestion) => (
+          <View
+            key={`${suggestion.monEvenement.id}:${suggestion.evenementPartenaire.id}`}
+            style={[
+              styles.suggestionFusionCarte,
+              { backgroundColor: C.carte, borderColor: C.carteBorder },
+            ]}
+          >
+            <Ionicons name="people-outline" size={16} color={C.texte} />
+            <View style={styles.suggestionFusionTexte}>
+              <Text style={[styles.suggestionFusionLabel, { color: C.texte }]}>
+                {`"${suggestion.monEvenement.nom}" ressemble à un événement de ${membrePartenaire?.prenom || "ton/ta partenaire"} — Fusionner ?`}
+              </Text>
+              <View style={styles.suggestionFusionBoutons}>
+                <TouchableOpacity
+                  style={[
+                    styles.suggestionFusionBouton,
+                    { backgroundColor: C.purple },
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={() => confirmerSuggestionFusion(suggestion)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Fusionner ces deux événements"
+                >
+                  <Text
+                    style={[
+                      styles.suggestionFusionBoutonTexte,
+                      { color: "#FFFFFF" },
+                    ]}
+                  >
+                    Fusionner
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.suggestionFusionBouton,
+                    { backgroundColor: C.fondSecondaire },
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={() => ignorerSuggestionFusion(suggestion)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Garder ces événements séparés"
+                >
+                  <Text
+                    style={[
+                      styles.suggestionFusionBoutonTexte,
+                      { color: C.texteMuted },
+                    ]}
+                  >
+                    Garder séparé
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        ))}
+
       {/* GestureDetector doit envelopper directement une View native (pas
           CibleTutoriel, qui n'est pas un forwardRef) pour pouvoir attacher
           son gestionnaire de geste — CibleTutoriel reste donc à l'extérieur,
@@ -1162,6 +1599,7 @@ export default function Planning() {
                         color={C.texte}
                         style={styles.alldayPin}
                       />
+                      {renderBadgeProprietaire(ev)}
                       <Text style={[styles.alldayNom, { color: ev.couleur }]}>
                         {ev.nom} — toute la journée
                       </Text>
@@ -1254,6 +1692,7 @@ export default function Planning() {
                           onPress={() => gererClicEvenement(ev)}
                         >
                           <View style={styles.eventTopRow}>
+                            {renderBadgeProprietaire(ev)}
                             <Text
                               style={[styles.eventTitre, { color: ev.couleur }]}
                               numberOfLines={1}
@@ -1348,6 +1787,7 @@ export default function Planning() {
                           activeOpacity={0.7}
                           onPress={() => gererClicEvenement(ev)}
                         >
+                          {renderBadgeProprietaireMini(ev)}
                           <Text
                             style={[
                               styles.weekAlldayTexte,
@@ -1432,15 +1872,20 @@ export default function Planning() {
                           activeOpacity={0.7}
                           onPress={() => gererClicEvenement(ev)}
                         >
-                          <Text
-                            style={[
-                              styles.weekEventBlockTexte,
-                              { color: ev.couleur },
-                            ]}
-                            numberOfLines={2}
+                          <View
+                            style={{ flexDirection: "row", alignItems: "center", gap: 3 }}
                           >
-                            {ev.nom}
-                          </Text>
+                            {renderBadgeProprietaireMini(ev)}
+                            <Text
+                              style={[
+                                styles.weekEventBlockTexte,
+                                { color: ev.couleur },
+                              ]}
+                              numberOfLines={2}
+                            >
+                              {ev.nom}
+                            </Text>
+                          </View>
                         </TouchableOpacity>
                       ))}
                       {estAujourdhui && ligneActuelleVisible && (
@@ -1519,6 +1964,7 @@ export default function Planning() {
                                   { backgroundColor: ev.couleur + "22" },
                                 ]}
                               >
+                                {renderBadgeProprietaireMini(ev)}
                                 <Text
                                   style={[
                                     styles.monthEventTexte,
@@ -2275,6 +2721,31 @@ export default function Planning() {
                       </>
                     )}
 
+                    {estDansUnEspace && (
+                      <View style={styles.switchRow}>
+                        <View>
+                          <Text style={[styles.switchLabel, { color: C.texte }]}>
+                            Événement commun
+                          </Text>
+                          <Text
+                            style={[styles.switchSub, { color: C.texteMuted }]}
+                          >
+                            {visibiliteEvent === "commun"
+                              ? `Visible par ${membrePartenaire?.prenom || "ton/ta partenaire"}`
+                              : "Visible par toi seulement"}
+                          </Text>
+                        </View>
+                        <Switch
+                          value={visibiliteEvent === "commun"}
+                          onValueChange={(val) =>
+                            setVisibiliteEvent(val ? "commun" : "personnel")
+                          }
+                          trackColor={{ false: C.separateur, true: C.purpleLight }}
+                          thumbColor={visibiliteEvent === "commun" ? C.purple : "#FFF"}
+                        />
+                      </View>
+                    )}
+
                     <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
                       Couleur
                     </Text>
@@ -2522,6 +2993,9 @@ const styles = StyleSheet.create({
   },
   weekAlldayCol: { flex: 1, paddingHorizontal: 2, gap: 2 },
   weekAlldayPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
     borderRadius: 4,
     paddingHorizontal: 3,
     paddingVertical: 2,
@@ -2556,7 +3030,15 @@ const styles = StyleSheet.create({
   },
   monthNum: { fontSize: 13, fontWeight: "600" },
   monthNumHorsMois: { opacity: 0.5 },
-  monthEventLine: { borderRadius: 4, paddingHorizontal: 3, paddingVertical: 1, marginTop: 3 },
+  monthEventLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    borderRadius: 4,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    marginTop: 3,
+  },
   monthEventTexte: { fontSize: 10, fontWeight: "600" },
   monthEventPlus: { fontSize: 9, fontWeight: "600", marginTop: 2 },
   accessoryBar: {
@@ -2731,4 +3213,47 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   segmentBtnTexte: { fontSize: 14, fontWeight: "600" },
+  suggestionFusionCarte: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    borderRadius: 13,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 0.5,
+  },
+  suggestionFusionTexte: { flex: 1 },
+  suggestionFusionLabel: { fontSize: 13, lineHeight: 19 },
+  suggestionFusionBoutons: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+  },
+  suggestionFusionBouton: {
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  suggestionFusionBoutonTexte: { fontSize: 13, fontWeight: "600" },
+  badgeProprietaire: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeProprietaireTexte: {
+    fontSize: 8,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  // RÈGLE : variante minuscule (simple pastille, sans initiale) pour les
+  // contextes trop denses pour le badge complet (14px) — semaine/mois, où le
+  // texte de l'événement lui-même descend déjà à 8-10px. Cf. RÈGLE sur
+  // renderBadgeProprietaireMini.
+  badgeProprietaireMini: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
 });
