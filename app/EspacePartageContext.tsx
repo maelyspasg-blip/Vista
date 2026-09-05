@@ -13,10 +13,14 @@ import {
   CategorieFusionnee,
   chargerDonneesPartenaire,
   chargerEvenementsPartenaire,
+  chargerHistoriqueMoisPartenaire,
   DonneesPartenaire,
   EvenementPartenaire,
   fusionnerCategoriesParNom,
   getMembreEspace,
+  ModeBalance,
+  modifierModeBalanceEspace,
+  SnapshotMoisPartenaire,
 } from "../utils/espacePartage";
 import { useObjectifs } from "./store";
 
@@ -81,6 +85,22 @@ type EspacePartageContextType = {
   // "partage"/hors espace actif, jamais `null` (simplifie les consommateurs :
   // toujours un tableau à mapper).
   categoriesFusionnees: CategorieFusionnee[];
+  // RÈGLE : chargé EN MÊME TEMPS que donneesPartenaire/evenementsPartenaire
+  // (même Promise.all, même chargementPartenaire) — cf. RÈGLE détaillée sur
+  // chargerHistoriqueMoisPartenaire (utils/espacePartage.ts). Tableau vide
+  // hors vue "partage"/hors espace actif, jamais `null`, même convention que
+  // evenementsPartenaire/categoriesFusionnees.
+  historiqueMoisPartenaire: SnapshotMoisPartenaire[];
+  // RÈGLE À NE JAMAIS CASSER : réglage DU COUPLE (posé sur espaces_partages),
+  // jamais par compte — cf. RÈGLE détaillée sur ModeBalance (utils/
+  // espacePartage.ts). "50_50" par défaut tant que non chargé/hors espace.
+  modeBalance: ModeBalance;
+  ratioPersonnalise: number;
+  // RÈGLE : passe par la RPC modifier_mode_balance_espace (jamais un update
+  // direct) — met à jour l'état local de façon optimiste après succès,
+  // jamais avant (pour ne pas afficher un mode qui pourrait échouer à
+  // s'enregistrer côté serveur).
+  changerModeBalance: (mode: ModeBalance, ratio: number) => Promise<boolean>;
 };
 
 const EspacePartageContext = createContext<EspacePartageContextType>({
@@ -95,6 +115,10 @@ const EspacePartageContext = createContext<EspacePartageContextType>({
   evenementsPartenaire: [],
   rafraichirEvenementsPartenaire: async () => {},
   categoriesFusionnees: [],
+  historiqueMoisPartenaire: [],
+  modeBalance: "50_50",
+  ratioPersonnalise: 0.5,
+  changerModeBalance: async () => false,
 });
 
 function cleVueActive(userId: string): string {
@@ -122,7 +146,12 @@ export function EspacePartageProvider({
   const [evenementsPartenaire, setEvenementsPartenaire] = useState<
     EvenementPartenaire[]
   >([]);
+  const [historiqueMoisPartenaire, setHistoriqueMoisPartenaire] = useState<
+    SnapshotMoisPartenaire[]
+  >([]);
   const [chargementPartenaire, setChargementPartenaire] = useState(false);
+  const [modeBalance, setModeBalance] = useState<ModeBalance>("50_50");
+  const [ratioPersonnalise, setRatioPersonnalise] = useState(0.5);
   const objStore = useObjectifs();
 
   // RÈGLE À NE JAMAIS CASSER — TOUT RÉINITIALISER SI userId CHANGE (jamais
@@ -140,6 +169,8 @@ export function EspacePartageProvider({
       setEspaceId(null);
       setMembrePartenaire(null);
       setVueActiveState("personnel");
+      setModeBalance("50_50");
+      setRatioPersonnalise(0.5);
       return;
     }
 
@@ -169,6 +200,8 @@ export function EspacePartageProvider({
           setEstDansUnEspace(false);
           setEspaceId(null);
           setMembrePartenaire(null);
+          setModeBalance("50_50");
+          setRatioPersonnalise(0.5);
           return;
         }
         setEstDansUnEspace(true);
@@ -179,6 +212,8 @@ export function EspacePartageProvider({
             ? { id: autreMembre.userId, prenom: autreMembre.prenom }
             : null,
         );
+        setModeBalance(etat.modeBalance);
+        setRatioPersonnalise(etat.ratioPersonnalise);
       })
       .catch(() => {
         // getMembreEspace() ne throw déjà jamais (cf. RÈGLE dans
@@ -209,6 +244,8 @@ export function EspacePartageProvider({
         setEstDansUnEspace(false);
         setEspaceId(null);
         setMembrePartenaire(null);
+        setModeBalance("50_50");
+        setRatioPersonnalise(0.5);
         return;
       }
       setEstDansUnEspace(true);
@@ -219,6 +256,8 @@ export function EspacePartageProvider({
           ? { id: autreMembre.userId, prenom: autreMembre.prenom }
           : null,
       );
+      setModeBalance(etat.modeBalance);
+      setRatioPersonnalise(etat.ratioPersonnalise);
     } catch (e) {
       // getMembreEspace() ne throw déjà jamais (cf. RÈGLE dans
       // utils/espacePartage.ts) — filet de sécurité pur.
@@ -260,18 +299,21 @@ export function EspacePartageProvider({
       // eslint-disable-next-line react-hooks/set-state-in-effect -- réinitialisation synchrone volontaire en quittant la vue Partagé, même précédent que la remise à zéro de userId plus haut dans ce fichier.
       setDonneesPartenaire(null);
       setEvenementsPartenaire([]);
+      setHistoriqueMoisPartenaire([]);
       return;
     }
     let annule = false;
     (async () => {
       setChargementPartenaire(true);
-      const [donnees, evenements] = await Promise.all([
+      const [donnees, evenements, historique] = await Promise.all([
         chargerDonneesPartenaire(membrePartenaire.id),
         chargerEvenementsPartenaire(membrePartenaire.id),
+        chargerHistoriqueMoisPartenaire(membrePartenaire.id),
       ]);
       if (annule) return;
       setDonneesPartenaire(donnees);
       setEvenementsPartenaire(evenements);
+      setHistoriqueMoisPartenaire(historique);
       setChargementPartenaire(false);
     })();
     return () => {
@@ -288,6 +330,21 @@ export function EspacePartageProvider({
     const evenements = await chargerEvenementsPartenaire(membrePartenaire.id);
     setEvenementsPartenaire(evenements);
   }, [membrePartenaire]);
+
+  // RÈGLE : mAj locale UNIQUEMENT après succès de la RPC, jamais avant
+  // (optimiste mais pas aveugle) — un échec réseau ne doit jamais laisser
+  // l'UI afficher un mode différent de ce qui est réellement enregistré.
+  const changerModeBalance = useCallback(
+    async (mode: ModeBalance, ratio: number) => {
+      const ok = await modifierModeBalanceEspace(mode, ratio);
+      if (ok) {
+        setModeBalance(mode);
+        setRatioPersonnalise(ratio);
+      }
+      return ok;
+    },
+    [],
+  );
 
   // RÈGLE À NE JAMAIS CASSER : cf. RÈGLE détaillée sur categoriesFusionnees
   // ci-dessus — calculée UNE SEULE FOIS ici, jamais dans un écran
@@ -340,6 +397,10 @@ export function EspacePartageProvider({
         evenementsPartenaire,
         rafraichirEvenementsPartenaire,
         categoriesFusionnees,
+        historiqueMoisPartenaire,
+        modeBalance,
+        ratioPersonnalise,
+        changerModeBalance,
       }}
     >
       {children}

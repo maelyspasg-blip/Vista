@@ -4,7 +4,10 @@
       "Bash(grep -n \"style={\\\\[styles.modalCard, { backgroundColor: C.carte }\\\\]}\" \"/Users/maelys/vista/app/\\(tabs\\)/index.tsx\")",
       "Bash(cat /tmp/tsc_out8.txt)",
       "Read(//private/tmp/**)",
-      "Bash(tee /tmp/tsc_final.txt)"
+      "Bash(tee /tmp/tsc_final.txt)",
+      "Bash(tee /tmp/tsc_check1.txt)",
+      "Bash(grep -n \"const { theme, couleurs: C } = useTheme\\(\\);\" \"/Users/maelys/vista/app/\\(tabs\\)/analytics.tsx\")",
+      "Bash(tee /tmp/tsc_check3.txt)"
     ]
   },
   "hooks": {

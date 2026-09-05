@@ -77,6 +77,11 @@ import { useTutoriel } from "../TutorielContext";
 import { TiroirStats } from "../TiroirStats";
 import { useEspacePartage } from "../EspacePartageContext";
 import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
+import {
+  chargerRemboursementsMois,
+  marquerRembourse,
+  RemboursementEspace,
+} from "../../utils/espacePartage";
 
 const MOIS_ACTUEL = new Date().getMonth();
 const ANNEE_ACTUELLE = new Date().getFullYear();
@@ -874,6 +879,150 @@ function JaugeRepartition({
   );
 }
 
+// RÈGLE : modelé sur DonutChart (app/(tabs)/index.tsx, non exporté — même
+// convention que GraphiqueBarresEmpilees/JaugeRepartition ci-dessus, un
+// composant de graphique local par écran, jamais partagé) : même technique
+// SVG (cercle à segments via strokeDasharray/strokeDashoffset), mais 3
+// segments FIXES Moi/Partenaire/Commun plutôt qu'un nombre variable de
+// catégories, et une légende pourcentage/montant en dessous plutôt qu'un
+// seul mot au centre — cf. demande explicite "Montant total au centre,
+// pourcentage par personne". Légende réutilise les styles jaugeLegende*
+// (JaugeRepartition ci-dessus) plutôt que d'en redéfinir des équivalents.
+function GraphiqueDonutCouple({
+  moi,
+  partenaire,
+  commun,
+  labelPartenaire,
+  couleurs: C,
+}: {
+  moi: number;
+  partenaire: number;
+  commun: number;
+  labelPartenaire: string;
+  couleurs: typeof COULEURS.clair;
+}) {
+  const total = moi + partenaire + commun;
+  const taille = 140;
+  const rayon = 55;
+  const epaisseur = 20;
+  const centre = taille / 2;
+  const circonference = 2 * Math.PI * rayon;
+
+  const segmentsBruts = [
+    { cle: "moi", label: "Moi", couleur: "#60a5fa", valeur: moi },
+    {
+      cle: "partenaire",
+      label: labelPartenaire,
+      couleur: "#c084fc",
+      valeur: partenaire,
+    },
+    { cle: "commun", label: "Commun", couleur: "#1D9E75", valeur: commun },
+  ];
+
+  if (total <= 0) {
+    return (
+      <View style={{ alignItems: "center" }}>
+        <View
+          style={{
+            width: taille,
+            height: taille,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Svg width={taille} height={taille}>
+            <Circle
+              cx={centre}
+              cy={centre}
+              r={rayon}
+              stroke={C.separateur}
+              strokeWidth={epaisseur}
+              fill="none"
+            />
+          </Svg>
+          <Text
+            style={{ position: "absolute", fontSize: 13, color: C.texteMuted }}
+          >
+            Aucune dépense
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  const donnees = segmentsBruts.filter((d) => d.valeur > 0);
+  const cumuls = donnees.reduce<number[]>((acc, d, i) => {
+    acc.push(i === 0 ? 0 : acc[i - 1] + donnees[i - 1].valeur / total);
+    return acc;
+  }, []);
+  const segments = donnees.map((d, i) => {
+    const pct = d.valeur / total;
+    const dashArray = pct * circonference;
+    const dashOffset = circonference * (1 - cumuls[i]);
+    return { ...d, dashArray, dashOffset, key: i };
+  });
+
+  return (
+    <View style={{ alignItems: "center" }}>
+      <View
+        style={{
+          width: taille,
+          height: taille,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Svg width={taille} height={taille}>
+          {segments.map((seg) => (
+            <Circle
+              key={seg.key}
+              cx={centre}
+              cy={centre}
+              r={rayon}
+              stroke={seg.couleur}
+              strokeWidth={epaisseur}
+              strokeDasharray={`${seg.dashArray} ${circonference - seg.dashArray}`}
+              strokeDashoffset={seg.dashOffset}
+              fill="none"
+              strokeLinecap="butt"
+              transform={`rotate(-90 ${centre} ${centre})`}
+            />
+          ))}
+        </Svg>
+        <View style={{ position: "absolute", alignItems: "center" }}>
+          <Text style={{ fontSize: 19, fontWeight: "700", color: C.texte }}>
+            {formaterMontant(total)} €
+          </Text>
+          <Text style={{ fontSize: 11, color: C.texteMuted }}>
+            dépenses communes
+          </Text>
+        </View>
+      </View>
+      <View style={[styles.jaugeLegende, { marginTop: 12 }]}>
+        {segmentsBruts
+          .filter((s) => s.valeur > 0)
+          .map((s) => (
+            <View key={s.cle} style={styles.jaugeLegendeItem}>
+              <View
+                style={[styles.jaugeDot, { backgroundColor: s.couleur }]}
+              />
+              <Text
+                style={[styles.jaugeNom, { color: C.texte }]}
+                numberOfLines={1}
+              >
+                {s.label}
+              </Text>
+              <Text style={[styles.jaugePct, { color: C.texteMuted }]}>
+                {Math.round((s.valeur / total) * 100)}% ·{" "}
+                {formaterMontant(s.valeur)} €
+              </Text>
+            </View>
+          ))}
+      </View>
+    </View>
+  );
+}
+
 export default function Analytics() {
   const router = useRouter();
   const estTablette = useEstTablette();
@@ -881,8 +1030,42 @@ export default function Analytics() {
   const objStore = useObjectifs();
   const { estPremium, simulerNonPremium } = usePremium();
   const { isGuest } = useGuest();
-  const { estDansUnEspace, vueActive, membrePartenaire, donneesPartenaire } =
-    useEspacePartage();
+  const {
+    estDansUnEspace,
+    vueActive,
+    membrePartenaire,
+    donneesPartenaire,
+    espaceId,
+    historiqueMoisPartenaire,
+    modeBalance,
+    ratioPersonnalise,
+    changerModeBalance,
+  } = useEspacePartage();
+  // RÈGLE À NE JAMAIS CASSER — SPÉCIFIQUE AU MOIS AFFICHÉ ICI, JAMAIS DANS
+  // EspacePartageContext : contrairement à donneesPartenaire/
+  // evenementsPartenaire/historiqueMoisPartenaire (partagés par plusieurs
+  // écrans), aucun autre écran n'a besoin de savoir si le mois courant est
+  // déjà remboursé — chargé localement, comme d'autres écrans font déjà
+  // leurs propres appels ponctuels.
+  const [remboursements, setRemboursements] = useState<RemboursementEspace[]>(
+    [],
+  );
+  useEffect(() => {
+    if (!estDansUnEspace || vueActive !== "partage" || !espaceId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- réinitialisation synchrone volontaire en quittant la vue Partagé/l'espace, même précédent que EspacePartageContext.tsx : jamais laisser un ancien montant de remboursement visible après ce changement.
+      setRemboursements([]);
+      return;
+    }
+    let annule = false;
+    chargerRemboursementsMois(espaceId, MOIS_ACTUEL, ANNEE_ACTUELLE).then(
+      (liste) => {
+        if (!annule) setRemboursements(liste);
+      },
+    );
+    return () => {
+      annule = true;
+    };
+  }, [estDansUnEspace, vueActive, espaceId]);
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Stats — voir
   // estComptePremium (utils/premium.ts) pour ce qu'il combine.
   const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
@@ -1200,6 +1383,69 @@ export default function Analytics() {
   const revenusCombines = totalEntreesMoiMois + totalEntreesPartenaireMois;
   const depensesCombinees = totalDepensesMoiMois + totalDepensesPartenaireMois;
 
+  // RÈGLE À NE JAMAIS CASSER — BASE DE LA BALANCE (Graphique 4) : MÊME
+  // FILTRE QUE repartitionParPersonne juste en dessous (mine :
+  // `.partage===true` ; partenaire : toutes catégories non-Entrée actives,
+  // cf. RÈGLE "accès complet entre membres" dans utils/espacePartage.ts) —
+  // les deux DOIVENT s'accorder (`moiCommun + partenaireCommun` doit égaler
+  // `repartitionParPersonne.reduce((a,l)=>a+l.commun,0)` plus la part
+  // "moi"/"partenaire" non fusionnée). Contrairement à
+  // repartitionParPersonne, qui collapse moi/partenaire en un seul nombre
+  // "commun" une fois une catégorie fusionnée, la balance a besoin du VRAI
+  // split (qui a payé quoi) — jamais totalDepensesMoiMois/
+  // totalDepensesPartenaireMois (qui incluent les dépenses 100%
+  // personnelles, non pertinentes pour "qui doit quoi sur les frais
+  // communs").
+  const contributionsCommunes = (() => {
+    if (vueActive !== "partage") {
+      return {
+        moiCommun: 0,
+        partenaireCommun: 0,
+        totalCommun: 0,
+        nomsCommuns: new Set<string>(),
+      };
+    }
+    const cleNom = (nom: string) => nom.trim().toLowerCase();
+    const parNom = new Map<string, { moi: number; partenaire: number }>();
+    objStore.enveloppes
+      .filter(
+        (e) =>
+          e.type !== "Entrée" &&
+          e.partage &&
+          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+      )
+      .forEach((e) => {
+        const cle = cleNom(e.nom);
+        const ligne = parNom.get(cle) ?? { moi: 0, partenaire: 0 };
+        ligne.moi += e.depense;
+        parNom.set(cle, ligne);
+      });
+    enveloppesPartenaireStats
+      .filter(
+        (e) =>
+          e.type !== "Entrée" &&
+          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+      )
+      .forEach((e) => {
+        const cle = cleNom(e.nom);
+        const ligne = parNom.get(cle) ?? { moi: 0, partenaire: 0 };
+        ligne.partenaire += e.depense;
+        parNom.set(cle, ligne);
+      });
+    let moiCommun = 0;
+    let partenaireCommun = 0;
+    parNom.forEach((ligne) => {
+      moiCommun += ligne.moi;
+      partenaireCommun += ligne.partenaire;
+    });
+    return {
+      moiCommun,
+      partenaireCommun,
+      totalCommun: moiCommun + partenaireCommun,
+      nomsCommuns: new Set(parNom.keys()),
+    };
+  })();
+
   // "Répartition" empilée par personne — regroupée par NOM de catégorie
   // (les deux comptes ont des enveloppes distinctes, jamais le même id).
   // RÈGLE À NE JAMAIS CASSER — NIVEAU ENVELOPPE, PAS TRANSACTION : le
@@ -1269,6 +1515,19 @@ export default function Analytics() {
       .sort((a, b) => b.total - a.total);
   })();
 
+  // RÈGLE : Graphique 1 (donut de contribution) — simple ré-agrégation de
+  // repartitionParPersonne (déjà la bonne population : mes catégories
+  // `partage`, toutes celles du partenaire), jamais un nouveau calcul
+  // indépendant qui pourrait diverger.
+  const totauxDonutCouple = repartitionParPersonne.reduce(
+    (acc, l) => ({
+      moi: acc.moi + l.moi,
+      partenaire: acc.partenaire + l.partenaire,
+      commun: acc.commun + l.commun,
+    }),
+    { moi: 0, partenaire: 0, commun: 0 },
+  );
+
   // Répartition par personne, reformatée pour GraphiqueBarresEmpilees — MÊME
   // composant que "Dépenses par catégorie"/"Entrées par catégorie" plus bas
   // (RÈGLE : jamais un composant de graphique ad hoc en plus, cf. demande
@@ -1299,26 +1558,161 @@ export default function Analytics() {
     },
   ];
 
-  // "Équilibre" — ligne compacte dans "Vue d'ensemble" (vue Partagé) :
-  // même seuil (<5% d'écart = équilibré) que le bloc "Équilibre du mois"
-  // prévu pour Aperçu (pas encore construit, données partenaire non
-  // branchées) — dupliqué ici volontairement plutôt que factorisé
-  // prématurément dans un util partagé entre deux écrans qui n'existent pas
-  // encore tous les deux sous leur forme finale.
-  const totalContributionsMois = totalDepensesMoiMois + totalDepensesPartenaireMois;
-  const diffContributionMois = totalDepensesMoiMois - totalDepensesPartenaireMois;
-  const pctDiffContributionMois =
-    totalContributionsMois > 0
-      ? (Math.abs(diffContributionMois) / totalContributionsMois) * 100
+  // RÈGLE À NE JAMAIS CASSER — GRAPHIQUE 2 "ÉVOLUTION 6 MOIS DES DÉPENSES
+  // COMMUNES" : réutilise le même mécanisme d'archive que getDepenseMois
+  // plus bas (snapshots_mois/snapshot_enveloppes côté moi,
+  // historiqueMoisPartenaire côté partenaire, cf. RÈGLE détaillée sur
+  // chargerHistoriqueMoisPartenaire, utils/espacePartage.ts) — JAMAIS
+  // transactions/historique_paiements, qui ne couvrent pas les catégories
+  // Fixe (loyer...). Le SET de noms "commun" (contributionsCommunes.
+  // nomsCommuns, calculé plus haut) est déterminé sur l'état ACTUEL
+  // uniquement et appliqué rétroactivement aux mois passés — même limite
+  // déjà acceptée par repartitionParPersonne (partage n'est pas historisé).
+  const moisEvolutionCommune = construireMoisPeriode(
+    6,
+    MOIS_ACTUEL,
+    ANNEE_ACTUELLE,
+  );
+  const depenseCommuneMoisPourMoi = (mois: number, annee: number): number => {
+    const noms = contributionsCommunes.nomsCommuns;
+    if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
+      return objStore.enveloppes
+        .filter(
+          (e) =>
+            e.type !== "Entrée" &&
+            noms.has(e.nom.trim().toLowerCase()) &&
+            estCategorieActiveCeMois(e, annee, mois),
+        )
+        .reduce((acc, e) => acc + e.depense, 0);
+    }
+    const snap = objStore.historiquesMois.find(
+      (s) => s.mois === mois && s.annee === annee,
+    );
+    if (!snap) return 0;
+    return snap.enveloppes
+      .filter(
+        (e) => e.type !== "Entrée" && noms.has(e.nom.trim().toLowerCase()),
+      )
+      .reduce((acc, e) => acc + e.depense, 0);
+  };
+  const depenseCommuneMoisPourPartenaire = (
+    mois: number,
+    annee: number,
+  ): number => {
+    const noms = contributionsCommunes.nomsCommuns;
+    if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
+      return enveloppesPartenaireStats
+        .filter(
+          (e) =>
+            e.type !== "Entrée" &&
+            noms.has(e.nom.trim().toLowerCase()) &&
+            estCategorieActiveCeMois(e, annee, mois),
+        )
+        .reduce((acc, e) => acc + e.depense, 0);
+    }
+    const snap = historiqueMoisPartenaire.find(
+      (s) => s.mois === mois && s.annee === annee,
+    );
+    if (!snap) return 0;
+    return snap.enveloppes
+      .filter(
+        (e) => e.type !== "Entrée" && noms.has(e.nom.trim().toLowerCase()),
+      )
+      .reduce((acc, e) => acc + e.depense, 0);
+  };
+  const labelsEvolutionCommune = moisEvolutionCommune.map(
+    ({ mois }) => MOIS_LABELS_COMPLETS[mois],
+  );
+  const seriesEvolutionCommune: SegmentBarreEmpilee[] = [
+    {
+      cle: "moi",
+      label: "Moi",
+      couleur: "#60a5fa",
+      donnees: moisEvolutionCommune.map(({ mois, annee }) =>
+        depenseCommuneMoisPourMoi(mois, annee),
+      ),
+    },
+    {
+      cle: "partenaire",
+      label: membrePartenaire?.prenom || "Partenaire",
+      couleur: "#c084fc",
+      donnees: moisEvolutionCommune.map(({ mois, annee }) =>
+        depenseCommuneMoisPourPartenaire(mois, annee),
+      ),
+    },
+  ];
+
+  // RÈGLE À NE JAMAIS CASSER — GRAPHIQUE 4 "BALANCE DU COUPLE" : ratio
+  // attendu de contribution du PARTENAIRE selon modeBalance (réglage du
+  // couple, cf. EspacePartageContext) — formule fournie explicitement par
+  // l'utilisateur. Mode "revenus" retombe sur 0.5 si revenusCombines est nul
+  // (aucun revenu déclaré des deux côtés : diviser par zéro n'aurait aucun
+  // sens, 50/50 reste le repli le plus neutre). balanceMontant > 0 signifie
+  // "le partenaire doit de l'argent" (il a payé moins que sa part attendue
+  // du total COMMUN, cf. contributionsCommunes ci-dessus) ; < 0 signifie
+  // qu'il a trop payé.
+  const ratioAttenduPartenaire =
+    modeBalance === "revenus"
+      ? revenusCombines > 0
+        ? totalEntreesPartenaireMois / revenusCombines
+        : 0.5
+      : modeBalance === "personnalise"
+        ? ratioPersonnalise
+        : 0.5;
+  const contributionAttenduePartenaire =
+    contributionsCommunes.totalCommun * ratioAttenduPartenaire;
+  const balanceMontant =
+    contributionAttenduePartenaire - contributionsCommunes.partenaireCommun;
+  const pctEcartBalance =
+    contributionsCommunes.totalCommun > 0
+      ? (Math.abs(balanceMontant) / contributionsCommunes.totalCommun) * 100
       : 0;
-  const equilibreLabel =
-    totalContributionsMois <= 0
+  const balanceLabel =
+    contributionsCommunes.totalCommun <= 0
       ? null
-      : pctDiffContributionMois < 5
-        ? "Vous contribuez de façon équilibrée ce mois-ci"
-        : diffContributionMois > 0
-          ? `Tu as payé ${formaterMontant(Math.abs(diffContributionMois))}€ de plus ce mois-ci`
-          : `${membrePartenaire?.prenom || "Ton/ta partenaire"} a payé ${formaterMontant(Math.abs(diffContributionMois))}€ de plus ce mois-ci`;
+      : pctEcartBalance < 5
+        ? "Vous êtes à l'équilibre ce mois-ci"
+        : balanceMontant > 0
+          ? `${membrePartenaire?.prenom || "Ton/ta partenaire"} te doit ${formaterMontant(Math.abs(balanceMontant))}€ ce mois-ci`
+          : `Tu dois ${formaterMontant(Math.abs(balanceMontant))}€ à ${membrePartenaire?.prenom || "ton/ta partenaire"} ce mois-ci`;
+
+  // RÈGLE : "remet la balance à zéro pour ce mois" est purement un effet
+  // d'AFFICHAGE (cf. RÈGLE table append-only, migration
+  // 20260905100000_stats_couple_schema.sql) — n'écrit jamais dans
+  // enveloppes/transactions, uniquement une ligne remboursements_espace qui
+  // fait passer remboursements.length de 0 à >0 pour ce mois.
+  const confirmerRemboursement = () => {
+    if (!espaceId || balanceMontant === 0) return;
+    const montant = Math.abs(balanceMontant);
+    const quiRembourse =
+      balanceMontant > 0 ? membrePartenaire?.prenom || "Ton/ta partenaire" : "Tu";
+    Alert.alert(
+      "Marquer comme remboursé",
+      `Confirmer que ${quiRembourse} ${balanceMontant > 0 ? "a" : "as"} remboursé ${formaterMontant(montant)}€ ce mois-ci ?`,
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Confirmer",
+          onPress: async () => {
+            const ok = await marquerRembourse(
+              espaceId,
+              MOIS_ACTUEL,
+              ANNEE_ACTUELLE,
+              montant,
+            );
+            if (ok) {
+              const liste = await chargerRemboursementsMois(
+                espaceId,
+                MOIS_ACTUEL,
+                ANNEE_ACTUELLE,
+              );
+              setRemboursements(liste);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   // Scores "Partenaire" et "Commun" — RÈGLE À NE JAMAIS CASSER : APPROXIMATIONS
   // ÉTIQUETÉES, JAMAIS PRÉSENTÉES COMME LE VRAI SCORE — décision explicite de
@@ -3192,22 +3586,34 @@ export default function Analytics() {
               </View>
             </View>
           )}
-          {estDansUnEspace && vueActive === "partage" && equilibreLabel && (
-            <View
-              style={[
-                styles.equilibreLigne,
-                { backgroundColor: C.carte, borderColor: C.carteBorder },
-              ]}
-            >
-              <Ionicons name="scale-outline" size={14} color={C.texteMuted} />
-              <Text
-                style={[styles.equilibreLigneTexte, { color: C.texte }]}
-                numberOfLines={2}
+          {/* Graphique 1 — donut de contribution : ré-agrégation de
+              repartitionParPersonne (totauxDonutCouple, calculé plus haut),
+              jamais un nouveau total indépendant. */}
+          {estDansUnEspace &&
+            vueActive === "partage" &&
+            totauxDonutCouple.moi +
+              totauxDonutCouple.partenaire +
+              totauxDonutCouple.commun >
+              0 && (
+              <View
+                style={[
+                  styles.chartCard,
+                  {
+                    backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
+                    borderColor: C.carteBorder,
+                    alignItems: "center",
+                  },
+                ]}
               >
-                {equilibreLabel}
-              </Text>
-            </View>
-          )}
+                <GraphiqueDonutCouple
+                  moi={totauxDonutCouple.moi}
+                  partenaire={totauxDonutCouple.partenaire}
+                  commun={totauxDonutCouple.commun}
+                  labelPartenaire={membrePartenaire?.prenom || "Partenaire"}
+                  couleurs={C}
+                />
+              </View>
+            )}
           <View style={styles.kpiGrid}>
             <View
               style={[
@@ -3477,6 +3883,180 @@ export default function Analytics() {
           </View>
         </TiroirStats>
         </CibleTutoriel>
+
+        {/* Graphique 4 — balance du couple : remplace l'ancienne bannière
+            texte equilibreLabel (comparaison 50/50 implicite sur TOUTES les
+            dépenses) par un calcul réel sur les dépenses COMMUNES
+            uniquement (contributionsCommunes), adaptable à 3 modes, avec
+            action de remboursement. */}
+        {estDansUnEspace &&
+          vueActive === "partage" &&
+          contributionsCommunes.totalCommun > 0 && (
+            <CibleTutoriel
+              id="tiroir-balance-couple"
+              onMesure={mesurerCibleTutoriel}
+              cleFocus={cleFocusTutoriel}
+            >
+              <TiroirStats
+                titre="Balance du couple"
+                labelTemporel={LABEL_MOIS_ACTUEL}
+                forcerOuvert={tiroirsForcesOuverts.has("balance-couple")}
+              >
+                <View style={styles.modeBalanceRow}>
+                  {(
+                    [
+                      { valeur: "50_50" as const, label: "50/50" },
+                      { valeur: "revenus" as const, label: "Revenus" },
+                      { valeur: "personnalise" as const, label: "Personnalisé" },
+                    ]
+                  ).map((option) => (
+                    <TouchableOpacity
+                      key={option.valeur}
+                      style={[
+                        styles.modeBalanceChip,
+                        { borderColor: C.separateur },
+                        modeBalance === option.valeur && {
+                          backgroundColor: C.purple,
+                          borderColor: C.purple,
+                        },
+                      ]}
+                      onPress={() =>
+                        changerModeBalance(option.valeur, ratioPersonnalise)
+                      }
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.modeBalanceChipTexte,
+                          {
+                            color:
+                              modeBalance === option.valeur
+                                ? "#FFFFFF"
+                                : C.texte,
+                          },
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {modeBalance === "personnalise" && (
+                  <View style={{ marginBottom: 14 }}>
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        color: C.texteMuted,
+                        marginBottom: 4,
+                      }}
+                    >
+                      {membrePartenaire?.prenom || "Ton/ta partenaire"}{" "}
+                      contribue {Math.round(ratioPersonnalise * 100)}% des
+                      dépenses communes
+                    </Text>
+                    <Slider
+                      style={{ width: "100%", height: 40 }}
+                      minimumValue={0}
+                      maximumValue={1}
+                      value={ratioPersonnalise}
+                      onSlidingComplete={(v) =>
+                        changerModeBalance("personnalise", v)
+                      }
+                      minimumTrackTintColor={C.purple}
+                      maximumTrackTintColor={C.separateur}
+                      thumbTintColor={C.purple}
+                    />
+                  </View>
+                )}
+
+                <View style={styles.jaugeBarre}>
+                  <View
+                    style={{
+                      flex: Math.max(contributionsCommunes.moiCommun, 0),
+                      backgroundColor: "#60a5fa",
+                    }}
+                  />
+                  <View
+                    style={{
+                      flex: Math.max(
+                        contributionsCommunes.partenaireCommun,
+                        0,
+                      ),
+                      backgroundColor: "#c084fc",
+                    }}
+                  />
+                </View>
+                <View style={styles.balanceBarreLabelsRow}>
+                  <Text
+                    style={[styles.balanceBarreMontant, { color: C.texte }]}
+                  >
+                    Toi · {formaterMontant(contributionsCommunes.moiCommun)} €
+                  </Text>
+                  <Text
+                    style={[styles.balanceBarreMontant, { color: C.texte }]}
+                  >
+                    {membrePartenaire?.prenom || "Partenaire"} ·{" "}
+                    {formaterMontant(contributionsCommunes.partenaireCommun)} €
+                  </Text>
+                </View>
+
+                {balanceLabel && (
+                  <View
+                    style={[
+                      styles.equilibreLigne,
+                      {
+                        backgroundColor: C.carte,
+                        borderColor: C.carteBorder,
+                        marginTop: 12,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="scale-outline"
+                      size={14}
+                      color={C.texteMuted}
+                    />
+                    <Text
+                      style={[styles.equilibreLigneTexte, { color: C.texte }]}
+                      numberOfLines={2}
+                    >
+                      {balanceLabel}
+                    </Text>
+                  </View>
+                )}
+
+                {Math.abs(balanceMontant) > 0.5 &&
+                  (remboursements.length > 0 ? (
+                    <View
+                      style={[
+                        styles.banniereInfo,
+                        { backgroundColor: C.vertLight, marginTop: 10 },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.banniereInfoTexte, { color: C.texte }]}
+                      >
+                        Remboursé ce mois-ci
+                      </Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={[
+                        styles.btnAdopterScenario,
+                        { backgroundColor: C.purple },
+                      ]}
+                      onPress={confirmerRemboursement}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.btnAdopterScenarioTexte}>
+                        Marquer comme remboursé
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+              </TiroirStats>
+            </CibleTutoriel>
+          )}
 
         <CibleTutoriel
           id="tiroir-evolution"
@@ -3849,6 +4429,45 @@ export default function Analytics() {
               labelTemporel={labelPeriode}
               forcerOuvert={tiroirsForcesOuverts.has("repartition")}
             >
+              {/* Graphique 2 — évolution 6 mois des dépenses communes :
+                  même composant GraphiqueBarresEmpilees que "Répartition par
+                  personne" juste en dessous, labels = mois (au lieu de
+                  noms de catégorie), 2 séries Moi/Partenaire (au lieu de 3
+                  Moi/Partenaire/Commun — ici tout est déjà "commun" par
+                  construction, cf. RÈGLE sur seriesEvolutionCommune plus
+                  haut). */}
+              {estDansUnEspace &&
+                vueActive === "partage" &&
+                contributionsCommunes.nomsCommuns.size > 0 && (
+                  <>
+                    <Text
+                      style={[
+                        styles.sectionLabel,
+                        { color: C.texteMuted, marginTop: 0 },
+                      ]}
+                    >
+                      Évolution des dépenses communes (6 derniers mois)
+                    </Text>
+                    <View
+                      style={[
+                        styles.chartCard,
+                        {
+                          backgroundColor:
+                            theme === "sombre" ? C.carte : "#FAFAFA",
+                          borderColor: C.carteBorder,
+                        },
+                      ]}
+                    >
+                      <GraphiqueBarresEmpilees
+                        series={seriesEvolutionCommune}
+                        labels={labelsEvolutionCommune}
+                        couleurs={C}
+                        mode="euro"
+                      />
+                    </View>
+                  </>
+                )}
+
               {estDansUnEspace &&
                 vueActive === "partage" &&
                 repartitionParPersonne.length > 0 && (
@@ -6799,6 +7418,21 @@ const styles = StyleSheet.create({
   jaugeDot: { width: 9, height: 9, borderRadius: 5 },
   jaugeNom: { flex: 1, fontSize: 14, fontWeight: "600" },
   jaugePct: { fontSize: 13, fontWeight: "500" },
+  modeBalanceRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  modeBalanceChip: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: "center",
+  },
+  modeBalanceChipTexte: { fontSize: 13, fontWeight: "600" },
+  balanceBarreLabelsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 6,
+  },
+  balanceBarreMontant: { fontSize: 12, fontWeight: "600" },
   compareCard: {
     backgroundColor: "#FAFAFA",
     borderRadius: 16,

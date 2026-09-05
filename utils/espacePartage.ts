@@ -80,6 +80,15 @@ export type MembreEspace = {
 // que quelqu'un rejoigne avec le code), `{statut: "actif"}` (2 membres —
 // prenomPartenaire est alors garanti non-null en pratique, mais typé
 // nullable par cohérence défensive avec le reste du fichier).
+// RÈGLE À NE JAMAIS CASSER — modeBalance/ratioPersonnalise SONT DES
+// RÉGLAGES DU COUPLE (posés sur espaces_partages), JAMAIS PAR COMPTE : les
+// deux membres lisent toujours la même valeur, cf. RÈGLE détaillée dans la
+// migration 20260905100000_stats_couple_schema.sql. Modifiables uniquement
+// via modifierModeBalanceEspace (RPC security definer) plus bas — jamais
+// un update direct, la policy UPDATE de espaces_partages reste restreinte
+// au propriétaire de l'espace.
+export type ModeBalance = "50_50" | "revenus" | "personnalise";
+
 export type EtatEspacePartage =
   | { statut: "en_attente"; code: string; expireAt: string }
   | {
@@ -87,6 +96,8 @@ export type EtatEspacePartage =
       espaceId: string;
       membres: MembreEspace[];
       prenomPartenaire: string | null;
+      modeBalance: ModeBalance;
+      ratioPersonnalise: number;
     };
 
 // RÈGLE : types volontairement DISTINCTS des Enveloppe/Transaction de
@@ -344,6 +355,35 @@ export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
 
     const autreMembre = membres.find((m) => m.user_id !== user.id);
 
+    // RÈGLE : lu ici plutôt que dans une requête séparée ailleurs — espaceId
+    // vient d'être résolu juste au-dessus, c'est le point naturel pour
+    // récupérer le reste de la ligne espaces_partages en une seule fois.
+    // Défaut "50_50"/0.5 si la colonne est absente/invalide (compte créé
+    // avant cette migration, ou valeur inattendue) — jamais de crash sur une
+    // valeur de mode non reconnue.
+    const { data: espaceRow, error: erreurEspaceModeBalance } = await supabase
+      .from("espaces_partages")
+      .select("mode_balance, ratio_personnalise")
+      .eq("id", espaceId)
+      .maybeSingle();
+
+    if (erreurEspaceModeBalance) {
+      console.error(
+        "Supabase select espaces_partages (mode_balance) a échoué :",
+        erreurEspaceModeBalance,
+      );
+    }
+
+    const modeBalance: ModeBalance =
+      espaceRow?.mode_balance === "revenus" ||
+      espaceRow?.mode_balance === "personnalise"
+        ? espaceRow.mode_balance
+        : "50_50";
+    const ratioPersonnalise =
+      typeof espaceRow?.ratio_personnalise === "number"
+        ? espaceRow.ratio_personnalise
+        : 0.5;
+
     return {
       statut: "actif",
       espaceId,
@@ -356,6 +396,8 @@ export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
         prenom: m.prenom ?? null,
       })),
       prenomPartenaire: autreMembre?.prenom ?? null,
+      modeBalance,
+      ratioPersonnalise,
     };
   } catch (e) {
     console.error("getMembreEspace a échoué :", e);
@@ -394,6 +436,37 @@ export async function quitterEspacePartage(): Promise<boolean> {
     return true;
   } catch (e) {
     console.error("quitterEspacePartage a échoué :", e);
+    return false;
+  }
+}
+
+// RÈGLE À NE JAMAIS CASSER — PASSE PAR LA RPC modifier_mode_balance_espace,
+// JAMAIS UN UPDATE CLIENT DIRECT SUR espaces_partages : cf. RÈGLE détaillée
+// dans la migration supabase/migrations/20260905102000_stats_couple_mode_balance_rpc.sql
+// — la policy UPDATE de cette table restreint l'écriture au propriétaire de
+// l'espace (protège code/expire_at), la RPC security definer est le seul
+// chemin qui permet à N'IMPORTE QUEL membre de changer mode_balance/
+// ratio_personnalise sans élargir cette policy.
+export async function modifierModeBalanceEspace(
+  mode: ModeBalance,
+  ratioPersonnalise: number,
+): Promise<boolean> {
+  try {
+    const { error } = await supabase.rpc("modifier_mode_balance_espace", {
+      p_mode: mode,
+      p_ratio_personnalise: ratioPersonnalise,
+    });
+
+    if (error) {
+      console.error(
+        "Supabase rpc modifier_mode_balance_espace a échoué :",
+        error,
+      );
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("modifierModeBalanceEspace a échoué :", e);
     return false;
   }
 }
@@ -817,6 +890,163 @@ export async function supprimerEvenementPartenaire(id: string): Promise<boolean>
     return true;
   } catch (e) {
     console.error("supprimerEvenementPartenaire a échoué :", e);
+    return false;
+  }
+}
+
+// RÈGLE À NE JAMAIS CASSER — MÊME MÉCANISME D'ARCHIVE QUE POUR MOI-MÊME,
+// JAMAIS transactions/historique_paiements : app/(tabs)/analytics.tsx
+// (getDepenseMois et la fonctionnalité "Séries") reconstruit l'historique
+// PAR CATÉGORIE d'un mois passé à partir de snapshots_mois + son enfant
+// snapshot_enveloppes (posés par archiverMoisActuelInterne, cf. app/
+// store.ts) — jamais à partir de transactions/historique_paiements, qui ne
+// couvrent pas les catégories Fixe (cf. RÈGLE "4 CAS DE FLUX" dans
+// GraphiqueFlux.tsx : Fixe ne passe jamais par transactions). Ce type/cette
+// fonction répliquent la même source pour le PARTENAIRE, nécessaires pour
+// que Graphique 2 (évolution 6 mois des dépenses communes) traite les deux
+// comptes de façon symétrique. RLS : snapshots_mois_select_espace_partage /
+// snapshot_enveloppes_select_espace_partage (migration 20260905101000).
+export type SnapshotMoisPartenaire = {
+  mois: number;
+  annee: number;
+  enveloppes: {
+    nom: string;
+    depense: number;
+    budget: number;
+    type: "Fixe" | "Variable" | "Entrée";
+  }[];
+};
+
+export async function chargerHistoriqueMoisPartenaire(
+  partenaireId: string,
+): Promise<SnapshotMoisPartenaire[]> {
+  try {
+    const { data: snapshotsData, error: erreurSnapshots } = await supabase
+      .from("snapshots_mois")
+      .select("id, mois, annee")
+      .eq("user_id", partenaireId);
+
+    if (erreurSnapshots) {
+      console.error(
+        "Supabase select snapshots_mois (chargerHistoriqueMoisPartenaire) a échoué :",
+        erreurSnapshots,
+      );
+      return [];
+    }
+
+    const snapshots = snapshotsData ?? [];
+    if (snapshots.length === 0) return [];
+
+    const { data: enveloppesData, error: erreurEnveloppes } = await supabase
+      .from("snapshot_enveloppes")
+      .select("snapshot_mois_id, nom, depense, budget, type")
+      .in(
+        "snapshot_mois_id",
+        snapshots.map((s) => s.id),
+      );
+
+    if (erreurEnveloppes) {
+      console.error(
+        "Supabase select snapshot_enveloppes (chargerHistoriqueMoisPartenaire) a échoué :",
+        erreurEnveloppes,
+      );
+      return [];
+    }
+
+    return snapshots.map((s) => ({
+      mois: s.mois,
+      annee: s.annee,
+      enveloppes: (enveloppesData ?? [])
+        .filter((e) => e.snapshot_mois_id === s.id)
+        .map((e) => ({
+          nom: e.nom,
+          depense: e.depense,
+          budget: e.budget,
+          type: e.type,
+        })),
+    }));
+  } catch (e) {
+    console.error("chargerHistoriqueMoisPartenaire a échoué :", e);
+    return [];
+  }
+}
+
+// RÈGLE : "au moins une ligne pour (espace_id, mois, annee)" suffit à
+// considérer le mois réglé côté client (cf. RÈGLE table append-only dans la
+// migration de schéma) — le tri par created_at n'a donc pas d'importance
+// fonctionnelle ici, juste une présentation chronologique si un jour
+// affichée en historique.
+export type RemboursementEspace = {
+  id: string;
+  mois: number;
+  annee: number;
+  montant: number;
+  remboursePar: string | null;
+  createdAt: string;
+};
+
+export async function chargerRemboursementsMois(
+  espaceId: string,
+  mois: number,
+  annee: number,
+): Promise<RemboursementEspace[]> {
+  try {
+    const { data, error } = await supabase
+      .from("remboursements_espace")
+      .select("*")
+      .eq("espace_id", espaceId)
+      .eq("mois", mois)
+      .eq("annee", annee);
+
+    if (error) {
+      console.error(
+        "Supabase select remboursements_espace a échoué :",
+        error,
+      );
+      return [];
+    }
+
+    return (data ?? []).map((r) => ({
+      id: r.id,
+      mois: r.mois,
+      annee: r.annee,
+      montant: r.montant,
+      remboursePar: r.rembourse_par ?? null,
+      createdAt: r.created_at,
+    }));
+  } catch (e) {
+    console.error("chargerRemboursementsMois a échoué :", e);
+    return [];
+  }
+}
+
+export async function marquerRembourse(
+  espaceId: string,
+  mois: number,
+  annee: number,
+  montant: number,
+): Promise<boolean> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    const { error } = await supabase.from("remboursements_espace").insert({
+      espace_id: espaceId,
+      mois,
+      annee,
+      montant,
+      rembourse_par: user.id,
+    });
+
+    if (error) {
+      console.error("Supabase insert remboursements_espace a échoué :", error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("marquerRembourse a échoué :", e);
     return false;
   }
 }
