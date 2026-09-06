@@ -77,6 +77,12 @@ type EspacePartageContextType = {
   // seul. Recharge uniquement les événements (pas les enveloppes), plus
   // léger qu'attendre un aller-retour complet de vueActive.
   rafraichirEvenementsPartenaire: () => Promise<void>;
+  // RÈGLE : pendant du pull-to-refresh (Aperçu/Budget/Stats, cf. RÈGLE sur
+  // rafraichirEvenementsPartenaire ci-dessus pour Planning) — recharge
+  // donneesPartenaire/historiqueMoisPartenaire à l'identique de l'effet de
+  // chargement plus bas, jamais un second pipeline de fetch. No-op silencieux
+  // hors vue "partage"/hors espace actif (mêmes gardes que cet effet).
+  rafraichirDonneesPartenaire: () => Promise<void>;
   // RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE DE LA FUSION PAR NOM, CALCULÉE
   // ICI ET NULLE PART AILLEURS : cf. RÈGLE détaillée sur
   // fusionnerCategoriesParNom (utils/espacePartage.ts). Mémoïsée, recalculée
@@ -85,6 +91,17 @@ type EspacePartageContextType = {
   // "partage"/hors espace actif, jamais `null` (simplifie les consommateurs :
   // toujours un tableau à mapper).
   categoriesFusionnees: CategorieFusionnee[];
+  // RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE, CALCULÉES ICI ET NULLE PART
+  // AILLEURS : couleur personnelle de chaque compte dans l'espace partagé
+  // (palette choisie dans app/profil.tsx, persistée sur
+  // profils.couleur_espace_partage). Remplacent les anciennes couleurs fixes
+  // #60a5fa (Moi) / #c084fc (Partenaire) partout où la vue partagée
+  // distingue les deux comptes (Aperçu, Budget, Stats, Planning) — jamais
+  // recalculées/re-fallback localement par un écran consommateur. Toujours
+  // une couleur valide (jamais `null`) : repli sur le défaut de palette
+  // (#1D9E75) si non chargée/non choisie, même hors espace.
+  couleurMoi: string;
+  couleurPartenaire: string;
   // RÈGLE : chargé EN MÊME TEMPS que donneesPartenaire/evenementsPartenaire
   // (même Promise.all, même chargementPartenaire) — cf. RÈGLE détaillée sur
   // chargerHistoriqueMoisPartenaire (utils/espacePartage.ts). Tableau vide
@@ -114,7 +131,10 @@ const EspacePartageContext = createContext<EspacePartageContextType>({
   chargementPartenaire: false,
   evenementsPartenaire: [],
   rafraichirEvenementsPartenaire: async () => {},
+  rafraichirDonneesPartenaire: async () => {},
   categoriesFusionnees: [],
+  couleurMoi: "#1D9E75",
+  couleurPartenaire: "#1D9E75",
   historiqueMoisPartenaire: [],
   modeBalance: "50_50",
   ratioPersonnalise: 0.5,
@@ -331,6 +351,22 @@ export function EspacePartageProvider({
     setEvenementsPartenaire(evenements);
   }, [membrePartenaire]);
 
+  // RÈGLE : cf. RÈGLE détaillée sur rafraichirDonneesPartenaire ci-dessus —
+  // mêmes deux chargements que l'effet de passage en vue "Partagé" plus bas
+  // (Promise.all), rejoués à l'identique sur demande explicite (pull-to-
+  // refresh) plutôt que d'attendre un changement de vueActive/membrePartenaire.
+  const rafraichirDonneesPartenaire = useCallback(async () => {
+    if (vueActive !== "partage" || !estDansUnEspace || !membrePartenaire) {
+      return;
+    }
+    const [donnees, historique] = await Promise.all([
+      chargerDonneesPartenaire(membrePartenaire.id),
+      chargerHistoriqueMoisPartenaire(membrePartenaire.id),
+    ]);
+    setDonneesPartenaire(donnees);
+    setHistoriqueMoisPartenaire(historique);
+  }, [vueActive, estDansUnEspace, membrePartenaire]);
+
   // RÈGLE : mAj locale UNIQUEMENT après succès de la RPC, jamais avant
   // (optimiste mais pas aveugle) — un échec réseau ne doit jamais laisser
   // l'UI afficher un mode différent de ce qui est réellement enregistré.
@@ -345,6 +381,13 @@ export function EspacePartageProvider({
     },
     [],
   );
+
+  // RÈGLE À NE JAMAIS CASSER : cf. RÈGLE détaillée sur couleurMoi/
+  // couleurPartenaire ci-dessus — repli sur le défaut de palette tant que
+  // non chargée (compte jamais passé par le sélecteur) ou hors espace,
+  // jamais `undefined`/chaîne vide propagé aux consommateurs.
+  const couleurMoi = objStore.couleurEspacePartage || "#1D9E75";
+  const couleurPartenaire = donneesPartenaire?.couleurEspacePartage || "#1D9E75";
 
   // RÈGLE À NE JAMAIS CASSER : cf. RÈGLE détaillée sur categoriesFusionnees
   // ci-dessus — calculée UNE SEULE FOIS ici, jamais dans un écran
@@ -361,6 +404,8 @@ export function EspacePartageProvider({
       objStore.enveloppes,
       donneesPartenaire.enveloppes,
       membrePartenaire?.prenom ?? null,
+      couleurMoi,
+      couleurPartenaire,
       maintenant.getFullYear(),
       maintenant.getMonth(),
     );
@@ -370,6 +415,8 @@ export function EspacePartageProvider({
     donneesPartenaire,
     objStore.enveloppes,
     membrePartenaire,
+    couleurMoi,
+    couleurPartenaire,
   ]);
 
   const setVueActive = (vue: VueEspacePartage) => {
@@ -396,7 +443,10 @@ export function EspacePartageProvider({
         chargementPartenaire,
         evenementsPartenaire,
         rafraichirEvenementsPartenaire,
+        rafraichirDonneesPartenaire,
         categoriesFusionnees,
+        couleurMoi,
+        couleurPartenaire,
         historiqueMoisPartenaire,
         modeBalance,
         ratioPersonnalise,

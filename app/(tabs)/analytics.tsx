@@ -9,6 +9,7 @@ import {
   Dimensions,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -34,13 +35,12 @@ import {
   ScoreSante,
 } from "../../utils/score";
 import {
-  calculerDeltaDepenseJournaliere,
   calculerDeltaTotal,
   calculerRythmeObjectif,
   calculerTauxEpargne,
   chargerNbAmeliorations,
 } from "../../utils/conseils";
-import { analyserFluxFinancier, genererMessageBilanVista } from "../../utils/bilanVista";
+import { analyserFluxFinancier } from "../../utils/bilanVista";
 import { situationsDejaAffichees } from "../../utils/situationsSession";
 import { calculerTrophees, Trophee } from "../../utils/trophees";
 import { supabase } from "../../supabaseClient";
@@ -245,7 +245,6 @@ const PERIODE_MAX_MOIS = 120; // plafond fixe (10 ans), indépendant des donnée
 // Nombre de mois consultables par un compte non-premium sur Stats — cf.
 // estComptePremium (utils/premium.ts) pour qui est concerné.
 const LIMITE_MOIS_GRATUIT_STATS = 2;
-const HAUTEUR_TRACK_EPARGNE = 90; // hauteur de la zone de tracé du graphique "Épargne dans le temps"
 
 type OptionPeriode = {
   valeur: number;
@@ -897,12 +896,16 @@ function GraphiqueDonutCouple({
   partenaire,
   commun,
   labelPartenaire,
+  couleurMoi,
+  couleurPartenaire,
   couleurs: C,
 }: {
   moi: number;
   partenaire: number;
   commun: number;
   labelPartenaire: string;
+  couleurMoi: string;
+  couleurPartenaire: string;
   couleurs: typeof COULEURS.clair;
 }) {
   const total = moi + partenaire + commun;
@@ -913,11 +916,11 @@ function GraphiqueDonutCouple({
   const circonference = 2 * Math.PI * rayon;
 
   const segmentsBruts = [
-    { cle: "moi", label: "Moi", couleur: "#60a5fa", valeur: moi },
+    { cle: "moi", label: "Moi", couleur: couleurMoi, valeur: moi },
     {
       cle: "partenaire",
       label: labelPartenaire,
-      couleur: "#c084fc",
+      couleur: couleurPartenaire,
       valeur: partenaire,
     },
     { cle: "commun", label: "Commun", couleur: "#1D9E75", valeur: commun },
@@ -1002,27 +1005,158 @@ function GraphiqueDonutCouple({
           </Text>
         </View>
       </View>
-      <View style={[styles.jaugeLegende, { marginTop: 12 }]}>
+      {/* RÈGLE : styles dédiés (coupleLegende*), JAMAIS jaugeLegende*
+          (JaugeRepartition ci-dessus, réutilisé ailleurs à l'identique) —
+          demande explicite du 2026-09-06 : légende illisible (texte écrasé
+          par les valeurs), corrigée ICI SEULEMENT pour ne pas modifier
+          l'apparence de JaugeRepartition partout où elle est déjà utilisée.
+          Nom de segment et montant/pourcentage sur deux lignes distinctes
+          (jamais sur une même ligne resserrée), police plus grande,
+          espacement généreux entre les 3 lignes. */}
+      <View style={[styles.coupleLegende, { marginTop: 14 }]}>
         {segmentsBruts
           .filter((s) => s.valeur > 0)
           .map((s) => (
-            <View key={s.cle} style={styles.jaugeLegendeItem}>
-              <View
-                style={[styles.jaugeDot, { backgroundColor: s.couleur }]}
-              />
-              <Text
-                style={[styles.jaugeNom, { color: C.texte }]}
-                numberOfLines={1}
-              >
-                {s.label}
-              </Text>
-              <Text style={[styles.jaugePct, { color: C.texteMuted }]}>
-                {Math.round((s.valeur / total) * 100)}% ·{" "}
-                {formaterMontant(s.valeur)} €
+            <View key={s.cle} style={styles.coupleLegendeItem}>
+              <View style={styles.coupleLegendeHautRow}>
+                <View
+                  style={[styles.coupleDot, { backgroundColor: s.couleur }]}
+                />
+                <Text
+                  style={[styles.coupleNom, { color: C.texte }]}
+                  numberOfLines={1}
+                >
+                  {s.label}
+                </Text>
+              </View>
+              <Text style={[styles.couplePct, { color: C.texteMuted }]}>
+                {formaterMontant(s.valeur)} € ·{" "}
+                {Math.round((s.valeur / total) * 100)}%
               </Text>
             </View>
           ))}
       </View>
+    </View>
+  );
+}
+
+// RÈGLE À NE JAMAIS CASSER — GRAPHIQUE 3 "RÉPARTITION PAR PERSONNE", REFONTE
+// DU 2026-09-06 (longueur proportionnelle au montant, cf. demande explicite
+// du même jour) : une ligne PAR CATÉGORIE, triée par montant total
+// décroissant (déjà l'ordre de `segments`, cf. repartitionParPersonne).
+// Chaque ligne lit moiReel/partenaireReel (JAMAIS moi/partenaire, mis à 0
+// pour une ligne fusionnée par repartitionParPersonne — cf. RÈGLE à son site
+// de définition) pour afficher le VRAI split, y compris sur une catégorie
+// "Commun". commun > 0 signale une catégorie fusionnée (même nom des deux
+// côtés ce mois-ci) : si les deux personnes ont réellement contribué, split
+// coloré + pourcentages ; si un seul côté a dépensé ce mois-ci malgré la
+// fusion, réduit à "Commun 100%" plutôt qu'un split 100/0 peu informatif.
+// Une catégorie non fusionnée (commun === 0) est entièrement à une seule
+// personne, jamais un split.
+//
+// RÈGLE : LONGUEUR DE BARRE = total / PLUS GROS total DU MOIS, JAMAIS UNE
+// LARGEUR FIXE : la catégorie la plus chère occupe 100% de la zone
+// disponible (repartitionCategorieBarreZone, largeur du "rail" de fond),
+// toutes les autres proportionnellement — recalculé à chaque rendu à partir
+// de `segments` (déjà trié), jamais mémoïsé séparément. Largeur plancher de
+// 3% pour qu'une catégorie très petite reste visible (un sliver) plutôt que
+// de disparaître complètement.
+function GraphiqueRepartitionCategoriePersonne({
+  segments,
+  labelPartenaire,
+  couleurMoi,
+  couleurPartenaire,
+  couleurs: C,
+}: {
+  segments: {
+    nom: string;
+    moiReel: number;
+    partenaireReel: number;
+    commun: number;
+    total: number;
+  }[];
+  labelPartenaire: string;
+  couleurMoi: string;
+  couleurPartenaire: string;
+  couleurs: typeof COULEURS.clair;
+}) {
+  const totalMax = Math.max(...segments.map((s) => s.total), 1);
+  return (
+    <View style={styles.repartitionCategorieListe}>
+      {segments.map((s) => {
+        const fusionnee = s.commun > 0;
+        const splitReel = s.moiReel > 0 && s.partenaireReel > 0;
+        const largeurPct = Math.max((s.total / totalMax) * 100, 3);
+        return (
+          <View key={s.nom} style={styles.repartitionCategorieLigne}>
+            <View style={styles.repartitionCategorieHautRow}>
+              <Text
+                style={[styles.repartitionCategorieNom, { color: C.texte }]}
+                numberOfLines={1}
+              >
+                {s.nom}
+              </Text>
+              <View
+                style={[
+                  styles.repartitionCategorieBarreZone,
+                  { backgroundColor: C.separateur },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.repartitionCategorieBarreFond,
+                    { width: `${largeurPct}%` },
+                  ]}
+                >
+                  {splitReel ? (
+                    <>
+                      <View
+                        style={{
+                          flex: s.partenaireReel,
+                          backgroundColor: couleurPartenaire,
+                        }}
+                      />
+                      <View
+                        style={{ flex: s.moiReel, backgroundColor: couleurMoi }}
+                      />
+                    </>
+                  ) : (
+                    <View
+                      style={{
+                        flex: 1,
+                        backgroundColor: fusionnee
+                          ? "#1D9E75"
+                          : s.moiReel > 0
+                            ? couleurMoi
+                            : couleurPartenaire,
+                      }}
+                    />
+                  )}
+                </View>
+              </View>
+              <Text
+                style={[styles.repartitionCategorieMontant, { color: C.texte }]}
+              >
+                {formaterMontant(s.total)} €
+              </Text>
+            </View>
+            <Text
+              style={[
+                styles.repartitionCategoriePct,
+                { color: C.texteMuted },
+              ]}
+            >
+              {splitReel
+                ? `${labelPartenaire} ${Math.round((s.partenaireReel / s.total) * 100)}% · Moi ${Math.round((s.moiReel / s.total) * 100)}%`
+                : fusionnee
+                  ? "Commun 100%"
+                  : s.moiReel > 0
+                    ? "Moi 100%"
+                    : `${labelPartenaire} 100%`}
+            </Text>
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -1044,7 +1178,31 @@ export default function Analytics() {
     modeBalance,
     ratioPersonnalise,
     changerModeBalance,
+    couleurMoi,
+    couleurPartenaire,
+    rafraichirEspace,
+    rafraichirDonneesPartenaire,
   } = useEspacePartage();
+
+  // RÈGLE : cf. RÈGLE identique dans app/(tabs)/index.tsx — mêmes chargeurs
+  // que ceux déjà appelés au montage/périodiquement, jamais un second
+  // pipeline de fetch.
+  const [rafraichissementEnCours, setRafraichissementEnCours] = useState(false);
+  const gererRafraichissement = async () => {
+    setRafraichissementEnCours(true);
+    try {
+      await Promise.all([
+        objStore.chargerEnveloppes(),
+        objStore.chargerObjectifs(),
+        objStore.chargerTransactions(),
+        objStore.chargerEvenements(),
+        rafraichirEspace(),
+        rafraichirDonneesPartenaire(),
+      ]);
+    } finally {
+      setRafraichissementEnCours(false);
+    }
+  };
   // RÈGLE À NE JAMAIS CASSER — SPÉCIFIQUE AU MOIS AFFICHÉ ICI, JAMAIS DANS
   // EspacePartageContext : contrairement à donneesPartenaire/
   // evenementsPartenaire/historiqueMoisPartenaire (partagés par plusieurs
@@ -1184,7 +1342,6 @@ export default function Analytics() {
     setScrollOffsetStats(y);
   };
   const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
-  const [deltaDepMoyPourcentage, setDeltaDepMoyPourcentage] = useState(true);
   // RÈGLE À NE JAMAIS CASSER : state local (pas persisté) — "pour la
   // session en cours" signifie qu'il revient à false à la prochaine
   // ouverture de l'app. Même mécanisme que conseilsDebloques dans
@@ -1210,8 +1367,6 @@ export default function Analytics() {
   const [modeEntreesCategorie, setModeEntreesCategorie] = useState<
     "pct" | "euro"
   >("pct");
-  const [modeRepartitionParPersonne, setModeRepartitionParPersonne] =
-    useState<"pct" | "euro">("pct");
   const [categoriesInchangeesOuvert, setCategoriesInchangeesOuvert] =
     useState(false);
   const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
@@ -1487,6 +1642,15 @@ export default function Analytics() {
     moi: number;
     partenaire: number;
     commun: number;
+    // RÈGLE : TOUJOURS le montant réel par personne, même pour une ligne
+    // fusionnée (contrairement à moi/partenaire ci-dessus, mis à 0 pour une
+    // ligne "Commun" par le collapse plus bas). Graphique 1 (donut,
+    // totauxDonutCouple) continue de lire moi/partenaire/commun tels quels,
+    // jamais ces deux champs — Graphique 3 (barres par catégorie, demande du
+    // 2026-09-06) est seul consommateur, pour afficher le VRAI split
+    // Moi/Partenaire même sur une catégorie "Commun".
+    moiReel: number;
+    partenaireReel: number;
     total: number;
   };
   const repartitionParPersonne: SegmentRepartitionPartagee[] = (() => {
@@ -1507,9 +1671,12 @@ export default function Analytics() {
           moi: 0,
           partenaire: 0,
           commun: 0,
+          moiReel: 0,
+          partenaireReel: 0,
           total: 0,
         };
         ligne.moi += e.depense;
+        ligne.moiReel += e.depense;
         ligne.total += e.depense;
         parNom.set(cle, ligne);
       });
@@ -1527,9 +1694,12 @@ export default function Analytics() {
           moi: 0,
           partenaire: 0,
           commun: 0,
+          moiReel: 0,
+          partenaireReel: 0,
           total: 0,
         };
         ligne.partenaire += e.depense;
+        ligne.partenaireReel += e.depense;
         ligne.total += e.depense;
         parNom.set(cle, ligne);
       });
@@ -1555,35 +1725,6 @@ export default function Analytics() {
     { moi: 0, partenaire: 0, commun: 0 },
   );
 
-  // Répartition par personne, reformatée pour GraphiqueBarresEmpilees — MÊME
-  // composant que "Dépenses par catégorie"/"Entrées par catégorie" plus bas
-  // (RÈGLE : jamais un composant de graphique ad hoc en plus, cf. demande
-  // explicite "même composant existant") — ici les LABELS de l'axe sont des
-  // noms de catégorie (pas des mois) et les 3 SÉRIES sont Moi/Partenaire/
-  // Commun plutôt qu'une série par catégorie. Le composant ne fait aucune
-  // hypothèse sur ce que représentent labels/series, cette réinterprétation
-  // est donc sûre.
-  const labelsRepartitionParPersonne = repartitionParPersonne.map((s) => s.nom);
-  const seriesRepartitionParPersonne: SegmentBarreEmpilee[] = [
-    {
-      cle: "moi",
-      label: "Moi",
-      couleur: "#60a5fa",
-      donnees: repartitionParPersonne.map((s) => s.moi),
-    },
-    {
-      cle: "partenaire",
-      label: membrePartenaire?.prenom || "Partenaire",
-      couleur: "#c084fc",
-      donnees: repartitionParPersonne.map((s) => s.partenaire),
-    },
-    {
-      cle: "commun",
-      label: "Commun",
-      couleur: "#1D9E75",
-      donnees: repartitionParPersonne.map((s) => s.commun),
-    },
-  ];
 
   // RÈGLE À NE JAMAIS CASSER — GRAPHIQUE 2 "ÉVOLUTION 6 MOIS DES DÉPENSES
   // COMMUNES" : réutilise le même mécanisme d'archive que getDepenseMois
@@ -1656,7 +1797,7 @@ export default function Analytics() {
     {
       cle: "moi",
       label: "Moi",
-      couleur: "#60a5fa",
+      couleur: couleurMoi,
       donnees: moisEvolutionCommune.map(({ mois, annee }) =>
         depenseCommuneMoisPourMoi(mois, annee),
       ),
@@ -1664,7 +1805,7 @@ export default function Analytics() {
     {
       cle: "partenaire",
       label: membrePartenaire?.prenom || "Partenaire",
-      couleur: "#c084fc",
+      couleur: couleurPartenaire,
       donnees: moisEvolutionCommune.map(({ mois, annee }) =>
         depenseCommuneMoisPourPartenaire(mois, annee),
       ),
@@ -1765,29 +1906,27 @@ export default function Analytics() {
           historiquePaiements: [],
         } satisfies DonneesScore)
       : null;
-  // "Ensemble" — RÈGLE À NE JAMAIS CASSER : moyenne PONDÉRÉE de "Moi" (le
-  // vrai score complet, jamais recalculé) et "Partenaire" (l'estimation
-  // ci-dessus), jamais un troisième calculerScoreSante() indépendant —
-  // décision explicite de l'utilisateur (remplace l'ancien "Score commun"
-  // qui mélangeait le budget total de mes enveloppes avec la part 'commun'
-  // seulement de leur dépense, une approximation plus fragile que
-  // nécessaire). Pondération par les dépenses du mois de chaque compte :
-  // celui qui a le plus dépensé pèse plus dans "Ensemble" — si le
-  // partenaire n'a pas de score estimable, "Ensemble" retombe simplement
-  // sur mon score seul (poids partenaire nul). Pas de `details` fabriqués
-  // (jamais affichés pour "Ensemble", cf. rendu plus bas) : uniquement
-  // score + mot.
+  // "Ensemble" — RÈGLE À NE JAMAIS CASSER : VRAIE MOYENNE ARITHMÉTIQUE de
+  // "Moi" (le vrai score complet, jamais recalculé) et "Partenaire"
+  // (l'estimation ci-dessus), jamais un troisième calculerScoreSante()
+  // indépendant. Ancienne version pondérée par les dépenses du mois de
+  // chaque compte (euros) — bug confirmé : cette pondération fait
+  // structurellement dominer le compte qui a le plus dépensé au point que
+  // "Ensemble" retombe systématiquement sur SON score, pas une vraie
+  // moyenne (ex: 37 et 44 donnait toujours 37 dès que "Moi" pesait
+  // largement plus que le partenaire en euros ce mois-ci — un score 0-100
+  // déjà normalisé n'a aucune raison d'être repondéré par un montant en
+  // euros, deux échelles sans rapport). Moyenne 50/50 désormais, jamais
+  // pondérée par un montant : si le partenaire n'a pas de score estimable,
+  // "Ensemble" retombe simplement sur mon score seul. Pas de `details`
+  // fabriqués (jamais affichés pour "Ensemble", cf. rendu plus bas) :
+  // uniquement score + mot.
   const scoreEnsemble: { score: number; mot: MotCleScore } | null =
     vueActive === "partage"
       ? scorePartenaireApprox
         ? (() => {
-            const poidsMoi = Math.max(totalDepensesMoiMois, 1);
-            const poidsPartenaire = Math.max(totalDepensesPartenaireMois, 1);
-            const poidsTotal = poidsMoi + poidsPartenaire;
             const score = Math.round(
-              (scoreSante.score * poidsMoi +
-                scorePartenaireApprox.score * poidsPartenaire) /
-                poidsTotal,
+              (scoreSante.score + scorePartenaireApprox.score) / 2,
             );
             return { score, mot: motPourScore(score) };
           })()
@@ -1972,32 +2111,6 @@ export default function Analytics() {
       ],
     );
   };
-
-  // === "Prochaine meilleure décision" ==========================================
-  // RÈGLE À NE JAMAIS CASSER : Zone 3 (Vista Bilan) — TOUT l'historique
-  // disponible, JAMAIS le mois en cours. utils/bilanVista.ts est un moteur
-  // entièrement séparé de utils/conseils.ts (Zone 1, mois en cours) et
-  // utils/tendancesPeriode.ts (Zone 2, période sélectionnée) — ne jamais
-  // lui passer resteEstime/disponibleEffectif du mois en cours, seulement
-  // objStore.historiquesMois (mois déjà archivés). Seule "decision" est
-  // encore utilisée ici — "Ce que Vista a remarqué" vient désormais de
-  // analyserFluxFinancier (période sélectionnée du graphique de flux, cf.
-  // définition de analyseFlux plus haut), pas de ce moteur tout-historique.
-  const { decision: decisionPrioritaire } = genererMessageBilanVista({
-    historiquesMois: objStore.historiquesMois,
-    objectifsAvecRythme: objStore.objectifs.map((o) => ({
-      objectif: { id: o.id, nom: o.nom, ferme: o.ferme },
-    })),
-    enveloppes: objStore.enveloppes,
-    moisActuel: MOIS_ACTUEL,
-    anneeActuelle: ANNEE_ACTUELLE,
-    // RÈGLE À NE JAMAIS CASSER : "Nos conseils" (Aperçu) est la source
-    // PRIORITAIRE — "Vista" ici ne fait qu'EXCLURE ce qu'Aperçu a déjà
-    // marqué comme affiché (voir l'effet correspondant dans
-    // app/(tabs)/index.tsx), jamais l'inverse. "Vista" ne marque rien lui-
-    // même.
-    situationsExclues: situationsDejaAffichees(),
-  });
 
   // Onglet Trophées.
   const trophees = calculerTrophees({
@@ -2580,19 +2693,27 @@ export default function Analytics() {
   const moisPrecedent = new Date(ANNEE_ACTUELLE, MOIS_ACTUEL - 1, 1);
   const depenseMoisPrec =
     getDepenseMois(moisPrecedent.getMonth(), moisPrecedent.getFullYear()) ?? 0;
-  const joursEcoules = new Date().getDate();
-  const depenseMoyJour =
-    joursEcoules > 0 ? Math.round(depenseMoisActuel / joursEcoules) : 0;
-  const { pct: deltaDepMoy, deltaEuros: deltaDepMoyEuros } =
-    calculerDeltaDepenseJournaliere(depenseMoisActuel, depenseMoisPrec, joursEcoules);
-
   const disponible = entreesBudgetDuMois(
     objStore.enveloppes,
     ANNEE_ACTUELLE,
     MOIS_ACTUEL,
   ).total;
   const epargne = objStore.epargneMois;
-  const tauxEpargne = calculerTauxEpargne(epargne, disponible);
+  // RÈGLE À NE JAMAIS CASSER — CONSOLIDÉ (MOI + PARTENAIRE) EN VUE PARTAGÉE :
+  // demande explicite du 2026-09-06, formule fournie
+  // (epargneMoi+epargnePartenaire)/(revenusMoi+revenusPartenaire)*100 — même
+  // sources que revenusCombines/depensesCombinees plus haut et que
+  // "Évolution dans le temps" consolidée (getDisponibleMoisPartenaire/
+  // getEpargneMoisPartenaire, jamais un second calcul indépendant). Un
+  // compte qui n'a pas épargné ne bloque pas le taux : la somme reflète
+  // quand même l'épargne de l'autre.
+  const tauxEpargne =
+    estDansUnEspace && vueActive === "partage"
+      ? calculerTauxEpargne(
+          epargne + getEpargneMoisPartenaire(MOIS_ACTUEL, ANNEE_ACTUELLE),
+          disponible + getDisponibleMoisPartenaire(MOIS_ACTUEL, ANNEE_ACTUELLE),
+        )
+      : calculerTauxEpargne(epargne, disponible);
 
   const deltaTotal = calculerDeltaTotal(depenseMoisActuel, depenseMoisPrec);
   const deltaTotalEuros = depenseMoisActuel - depenseMoisPrec;
@@ -3754,7 +3875,17 @@ export default function Analytics() {
         estTablette && { paddingHorizontal: 80 },
       ]}
     >
-      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={rafraichissementEnCours}
+            onRefresh={gererRafraichissement}
+            tintColor={C.accent}
+          />
+        }
+      >
         <View style={[styles.header, styles.headerRow]}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <View>
@@ -4080,13 +4211,36 @@ export default function Analytics() {
           )}
           {/* Graphique 1 — donut de contribution : ré-agrégation de
               repartitionParPersonne (totauxDonutCouple, calculé plus haut),
-              jamais un nouveau total indépendant. */}
+              jamais un nouveau total indépendant. Titre explicite au-dessus
+              (demande du 2026-09-06, remplace l'ancien intitulé "dépenses
+              communes" qui n'apparaissait qu'en petit au centre du donut) —
+              même convention que le sectionLabelRow "Évolution" plus bas. */}
           {estDansUnEspace &&
             vueActive === "partage" &&
             totauxDonutCouple.moi +
               totauxDonutCouple.partenaire +
               totauxDonutCouple.commun >
               0 && (
+              <>
+                <View style={[styles.sectionLabelRow, { marginTop: 16 }]}>
+                  <View
+                    style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                  >
+                    <Ionicons
+                      name="pie-chart-outline"
+                      size={13}
+                      color={C.texteMuted}
+                    />
+                    <Text
+                      style={[
+                        styles.sectionLabel,
+                        { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+                      ]}
+                    >
+                      Répartition des dépenses communes
+                    </Text>
+                  </View>
+                </View>
               <View
                 style={[
                   styles.chartCard,
@@ -4102,83 +4256,52 @@ export default function Analytics() {
                   partenaire={totauxDonutCouple.partenaire}
                   commun={totauxDonutCouple.commun}
                   labelPartenaire={membrePartenaire?.prenom || "Partenaire"}
+                  couleurMoi={couleurMoi}
+                  couleurPartenaire={couleurPartenaire}
                   couleurs={C}
                 />
               </View>
+              </>
             )}
-          <View style={styles.kpiGrid}>
-            <View
-              style={[
-                styles.kpiCard,
-                theme === "sombre"
-                  ? {
-                      backgroundColor: C.carte,
-                      borderWidth: 0.5,
-                      borderColor: C.carteBorder,
-                      borderLeftWidth: 3,
-                      borderLeftColor: C.accent,
-                    }
-                  : {
-                      backgroundColor: "#FFFFFF",
-                      borderWidth: 0.5,
-                      borderColor: "#E4E6EA",
-                      borderLeftWidth: 3,
-                      borderLeftColor: C.accent,
-                    },
-              ]}
-            >
-              <View style={styles.kpiLabelRow}>
-                <Text
-                  style={[
-                    styles.kpiLabel,
-                    {
-                      marginBottom: 0,
-                      color: theme === "sombre" ? C.accent : C.texteMuted,
-                    },
-                  ]}
-                >
-                  DÉPENSE MOY. / JOUR
-                </Text>
-                <InfoBulle
-                  titre="Dépense moyenne par jour"
-                  texte="Calculée en divisant tes dépenses totales par le nombre de jours écoulés depuis le début du mois. En début de mois, ce chiffre peut paraître élevé — il s'étale et se stabilise naturellement au fil des jours."
-                  taille={12}
-                  couleur={theme === "sombre" ? C.accent : C.texteMuted}
-                />
-              </View>
-              <Text
+          {/* RÈGLE : remplace l'ancienne carte "DÉPENSE MOY. / JOUR" (retirée
+              du 2026-09-06, cf. git log) — vue individuelle UNIQUEMENT
+              (pendant de kpiFusionneRow "REVENUS COMBINÉS"/"DÉPENSES
+              TOTALES (2 COMPTES)" plus haut, vue partagée), même style
+              (kpiFusionneRow/kpiFusionneCard), jamais un nouveau style ad
+              hoc. disponible/depenseMoisActuel déjà calculés plus haut pour
+              TAUX D'ÉPARGNE/le reste de cet écran — jamais un second calcul
+              indépendant. */}
+          {!(estDansUnEspace && vueActive === "partage") && (
+            <View style={styles.kpiFusionneRow}>
+              <View
                 style={[
-                  styles.kpiVal,
-                  { color: theme === "sombre" ? C.accentText : C.texte },
+                  styles.kpiFusionneCard,
+                  { backgroundColor: C.carte, borderColor: C.carteBorder },
                 ]}
               >
-                {depenseMoyJour} €
-              </Text>
-              <View style={styles.kpiDeltaRow}>
-                <Ionicons
-                  name={deltaDepMoy > 0 ? "arrow-up" : "arrow-down"}
-                  size={11}
-                  color={deltaDepMoy <= 0 ? C.accentText : C.peachText}
-                />
-                <TouchableOpacity
-                  activeOpacity={0.6}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  onPress={() => setDeltaDepMoyPourcentage((v) => !v)}
-                >
-                  <Text
-                    style={[
-                      styles.kpiDelta,
-                      { color: deltaDepMoy <= 0 ? C.accentText : C.peachText },
-                    ]}
-                  >
-                    {deltaDepMoyPourcentage
-                      ? `${Math.abs(deltaDepMoy)}%`
-                      : `${deltaDepMoyEuros > 0 ? "+" : ""}${deltaDepMoyEuros} €`}
-                    {" vs mois dernier"}
-                  </Text>
-                </TouchableOpacity>
+                <Text style={[styles.kpiLabel, { color: C.texteMuted }]}>
+                  REVENUS TOTAUX
+                </Text>
+                <Text style={[styles.kpiVal, { color: C.texte }]}>
+                  {formaterMontant(disponible)} €
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.kpiFusionneCard,
+                  { backgroundColor: C.carte, borderColor: C.carteBorder },
+                ]}
+              >
+                <Text style={[styles.kpiLabel, { color: C.texteMuted }]}>
+                  DÉPENSES TOTALES
+                </Text>
+                <Text style={[styles.kpiVal, { color: C.texte }]}>
+                  {formaterMontant(depenseMoisActuel)} €
+                </Text>
               </View>
             </View>
+          )}
+          <View style={styles.kpiGrid}>
             <View
               style={[
                 styles.kpiCard,
@@ -4390,7 +4513,7 @@ export default function Analytics() {
               cleFocus={cleFocusTutoriel}
             >
               <TiroirStats
-                titre="Balance du couple"
+                titre="Balance partagée"
                 labelTemporel={LABEL_MOIS_ACTUEL}
                 forcerOuvert={tiroirsForcesOuverts.has("balance-couple")}
               >
@@ -4466,7 +4589,7 @@ export default function Analytics() {
                   <View
                     style={{
                       flex: Math.max(contributionsCommunes.moiCommun, 0),
-                      backgroundColor: "#60a5fa",
+                      backgroundColor: couleurMoi,
                     }}
                   />
                   <View
@@ -4475,7 +4598,7 @@ export default function Analytics() {
                         contributionsCommunes.partenaireCommun,
                         0,
                       ),
-                      backgroundColor: "#c084fc",
+                      backgroundColor: couleurPartenaire,
                     }}
                   />
                 </View>
@@ -4624,109 +4747,6 @@ export default function Analytics() {
               </View>
             </>
           )}
-
-          <Text
-            style={[
-              styles.sectionLabel,
-              { color: C.texteMuted, marginTop: 8 },
-            ]}
-          >
-            Épargne dans le temps
-          </Text>
-          <View
-            style={[
-              styles.chartCard,
-              {
-                backgroundColor: theme === "sombre" ? C.carte : "#FAFAFA",
-                borderColor: C.carteBorder,
-              },
-            ]}
-          >
-            {(() => {
-              const maxBrutEpargne = Math.max(...donneesEpargneConsolidees, 1);
-              const ticksEpargne = calculerTicksY(maxBrutEpargne);
-              const maxEpargne = ticksEpargne[ticksEpargne.length - 1];
-              const indicesAffichesEpargne = indicesLabelsAffiches(
-                donneesEpargneConsolidees.length,
-              );
-              return (
-                <View style={styles.epargneChartRow}>
-                  <View style={[styles.epargneAxeY, { height: HAUTEUR_TRACK_EPARGNE }]}>
-                    {[...ticksEpargne].reverse().map((t) => (
-                      <Text
-                        key={t}
-                        style={[styles.epargneAxeYTexte, { color: C.texteMuted }]}
-                      >
-                        {t}€
-                      </Text>
-                    ))}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={styles.barresEpargneValeursRow}>
-                      {donneesEpargneConsolidees.map((val, i) => (
-                        <Text
-                          key={i}
-                          style={[styles.barreEpargneVal, { color: C.bleuGris }]}
-                        >
-                          {val !== 0 && indicesAffichesEpargne.includes(i)
-                            ? `${formaterMontant(val)}€`
-                            : ""}
-                        </Text>
-                      ))}
-                    </View>
-                    <View
-                      style={[
-                        styles.epargnePlotZone,
-                        { height: HAUTEUR_TRACK_EPARGNE },
-                      ]}
-                    >
-                      {ticksEpargne.map((t) => (
-                        <View
-                          key={t}
-                          style={[
-                            styles.epargneGridline,
-                            {
-                              top:
-                                HAUTEUR_TRACK_EPARGNE -
-                                (t / maxEpargne) * HAUTEUR_TRACK_EPARGNE,
-                              backgroundColor: C.separateur,
-                            },
-                          ]}
-                        />
-                      ))}
-                      <View style={styles.barresEpargne}>
-                        {donneesEpargneConsolidees.map((val, i) => {
-                          const h = Math.round(
-                            (val / maxEpargne) * HAUTEUR_TRACK_EPARGNE,
-                          );
-                          return (
-                            <View key={i} style={styles.barreEpargneCol}>
-                              <View
-                                style={[
-                                  styles.barreEpargneRemplissage,
-                                  { height: h, backgroundColor: C.bleuGris },
-                                ]}
-                              />
-                            </View>
-                          );
-                        })}
-                      </View>
-                    </View>
-                    <View style={styles.barresEpargneValeursRow}>
-                      {labels.map((lbl, i) => (
-                        <Text
-                          key={i}
-                          style={[styles.barreEpargneLabel, { color: C.texteMuted }]}
-                        >
-                          {lbl}
-                        </Text>
-                      ))}
-                    </View>
-                  </View>
-                </View>
-              );
-            })()}
-          </View>
 
           {!filtreEstEntreesUniquement && !filtreEstDepensesUniquement && (
             <>
@@ -4964,62 +4984,14 @@ export default function Analytics() {
                 vueActive === "partage" &&
                 repartitionParPersonne.length > 0 && (
                   <>
-                    <View
+                    <Text
                       style={[
-                        styles.sectionLabelRow,
-                        { justifyContent: "space-between", alignItems: "center" },
+                        styles.sectionLabel,
+                        { color: C.texteMuted, marginTop: 16 },
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.sectionLabel,
-                          { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
-                        ]}
-                      >
-                        Répartition par personne ({LABEL_MOIS_ACTUEL})
-                      </Text>
-                      <View
-                        style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-                      >
-                        <TouchableOpacity
-                          onPress={() => setModeRepartitionParPersonne("pct")}
-                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 2 }}
-                        >
-                          <Text
-                            style={[
-                              styles.toggleModeTexte,
-                              {
-                                color:
-                                  modeRepartitionParPersonne === "pct"
-                                    ? C.accent
-                                    : C.texteMuted,
-                              },
-                            ]}
-                          >
-                            %
-                          </Text>
-                        </TouchableOpacity>
-                        <Text style={{ color: C.texteMuted, fontSize: 12 }}>/</Text>
-                        <TouchableOpacity
-                          onPress={() => setModeRepartitionParPersonne("euro")}
-                          hitSlop={{ top: 6, bottom: 6, left: 2, right: 6 }}
-                        >
-                          <Text
-                            style={[
-                              styles.toggleModeTexte,
-                              {
-                                color:
-                                  modeRepartitionParPersonne === "euro"
-                                    ? C.accent
-                                    : C.texteMuted,
-                              },
-                            ]}
-                          >
-                            €
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
+                      Répartition par personne ({LABEL_MOIS_ACTUEL})
+                    </Text>
                     <View
                       style={[
                         styles.chartCard,
@@ -5030,11 +5002,12 @@ export default function Analytics() {
                         },
                       ]}
                     >
-                      <GraphiqueBarresEmpilees
-                        series={seriesRepartitionParPersonne}
-                        labels={labelsRepartitionParPersonne}
+                      <GraphiqueRepartitionCategoriePersonne
+                        segments={repartitionParPersonne}
+                        labelPartenaire={membrePartenaire?.prenom || "Partenaire"}
+                        couleurMoi={couleurMoi}
+                        couleurPartenaire={couleurPartenaire}
                         couleurs={C}
-                        mode={modeRepartitionParPersonne}
                       />
                     </View>
                   </>
@@ -5534,7 +5507,7 @@ export default function Analytics() {
                 (contrairement aux 3 autres onglets, Premium uniquement),
                 même logique qu'un aperçu gratuit sur "Nos conseils"
                 d'Aperçu. Ordre vertical : graphique de flux → "Ce que Vista
-                a remarqué" → "Prochaine meilleure décision". */}
+                a remarqué". */}
             {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
                 `display` : les 4 ScrollView des onglets restent montés en
                 permanence dès l'ouverture de la modale (jamais un
@@ -5736,29 +5709,6 @@ export default function Analytics() {
                     </Text>
                   </View>
                 </InsightVerrouille>
-              </View>
-            )}
-
-            {decisionPrioritaire && (
-              <View
-                style={[
-                  styles.decisionBloc,
-                  { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
-                ]}
-              >
-                <Text style={[styles.decisionLabel, { color: C.texteMuted }]}>
-                  PROCHAINE MEILLEURE DÉCISION
-                </Text>
-                <Text style={[styles.decisionTexte, { color: C.texte }]}>
-                  {decisionPrioritaire.texte}
-                </Text>
-                <TouchableOpacity
-                  style={[styles.decisionBouton, { backgroundColor: C.purple }]}
-                  onPress={() => ouvrirSimulateurPour(decisionPrioritaire.categorieId)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.decisionBoutonTexte}>Simuler</Text>
-                </TouchableOpacity>
               </View>
             )}
 
@@ -7952,6 +7902,52 @@ const styles = StyleSheet.create({
   jaugeDot: { width: 9, height: 9, borderRadius: 5 },
   jaugeNom: { flex: 1, fontSize: 14, fontWeight: "600" },
   jaugePct: { fontSize: 13, fontWeight: "500" },
+  // Légende du donut couple (GraphiqueDonutCouple) — dédiée, JAMAIS
+  // jaugeLegende* ci-dessus (réutilisée telle quelle par JaugeRepartition
+  // ailleurs) : nom et montant/pourcentage sur deux lignes, police plus
+  // grande, espacement généreux (corrige la légende illisible, demande du
+  // 2026-09-06).
+  coupleLegende: { gap: 14 },
+  coupleLegendeItem: { gap: 4 },
+  coupleLegendeHautRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  coupleDot: { width: 10, height: 10, borderRadius: 5 },
+  coupleNom: { flex: 1, fontSize: 16, fontWeight: "700" },
+  couplePct: { fontSize: 14, fontWeight: "500", marginLeft: 18 },
+  // Graphique 3 "Répartition par personne" (refonte du 2026-09-06) — une
+  // ligne par catégorie, plus d'espace vertical assumé (demande explicite).
+  repartitionCategorieListe: { gap: 18 },
+  repartitionCategorieLigne: { gap: 4 },
+  repartitionCategorieHautRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  repartitionCategorieNom: { width: 84, fontSize: 14, fontWeight: "600" },
+  // Rail de fond (largeur = zone disponible) : toujours pleine largeur,
+  // C.separateur — cf. RÈGLE détaillée au composant, "largeur du rail" est
+  // la référence des 100% (catégorie la plus chère du mois).
+  repartitionCategorieBarreZone: {
+    flex: 1,
+    height: 16,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  // Barre colorée elle-même : largeur posée dynamiquement en inline style
+  // (proportionnelle au montant, cf. composant) — jamais flex:1 ici.
+  repartitionCategorieBarreFond: {
+    flexDirection: "row",
+    height: "100%",
+  },
+  repartitionCategorieMontant: {
+    width: 60,
+    textAlign: "right",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  // marginLeft = largeur de repartitionCategorieNom + son gap dans
+  // repartitionCategorieHautRow, pour aligner ce texte sous la barre plutôt
+  // que sous le nom de catégorie.
+  repartitionCategoriePct: { fontSize: 12, fontWeight: "500", marginLeft: 92 },
   modeBalanceRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
   modeBalanceChip: {
     flex: 1,
@@ -8013,46 +8009,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     marginTop: 10,
   },
-  epargneChartRow: { flexDirection: "row" },
-  epargneAxeY: { width: 32, justifyContent: "space-between", marginRight: 6 },
-  epargneAxeYTexte: { fontSize: 9, textAlign: "right" },
-  barresEpargneValeursRow: {
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "space-around",
-  },
-  epargnePlotZone: { position: "relative" },
-  epargneGridline: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    height: StyleSheet.hairlineWidth,
-  },
-  barresEpargne: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "flex-end",
-    justifyContent: "space-around",
-    height: "100%",
-  },
-  barreEpargneCol: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-  barreEpargneVal: {
-    flex: 1,
-    fontSize: 9,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  barreEpargneRemplissage: { width: "60%", borderRadius: 6 },
-  barreEpargneLabel: {
-    flex: 1,
-    fontSize: 10,
-    color: "#999",
-    textAlign: "center",
-  },
   insightCard: { backgroundColor: "#F0EEFF", borderRadius: 16, padding: 18 },
   insightItem: { flexDirection: "row", gap: 10, paddingVertical: 10 },
   insightItemBorder: {
@@ -8068,28 +8024,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   insightTexte: { flex: 1, fontSize: 13, color: "#26215C", lineHeight: 19 },
-  decisionBloc: {
-    borderRadius: 14,
-    borderWidth: 0.5,
-    padding: 14,
-    marginBottom: 10,
-  },
-  decisionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-    marginBottom: 8,
-  },
-  decisionTexte: { fontSize: 13, lineHeight: 19 },
-  decisionBouton: {
-    alignSelf: "flex-start",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    marginTop: 10,
-  },
-  decisionBoutonTexte: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
   observationLigne: { flexDirection: "row", gap: 8, alignItems: "flex-start" },
   observationTexte: { flex: 1, fontSize: 13, lineHeight: 19 },
   topItem: {

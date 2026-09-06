@@ -75,6 +75,22 @@ const OPTIONS_TAILLE_TEXTE: { valeur: TailleTexte; label: string }[] = [
   { valeur: "tres_grand", label: "Très grand" },
 ];
 
+// Palette fixe pour couleurMoi/couleurPartenaire (espace partagé) — distincte
+// de PALETTE_COULEURS (app/ColorPicker.tsx, 28 teintes pour
+// catégories/événements) : ici seulement 8 teintes, choisies pour rester
+// discernables du teal fixe "Commun" (#1D9E75, qui reste aussi le défaut
+// volontaire de cette palette — cf. migration 20260906090000).
+const PALETTE_ESPACE_PARTAGE = [
+  "#1D9E75",
+  "#378ADD",
+  "#7F77DD",
+  "#D85A30",
+  "#D4537E",
+  "#BA7517",
+  "#639922",
+  "#E24B4A",
+];
+
 type OptionMoisExport = {
   valeur: string;
   label: string;
@@ -241,6 +257,12 @@ export default function Profil() {
   const [ongletEspacePartage, setOngletEspacePartage] = useState<
     "creer" | "rejoindre"
   >("creer");
+  // RÈGLE : ligne cliquable "Ma couleur dans l'espace partagé" (cf. plus
+  // bas) — remplace l'ancien affichage direct des 8 cercles, désormais dans
+  // cette modale, fermée automatiquement après sélection (onPress de chaque
+  // cercle appelle aussi setModalCouleurEspacePartageVisible(false)).
+  const [modalCouleurEspacePartageVisible, setModalCouleurEspacePartageVisible] =
+    useState(false);
   const [codeGenere, setCodeGenere] = useState("");
   // RÈGLE À NE JAMAIS CASSER — LABEL PRÉ-CALCULÉ, JAMAIS Date.now() DANS LE
   // RENDU : ce texte ("Expire dans Xh.") est calculé une fois par
@@ -1355,6 +1377,42 @@ export default function Profil() {
                     }
                   />
                 </View>
+                {/* RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE DE couleurMoi :
+                    persistée sur profils.couleur_espace_partage, exposée via
+                    EspacePartageContext.couleurMoi (jamais relue localement
+                    par un écran consommateur). Remplace les anciennes
+                    couleurs fixes #60a5fa (Moi) partout où la vue partagée
+                    distingue les deux comptes. Ligne cliquable → tiroir/
+                    modale (palette complète plus bas dans ce fichier), pas
+                    un affichage direct des 8 cercles ici. */}
+                <TouchableOpacity
+                  style={[styles.switchRow, { marginTop: 16 }]}
+                  onPress={() => setModalCouleurEspacePartageVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.switchLabel, { color: C.texte }]}>
+                      Ma couleur dans l&apos;espace partagé
+                    </Text>
+                    <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                      {espacePartageActif.prenomPartenaire ||
+                        "Ton/ta partenaire"}{" "}
+                      verra tes montants et badges dans cette couleur.
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.paletteEspacePartageCercle,
+                      { backgroundColor: objStore.couleurEspacePartage },
+                    ]}
+                  />
+                  <Ionicons
+                    name="chevron-forward"
+                    size={18}
+                    color={C.texteMuted}
+                    style={{ marginLeft: 8 }}
+                  />
+                </TouchableOpacity>
               </View>
             )}
           </>
@@ -2337,6 +2395,76 @@ export default function Profil() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* RÈGLE : tiroir/modale de la couleur espace partagé — remplace
+          l'ancien affichage direct des 8 cercles sous le toggle "Masquer mes
+          événements personnels" (demande du 2026-09-06). Fermeture
+          automatique après sélection (onPress de chaque cercle). */}
+      <Modal
+        visible={modalCouleurEspacePartageVisible}
+        transparent
+        animationType={reduireAnimations ? "none" : "slide"}
+        onRequestClose={() => setModalCouleurEspacePartageVisible(false)}
+      >
+        <TouchableOpacity
+          style={[
+            styles.modalOverlayTouch,
+            estTablette && styles.modalOverlayTouchTablette,
+          ]}
+          activeOpacity={1}
+          onPress={() => setModalCouleurEspacePartageVisible(false)}
+        >
+          <TouchableOpacity
+            style={[
+              styles.modalCard,
+              { backgroundColor: C.carte },
+              styleModaleTablette(estTablette),
+            ]}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
+            <Text style={[styles.modalTitre, { color: C.texte }]}>
+              Ma couleur dans l&apos;espace partagé
+            </Text>
+            <Text
+              style={[
+                styles.switchSub,
+                { color: C.texteMuted, marginBottom: 16 },
+              ]}
+            >
+              {(espacePartageActif?.statut === "actif"
+                ? espacePartageActif.prenomPartenaire
+                : null) || "Ton/ta partenaire"}{" "}
+              verra tes montants et badges dans cette couleur.
+            </Text>
+            <View style={styles.paletteEspacePartageRow}>
+              {PALETTE_ESPACE_PARTAGE.map((c) => (
+                <TouchableOpacity
+                  key={c}
+                  onPress={() => {
+                    objStore.modifierCouleurEspacePartage(c);
+                    setModalCouleurEspacePartageVisible(false);
+                  }}
+                  activeOpacity={0.7}
+                  style={[
+                    styles.paletteEspacePartageCercle,
+                    { backgroundColor: c },
+                    objStore.couleurEspacePartage === c && {
+                      borderWidth: 3,
+                      borderColor: theme === "sombre" ? "#FFFFFF" : "#000000",
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Choisir la couleur ${c}`}
+                  accessibilityState={{
+                    selected: objStore.couleurEspacePartage === c,
+                  }}
+                />
+              ))}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <ModaleDocumentLegal
         visible={documentLegalOuvert === "confidentialite"}
         onClose={() => setDocumentLegalOuvert(null)}
@@ -2509,6 +2637,16 @@ const styles = StyleSheet.create({
   },
   switchLabel: { fontSize: 15, fontWeight: "600" },
   switchSub: { fontSize: 12, marginTop: 2 },
+  paletteEspacePartageRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 11,
+  },
+  paletteEspacePartageCercle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
   chipRowTailleTexte: {
     flexDirection: "row",
     flexWrap: "wrap",

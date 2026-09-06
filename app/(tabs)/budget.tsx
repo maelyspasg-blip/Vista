@@ -18,6 +18,7 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -177,8 +178,36 @@ export default function Budget() {
   const estTablette = useEstTablette();
   const { estPremium, simulerNonPremium } = usePremium();
   const { isGuest } = useGuest();
-  const { estDansUnEspace, vueActive, membrePartenaire, categoriesFusionnees } =
-    useEspacePartage();
+  const {
+    estDansUnEspace,
+    vueActive,
+    membrePartenaire,
+    categoriesFusionnees,
+    couleurMoi,
+    couleurPartenaire,
+    rafraichirEspace,
+    rafraichirDonneesPartenaire,
+  } = useEspacePartage();
+
+  // RÈGLE : cf. RÈGLE identique dans app/(tabs)/index.tsx — mêmes chargeurs
+  // que ceux déjà appelés au montage/périodiquement, jamais un second
+  // pipeline de fetch.
+  const [rafraichissementEnCours, setRafraichissementEnCours] = useState(false);
+  const gererRafraichissement = async () => {
+    setRafraichissementEnCours(true);
+    try {
+      await Promise.all([
+        objStore.chargerEnveloppes(),
+        objStore.chargerObjectifs(),
+        objStore.chargerTransactions(),
+        objStore.chargerEvenements(),
+        rafraichirEspace(),
+        rafraichirDonneesPartenaire(),
+      ]);
+    } finally {
+      setRafraichissementEnCours(false);
+    }
+  };
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Budget —
   // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
   const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
@@ -576,21 +605,21 @@ export default function Budget() {
               }))
             }
           >
-            <View style={{ flex: item.moiDepense, backgroundColor: "#60a5fa" }} />
+            <View style={{ flex: item.moiDepense, backgroundColor: couleurMoi }} />
             <View
-              style={{ flex: item.partenaireDepense, backgroundColor: "#c084fc" }}
+              style={{ flex: item.partenaireDepense, backgroundColor: couleurPartenaire }}
             />
           </TouchableOpacity>
         )}
         {afficherContribution && (
           <View style={styles.contributionLegendeRow}>
-            <Text style={[styles.contributionLegendeTexte, { color: "#60a5fa" }]}>
+            <Text style={[styles.contributionLegendeTexte, { color: couleurMoi }]}>
               Moi{" "}
               {enPourcentage
                 ? `${Math.round(pctMoi)}%`
                 : `${formaterMontant(item.moiDepense)}€`}
             </Text>
-            <Text style={[styles.contributionLegendeTexte, { color: "#c084fc" }]}>
+            <Text style={[styles.contributionLegendeTexte, { color: couleurPartenaire }]}>
               {membrePartenaire?.prenom || "Partenaire"}{" "}
               {enPourcentage
                 ? `${Math.round(pctPartenaire)}%`
@@ -1521,6 +1550,13 @@ export default function Budget() {
         showsVerticalScrollIndicator={false}
         onScroll={gererScrollTutoriel}
         scrollEventThrottle={16}
+        refreshControl={
+          <RefreshControl
+            refreshing={rafraichissementEnCours}
+            onRefresh={gererRafraichissement}
+            tintColor={C.accent}
+          />
+        }
       >
         <View
           style={[

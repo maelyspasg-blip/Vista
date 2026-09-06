@@ -281,6 +281,11 @@ type EtatStore = {
   // jamais mes événements 'commun', toujours visibles. Défaut false (rien
   // de masqué).
   masquerEvenementsPersonnels: boolean;
+  // Couleur personnelle affichée dans l'espace partagé (Aperçu/Budget/Stats/
+  // Planning en vue "Partagé"), choisie parmi une palette fixe de 8 teintes
+  // — cf. EspacePartageContext.couleurMoi. Défaut teal, même valeur que la
+  // couleur fixe "Commun" (volontaire, cf. migration 20260906090000).
+  couleurEspacePartage: string;
   prenom: string;
   nom: string;
   avatarUrl: string | null;
@@ -321,6 +326,7 @@ const ETAT_INITIAL: EtatStore = {
   argentDisponibleReportAuto: false,
   seuilEpargneConstante: null,
   masquerEvenementsPersonnels: false,
+  couleurEspacePartage: "#1D9E75",
   prenom: "",
   nom: "",
   avatarUrl: null,
@@ -1515,9 +1521,12 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
   // (qui n'avance dateFixe QUE dans son branchement repeteChaqueMois, cf.
   // RÈGLE là-bas) revoyait alors un dateFixe resté dans le passé sur une
   // catégorie "non payée" et la re-marquait payée avec cette ancienne date.
-  // Une Fixe récurrente repart "non payée" chaque mois (son dateFixe avance
-  // en parallèle) ; une catégorie ponctuelle (Fixe ou Variable) n'est plus
-  // du tout touchée par cette map désormais, payee compris.
+  // Une Fixe récurrente repart "non payée" ICI, AU VRAI CHANGEMENT DE MOIS
+  // (son dateFixe a déjà avancé plus tôt, cf. RÈGLE mise à jour le
+  // 2026-09-06 dans verifierEcheancesFixesInterne : payee passe à true dès
+  // que l'échéance est franchie, PUIS repasse à false seulement ici) ; une
+  // catégorie ponctuelle (Fixe ou Variable) n'est plus du tout touchée par
+  // cette map désormais, payee compris.
   let nbEnveloppesRemisesAZero = 0;
   const enveloppesMaj = etat.enveloppes.map((e) => {
     if (e.type === "Entrée") {
@@ -2071,10 +2080,25 @@ async function verifierEcheancesFixesInterne() {
           const prochaine = new Date(dateEcheance);
           prochaine.setMonth(prochaine.getMonth() + 1);
           const prochaineStr = `${prochaine.getFullYear()}-${String(prochaine.getMonth() + 1).padStart(2, "0")}-${String(prochaine.getDate()).padStart(2, "0")}`;
+          // RÈGLE À NE JAMAIS CASSER — payee: true ICI (bug corrigé le
+          // 2026-09-06, ancien comportement : false) : une Fixe récurrente
+          // dont l'échéance vient de passer doit afficher la coche "Payé"
+          // pour LE RESTE DU CYCLE EN COURS, pas seulement à l'instant où
+          // cette fonction tourne — sinon la coche n'apparaît jamais côté UI
+          // (env.payee est le seul signal lu par le badge, cf.
+          // app/(tabs)/index.tsx). dateFixe avance quand même dès
+          // maintenant (repositionne la PROCHAINE échéance) : aucun
+          // flip-flop possible malgré payee=true + dateFixe déjà dans le
+          // futur, car c'est archiverMoisActuelInterne (jamais cette
+          // fonction) qui remet payee=false pour les Fixe permanentes, et
+          // uniquement au véritable changement de mois (cf. RÈGLE
+          // détaillée là-bas) — cette fonction ne revalidera donc pas cette
+          // ligne avant la prochaine échéance réelle (garde !env.payee
+          // ci-dessus, à nouveau fausse jusqu'à cette remise à zéro).
           return {
             ...env,
             depense: dejaEnregistree ? env.depense : env.budget,
-            payee: false,
+            payee: true,
             dateFixe: prochaineStr,
           };
         }
@@ -2168,6 +2192,27 @@ function majMasquerEvenementsPersonnelsSupabase(masquer: boolean) {
         if (error) {
           console.error(
             "Supabase update masquer_evenements_personnels a échoué :",
+            error,
+          );
+          signalerErreurSync(
+            `Impossible de sauvegarder ce réglage : ${error.message}`,
+          );
+        }
+      });
+  });
+}
+
+function majCouleurEspacePartageSupabase(couleur: string) {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("profils")
+      .update({ couleur_espace_partage: couleur })
+      .eq("user_id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error(
+            "Supabase update couleur_espace_partage a échoué :",
             error,
           );
           signalerErreurSync(
@@ -2300,6 +2345,7 @@ export function useObjectifs() {
     notificationsActives: local.notificationsActives,
     alertesBudget: local.alertesBudget,
     masquerEvenementsPersonnels: local.masquerEvenementsPersonnels,
+    couleurEspacePartage: local.couleurEspacePartage,
     alerteBudgetActuelle: local.alerteBudgetActuelle,
     transactions: local.transactions,
     modelesDepenses: local.modelesDepenses,
@@ -2450,7 +2496,7 @@ export function useObjectifs() {
             supabase
               .from("profils")
               .select(
-                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, seuil_epargne_constante, prenom, nom, avatar_url, is_admin, notifications_actives, alertes_budget, dernier_mois_archive_mois, dernier_mois_archive_annee, masquer_evenements_personnels",
+                "epargne_mois, argent_disponible, argent_disponible_recurrent, argent_disponible_report_auto, seuil_epargne_constante, prenom, nom, avatar_url, is_admin, notifications_actives, alertes_budget, dernier_mois_archive_mois, dernier_mois_archive_annee, masquer_evenements_personnels, couleur_espace_partage",
               )
               .eq("user_id", user.id)
               .single(),
@@ -2492,6 +2538,8 @@ export function useObjectifs() {
           masquerEvenementsPersonnels:
             profil?.masquer_evenements_personnels ??
             etat.masquerEvenementsPersonnels,
+          couleurEspacePartage:
+            profil?.couleur_espace_partage ?? etat.couleurEspacePartage,
           prenom: profil?.prenom ?? etat.prenom,
           nom: profil?.nom ?? etat.nom,
           avatarUrl: profil?.avatar_url ?? etat.avatarUrl,
@@ -3186,6 +3234,11 @@ export function useObjectifs() {
     modifierMasquerEvenementsPersonnels: (masquer: boolean) => {
       setEtat({ masquerEvenementsPersonnels: masquer });
       majMasquerEvenementsPersonnelsSupabase(masquer);
+    },
+
+    modifierCouleurEspacePartage: (couleur: string) => {
+      setEtat({ couleurEspacePartage: couleur });
+      majCouleurEspacePartageSupabase(couleur);
     },
 
     modifierSeuilEpargneConstante: (seuil: number | null) => {

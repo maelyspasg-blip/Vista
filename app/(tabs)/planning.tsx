@@ -15,6 +15,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleProp,
   StyleSheet,
@@ -278,7 +279,33 @@ export default function Planning() {
     membrePartenaire,
     evenementsPartenaire,
     rafraichirEvenementsPartenaire,
+    couleurMoi,
+    couleurPartenaire,
+    rafraichirEspace,
   } = useEspacePartage();
+
+  // RÈGLE : cf. RÈGLE identique dans app/(tabs)/index.tsx — mêmes chargeurs
+  // que ceux déjà appelés au montage/périodiquement, jamais un second
+  // pipeline de fetch. rafraichirEvenementsPartenaire (pas
+  // rafraichirDonneesPartenaire : Planning ne consomme jamais
+  // donneesPartenaire, cf. RÈGLE dans EspacePartageContext.tsx) est un no-op
+  // silencieux hors espace actif (garde interne sur membrePartenaire).
+  const [rafraichissementEnCours, setRafraichissementEnCours] = useState(false);
+  const gererRafraichissement = async () => {
+    setRafraichissementEnCours(true);
+    try {
+      await Promise.all([
+        objStore.chargerEnveloppes(),
+        objStore.chargerObjectifs(),
+        objStore.chargerTransactions(),
+        objStore.chargerEvenements(),
+        rafraichirEspace(),
+        rafraichirEvenementsPartenaire(),
+      ]);
+    } finally {
+      setRafraichissementEnCours(false);
+    }
+  };
   const affichagePartage = estDansUnEspace && vueActive === "partage";
   const params = useLocalSearchParams<{ editEventId?: string }>();
   const { planning: tutorielPlanningVu, marquerVu: marquerTutorielVu } =
@@ -834,11 +861,12 @@ export default function Planning() {
 
   // RÈGLE À NE JAMAIS CASSER — MÊME CONVENTION COULEUR QUE CategorieFusionnee
   // (utils/espacePartage.ts, badges Moi/[Prénom]/Commun déjà utilisés sur
-  // Aperçu/Budget) : bleu #60a5fa "Moi", violet #c084fc "[Prénom]" pour le
-  // partenaire, teal #1D9E75 "Commun" — jamais une palette différente ici,
-  // la cohérence visuelle entre les 3 écrans partagés est le but explicite
-  // de ce chantier. Retourne null hors vue partagée (badge sans objet : tout
-  // est "à moi" par construction quand affichagePartage est faux).
+  // Aperçu/Budget) : couleurMoi/couleurPartenaire (EspacePartageContext,
+  // choisies par chaque compte dans profil.tsx) pour "Moi"/"[Prénom]", teal
+  // fixe #1D9E75 "Commun" — jamais une palette différente ici, la cohérence
+  // visuelle entre les 3 écrans partagés est le but explicite de ce
+  // chantier. Retourne null hors vue partagée (badge sans objet : tout est
+  // "à moi" par construction quand affichagePartage est faux).
   const infoBadgeProprietaire = (
     ev: EvenementUnifie,
   ): { texte: string; couleur: string } | null => {
@@ -847,12 +875,12 @@ export default function Planning() {
     if (ev.proprietaire === "partenaire") {
       return {
         texte: (membrePartenaire?.prenom || "P").charAt(0).toUpperCase(),
-        couleur: "#c084fc",
+        couleur: couleurPartenaire,
       };
     }
     return {
       texte: (objStore.prenom || "M").charAt(0).toUpperCase(),
-      couleur: "#60a5fa",
+      couleur: couleurMoi,
     };
   };
 
@@ -1651,6 +1679,13 @@ export default function Planning() {
                 style={styles.timeline}
                 showsVerticalScrollIndicator={false}
                 contentOffset={{ x: 0, y: HEURE_SCROLL_INITIAL * HAUTEUR_HEURE }}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={rafraichissementEnCours}
+                    onRefresh={gererRafraichissement}
+                    tintColor={C.accent}
+                  />
+                }
               >
                 <View style={styles.timelineInner}>
                   <View style={styles.heuresCol}>
@@ -1808,6 +1843,13 @@ export default function Planning() {
                 style={styles.timeline}
                 showsVerticalScrollIndicator={false}
                 contentOffset={{ x: 0, y: HEURE_SCROLL_INITIAL * HAUTEUR_HEURE }}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={rafraichissementEnCours}
+                    onRefresh={gererRafraichissement}
+                    tintColor={C.accent}
+                  />
+                }
               >
               <View
                 style={[
@@ -1908,7 +1950,17 @@ export default function Planning() {
           )}
 
           {vue === "mois" && (
-            <View style={{ flex: 1 }}>
+            <ScrollView
+              style={{ flex: 1 }}
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={rafraichissementEnCours}
+                  onRefresh={gererRafraichissement}
+                  tintColor={C.accent}
+                />
+              }
+            >
               <View style={styles.monthDayHeadRow}>
                 {JOURS_SEMAINE.map((j) => (
                   <Text
@@ -1993,7 +2045,7 @@ export default function Planning() {
                   ),
                 )}
               </View>
-            </View>
+            </ScrollView>
           )}
       </View>
 

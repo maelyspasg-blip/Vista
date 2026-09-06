@@ -149,6 +149,10 @@ export type TransactionPartenaire = {
 export type DonneesPartenaire = {
   enveloppes: EnveloppePartenaire[];
   transactions: TransactionPartenaire[];
+  // `null` hors espace/erreur RPC — cf. RÈGLE sur couleurEspacePartagePartenaire
+  // plus bas. Les consommateurs (EspacePartageContext.couleurPartenaire)
+  // retombent alors sur le défaut de palette (#1D9E75).
+  couleurEspacePartage: string | null;
 };
 
 // RÈGLE À NE JAMAIS CASSER — CRÉATION ENTIÈREMENT SERVEUR, VIA RPC : la
@@ -471,6 +475,33 @@ export async function modifierModeBalanceEspace(
   }
 }
 
+// RÈGLE À NE JAMAIS CASSER — PASSE PAR LA RPC
+// couleur_espace_partage_partenaire, JAMAIS UN SELECT DIRECT SUR profils :
+// même raison que epargneMoisPartenaire ci-dessus — profils n'a jamais de
+// lecture cross-compte ouverte en RLS dans ce projet, seule une RPC étroite
+// (qui ne renvoie que ce champ) peut exposer la couleur du partenaire. Appelée
+// DEPUIS chargerDonneesPartenaire (juste en dessous), jamais indépendamment
+// par un écran. `null` si hors espace/erreur, jamais de throw (cf. RÈGLE en
+// tête de fichier).
+async function couleurEspacePartagePartenaire(): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "couleur_espace_partage_partenaire",
+    );
+    if (error) {
+      console.error(
+        "Supabase rpc couleur_espace_partage_partenaire a échoué :",
+        error,
+      );
+      return null;
+    }
+    return typeof data === "string" ? data : null;
+  } catch (e) {
+    console.error("couleurEspacePartagePartenaire a échoué :", e);
+    return null;
+  }
+}
+
 // RÈGLE À NE JAMAIS CASSER — ACCÈS COMPLET ENTRE MEMBRES D'UN MÊME ESPACE,
 // DÉCISION EXPLICITE DE L'UTILISATEUR (confirmée via question posée avant
 // cette version) : une fois deux comptes liés, chacun voit TOUTES les
@@ -493,10 +524,13 @@ export async function chargerDonneesPartenaire(
   partenaireId: string,
 ): Promise<DonneesPartenaire> {
   try {
-    const { data: enveloppesData, error: erreurEnveloppes } = await supabase
-      .from("enveloppes")
-      .select("*")
-      .eq("user_id", partenaireId);
+    const [
+      { data: enveloppesData, error: erreurEnveloppes },
+      couleurEspacePartage,
+    ] = await Promise.all([
+      supabase.from("enveloppes").select("*").eq("user_id", partenaireId),
+      couleurEspacePartagePartenaire(),
+    ]);
 
     if (erreurEnveloppes) {
       console.error(
@@ -521,7 +555,7 @@ export async function chargerDonneesPartenaire(
     }));
 
     if (enveloppes.length === 0) {
-      return { enveloppes: [], transactions: [] };
+      return { enveloppes: [], transactions: [], couleurEspacePartage };
     }
 
     const { data: transactionsData, error: erreurTransactions } =
@@ -546,10 +580,11 @@ export async function chargerDonneesPartenaire(
         enveloppeId: t.enveloppe_id,
         date: t.date,
       })),
+      couleurEspacePartage,
     };
   } catch (e) {
     console.error("chargerDonneesPartenaire a échoué :", e);
-    return { enveloppes: [], transactions: [] };
+    return { enveloppes: [], transactions: [], couleurEspacePartage: null };
   }
 }
 
@@ -583,6 +618,8 @@ export function fusionnerCategoriesParNom(
   mesEnveloppes: Enveloppe[],
   enveloppesPartenaire: EnveloppePartenaire[],
   prenomPartenaire: string | null,
+  couleurMoi: string,
+  couleurPartenaire: string,
   annee: number,
   mois: number,
 ): CategorieFusionnee[] {
@@ -656,10 +693,13 @@ export function fusionnerCategoriesParNom(
       fusionnee || (!!acc.moiEnveloppe && acc.moiPartage)
         ? { texte: "Commun", couleur: "#1D9E75" }
         : acc.moiEnveloppe
-          ? { texte: "Moi", couleur: "#60a5fa" }
+          ? { texte: "Moi", couleur: couleurMoi }
           : acc.partenairePartage
             ? { texte: "Commun", couleur: "#1D9E75" }
-            : { texte: prenomPartenaire || "Partenaire", couleur: "#c084fc" };
+            : {
+                texte: prenomPartenaire || "Partenaire",
+                couleur: couleurPartenaire,
+              };
 
     // "Moi seul" : objet réel préservé tel quel (id authentique) — l'édition
     // reste désactivée en vue Partagée de toute façon (cf. RÈGLE

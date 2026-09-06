@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "expo-image";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { getInitiales } from "../../utils/initiales";
@@ -10,7 +11,7 @@ import {
 } from "../../utils/budget";
 import type { CategorieFusionnee } from "../../utils/espacePartage";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,10 +20,12 @@ import {
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -269,6 +272,87 @@ function DonutChart({
 
 const ACCESSORY_ID = "numericDone";
 
+// Section "Dépenses"/"Entrées d'argent" collapsable (demande du 2026-09-06,
+// Aperçu uniquement) — état ouvert/fermé persisté par utilisateur, jamais
+// remonté au parent (même philosophie que app/TiroirStats.tsx : chaque
+// section reste indépendante, pas de coordination entre elles). `cleStockage`
+// à `null` tant que objStore.userId n'est pas encore résolu : la lecture/
+// écriture AsyncStorage est alors simplement sautée (best-effort, jamais de
+// throw), la section retombe sur ouvertParDefaut le temps que userId arrive.
+function SectionCollapsable({
+  titre,
+  cleStockage,
+  ouvertParDefaut,
+  children,
+}: {
+  titre: string;
+  cleStockage: string | null;
+  ouvertParDefaut: boolean;
+  children: ReactNode;
+}) {
+  const { couleurs: C } = useTheme();
+  const { reduireAnimations } = useAccessibilite();
+  const [ouvert, setOuvert] = useState(ouvertParDefaut);
+
+  useEffect(() => {
+    if (!cleStockage) return;
+    AsyncStorage.getItem(cleStockage)
+      .then((valeur) => {
+        if (valeur === "ouvert" || valeur === "ferme") {
+          setOuvert(valeur === "ouvert");
+        }
+      })
+      .catch(() => {
+        // Best-effort : retombe sur ouvertParDefaut déjà posé en state initial.
+      });
+  }, [cleStockage]);
+
+  const basculer = () => {
+    LayoutAnimation.configureNext(
+      reduireAnimations
+        ? { duration: 0, update: { type: "linear" } }
+        : LayoutAnimation.Presets.easeInEaseOut,
+    );
+    setOuvert((precedent) => {
+      const suivant = !precedent;
+      if (cleStockage) {
+        AsyncStorage.setItem(cleStockage, suivant ? "ouvert" : "ferme").catch(
+          () => {
+            // Best-effort : une erreur d'écriture locale ne doit jamais
+            // empêcher le changement lui-même (déjà appliqué en mémoire),
+            // juste faire perdre la persistance.
+          },
+        );
+      }
+      return suivant;
+    });
+  };
+
+  return (
+    <>
+      <TouchableOpacity
+        style={styles.sectionCollapsableHeader}
+        onPress={basculer}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: ouvert }}
+      >
+        <Text
+          style={[styles.sectionTitle, { color: C.texteMuted, marginBottom: 0 }]}
+        >
+          {titre}
+        </Text>
+        <Ionicons
+          name={ouvert ? "chevron-down" : "chevron-forward"}
+          size={16}
+          color={C.texteMuted}
+        />
+      </TouchableOpacity>
+      {ouvert && children}
+    </>
+  );
+}
+
 export default function Dashboard() {
   const objStore = useObjectifs();
   const estTablette = useEstTablette();
@@ -289,7 +373,33 @@ export default function Dashboard() {
     membrePartenaire,
     chargementPartenaire,
     categoriesFusionnees,
+    couleurMoi,
+    couleurPartenaire,
+    rafraichirEspace,
+    rafraichirDonneesPartenaire,
   } = useEspacePartage();
+
+  // RÈGLE : mêmes chargeurs que ceux déjà appelés au montage/périodiquement
+  // (app/(tabs)/_layout.tsx) — jamais un second pipeline de fetch, juste
+  // rejoués sur demande explicite (pull-to-refresh). rafraichirDonneesPartenaire
+  // est un no-op silencieux hors vue "Partagé"/hors espace actif (cf. RÈGLE
+  // dans EspacePartageContext.tsx), donc toujours sûr à appeler ici.
+  const [rafraichissementEnCours, setRafraichissementEnCours] = useState(false);
+  const gererRafraichissement = async () => {
+    setRafraichissementEnCours(true);
+    try {
+      await Promise.all([
+        objStore.chargerEnveloppes(),
+        objStore.chargerObjectifs(),
+        objStore.chargerTransactions(),
+        objStore.chargerEvenements(),
+        rafraichirEspace(),
+        rafraichirDonneesPartenaire(),
+      ]);
+    } finally {
+      setRafraichissementEnCours(false);
+    }
+  };
   const { theme, couleurs, toggleTheme } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const C = couleurs;
@@ -320,13 +430,6 @@ export default function Dashboard() {
   const [etatsInsights, setEtatsInsights] = useState<EtatsInsightsMap>({});
   const [userIdInsights, setUserIdInsights] = useState<string | null>(null);
   const [nbAmeliorations, setNbAmeliorations] = useState(0);
-  // Toggle €/% de la barre de contribution (vue Partagé), par carte fusionnée
-  // — groupé ici avec les autres useState (jamais déclaré au milieu de
-  // calculs dérivés plus bas, cf. bug corrigé où un hook déclaré tardivement
-  // au milieu du corps du composant perturbait le rendu).
-  const [contributionEnPourcentage, setContributionEnPourcentage] = useState<
-    Record<string, boolean>
-  >({});
   const derniersEtatsSauvegardesRef = useRef<string>("{}");
   useEffect(() => {
     (async () => {
@@ -1175,6 +1278,20 @@ export default function Dashboard() {
     fermerVersementPonctuel();
   };
 
+  // RÈGLE : type partagé par renderCarteEnveloppe et le calcul d'"Équilibre
+  // du mois" ci-dessous — tous deux ont besoin de relire les champs
+  // CategorieFusionnee sur des lignes typées Enveloppe[] par la RÈGLE "MÊME
+  // JSX POUR MOI ET PARTAGÉ" (enveloppesAffichees/enveloppesTriees* restent
+  // typées Enveloppe[] même quand elles contiennent réellement des
+  // CategorieFusionnee, cf. définition d'enveloppesAffichees plus haut).
+  type EnveloppeAvecFusion = Enveloppe &
+    Partial<
+      Pick<
+        CategorieFusionnee,
+        "badge" | "fusionnee" | "moiIds" | "moiPartage" | "moiDepense" | "partenaireDepense"
+      >
+    >;
+
   // RÈGLE À NE JAMAIS CASSER — MÊME CARTE POUR "MOI" ET "PARTAGÉ" : accepte
   // en plus, optionnellement, les champs de CategorieFusionnee
   // (utils/espacePartage.ts) — présents à l'exécution uniquement quand
@@ -1185,25 +1302,28 @@ export default function Dashboard() {
   // décision explicite du 2026-09-04) ; seul le badge d'attribution reste
   // tappable pour basculerPartageCategorie, et une barre de contribution
   // bleu/violet s'ajoute sous la jauge pour les catégories fusionnées.
-  const renderCarteEnveloppe = (
-    env: Enveloppe &
-      Partial<
-        Pick<
-          CategorieFusionnee,
-          "badge" | "fusionnee" | "moiIds" | "moiPartage" | "moiDepense" | "partenaireDepense"
-        >
-      >,
-  ) => {
+  const renderCarteEnveloppe = (env: EnveloppeAvecFusion) => {
     const pct = Math.min((env.depense / env.budget) * 100, 100);
+    // RÈGLE À NE JAMAIS CASSER — CATÉGORIES "PLUS LÉGÈRES" (vue partagée) :
+    // demande explicite de simplification — plus de grosse jauge bleu/violet
+    // systématique ni de tap pour bascule %/€ (l'ancien contributionEnPourcentage
+    // a été retiré, retiré aussi de son state) ; uniquement pour une
+    // catégorie fusionnée avec un vrai split (les deux côtés > 0 ce mois-ci,
+    // même garde qu'avant) : un texte discret ("[Prénom] X% · Moi Y%") sur
+    // toutes, PLUS une mini barre seulement si l'écart entre les deux
+    // dépasse 20 points — sous ce seuil, le texte seul suffit. Catégorie non
+    // fusionnée (badge "Moi"/"[Prénom]" seul, cf. JSX plus haut) : aucun
+    // texte ni barre, jamais concernée par ce bloc.
     const afficherContribution =
       affichagePartage &&
       !!env.fusionnee &&
       (env.moiDepense ?? 0) > 0 &&
       (env.partenaireDepense ?? 0) > 0;
-    const enPourcentage = !!contributionEnPourcentage[env.id];
     const pctMoi =
       env.depense > 0 ? ((env.moiDepense ?? 0) / env.depense) * 100 : 0;
     const pctPartenaire = 100 - pctMoi;
+    const afficherBarreContribution =
+      afficherContribution && Math.abs(pctMoi - pctPartenaire) >= 20;
     return (
       <TouchableOpacity
         key={env.id}
@@ -1343,48 +1463,36 @@ export default function Dashboard() {
             {formaterMontant(env.depense)} € / {formaterMontant(env.budget)} €
           </Text>
         </View>
-        <BarreProgression
-          pourcentage={pct}
-          couleur={env.couleur}
-          couleurFond={C.separateur}
-          hauteur={6}
-        />
+        {/* RÈGLE : masquée pour une catégorie INDIVIDUELLE (non fusionnée)
+            en vue partagée (demande explicite, point 4) — reste affichée
+            pour une catégorie Commune, et inchangée en vue personnelle. */}
+        {!(affichagePartage && !env.fusionnee) && (
+          <BarreProgression
+            pourcentage={pct}
+            couleur={env.couleur}
+            couleurFond={C.separateur}
+            hauteur={6}
+          />
+        )}
         {afficherContribution && (
-          <TouchableOpacity
-            activeOpacity={0.7}
-            style={styles.contributionBarreFond}
-            onPress={() =>
-              setContributionEnPourcentage((prev) => ({
-                ...prev,
-                [env.id]: !prev[env.id],
-              }))
-            }
+          <Text
+            style={[styles.contributionTexteDiscret, { color: C.texteMuted }]}
           >
+            {membrePartenaire?.prenom || "Partenaire"}{" "}
+            {Math.round(pctPartenaire)}% · Moi {Math.round(pctMoi)}%
+          </Text>
+        )}
+        {afficherBarreContribution && (
+          <View style={styles.contributionBarreMiniFond}>
             <View
-              style={{ flex: env.moiDepense ?? 0, backgroundColor: "#60a5fa" }}
+              style={{ flex: env.moiDepense ?? 0, backgroundColor: couleurMoi }}
             />
             <View
               style={{
                 flex: env.partenaireDepense ?? 0,
-                backgroundColor: "#c084fc",
+                backgroundColor: couleurPartenaire,
               }}
             />
-          </TouchableOpacity>
-        )}
-        {afficherContribution && (
-          <View style={styles.contributionLegendeRow}>
-            <Text style={[styles.contributionLegendeTexte, { color: "#60a5fa" }]}>
-              Moi{" "}
-              {enPourcentage
-                ? `${Math.round(pctMoi)}%`
-                : `${formaterMontant(env.moiDepense ?? 0)}€`}
-            </Text>
-            <Text style={[styles.contributionLegendeTexte, { color: "#c084fc" }]}>
-              {membrePartenaire?.prenom || "Partenaire"}{" "}
-              {enPourcentage
-                ? `${Math.round(pctPartenaire)}%`
-                : `${formaterMontant(env.partenaireDepense ?? 0)}€`}
-            </Text>
           </View>
         )}
       </TouchableOpacity>
@@ -1401,6 +1509,13 @@ export default function Dashboard() {
         keyboardShouldPersistTaps="handled"
         onScroll={gererScroll}
         scrollEventThrottle={16}
+        refreshControl={
+          <RefreshControl
+            refreshing={rafraichissementEnCours}
+            onRefresh={gererRafraichissement}
+            tintColor={C.accent}
+          />
+        }
       >
         <View style={[styles.header, { backgroundColor: C.fondPage }]}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
@@ -2063,39 +2178,39 @@ export default function Dashboard() {
         </View>
 
         {enveloppesTrieesEntrees.length > 0 && (
-          <>
-            <Text
-              style={[
-                styles.sectionTitle,
-                { color: C.texteMuted, marginBottom: 8 },
-              ]}
-            >
-              ENTRÉES D&apos;ARGENT
-            </Text>
+          <SectionCollapsable
+            titre="ENTRÉES D'ARGENT"
+            cleStockage={
+              objStore.userId
+                ? `vista_section_ouverte_entrees_${objStore.userId}`
+                : null
+            }
+            ouvertParDefaut={false}
+          >
             <View style={estTablette ? styles.grilleTablette : undefined}>
               {enveloppesTrieesEntrees.map(renderCarteEnveloppe)}
             </View>
-          </>
+          </SectionCollapsable>
         )}
 
         {enveloppesTrieesDepenses.length > 0 && (
-          <>
-            <Text
-              style={[
-                styles.sectionTitle,
-                {
-                  color: C.texteMuted,
-                  marginTop: enveloppesTrieesEntrees.length > 0 ? 16 : 0,
-                  marginBottom: 8,
-                },
-              ]}
+          <View
+            style={{ marginTop: enveloppesTrieesEntrees.length > 0 ? 16 : 0 }}
+          >
+            <SectionCollapsable
+              titre="DÉPENSES"
+              cleStockage={
+                objStore.userId
+                  ? `vista_section_ouverte_depenses_${objStore.userId}`
+                  : null
+              }
+              ouvertParDefaut={true}
             >
-              DÉPENSES
-            </Text>
-            <View style={estTablette ? styles.grilleTablette : undefined}>
-              {enveloppesTrieesDepenses.map(renderCarteEnveloppe)}
-            </View>
-          </>
+              <View style={estTablette ? styles.grilleTablette : undefined}>
+                {enveloppesTrieesDepenses.map(renderCarteEnveloppe)}
+              </View>
+            </SectionCollapsable>
+          </View>
         )}
 
         <View
@@ -3892,19 +4007,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   badgePartageMiniTexte: { fontSize: 9, fontWeight: "700", color: "#FFFFFF" },
-  contributionBarreFond: {
-    flexDirection: "row",
-    height: 5,
-    borderRadius: 3,
-    overflow: "hidden",
+  contributionTexteDiscret: {
+    fontSize: 11,
+    fontWeight: "600",
     marginTop: 6,
   },
-  contributionLegendeRow: {
+  contributionBarreMiniFond: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 4,
+    height: 3,
+    borderRadius: 2,
+    overflow: "hidden",
+    marginTop: 5,
   },
-  contributionLegendeTexte: { fontSize: 10, fontWeight: "700" },
   appNameRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -4139,6 +4253,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 1,
+  },
+  sectionCollapsableHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
   },
   sectionTitreEtTri: { flexDirection: "row", alignItems: "center", gap: 10 },
   triBouton: { flexDirection: "row", alignItems: "center", gap: 3 },

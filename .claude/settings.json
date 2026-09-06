@@ -8,7 +8,10 @@
       "Bash(tee /tmp/tsc_check1.txt)",
       "Bash(grep -n \"const { theme, couleurs: C } = useTheme\\(\\);\" \"/Users/maelys/vista/app/\\(tabs\\)/analytics.tsx\")",
       "Bash(tee /tmp/tsc_check3.txt)",
-      "Bash(grep -A1 \"analytics.tsx$\")"
+      "Bash(grep -A1 \"analytics.tsx$\")",
+      "Bash(git add *)",
+      "Bash(git status *)",
+      "Read(//tmp/**)"
     ]
   },
   "hooks": {
