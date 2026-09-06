@@ -282,6 +282,7 @@ export default function Planning() {
     couleurMoi,
     couleurPartenaire,
     rafraichirEspace,
+    chargementPartenaire,
   } = useEspacePartage();
 
   // RÈGLE : cf. RÈGLE identique dans app/(tabs)/index.tsx — mêmes chargeurs
@@ -325,6 +326,100 @@ export default function Planning() {
     const intervalle = setInterval(() => setMaintenant(new Date()), 60000);
     return () => clearInterval(intervalle);
   }, []);
+
+  // RÈGLE À NE JAMAIS CASSER — NOTIFICATION IN-APP "ÉVÉNEMENT COMMUN AJOUTÉ
+  // PAR LE PARTENAIRE" (demande du 2026-09-06) : bandeau discret, JAMAIS une
+  // vraie notification push. Détection par DIFF entre deux valeurs
+  // successives de evenementsPartenaire (contexte, seul consommateur ce
+  // fichier, cf. RÈGLE dans EspacePartageContext.tsx) — jamais un second
+  // pipeline de chargement. `notifsEvenementsVus` (persisté AsyncStorage) est
+  // la SEULE source de vérité pour "déjà notifié" ; le ref ci-dessous ne sert
+  // qu'à ignorer le PREMIER chargement réel de la session (sinon chaque
+  // événement commun préexistant redéclencherait une notif à l'ouverture de
+  // l'app/au passage en vue Partagée, jamais seulement les vraiment
+  // nouveaux) — gardé à `null` tant que chargementPartenaire est vrai, pour
+  // ne jamais capturer le tableau vide transitoire du tout début de
+  // chargement comme s'il s'agissait de la vraie liste.
+  const evenementsPartenairePrecedentsRef = useRef<EvenementPartenaire[] | null>(
+    null,
+  );
+  const [notifsEvenementsVus, setNotifsEvenementsVus] = useState<Set<string>>(
+    new Set(),
+  );
+  const [banniereNotifEvenement, setBanniereNotifEvenement] = useState<{
+    id: string;
+    texte: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!objStore.userId) return;
+    let annule = false;
+    AsyncStorage.getItem(`vista_notifs_evenements_${objStore.userId}`)
+      .then((valeur) => {
+        if (annule || !valeur) return;
+        try {
+          setNotifsEvenementsVus(new Set(JSON.parse(valeur)));
+        } catch {
+          // JSON corrompu : retombe sur un Set vide, déjà la valeur initiale.
+        }
+      })
+      .catch(() => {
+        // Best-effort : une erreur de lecture locale retombe simplement sur
+        // un Set vide (au pire, un événement déjà vu redéclenche une notif
+        // une fois, jamais l'inverse).
+      });
+    return () => {
+      annule = true;
+    };
+  }, [objStore.userId]);
+
+  useEffect(() => {
+    if (chargementPartenaire) return;
+    const precedents = evenementsPartenairePrecedentsRef.current;
+    evenementsPartenairePrecedentsRef.current = evenementsPartenaire;
+    if (precedents === null) return;
+    const idsPrecedents = new Set(precedents.map((e) => e.id));
+    const nouveaux = evenementsPartenaire.filter(
+      (e) =>
+        e.visibilite === "commun" &&
+        !idsPrecedents.has(e.id) &&
+        !notifsEvenementsVus.has(e.id),
+    );
+    if (nouveaux.length === 0) return;
+    const ev = nouveaux[0];
+    const dateFormatee = new Date(ev.date).toLocaleDateString("fr-FR", {
+      day: "numeric",
+      month: "long",
+    });
+    setBanniereNotifEvenement({
+      id: ev.id,
+      texte: `${membrePartenaire?.prenom || "Ton/ta partenaire"} vous a ajouté à un événement : ${ev.nom} le ${dateFormatee} à ${ev.heure}`,
+    });
+    setNotifsEvenementsVus((prev) => {
+      const suivant = new Set(prev);
+      nouveaux.forEach((e) => suivant.add(e.id));
+      if (objStore.userId) {
+        AsyncStorage.setItem(
+          `vista_notifs_evenements_${objStore.userId}`,
+          JSON.stringify([...suivant]),
+        ).catch(() => {
+          // Best-effort : une erreur d'écriture locale ne doit jamais
+          // empêcher l'affichage du bandeau (déjà posé ci-dessus), juste
+          // faire réafficher cette même notif après un redémarrage de l'app.
+        });
+      }
+      return suivant;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- notifsEvenementsVus/membrePartenaire/objStore.userId lus mais volontairement absents des deps : ce diff ne doit se redéclencher que quand evenementsPartenaire (ou la fin d'un chargement) change, jamais à cause de notifsEvenementsVus lui-même (modifié juste au-dessus), sous peine de boucle.
+  }, [evenementsPartenaire, chargementPartenaire]);
+
+  // Fermeture automatique après 5 secondes (cf. RÈGLE ci-dessus) — tap manuel
+  // géré directement au site de rendu du bandeau.
+  useEffect(() => {
+    if (!banniereNotifEvenement) return;
+    const minuteur = setTimeout(() => setBanniereNotifEvenement(null), 5000);
+    return () => clearTimeout(minuteur);
+  }, [banniereNotifEvenement]);
 
   const [modalCreationVisible, setModalCreationVisible] = useState(false);
   const [nomEvent, setNomEvent] = useState("");
@@ -1325,6 +1420,45 @@ export default function Planning() {
     setModalCreationVisible(false);
   };
 
+  // RÈGLE : "événement important" (Timeline premium, demande du 2026-09-06)
+  // = financier OU récurrent — un événement récurrent n'a pas son propre
+  // champ sur EvenementUnifie (type partagé par toutes les origines :
+  // manuel, jour férié, échéance Fixe, entrée d'argent, cf. RÈGLE à sa
+  // définition), donc résolu ici par LOOKUP vers la ligne source
+  // (objStore.evenements pour "moi", evenementsPartenaire pour
+  // "partenaire") plutôt que d'ajouter un champ à threader dans les 8 sites
+  // de construction de EvenementUnifie (jour férié/échéance Fixe/entrée
+  // n'ont d'ailleurs aucun sens "récurrent" au sens `recurrent`/`frequence`).
+  const estEvenementRecurrent = (ev: EvenementUnifie): boolean => {
+    if (!ev.evenementId) return false;
+    if (ev.proprietaire === "partenaire") {
+      return !!evenementsPartenaire.find((e) => e.id === ev.evenementId)
+        ?.recurrent;
+    }
+    return !!objStore.evenements.find((e) => e.id === ev.evenementId)
+      ?.recurrent;
+  };
+
+  // "Durée en petit" (Timeline premium) — ev.duree est en HEURES (float,
+  // cf. calculerPositions plus bas : `ev.duree * 60` pour convertir en
+  // minutes), jamais en minutes directement.
+  const formaterDureeCourte = (dureeHeures: number): string => {
+    const minutes = Math.round(dureeHeures * 60);
+    if (minutes < 60) return `${minutes} min`;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`;
+  };
+
+  // RÈGLE : "jours fériés en gris discret" (vue Mois, demande du 2026-09-06)
+  // — détection par id, JAMAIS par modifiable/evenementId (aussi vrais pour
+  // les échéances Fixe/Entrée/Objectif, cf. leurs sites de construction plus
+  // haut — ambigu). L'id final d'un jour férié reste "manuel-ferie_..."
+  // (préfixe `ferie_` posé par utils/joursFeries.ts, cf. RÈGLE à
+  // pousserOccurrence plus haut — jamais un autre id ne contient ce motif).
+  const estJourFerie = (ev: EvenementUnifie): boolean =>
+    ev.id.includes("ferie_");
+
   function calculerPositions(evs: EvenementUnifie[]) {
     const groupes: EvenementUnifie[][] = [];
     const tries = [...evs].sort(
@@ -1469,6 +1603,26 @@ export default function Planning() {
         </TouchableOpacity>
       </View>
 
+      {/* RÈGLE : cf. RÈGLE détaillée plus haut sur banniereNotifEvenement —
+          bandeau discret, jamais une notification push. */}
+      {banniereNotifEvenement && (
+        <TouchableOpacity
+          style={[
+            styles.banniereNotifEvenement,
+            { backgroundColor: C.carte, borderColor: C.carteBorder },
+          ]}
+          activeOpacity={0.8}
+          onPress={() => setBanniereNotifEvenement(null)}
+        >
+          <Ionicons name="calendar" size={16} color={C.purple} />
+          <Text
+            style={[styles.banniereNotifEvenementTexte, { color: C.texte }]}
+          >
+            {banniereNotifEvenement.texte}
+          </Text>
+        </TouchableOpacity>
+      )}
+
       {affichagePartage &&
         suggestionsFusion.map((suggestion) => (
           <View
@@ -1606,7 +1760,16 @@ export default function Planning() {
 
       <View style={{ flex: 1 }}>
           {vue === "jour" && (
-            <View style={{ flex: 1 }}>
+            // RÈGLE : fond Timeline premium (demande du 2026-09-06) —
+            // spécifique à Planning, jamais C.fondPage (#1A2530, utilisé
+            // partout ailleurs dans l'app) : divergence assumée pour cette
+            // seule refonte, cf. couleurs fournies explicitement.
+            <View
+              style={[
+                { flex: 1 },
+                { backgroundColor: theme === "sombre" ? "#0D1B2A" : "#FFFFFF" },
+              ]}
+            >
               {evsToutLaJourneeJour(dateActuelle).length > 0 && (
                 <View
                   style={[styles.alldayZone, { borderColor: C.separateur }]}
@@ -1698,60 +1861,95 @@ export default function Planning() {
                     ))}
                   </View>
                   <View style={styles.eventsCol}>
+                    {/* RÈGLE : "ligne verticale fine et continue" (Timeline
+                        premium) — hauteur posée explicitement (jamais
+                        top:0/bottom:0) : eventsCol n'a pas de hauteur propre
+                        déclarée, seulement celle induite par ses enfants
+                        (lignes ligneFond empilées + eventCard en position
+                        absolue), un bottom:0 n'aurait donc aucune référence
+                        fiable. */}
+                    <View
+                      style={[
+                        styles.timelineSpine,
+                        {
+                          height: HEURES.length * HAUTEUR_HEURE,
+                          backgroundColor: C.separateur,
+                        },
+                      ]}
+                    />
                     {HEURES.map((h, i) => (
                       <TouchableOpacity
                         key={h}
-                        style={[styles.ligneFond, { borderTopColor: C.separateur }]}
+                        style={styles.ligneFond}
                         activeOpacity={0.5}
                         onPress={() => ouvrirCreationRapide(`${HEURE_DEBUT + i}h00`)}
                       />
                     ))}
                     {calculerPositions(evsHorairesJour(dateActuelle)).map(
-                      ({ ev, top, height, left, width }) => (
-                        <TouchableOpacity
-                          key={ev.id}
-                          style={[
-                            styles.eventCard,
-                            {
-                              top,
-                              height,
-                              left: left as any,
-                              width: width as any,
-                            },
-                            {
-                              backgroundColor: ev.couleur + "22",
-                              borderLeftColor: ev.couleur,
-                            },
-                          ]}
-                          activeOpacity={0.7}
-                          onPress={() => gererClicEvenement(ev)}
-                        >
-                          <View style={styles.eventTopRow}>
-                            {renderBadgeProprietaire(ev)}
-                            <Text
-                              style={[styles.eventTitre, { color: ev.couleur }]}
-                              numberOfLines={1}
-                            >
-                              {ev.nom}
-                            </Text>
-                            {ev.estFinancier && (
-                              <View
-                                style={[
-                                  styles.badgeFinancier,
-                                  { backgroundColor: ev.couleur },
-                                ]}
-                              >
-                                <Text style={styles.badgeFinancierTexte}>
-                                  {formaterMontant(ev.montant ?? 0)}€
-                                </Text>
+                      ({ ev, top, height, left, width }) => {
+                        const important =
+                          ev.estFinancier || estEvenementRecurrent(ev);
+                        return (
+                          <TouchableOpacity
+                            key={ev.id}
+                            style={[
+                              styles.eventCard,
+                              {
+                                top,
+                                height,
+                                left: left as any,
+                                width: width as any,
+                              },
+                              {
+                                backgroundColor:
+                                  ev.couleur + (important ? "26" : "14"),
+                                borderLeftColor: ev.couleur,
+                                borderLeftWidth: important ? 4 : 2,
+                              },
+                            ]}
+                            activeOpacity={0.7}
+                            onPress={() => gererClicEvenement(ev)}
+                          >
+                            {/* RÈGLE : badge propriétaire en overlay absolu
+                                (coin), JAMAIS inline dans eventTopRow — demande
+                                du 2026-09-06 : inline, il grignotait ~18px sur
+                                la largeur dispo pour eventTitre (badge 14px +
+                                gap 4), donnant l'impression que le bloc entier
+                                avait rétréci alors que ses dimensions propres
+                                (calculerPositions) n'ont jamais changé. */}
+                            {renderBadgeProprietaire(ev) && (
+                              <View style={styles.badgeProprietaireCoin}>
+                                {renderBadgeProprietaire(ev)}
                               </View>
                             )}
-                          </View>
-                          <Text style={[styles.eventHeure, { color: C.texteMuted }]}>
-                            {ev.heure}
-                          </Text>
-                        </TouchableOpacity>
-                      ),
+                            <View style={styles.eventTopRow}>
+                              <Text
+                                style={[styles.eventTitre, { color: ev.couleur }]}
+                                numberOfLines={1}
+                              >
+                                {ev.nom}
+                              </Text>
+                              {ev.estFinancier && (
+                                <View
+                                  style={[
+                                    styles.badgeFinancier,
+                                    { backgroundColor: ev.couleur },
+                                  ]}
+                                >
+                                  <Text style={styles.badgeFinancierTexte}>
+                                    {formaterMontant(ev.montant ?? 0)}€
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text
+                              style={[styles.eventHeure, { color: C.texteMuted }]}
+                            >
+                              {ev.heure} · {formaterDureeCourte(ev.duree)}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      },
                     )}
                     {memeJour(dateActuelle, AUJOURDHUI) &&
                       ligneActuelleVisible && (
@@ -1769,11 +1967,37 @@ export default function Planning() {
                 <View style={{ height: 40 }} />
               </ScrollView>
               </CibleTutoriel>
+
+              {/* RÈGLE : bouton "+" flottant (Timeline premium, demande du
+                  2026-09-06) — vue Jour uniquement, cf. point 1 de la
+                  demande. N'enlève rien : le "+" du header reste actif sur
+                  toutes les vues (point 4, "toujours accessible"), celui-ci
+                  s'y ajoute. */}
+              <TouchableOpacity
+                style={[styles.fabPlanning, { backgroundColor: C.purple }]}
+                activeOpacity={0.8}
+                onPress={ouvrirCreationComplete}
+                accessibilityRole="button"
+                accessibilityLabel="Créer un événement"
+              >
+                <Text style={styles.fabPlanningTexte}>+</Text>
+              </TouchableOpacity>
             </View>
           )}
 
           {vue === "semaine" && (
-            <>
+            // RÈGLE : même fond Timeline premium que la vue Jour, cf. RÈGLE
+            // détaillée là-bas — "une seule structure, deux systèmes de
+            // couleurs" (demande du 2026-09-06) s'applique aux deux vues
+            // Timeline (Jour/Semaine), jamais à Mois (qui garde son fond
+            // actuel, cf. point 3 de la demande : "conserver le principe
+            // actuel").
+            <View
+              style={[
+                { flex: 1 },
+                { backgroundColor: theme === "sombre" ? "#0D1B2A" : "#FFFFFF" },
+              ]}
+            >
               <View style={styles.weekHeadRow}>
                 <View style={{ width: 32 }} />
                 {joursSemaineVue.map(({ jourDate, estAujourdhui }, i) => (
@@ -1793,9 +2017,13 @@ export default function Planning() {
                       style={[
                         styles.weekHeadNum,
                         { color: C.texte },
+                        // RÈGLE : accent teal #1D9E75 (Timeline premium,
+                        // demande du 2026-09-06) — remplace C.purple, ce
+                        // hex spécifique est celui donné explicitement,
+                        // jamais une teinte du thème.
                         estAujourdhui && [
                           styles.weekHeadNumAujourdhui,
-                          { backgroundColor: C.purple, color: "#FFFFFF" },
+                          { backgroundColor: "#1D9E75", color: "#FFFFFF" },
                         ],
                       ]}
                     >
@@ -1897,27 +2125,41 @@ export default function Planning() {
                           }}
                         />
                       ))}
-                      {positions.map(({ ev, top, height, left, width }) => (
-                        <TouchableOpacity
-                          key={ev.id}
-                          style={[
-                            styles.weekEventBlock,
-                            {
-                              top,
-                              height,
-                              left: left as any,
-                              width: width as any,
-                              backgroundColor: ev.couleur + "33",
-                              borderLeftColor: ev.couleur,
-                            },
-                          ]}
-                          activeOpacity={0.7}
-                          onPress={() => gererClicEvenement(ev)}
-                        >
-                          <View
-                            style={{ flexDirection: "row", alignItems: "center", gap: 3 }}
+                      {positions.map(({ ev, top, height, left, width }) => {
+                        // RÈGLE : cf. RÈGLE identique sur eventCard (vue
+                        // jour) — même distinction "important" (financier ou
+                        // récurrent), même style plus léger.
+                        const important =
+                          ev.estFinancier || estEvenementRecurrent(ev);
+                        return (
+                          <TouchableOpacity
+                            key={ev.id}
+                            style={[
+                              styles.weekEventBlock,
+                              {
+                                top,
+                                height,
+                                left: left as any,
+                                width: width as any,
+                                backgroundColor:
+                                  ev.couleur + (important ? "26" : "14"),
+                                borderLeftColor: ev.couleur,
+                                borderLeftWidth: important ? 3 : 1.5,
+                              },
+                            ]}
+                            activeOpacity={0.7}
+                            onPress={() => gererClicEvenement(ev)}
                           >
-                            {renderBadgeProprietaireMini(ev)}
+                            {/* RÈGLE : badge en overlay absolu, jamais
+                                inline : en semaine, le texte tombe déjà à
+                                9px sur 2 lignes (weekEventBlockTexte), la
+                                moindre largeur perdue au profit du badge le
+                                fait paraître tronqué/le bloc plus petit. */}
+                            {renderBadgeProprietaireMini(ev) && (
+                              <View style={styles.badgeProprietaireMiniCoin}>
+                                {renderBadgeProprietaireMini(ev)}
+                              </View>
+                            )}
                             <Text
                               style={[
                                 styles.weekEventBlockTexte,
@@ -1927,9 +2169,9 @@ export default function Planning() {
                             >
                               {ev.nom}
                             </Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))}
+                          </TouchableOpacity>
+                        );
+                      })}
                       {estAujourdhui && ligneActuelleVisible && (
                         <View
                           style={[
@@ -1946,7 +2188,7 @@ export default function Planning() {
               </View>
               <View style={{ height: 40 }} />
             </ScrollView>
-            </>
+            </View>
           )}
 
           {vue === "mois" && (
@@ -1992,42 +2234,69 @@ export default function Planning() {
                             style={[
                               styles.monthCell,
                               { borderColor: C.separateur },
-                              estAujourdhui && {
-                                backgroundColor: teinteAujourdhui,
-                              },
                             ]}
                             activeOpacity={0.7}
                             onPress={() => ouvrirJour(jourDate)}
                           >
-                            <Text
+                            {/* RÈGLE : "jour actuel cerclé en teal" (demande
+                                du 2026-09-06) — remplace l'ancien fond de
+                                cellule entière (teinteAujourdhui) par un
+                                simple cercle autour du numéro, jamais un
+                                fond de cellule. */}
+                            <View
                               style={[
-                                styles.monthNum,
-                                { color: C.texteMuted },
-                                !estMoisActuel && styles.monthNumHorsMois,
+                                styles.monthNumCercle,
+                                estAujourdhui && {
+                                  borderWidth: 1.5,
+                                  borderColor: "#1D9E75",
+                                },
                               ]}
                             >
-                              {jourDate.getDate()}
-                            </Text>
-                            {evsVisibles.map((ev) => (
-                              <View
-                                key={ev.id}
+                              <Text
                                 style={[
-                                  styles.monthEventLine,
-                                  { backgroundColor: ev.couleur + "22" },
+                                  styles.monthNum,
+                                  { color: C.texteMuted },
+                                  !estMoisActuel && styles.monthNumHorsMois,
                                 ]}
                               >
-                                {renderBadgeProprietaireMini(ev)}
-                                <Text
+                                {jourDate.getDate()}
+                              </Text>
+                            </View>
+                            {evsVisibles.map((ev) => {
+                              // RÈGLE : "jours fériés en gris discret"
+                              // (demande du 2026-09-06) — remplace la
+                              // couleur propre du jour férié (souvent vive),
+                              // jamais pour un événement financier/
+                              // récurrent/partagé.
+                              const ferie = estJourFerie(ev);
+                              const couleurAffichee = ferie
+                                ? C.texteMuted
+                                : ev.couleur;
+                              return (
+                                <View
+                                  key={ev.id}
                                   style={[
-                                    styles.monthEventTexte,
-                                    { color: ev.couleur },
+                                    styles.monthEventLine,
+                                    {
+                                      backgroundColor: ferie
+                                        ? C.separateur
+                                        : couleurAffichee + "18",
+                                    },
                                   ]}
-                                  numberOfLines={1}
                                 >
-                                  {ev.nom}
-                                </Text>
-                              </View>
-                            ))}
+                                  {renderBadgeProprietaireMini(ev)}
+                                  <Text
+                                    style={[
+                                      styles.monthEventTexte,
+                                      { color: couleurAffichee },
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {ev.nom}
+                                  </Text>
+                                </View>
+                              );
+                            })}
                             {nbSupplementaires > 0 && (
                               <Text
                                 style={[
@@ -2115,7 +2384,7 @@ export default function Planning() {
                     keyboardShouldPersistTaps="handled"
                   >
                     <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                      Nom de l'événement
+                      Nom de l&apos;événement
                     </Text>
                     <TextInput
                       style={[
@@ -2977,14 +3246,26 @@ const styles = StyleSheet.create({
     paddingRight: 4,
   },
   eventsCol: { flex: 1, position: "relative" },
-  ligneFond: {
-    height: HAUTEUR_HEURE,
-    borderTopWidth: 0.5,
+  // RÈGLE : plus de bordure horizontale par heure (Timeline premium, demande
+  // du 2026-09-06) — remplacée par timelineSpine ci-dessous, une seule ligne
+  // verticale continue plutôt que 24 séparateurs horizontaux. Reste un
+  // TouchableOpacity invisible, uniquement comme cible de tap
+  // (ouvrirCreationRapide, cf. site d'appel).
+  ligneFond: { height: HAUTEUR_HEURE },
+  // Ligne verticale fine et continue, à gauche de la colonne d'événements
+  // ("Heures affichées à gauche de la ligne, événements accrochés à droite",
+  // cf. demande) — hauteur posée par le site d'appel (HEURES.length *
+  // HAUTEUR_HEURE), jamais top:0/bottom:0 (eventsCol n'a pas de hauteur
+  // propre déclarée pour servir de référence).
+  timelineSpine: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: 1.5,
   },
   eventCard: {
     position: "absolute",
     borderRadius: 8,
-    borderLeftWidth: 3,
     padding: 6,
     justifyContent: "center",
   },
@@ -3061,7 +3342,6 @@ const styles = StyleSheet.create({
   weekEventBlock: {
     position: "absolute",
     borderRadius: 6,
-    borderLeftWidth: 2,
     padding: 3,
     justifyContent: "center",
   },
@@ -3082,11 +3362,22 @@ const styles = StyleSheet.create({
   },
   monthNum: { fontSize: 13, fontWeight: "600" },
   monthNumHorsMois: { opacity: 0.5 },
+  // Cercle autour du numéro du jour (vue Mois, demande du 2026-09-06) —
+  // bordure teal posée inline uniquement pour "aujourd'hui" (cf. site
+  // d'appel), transparent sinon : garde la même taille de cellule qu'un
+  // jour normal.
+  monthNumCercle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   monthEventLine: {
     flexDirection: "row",
     alignItems: "center",
     gap: 3,
-    borderRadius: 4,
+    borderRadius: 6,
     paddingHorizontal: 3,
     paddingVertical: 1,
     marginTop: 3,
@@ -3307,5 +3598,59 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
+  },
+  // RÈGLE : overlays en coin (vue jour/semaine, demande du 2026-09-06) —
+  // jamais inline dans la ligne de texte, cf. RÈGLE aux 2 sites d'appel
+  // (eventCard/weekEventBlock) : restaure la largeur de texte d'origine.
+  badgeProprietaireCoin: { position: "absolute", top: 3, right: 3, zIndex: 1 },
+  badgeProprietaireMiniCoin: {
+    position: "absolute",
+    top: 3,
+    right: 3,
+    zIndex: 1,
+  },
+  // Bandeau "événement commun ajouté par le partenaire" (demande du
+  // 2026-09-06) — même gabarit que app/RecurrenceSuggestionBanner.tsx
+  // (carte arrondie, bordée, position absolue sous le header).
+  banniereNotifEvenement: {
+    position: "absolute",
+    top: 60,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 14,
+    borderWidth: 0.5,
+    padding: 14,
+    zIndex: 999,
+  },
+  banniereNotifEvenementTexte: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "500",
+    lineHeight: 18,
+  },
+  // Bouton "+" flottant, vue Jour Timeline (demande du 2026-09-06).
+  fabPlanning: {
+    position: "absolute",
+    bottom: 24,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  fabPlanningTexte: {
+    fontSize: 28,
+    fontWeight: "300",
+    color: "#FFFFFF",
+    marginTop: -2,
   },
 });

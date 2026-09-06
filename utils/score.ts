@@ -16,7 +16,7 @@ type EnveloppeAvecNom = {
 // scoreStabilite), qui n'ont besoin que des montants, jamais du nom des
 // catégories. Permet de leur passer indifféremment des Enveloppe[] vivantes
 // ou des EnveloppeSerie[]/SnapshotEnveloppe[] (mêmes champs pertinents).
-type EnveloppeMontants = {
+export type EnveloppeMontants = {
   depense: number;
   budget: number;
   type: "Fixe" | "Variable" | "Entrée";
@@ -149,7 +149,11 @@ function calculerScoreDepuisSignaux(signaux: SignauxScore): ScoreSante {
 // sur des données live (app/store.ts) ou des snapshots archivés
 // (SnapshotEnveloppe/SnapshotObjectif, mêmes champs pertinents). ---------
 
-function scoreBudget(enveloppes: EnveloppeMontants[]): number | null {
+// RÈGLE : exportée pour "Dépenses communes" (analytics.tsx, Santé du couple,
+// vue partagée, 2026-09-06) — même formule ratio dépense/budget que le
+// critère "budget" du score individuel, appliquée aux catégories fusionnées
+// des deux comptes plutôt qu'aux miennes seules. Jamais dupliquée.
+export function scoreBudget(enveloppes: EnveloppeMontants[]): number | null {
   const pertinentes = enveloppes.filter((e) => e.type !== "Entrée");
   const budgetTotal = pertinentes.reduce((acc, e) => acc + e.budget, 0);
   const depenseTotal = pertinentes.reduce((acc, e) => acc + e.depense, 0);

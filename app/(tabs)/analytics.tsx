@@ -32,6 +32,7 @@ import {
   genererExplicationsScore,
   MotCleScore,
   motPourScore,
+  scoreBudget,
   ScoreSante,
 } from "../../utils/score";
 import {
@@ -2469,6 +2470,27 @@ export default function Analytics() {
       .filter((e) => e.type !== "Entrée")
       .reduce((acc, e) => acc + e.depense, 0);
   };
+  // RÈGLE : pendant de getDepenseMoisPartenaire ci-dessus, pour le BUDGET
+  // (prévu) plutôt que la dépense (réel) — alimente
+  // donneesPrevisionnellesConsolidees plus bas ("Dépensé vs dépenses
+  // prévues" consolidé, demande du 2026-09-06).
+  const getBudgetMoisPartenaire = (mois: number, annee: number): number => {
+    if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
+      return enveloppesPartenaireStats
+        .filter(
+          (e) =>
+            e.type !== "Entrée" && estCategorieActiveCeMois(e, annee, mois),
+        )
+        .reduce((acc, e) => acc + e.budget, 0);
+    }
+    const snap = historiqueMoisPartenaire.find(
+      (s) => s.mois === mois && s.annee === annee,
+    );
+    if (!snap) return 0;
+    return snap.enveloppes
+      .filter((e) => e.type !== "Entrée")
+      .reduce((acc, e) => acc + e.budget, 0);
+  };
   const getDisponibleMoisPartenaire = (mois: number, annee: number): number => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
       return entreesBudgetDuMois(enveloppesPartenaireStats, annee, mois).total;
@@ -2498,6 +2520,20 @@ export default function Analytics() {
           getDepenseMoisPartenaire(mois, annee),
       )
     : donneesReelles;
+  // RÈGLE : pendant de donneesReellesConsolidees ci-dessus, pour le BUDGET
+  // (prévu) — demande du 2026-09-06, "Dépensé vs dépenses prévues"
+  // consolidé. Comme donneesReellesConsolidees, jamais filtre-aware
+  // (toujours le total TOUTES catégories des deux comptes) : au site
+  // d'appel, utilisé UNIQUEMENT quand enveloppesFiltrees est undefined (pas
+  // de filtre catégorie actif) — avec un filtre actif, donneesPrevisionnelles
+  // (individuel, filtré) reste la source, cf. RÈGLE au site d'appel.
+  const donneesPrevisionnellesConsolidees = affichagePartageEvolution
+    ? moisAffiches.map(
+        ({ mois, annee }) =>
+          (getBudgetMois(mois, annee) ?? 0) +
+          getBudgetMoisPartenaire(mois, annee),
+      )
+    : donneesPrevisionnelles;
   const donneesDisponibleConsolidees = affichagePartageEvolution
     ? moisAffiches.map(
         ({ mois, annee }) =>
@@ -2515,9 +2551,23 @@ export default function Analytics() {
 
   // Variation totale réel vs prévu sur toute la période affichée (pas un
   // mois précis) — indicateur affiché sous le titre de "Dépensé vs dépenses
-  // prévues".
-  const totalReelPeriode = donneesReelles.reduce((acc, v) => acc + v, 0);
-  const totalPrevuPeriode = donneesPrevisionnelles.reduce(
+  // prévues". RÈGLE : consolidé (moi + partenaire) en vue partagée SEULEMENT
+  // hors filtre catégorie (demande du 2026-09-06) — même garde qu'au site
+  // d'affichage du graphique (GraphiqueLignes, plus bas), pour que ce
+  // delta reste cohérent avec ce que montre réellement le graphique.
+  const donneesReellesPourGraphique =
+    affichagePartageEvolution && !enveloppesFiltrees
+      ? donneesReellesConsolidees
+      : donneesReelles;
+  const donneesPrevisionnellesPourGraphique =
+    affichagePartageEvolution && !enveloppesFiltrees
+      ? donneesPrevisionnellesConsolidees
+      : donneesPrevisionnelles;
+  const totalReelPeriode = donneesReellesPourGraphique.reduce(
+    (acc, v) => acc + v,
+    0,
+  );
+  const totalPrevuPeriode = donneesPrevisionnellesPourGraphique.reduce(
     (acc, v) => acc + v,
     0,
   );
@@ -2714,6 +2764,101 @@ export default function Analytics() {
           disponible + getDisponibleMoisPartenaire(MOIS_ACTUEL, ANNEE_ACTUELLE),
         )
       : calculerTauxEpargne(epargne, disponible);
+
+  // RÈGLE À NE JAMAIS CASSER — SANTÉ DU COUPLE (refonte du 2026-09-06) :
+  // remplace l'ancienne carte "Scores partagés" (MOI/PARTENAIRE/ENSEMBLE, 3
+  // chiffres bruts sans analyse) — la vue partagée affiche désormais UN
+  // SEUL score global (scoreEnsemble, moyenne 50/50 déjà établie plus haut,
+  // jamais repondérée par un montant — cf. RÈGLE à son site de définition)
+  // puis 3 critères CONSOLIDÉS propres au couple (épargne/dépenses/équilibre
+  // communs), distincts des 5 critères individuels (CRITERES_SCORE) qui
+  // n'ont pas de sens à cette échelle.
+  //
+  // budgetCommun : même ensemble de catégories que contributionsCommunes
+  // (fusion par nom ce mois-ci), mais leur BUDGET plutôt que leur dépense —
+  // alimente scoreDepensesCommunes via scoreBudget (utils/score.ts), même
+  // formule que le critère individuel "budget".
+  const budgetCommun = (() => {
+    if (vueActive !== "partage" || !estDansUnEspace) return 0;
+    const cleNom = (nom: string) => nom.trim().toLowerCase();
+    const noms = contributionsCommunes.nomsCommuns;
+    const budgetMoi = objStore.enveloppes
+      .filter(
+        (e) =>
+          e.type !== "Entrée" &&
+          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL) &&
+          noms.has(cleNom(e.nom)),
+      )
+      .reduce((acc, e) => acc + e.budget, 0);
+    const budgetPartenaire = enveloppesPartenaireStats
+      .filter(
+        (e) =>
+          e.type !== "Entrée" &&
+          estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL) &&
+          noms.has(cleNom(e.nom)),
+      )
+      .reduce((acc, e) => acc + e.budget, 0);
+    return budgetMoi + budgetPartenaire;
+  })();
+  // Épargne commune : taux d'épargne consolidé (tauxEpargne ci-dessus) mis à
+  // l'échelle 0-100 — 20% de taux d'épargne (repère courant de bonne santé
+  // financière) atteint déjà 100 pts. Calibrage assumé, distinct de la
+  // formule "streak" du critère individuel "epargne" (pas d'historique
+  // multi-mois fiable du partenaire pour reproduire un streak couple, cf.
+  // RÈGLE sur scorePartenaireApprox).
+  const scoreEpargneCommune = Math.max(
+    0,
+    Math.min(100, Math.round(tauxEpargne * 5)),
+  );
+  // Dépenses communes : même formule que le critère individuel "budget"
+  // (scoreBudget, utils/score.ts), appliquée au total commun plutôt qu'à mes
+  // seules catégories.
+  const scoreDepensesCommunes =
+    vueActive === "partage" && estDansUnEspace
+      ? scoreBudget([
+          {
+            depense: contributionsCommunes.totalCommun,
+            budget: budgetCommun,
+            type: "Variable",
+          },
+        ])
+      : null;
+  // Équilibre : 50/50 = 100 pts, s'éloigne de 2 pts par point de pourcentage
+  // d'écart — même seuil "équilibré" (<10 points d'écart) que l'ancien bloc
+  // "Équilibre du mois" d'Aperçu (retiré le 2026-09-06), recalculé ici
+  // indépendamment (contributionsCommunes n'est jamais partagé entre
+  // écrans, cf. RÈGLE à son site de définition).
+  const pctMoiCommunPourScore =
+    contributionsCommunes.totalCommun > 0
+      ? (contributionsCommunes.moiCommun / contributionsCommunes.totalCommun) *
+        100
+      : null;
+  const scoreEquilibre =
+    pctMoiCommunPourScore === null
+      ? null
+      : Math.round(100 - Math.abs(pctMoiCommunPourScore - 50) * 2);
+
+  // "Ce qui pourrait améliorer le score de [Partenaire]" — RÈGLE À NE JAMAIS
+  // CASSER : contrairement à leviersScore (Moi), limité à UN SEUL levier
+  // heuristique (le pire dépassement de budget Variable ce mois-ci) — je
+  // n'ai ni ses objectifs ni son historique multi-mois (cf. RÈGLE sur
+  // scorePartenaireApprox), donc les 2 autres types de leviers de
+  // leviersScore (rythme d'objectif, volatilité multi-mois) ne sont pas
+  // reproductibles de façon fiable pour son compte.
+  const leviersPartenaireScore: LevierScore[] = (() => {
+    if (vueActive !== "partage" || !estDansUnEspace) return [];
+    const pireDepassementPartenaire = enveloppesPartenaireStats
+      .filter(
+        (e) => e.type === "Variable" && e.budget > 0 && e.depense > e.budget,
+      )
+      .sort((a, b) => b.depense - b.budget - (a.depense - a.budget))[0];
+    if (!pireDepassementPartenaire) return [];
+    return [
+      {
+        texte: `Réduire ${pireDepassementPartenaire.nom} d'environ ${Math.round(pireDepassementPartenaire.depense - pireDepassementPartenaire.budget)}€/mois → pourrait améliorer son score.`,
+      },
+    ];
+  })();
 
   const deltaTotal = calculerDeltaTotal(depenseMoisActuel, depenseMoisPrec);
   const deltaTotalEuros = depenseMoisActuel - depenseMoisPrec;
@@ -4797,8 +4942,8 @@ export default function Analytics() {
                 ]}
               >
                 <GraphiqueLignes
-                  donneesReelles={donneesReelles}
-                  donneesPrevisionnelles={donneesPrevisionnelles}
+                  donneesReelles={donneesReellesPourGraphique}
+                  donneesPrevisionnelles={donneesPrevisionnellesPourGraphique}
                   labels={labels}
                   couleurs={C}
                 />
@@ -5740,7 +5885,175 @@ export default function Analytics() {
                 style={{ flex: 1, width: "100%", display: vueModalStats === "sante" ? "flex" : "none" }}
                 contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 26, paddingBottom: 60 }}
               >
-              {(
+              {/* RÈGLE À NE JAMAIS CASSER — REFONTE DU 2026-09-06 : en vue
+                  partagée, remplace la carte individuelle (A-E ci-dessous,
+                  scoreSante) + l'ancienne carte séparée "Scores partagés"
+                  (MOI/PARTENAIRE/ENSEMBLE bruts) par UNE analyse globale du
+                  couple (scoreEnsemble + 3 critères consolidés + détail par
+                  personne). vueActive === "personnel" (ou hors espace)
+                  retombe sur EXACTEMENT le rendu d'origine (branche `else`),
+                  jamais modifié — demande explicite. */}
+              {vueActive === "partage" && estDansUnEspace && scoreEnsemble ? (
+                <View
+                  style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
+                >
+                  {/* Score global unique — moyenne 50/50 (scoreEnsemble,
+                      jamais repondérée par un montant, cf. RÈGLE à son site
+                      de définition), même présentation (pill/delta absent
+                      volontairement : pas de "scoreEnsembleMoisPrecedent"
+                      fiable, le partenaire n'a pas d'historique accessible). */}
+                  <View style={styles.serieEnTete}>
+                    <View
+                      style={[
+                        styles.serieIconeFond,
+                        { backgroundColor: couleurScoreTeinte(scoreEnsemble.mot, C) },
+                      ]}
+                    >
+                      <Ionicons
+                        name="pulse"
+                        size={18}
+                        color={couleurScoreForte(scoreEnsemble.mot, C)}
+                      />
+                    </View>
+                    <Text style={[styles.serieTitre, { color: C.texte }]}>
+                      Santé financière du couple
+                    </Text>
+                    <InfoBulle
+                      titre="Comment ce score est calculé"
+                      texte="Moyenne à 50/50 de ton score et de celui, estimé, de ton/ta partenaire — jamais pondérée par les montants dépensés (un score déjà sur 100 n'a aucune raison d'être repondéré par un montant en euros). Les 3 critères ci-dessous analysent votre situation à deux : épargne commune, dépenses communes et équilibre de contribution."
+                    />
+                  </View>
+
+                  <View style={styles.scoreNombreLigne}>
+                    <Text style={[styles.scoreNombre, { color: C.texte }]}>
+                      {scoreEnsemble.score}
+                    </Text>
+                    <Text style={[styles.scoreSur100, { color: C.texteMuted }]}>
+                      /100
+                    </Text>
+                    <View
+                      style={[
+                        styles.scoreMotPill,
+                        { backgroundColor: couleurScoreTeinte(scoreEnsemble.mot, C) },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.scoreMotTexte,
+                          { color: couleurScoreForte(scoreEnsemble.mot, C) },
+                        ]}
+                      >
+                        {scoreEnsemble.mot}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.scoreContexteTexte, { color: C.texteMuted }]}>
+                    Moyenne de ton score et de celui, estimé, de{" "}
+                    {membrePartenaire?.prenom || "ton/ta partenaire"}.
+                  </Text>
+
+                  {/* Critères consolidés — épargne/dépenses/équilibre
+                      communs, distincts des 5 critères individuels
+                      (n'ont pas de sens à l'échelle du couple). */}
+                  <View style={styles.scoreDetailsBloc}>
+                    <View style={styles.scoreDetailLigne}>
+                      <Text style={[styles.scoreDetailLabel, { color: C.texteMuted }]}>
+                        Épargne commune
+                      </Text>
+                      <Text style={[styles.scoreDetailValeur, { color: C.texte }]}>
+                        {scoreEpargneCommune}/100
+                      </Text>
+                    </View>
+                    <View style={styles.scoreDetailLigne}>
+                      <Text style={[styles.scoreDetailLabel, { color: C.texteMuted }]}>
+                        Dépenses communes
+                      </Text>
+                      <Text style={[styles.scoreDetailValeur, { color: C.texte }]}>
+                        {scoreDepensesCommunes !== null
+                          ? `${Math.round(scoreDepensesCommunes)}/100`
+                          : "Non disponible"}
+                      </Text>
+                    </View>
+                    <View style={styles.scoreDetailLigne}>
+                      <Text style={[styles.scoreDetailLabel, { color: C.texteMuted }]}>
+                        Équilibre
+                      </Text>
+                      <Text style={[styles.scoreDetailValeur, { color: C.texte }]}>
+                        {scoreEquilibre !== null ? `${scoreEquilibre}/100` : "Non disponible"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Détail par personne — mêmes leviers que la vue
+                      individuelle pour "Moi" (leviersScore, inchangé) ;
+                      pendant plus limité pour le partenaire
+                      (leviersPartenaireScore, cf. RÈGLE à sa définition —
+                      un seul type de levier, pas d'objectifs/historique
+                      accessibles pour son compte). */}
+                  <View style={styles.scoreExplicationsBloc}>
+                    <Text
+                      style={[styles.scoreExplicationsLabel, { color: C.texteMuted }]}
+                    >
+                      Ce qui pourrait améliorer le score de{" "}
+                      {objStore.prenom || "toi"}
+                    </Text>
+                    {leviersScore.length > 0 ? (
+                      leviersScore.map((levier, i) => (
+                        <View key={i} style={styles.levierLigne}>
+                          <Text style={[styles.levierTexte, { color: C.texte }]}>
+                            {i + 1}. {levier.texte}
+                          </Text>
+                          <TouchableOpacity
+                            style={[styles.levierBouton, { borderColor: C.purple }]}
+                            onPress={() => ouvrirSimulateurPour(levier.categorieId)}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[styles.levierBoutonTexte, { color: C.purple }]}>
+                              Simuler
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={[styles.scorePartageIndispo, { color: C.texteMuted }]}>
+                        Rien à signaler pour l&apos;instant.
+                      </Text>
+                    )}
+                  </View>
+                  <View style={styles.scoreExplicationsBloc}>
+                    <Text
+                      style={[styles.scoreExplicationsLabel, { color: C.texteMuted }]}
+                    >
+                      Ce qui pourrait améliorer le score de{" "}
+                      {membrePartenaire?.prenom || "ton/ta partenaire"}
+                    </Text>
+                    {leviersPartenaireScore.length > 0 ? (
+                      leviersPartenaireScore.map((levier, i) => (
+                        <View key={i} style={styles.levierLigne}>
+                          <Text style={[styles.levierTexte, { color: C.texte }]}>
+                            {i + 1}. {levier.texte}
+                          </Text>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={[styles.scorePartageIndispo, { color: C.texteMuted }]}>
+                        Rien à signaler pour l&apos;instant.
+                      </Text>
+                    )}
+                    <Text
+                      style={[
+                        styles.scorePartageNote,
+                        { color: C.texteMuted, marginTop: 8 },
+                      ]}
+                    >
+                      Basé uniquement sur les catégories de{" "}
+                      {membrePartenaire?.prenom || "ton/ta partenaire"} visibles
+                      dans l&apos;espace partagé — son vrai score détaillé
+                      reste privé.
+                    </Text>
+                  </View>
+                </View>
+              ) : (
                 <View
                   style={[styles.serieCarte, { backgroundColor: C.fondSecondaire }]}
                 >
@@ -5971,100 +6284,6 @@ export default function Analytics() {
                       })}
                     </View>
                   )}
-                </View>
-              )}
-
-              {/* RÈGLE À NE JAMAIS CASSER — SCORES APPROXIMATIFS, TOUJOURS
-                  ÉTIQUETÉS : "Moi" ci-dessus reste le SEUL score réel/complet
-                  (scoreSante, inchangé) — "Partenaire" et "Commun"
-                  ci-dessous sont calculés uniquement à partir des données
-                  'commun' (jamais les données personnelles du partenaire,
-                  inaccessibles par design, cf. étape 3). Ne jamais retirer
-                  le mot "estim."/la note explicative en dessous : sans ça,
-                  ces deux chiffres seraient confondus avec de vrais scores
-                  individuels alors qu'ils ne reflètent qu'une partie des
-                  dépenses. */}
-              {estDansUnEspace && vueActive === "partage" && (
-                <View
-                  style={[
-                    styles.serieCarte,
-                    { backgroundColor: C.fondSecondaire, marginTop: 16 },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.serieTitre,
-                      { color: C.texte, marginBottom: 12 },
-                    ]}
-                  >
-                    Scores partagés
-                  </Text>
-                  <View style={styles.scorePartageRow}>
-                    <View style={styles.scorePartageColonne}>
-                      <Text
-                        style={[styles.scorePartageLabel, { color: C.texteMuted }]}
-                      >
-                        MOI
-                      </Text>
-                      <Text style={[styles.scoreNombre, { color: C.texte, fontSize: 26 }]}>
-                        {scoreSante.score}
-                        <Text style={[styles.scoreSur100, { color: C.texteMuted }]}>
-                          /100
-                        </Text>
-                      </Text>
-                    </View>
-                    <View style={styles.scorePartageColonne}>
-                      <Text
-                        style={[styles.scorePartageLabel, { color: C.texteMuted }]}
-                      >
-                        {(membrePartenaire?.prenom || "PARTENAIRE").toUpperCase()}
-                        {" (estim.)"}
-                      </Text>
-                      {scorePartenaireApprox ? (
-                        <Text style={[styles.scoreNombre, { color: C.texte, fontSize: 26 }]}>
-                          {scorePartenaireApprox.score}
-                          <Text style={[styles.scoreSur100, { color: C.texteMuted }]}>
-                            /100
-                          </Text>
-                        </Text>
-                      ) : (
-                        <Text
-                          style={[styles.scorePartageIndispo, { color: C.texteMuted }]}
-                        >
-                          Non disponible
-                        </Text>
-                      )}
-                    </View>
-                    <View style={styles.scorePartageColonne}>
-                      <Text
-                        style={[styles.scorePartageLabel, { color: C.texteMuted }]}
-                      >
-                        ENSEMBLE
-                      </Text>
-                      {scoreEnsemble ? (
-                        <Text style={[styles.scoreNombre, { color: C.texte, fontSize: 26 }]}>
-                          {scoreEnsemble.score}
-                          <Text style={[styles.scoreSur100, { color: C.texteMuted }]}>
-                            /100
-                          </Text>
-                        </Text>
-                      ) : (
-                        <Text
-                          style={[styles.scorePartageIndispo, { color: C.texteMuted }]}
-                        >
-                          Non disponible
-                        </Text>
-                      )}
-                    </View>
-                  </View>
-                  <Text style={[styles.scorePartageNote, { color: C.texteMuted }]}>
-                    Le score de {membrePartenaire?.prenom || "ton/ta partenaire"}
-                    {" "}
-                    est une estimation basée uniquement sur les dépenses/
-                    entrées marquées « Commun » — pas son vrai score, qui
-                    reste privé. « Ensemble » est une moyenne pondérée des
-                    deux scores.
-                  </Text>
                 </View>
               )}
 
@@ -7547,15 +7766,6 @@ const styles = StyleSheet.create({
   },
   scoreDetailLabel: { fontSize: 13 },
   scoreDetailValeur: { fontSize: 13, fontWeight: "700" },
-  scorePartageRow: { flexDirection: "row", gap: 10 },
-  scorePartageColonne: { flex: 1, alignItems: "center" },
-  scorePartageLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-    marginBottom: 4,
-    textAlign: "center",
-  },
   scorePartageIndispo: { fontSize: 13, fontStyle: "italic" },
   scorePartageNote: { fontSize: 11, marginTop: 12, lineHeight: 16 },
   scoreExplicationsBloc: { marginTop: 16 },
