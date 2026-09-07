@@ -221,6 +221,31 @@ Rechercher activement et provoquer volontairement des situations susceptibles de
 
 ---
 
+## Règles du loop autonome (session sans intervention, ajouté le 2026-09-07)
+
+Un loop autonome (`/loop`, routine cloud planifiée) qui s'arrête pour
+attendre une validation ne fait plus aucun progrès jusqu'au retour de
+Maëlys — l'objectif ci-dessous prime sur la règle générale "en cas de
+doute, remonte le problème" (qui suppose une réponse rapide, pas vraie ici) :
+**ne jamais s'arrêter, toujours avancer sur autre chose.**
+
+- **Doute sur une correction** → appliquer la solution la plus conservative
+  (le moins de changements possible), documenter dans `AUDIT_V1.md` section
+  "Décisions autonomes", continuer.
+- **Bug 🔴 trouvé** → documenter dans `AUDIT_V1.md`, ne pas bloquer dessus,
+  passer à autre chose.
+- **tsc ou lint dépasse la baseline après une modification** → annuler cette
+  modification précise, documenter, continuer sur autre chose.
+- **Migration SQL nécessaire** → générer le SQL complet dans `AUDIT_V1.md`
+  (ou un fichier `supabase/migrations/...`, cf. section dédiée), **ne
+  jamais l'exécuter** — cohérent avec l'absence d'accès Supabase direct
+  depuis cet environnement.
+- **Doute sur une direction produit** (pas juste technique) → écrire la
+  question dans `AUDIT_V1.md` section "Questions pour Maëlys", continuer
+  sur autre chose — jamais attendre la réponse pour avancer.
+
+---
+
 ## Système de classification des problèmes
 
 🔴 **CRITIQUE** — Empêche l'utilisation, perte de données, problème de sécurité, calcul fondamental faux
