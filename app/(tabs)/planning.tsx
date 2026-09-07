@@ -1764,11 +1764,16 @@ export default function Planning() {
             // spécifique à Planning, jamais C.fondPage (#1A2530, utilisé
             // partout ailleurs dans l'app) : divergence assumée pour cette
             // seule refonte, cf. couleurs fournies explicitement.
+            // RÈGLE : height: "100%" en plus de flex: 1 (bug du 2026-09-06,
+            // constaté uniquement sur device iOS physique, jamais reproduit
+            // en web) — flex:1 seul ne se résolvait pas de façon fiable ici,
+            // laissant une zone vide en bas de la vue Jour/Semaine.
             <View
-              style={[
-                { flex: 1 },
-                { backgroundColor: theme === "sombre" ? "#0D1B2A" : "#FFFFFF" },
-              ]}
+              style={{
+                flex: 1,
+                height: "100%",
+                backgroundColor: theme === "sombre" ? "#0D1B2A" : "#FFFFFF",
+              }}
             >
               {evsToutLaJourneeJour(dateActuelle).length > 0 && (
                 <View
@@ -1840,6 +1845,13 @@ export default function Planning() {
               >
               <ScrollView
                 style={styles.timeline}
+                // RÈGLE : flexGrow:1 (bug du 2026-09-06, device iOS physique,
+                // cf. RÈGLE sur le wrapper flex/height ci-dessus) — garantit
+                // que le contenu du ScrollView s'étire au moins jusqu'au bas
+                // du viewport visible même les jours où la grille d'heures
+                // (24 × HAUTEUR_HEURE, normalement plus haute que l'écran)
+                // ne suffirait pas à elle seule.
+                contentContainerStyle={{ flexGrow: 1 }}
                 showsVerticalScrollIndicator={false}
                 contentOffset={{ x: 0, y: HEURE_SCROLL_INITIAL * HAUTEUR_HEURE }}
                 refreshControl={
@@ -1991,12 +2003,14 @@ export default function Planning() {
             // couleurs" (demande du 2026-09-06) s'applique aux deux vues
             // Timeline (Jour/Semaine), jamais à Mois (qui garde son fond
             // actuel, cf. point 3 de la demande : "conserver le principe
-            // actuel").
+            // actuel"). height: "100%" : cf. RÈGLE identique sur la vue Jour
+            // (bug du 2026-09-06, device iOS physique).
             <View
-              style={[
-                { flex: 1 },
-                { backgroundColor: theme === "sombre" ? "#0D1B2A" : "#FFFFFF" },
-              ]}
+              style={{
+                flex: 1,
+                height: "100%",
+                backgroundColor: theme === "sombre" ? "#0D1B2A" : "#FFFFFF",
+              }}
             >
               <View style={styles.weekHeadRow}>
                 <View style={{ width: 32 }} />
@@ -2069,6 +2083,13 @@ export default function Planning() {
 
               <ScrollView
                 style={styles.timeline}
+                // RÈGLE : flexGrow:1 (bug du 2026-09-06, device iOS physique,
+                // cf. RÈGLE sur le wrapper flex/height ci-dessus) — garantit
+                // que le contenu du ScrollView s'étire au moins jusqu'au bas
+                // du viewport visible même les jours où la grille d'heures
+                // (24 × HAUTEUR_HEURE, normalement plus haute que l'écran)
+                // ne suffirait pas à elle seule.
+                contentContainerStyle={{ flexGrow: 1 }}
                 showsVerticalScrollIndicator={false}
                 contentOffset={{ x: 0, y: HEURE_SCROLL_INITIAL * HAUTEUR_HEURE }}
                 refreshControl={
@@ -2194,6 +2215,13 @@ export default function Planning() {
           {vue === "mois" && (
             <ScrollView
               style={{ flex: 1 }}
+              // RÈGLE : flexGrow:1 (bug du 2026-09-06, device iOS physique,
+              // cf. RÈGLE identique sur les ScrollView Jour/Semaine) —
+              // monthGrid/monthRow/monthCell (flex:1, inchangés) ne se
+              // résolvaient pas contre le viewport sans ça : un flex:1 posé
+              // sur un enfant direct d'une ScrollView n'a pas de hauteur de
+              // référence fiable, seul contentContainerStyle en a une.
+              contentContainerStyle={{ flexGrow: 1 }}
               showsVerticalScrollIndicator={false}
               refreshControl={
                 <RefreshControl

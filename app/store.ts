@@ -3188,6 +3188,17 @@ export function useObjectifs() {
       setEtat({
         enveloppes: etat.enveloppes.filter((e) => e.id !== id),
         transactions: etat.transactions.filter((t) => t.enveloppeId !== id),
+        // RÈGLE À NE JAMAIS CASSER — AUDIT V1 (2026-09-07) : sans ce filtre,
+        // un modèle de dépense ("Ajout rapide", budget.tsx) rattaché à cette
+        // catégorie restait en base indéfiniment après sa suppression —
+        // jamais visible (budget.tsx ne montre que les modèles dont
+        // enveloppeId correspond à une enveloppe encore existante, donc
+        // aucun symptôme utilisateur), mais orphelin en base pour toujours.
+        // Même mécanique que la suppression des transactions liées
+        // juste au-dessus.
+        modelesDepenses: etat.modelesDepenses.filter(
+          (m) => m.enveloppeId !== id,
+        ),
         evenements: etat.evenements.map((e) =>
           e.categorieLiee === enveloppe.nom
             ? { ...e, categorieLiee: undefined }
@@ -3206,6 +3217,20 @@ export function useObjectifs() {
         );
         signalerErreurSync(
           `Impossible de supprimer les transactions liées : ${erreurTransactions.message}`,
+        );
+      }
+
+      const { error: erreurModeles } = await supabase
+        .from("modeles_depenses")
+        .delete()
+        .eq("enveloppe_id", id);
+      if (erreurModeles) {
+        console.error(
+          "Supabase delete modeles_depenses liés a échoué :",
+          erreurModeles,
+        );
+        signalerErreurSync(
+          `Impossible de supprimer les raccourcis liés : ${erreurModeles.message}`,
         );
       }
 
