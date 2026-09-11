@@ -149,6 +149,70 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   enveloppe_id → contrainte) plutôt que de deviner.
 - **Statut** : NOUVEAU — nécessite un accès Supabase que je n'ai pas.
 
+### P003 — Archivage rétroactif d'un mois codé en dur (épargne + payée wipées en plein mois)
+
+- **Gravité** : 🔴 CRITIQUE (perte de données réelle sur un compte de production)
+- **Description** : `verifierArchivageMoisInterne()` (`app/store.ts`)
+  utilisait `const moisCourant = 5; const anneeCourante = 2026;` (juin
+  2026, le mois où cette fonction a été écrite à l'origine, commit
+  `b7ff904`) comme hypothèse de "premier mois jamais archivé" dès que
+  `etat.dernierMoisArchive` valait `null` pour un compte. Si ce cas se
+  représentait pour un compte DÉJÀ utilisé depuis des mois (chargement du
+  profil pas encore terminé, `dernier_mois_archive_mois/annee` `NULL` côté
+  Supabase pour une raison quelconque, etc.), la fonction archivait
+  automatiquement ce juin 2026 figé — quel que soit le mois réel en cours —
+  via `archiverMoisActuelInterne`, qui remet `epargneMois` à 0 ET remet à
+  zéro `depense`/`payee` de toutes les catégories permanentes (Fixe
+  récurrente / Variable récurrente), EN PLEIN MILIEU du mois réel.
+- **Reproduction** : sur un compte existant utilisé depuis plusieurs mois,
+  faire en sorte que `dernierMoisArchive` redevienne `null` en mémoire au
+  moment où `verifierArchivageMoisInterne` s'exécute (ex. profil pas encore
+  chargé) — l'archivage du mois codé en dur se déclenche silencieusement,
+  sans rapport avec la date réelle.
+- **Compte concerné** : Maëlys (`c80c78f3-fd9e-4d85-a4e5-c49bf0a624fa`),
+  remonté le 2026-09-11. Chemin de code général — potentiellement tout
+  compte, pas spécifique à ce profil.
+- **Résultat attendu** : l'épargne du mois en cours reste intacte tant
+  qu'aucun vrai changement de mois n'a eu lieu ; les catégories Fixe
+  récurrentes (Loyer, Abonnements) restent marquées `payee: true` une fois
+  réglées, jusqu'au vrai mois suivant.
+- **Résultat obtenu** : `epargne_mois` remis à 0 sans que l'argent n'ait
+  été réellement dépensé ; Loyer/Abonnements repassés à `payee: false`,
+  `depense: 0` en plein mois — et comme `verifierEcheancesFixesInterne`
+  avait déjà avancé leur `dateFixe` au mois suivant AVANT ce reset, plus
+  aucune re-détection d'échéance n'était possible pour ce mois-ci ensuite
+  (d'où le symptôme "les échéances ne se déclenchent pas").
+- **Cause racine** : bootstrap codé en dur jamais rendu dynamique,
+  introduit dans le commit `b7ff904` ("Complete Supabase persistence:
+  historique paiements, archivage mensuel, argent disponible") et jamais
+  modifié depuis (confirmé via `git log --all -S "const moisCourant = 5"`).
+- **Correction appliquée** : suppression totale de l'archivage rétroactif
+  d'un mois arbitraire. Quand `dernierMoisArchive` est `null`, la fonction
+  pose désormais le curseur au mois réel précédent (`new Date(anneeActuelle,
+  moisActuel - 1, 1)`), persisté via `majDernierMoisArchiveSupabase`, SANS
+  jamais appeler `archiverMoisActuelInterne` sur une date devinée — aucun
+  snapshot créé, aucune donnée live touchée. Commit `137c564`, revu par
+  code-reviewer + security-auditor (agents dédiés, 0 bloquant), tsc/lint
+  vérifiés propres avant/après (10 lignes / 50 problèmes, baseline
+  inchangée).
+- **Point résiduel noté par le code-reviewer** (non bloquant, à surveiller) :
+  si `chargerObjectifs()` échoue de façon transitoire juste avant cette
+  branche sur un compte ayant un VRAI retard d'archivage de plusieurs mois,
+  le nouveau code déduit un mois précédent et l'écrit en base — écrasant
+  silencieusement un éventuel vrai curseur de retard. Strictement moins
+  grave que l'ancien bug (aucun reset destructeur sur le mois en cours),
+  mais à garder en tête si un futur compte présente un historique
+  d'archivage réellement en retard.
+- **Non corrigé par moi (hors accès DB)** : la valeur d'épargne perdue sur
+  le compte de Maëlys n'est pas récupérable — aucun enregistrement de sa
+  valeur avant le reset. SQL manuel fourni à l'utilisatrice pour la
+  restaurer si elle se souvient du montant, et pour corriger manuellement
+  les enveloppes Fixe impactées (`payee`/`depense`) en attendant que la
+  cause racine soit corrigée (voir réponse du 2026-09-11).
+- **Statut** : CORRIGÉ (2026-09-11, commit `137c564`) côté cause racine
+  applicative. Données déjà perdues sur le compte de Maëlys : correction
+  manuelle SQL transmise, épargne non récupérable.
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 
