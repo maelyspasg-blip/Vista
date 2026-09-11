@@ -1750,8 +1750,6 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
 async function verifierArchivageMoisInterne() {
   if (!etat.userId) return;
 
-  const moisCourant = 5;
-  const anneeCourante = 2026;
   let limiteIterations = 60;
 
   while (limiteIterations > 0) {
@@ -1762,15 +1760,41 @@ async function verifierArchivageMoisInterne() {
     const anneeActuelle = maintenant.getFullYear();
     const dernier = etat.dernierMoisArchive;
 
+    // RÈGLE À NE JAMAIS CASSER — BUG CRITIQUE CORRIGÉ LE 2026-09-11 : cette
+    // branche utilisait auparavant un mois/année CODÉS EN DUR (juin 2026 —
+    // le mois où ce fichier a été écrit, cf. commit "Complete Supabase
+    // persistence") comme "premier mois jamais archivé" pour TOUT compte
+    // dont dernierMoisArchive valait null. Des mois plus tard, si
+    // dernierMoisArchive redevenait null pour un compte DÉJÀ utilisé
+    // (dernier_mois_archive_mois/annee NULL en base pour une raison
+    // quelconque côté profil, chargement pas encore terminé au moment de
+    // cet appel, etc.), cette branche archivait AUTOMATIQUEMENT ce juin
+    // 2026 codé en dur — quel que soit le mois réel — ce qui remet
+    // epargneMois à 0 ET remet à zéro depense/payee de TOUTES les
+    // catégories permanentes (Fixe récurrente/Variable récurrente, cf.
+    // archiverMoisActuelInterne) EN PLEIN MILIEU du mois réel. C'est
+    // exactement ce qui a produit les deux bugs remontés le 2026-09-11 sur
+    // le compte de Maëlys : épargne à 0, loyer/abonnements jamais
+    // remarqués payés (leur dateFixe avait déjà été avancée au mois
+    // suivant par verifierEcheancesFixesInterne AVANT ce reset, donc plus
+    // aucune re-détection possible ensuite ce mois-ci, cf. RÈGLE sur cette
+    // fonction).
+    //
+    // Correction : plus JAMAIS d'archivage rétroactif d'un mois arbitraire
+    // ici. Sans historique connu, la seule action sûre est de considérer
+    // qu'il n'y a rien à rattraper — poser dernierMoisArchive au mois
+    // PRÉCÉDENT le mois réel actuel, SANS appeler archiverMoisActuelInterne
+    // (aucun snapshot créé, aucune donnée live touchée), pour que le mois
+    // réel en cours reste normalement vivant et que l'archivage reprenne
+    // son cours normal au VRAI changement de mois suivant.
     if (dernier === null) {
-      if (moisActuel > moisCourant || anneeActuelle > anneeCourante) {
-        await archiverMoisActuelInterne(moisCourant, anneeCourante);
-        // Filet de sécurité : si l'archivage a échoué silencieusement
-        // (dernierMoisArchive toujours null), on sort plutôt que de
-        // boucler indéfiniment sur le même appel.
-        if (etat.dernierMoisArchive === null) return;
-        continue;
-      }
+      const moisPrecedent = new Date(anneeActuelle, moisActuel - 1, 1);
+      const valeur = {
+        mois: moisPrecedent.getMonth(),
+        annee: moisPrecedent.getFullYear(),
+      };
+      setEtat({ dernierMoisArchive: valeur });
+      majDernierMoisArchiveSupabase(valeur.mois, valeur.annee);
       return;
     }
 
