@@ -48,7 +48,7 @@ import {
 } from "../../utils/exportExcel";
 import { trouverDepenseDominante } from "../../utils/conseils";
 import {
-  entreesBudgetDuMois,
+  calculerResteEstimeCourant,
   estCategorieActiveCeMois,
   moisComptageEffectif,
 } from "../../utils/budget";
@@ -187,6 +187,13 @@ export default function Budget() {
     couleurPartenaire,
     rafraichirEspace,
     rafraichirDonneesPartenaire,
+    // RÈGLE : cf. RÈGLE détaillée sur epargneMoisAffiche plus bas — mêmes
+    // deux champs que app/(tabs)/index.tsx pour fusionner "Dépenses"/
+    // "Argent immobilisé" en vue partagée (bug confirmé le 2026-09-12 :
+    // cette carte utilisait encore objStore.enveloppes/epargneMois sans
+    // condition, jamais categoriesFusionnees).
+    donneesPartenaire,
+    epargneMoisPartenaireActuelle,
   } = useEspacePartage();
 
   // RÈGLE : cf. RÈGLE identique dans app/(tabs)/index.tsx — mêmes chargeurs
@@ -754,19 +761,57 @@ export default function Budget() {
     })),
   ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const enveloppesSansEntree = objStore.enveloppes.filter(
-    (e) => e.type !== "Entrée",
+  // RÈGLE À NE JAMAIS CASSER — FUSIONNÉS EN VUE PARTAGÉE (bug confirmé le
+  // 2026-09-12) : cette carte utilisait encore objStore.enveloppes/
+  // objStore.epargneMois SANS CONDITION, jamais categoriesFusionnees/
+  // epargneMoisPartenaireActuelle — "Dépenses"/"Argent immobilisé"
+  // n'évoluaient donc jamais en passant en vue partagée, contrairement à
+  // Aperçu (app/(tabs)/index.tsx) qui fait déjà correctement ce
+  // branchement. Même formule que là-bas : enveloppesAffichees =
+  // categoriesFusionnees en vue partagée (structurellement compatible avec
+  // Enveloppe, cf. RÈGLE sur CategorieFusionnee/EnveloppePartenaire,
+  // utils/espacePartage.ts), epargneMoisAffiche = epargneMois (moi) +
+  // epargneMoisPartenaireActuelle (partenaire). calculerResteEstimeCourant
+  // (utils/budget.ts) reste la SEULE source de totalDepenseEnveloppes/
+  // disponibleEffectif — jamais un second calcul local dupliqué comme
+  // c'était le cas ici avant ce correctif.
+  //
+  // RÈGLE : `&& donneesPartenaire` — cet écran n'a pas de garde de
+  // chargement dédié comme chargementPartageBox dans app/(tabs)/index.tsx
+  // (hors scope de ce correctif) ; sans ce garde, categoriesFusionnees
+  // retombe sur [] tant que donneesPartenaire n'a pas fini de charger (cf.
+  // sa RÈGLE, EspacePartageContext.tsx), ce qui ferait passer "Dépenses"/
+  // "Argent immobilisé" à 0€ un instant au lieu de mes propres chiffres —
+  // on affiche donc MES données personnelles pendant ce court chargement,
+  // jamais un flash à zéro.
+  const affichagePartage = estDansUnEspace && vueActive === "partage";
+  const enveloppesAffichees: Enveloppe[] =
+    affichagePartage && donneesPartenaire ? categoriesFusionnees : objStore.enveloppes;
+  const epargneMoisAffiche =
+    affichagePartage && donneesPartenaire
+      ? objStore.epargneMois + (epargneMoisPartenaireActuelle ?? 0)
+      : objStore.epargneMois;
+  // RÈGLE : filtre estCategorieActiveCeMois ajouté le 2026-09-12 (bug trouvé
+  // en revue) — calculerResteEstimeCourant ci-dessous applique déjà ce
+  // filtre en interne pour totalDepenses, mais enveloppesSansEntree ne
+  // l'avait pas : depenseDominante (plus bas, via trouverDepenseDominante)
+  // pouvait désigner comme "ta plus grosse dépense ce mois" une catégorie
+  // ponctuelle déjà inactive, exclue du total "Dépenses" affiché juste
+  // au-dessus — incohérence entre les deux cartes. Même filtre que
+  // categoriesAffichees plus haut dans ce fichier.
+  const enveloppesSansEntree = enveloppesAffichees.filter(
+    (e) =>
+      e.type !== "Entrée" &&
+      estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
   );
-  const totalDepenses = enveloppesSansEntree.reduce(
-    (acc, e) => acc + e.depense,
-    0,
-  );
-  const totalEpargne = objStore.epargneMois;
-  const budgetTotal = entreesBudgetDuMois(
-    objStore.enveloppes,
-    ANNEE_ACTUELLE,
-    MOIS_ACTUEL,
-  ).total;
+  const { disponibleEffectif: budgetTotal, totalDepenseEnveloppes: totalDepenses } =
+    calculerResteEstimeCourant(
+      enveloppesAffichees,
+      epargneMoisAffiche,
+      ANNEE_ACTUELLE,
+      MOIS_ACTUEL,
+    );
+  const totalEpargne = epargneMoisAffiche;
   // ⚠️ Jauge "Dépenses et argent immobilisé" : UNIQUEMENT ces deux segments
   // (pctDepenses, pctEpargne/pctEpargneGenerique/pctObjectifs). Les entrées
   // d'argent (reçues/prévues) ne doivent jamais y apparaître — elles sont
@@ -1901,7 +1946,7 @@ export default function Budget() {
           </View>
         ))}
 
-        {estDansUnEspace && vueActive === "partage"
+        {affichagePartage
           ? categoriesFusionneesTriees.map(renderCarteCategoriePartagee)
           : categoriesAffichesTriees.map(renderCarteCategorie)}
 

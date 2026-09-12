@@ -1588,6 +1588,23 @@ export default function Planning() {
   // visuellement identiques sur ce point.
   const couleurGrillePlanning =
     theme === "sombre" ? C.separateur : "rgba(0,0,0,0.08)";
+  // RÈGLE À NE JAMAIS CASSER — TYPOGRAPHIE UNIFORMISÉE (demande du
+  // 2026-09-12) : C.texteMuted est une teinte du thème (ex: #6B8CAE en
+  // sombre, un bleu-gris moyen), pas du blanc/noir clair — remplacé ici par
+  // du blanc/noir littéral à opacité fixe pour les heures (Jour/Semaine) et
+  // les chiffres de jour (Mois), afin qu'ils restent lisibles en mode
+  // sombre sans dépendre de la teinte "muted" du thème. Trois paliers,
+  // mêmes 3 vues : 0.9 = élément principal (chiffre du jour, Mois), 0.7 =
+  // élément secondaire (heure, Jour/Semaine), 0.3 = atténué (jour hors mois
+  // actuel, Mois). Ne s'applique PAS aux noms de jours (L M M J V S D,
+  // weekHeadNom/monthDayHead) ni aux headers de colonnes (déjà clairs via
+  // C.texte) — hors périmètre de cette demande.
+  const couleurTexteGrillePrincipal =
+    theme === "sombre" ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.9)";
+  const couleurTexteGrilleSecondaire =
+    theme === "sombre" ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.7)";
+  const couleurTexteGrilleAttenue =
+    theme === "sombre" ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)";
 
   // "vue" et "grille" sont toutes deux TOUJOURS montées (contrairement à
   // l'ancienne étape "evenement", retirée : elle dépendait de la présence
@@ -1903,7 +1920,11 @@ export default function Planning() {
                           <Text
                             style={[
                               styles.heureTexte,
-                              { color: estHeureActuelle ? "#1D9E75" : C.texteMuted },
+                              {
+                                color: estHeureActuelle
+                                  ? "#1D9E75"
+                                  : couleurTexteGrilleSecondaire,
+                              },
                             ]}
                           >
                             {h}
@@ -2160,7 +2181,12 @@ export default function Planning() {
                         { borderBottomColor: couleurGrillePlanning },
                       ]}
                     >
-                      <Text style={[styles.heureTexte, { color: C.texteMuted }]}>
+                      <Text
+                        style={[
+                          styles.heureTexte,
+                          { color: couleurTexteGrilleSecondaire },
+                        ]}
+                      >
                         {h}
                       </Text>
                     </View>
@@ -2317,15 +2343,22 @@ export default function Planning() {
                             style={[
                               styles.monthCell,
                               { borderBottomColor: couleurGrillePlanning },
+                              // RÈGLE : fond de cellule "aujourd'hui" —
+                              // RÉINTRODUIT le 2026-09-12 (demande explicite,
+                              // teal 10%), en plus du cercle ci-dessous.
+                              // Reversait la RÈGLE du 2026-09-06 qui
+                              // l'excluait volontairement ("jamais un fond
+                              // de cellule") ; les deux se combinent
+                              // maintenant, cf. site d'appel du cercle.
+                              estAujourdhui && { backgroundColor: "#1D9E7519" },
                             ]}
                             activeOpacity={0.7}
                             onPress={() => ouvrirJour(jourDate)}
                           >
                             {/* RÈGLE : "jour actuel cerclé en teal" (demande
-                                du 2026-09-06) — remplace l'ancien fond de
-                                cellule entière (teinteAujourdhui) par un
-                                simple cercle autour du numéro, jamais un
-                                fond de cellule. */}
+                                du 2026-09-06) — cercle autour du numéro,
+                                combiné depuis le 2026-09-12 avec le fond de
+                                cellule ci-dessus (cf. sa RÈGLE). */}
                             <View
                               style={[
                                 styles.monthNumCercle,
@@ -2338,8 +2371,11 @@ export default function Planning() {
                               <Text
                                 style={[
                                   styles.monthNum,
-                                  { color: C.texteMuted },
-                                  !estMoisActuel && styles.monthNumHorsMois,
+                                  {
+                                    color: estMoisActuel
+                                      ? couleurTexteGrillePrincipal
+                                      : couleurTexteGrilleAttenue,
+                                  },
                                 ]}
                               >
                                 {jourDate.getDate()}
@@ -3462,7 +3498,11 @@ const styles = StyleSheet.create({
   // fontSize/fontWeight relevés le 2026-09-12 (13→16, 600→700) — "mettre en
   // valeur les chiffres de chaque jour, plus grands, plus lisibles".
   monthNum: { fontSize: 16, fontWeight: "700" },
-  monthNumHorsMois: { opacity: 0.3 },
+  // RÈGLE : plus de style monthNumHorsMois (2026-09-12) — l'opacité fixe sur
+  // C.texteMuted ne donnait pas un vrai "blanc/noir atténué" en mode sombre
+  // ; remplacé par couleurTexteGrilleAttenue appliqué directement comme
+  // couleur de texte (cf. site d'appel), jamais un opacity RN superposé à
+  // une autre couleur.
   // Cercle autour du numéro du jour (vue Mois, demande du 2026-09-06) —
   // bordure teal posée inline uniquement pour "aujourd'hui" (cf. site
   // d'appel), transparent sinon : garde la même taille de cellule qu'un
