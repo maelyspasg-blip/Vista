@@ -77,6 +77,28 @@ const AUJOURDHUI = new Date();
 // couleurs d'événements synthétiques venant de la catégorie/l'objectif liés.
 const COULEUR_ENTREE_PLANNING = "#1D9E75";
 
+// Force l'opacité d'une couleur de séparateur du thème (hex #RRGGBB ou
+// rgba(...), les deux formats existants dans COULEURS, cf. ThemeContext) à
+// une valeur donnée — utilisé pour "bordures de la vue Mois plus marquées"
+// (demande du 2026-09-12) : C.separateur en thème sombre est déjà une rgba
+// à faible opacité (0.1/0.35 selon le contraste renforcé), un simple
+// suffixe hex n'aurait aucun sens dessus, d'où ce petit helper plutôt qu'un
+// nouveau token de palette pour un seul écran.
+function appliquerOpacite(couleur: string, opacite: number): string {
+  const rgba = couleur.match(/^rgba\(([^,]+),([^,]+),([^,]+),([^)]+)\)$/);
+  if (rgba) {
+    return `rgba(${rgba[1]},${rgba[2]},${rgba[3]},${opacite})`;
+  }
+  const hex6 = couleur.match(/^#([0-9a-fA-F]{6})$/);
+  if (hex6) {
+    const alphaHex = Math.round(opacite * 255)
+      .toString(16)
+      .padStart(2, "0");
+    return `${couleur}${alphaHex}`;
+  }
+  return couleur;
+}
+
 function heureEnMinutes(heure: string): number {
   const [h, m] = heure.replace("h", ":").split(":");
   return parseInt(h) * 60 + (parseInt(m) || 0);
@@ -1568,6 +1590,14 @@ export default function Planning() {
     ((minutesActuelles - HEURE_DEBUT * 60) / 60) * HAUTEUR_HEURE;
   const teinteAujourdhui =
     theme === "sombre" ? "rgba(139,111,232,0.3)" : "#E3DDFB";
+  // RÈGLE : surbrillance heure actuelle (vue Jour, demande du 2026-09-12) —
+  // -1 (jamais égal à un index HEURES réel) tant que dateActuelle n'est pas
+  // aujourd'hui, même garde que ligneActuelle (memeJour(dateActuelle,
+  // AUJOURDHUI)) : la surbrillance n'a de sens que pour le jour affiché
+  // réellement en cours.
+  const heureActuelleIndex = memeJour(dateActuelle, AUJOURDHUI)
+    ? maintenant.getHours()
+    : -1;
 
   // "vue" et "grille" sont toutes deux TOUJOURS montées (contrairement à
   // l'ancienne étape "evenement", retirée : elle dépendait de la présence
@@ -1864,13 +1894,30 @@ export default function Planning() {
               >
                 <View style={styles.timelineInner}>
                   <View style={styles.heuresCol}>
-                    {HEURES.map((h) => (
-                      <View key={h} style={styles.heureRow}>
-                        <Text style={[styles.heureTexte, { color: C.texteMuted }]}>
-                          {h}
-                        </Text>
-                      </View>
-                    ))}
+                    {HEURES.map((h, i) => {
+                      const estHeureActuelle = i === heureActuelleIndex;
+                      return (
+                        <View
+                          key={h}
+                          style={[
+                            styles.heureRow,
+                            { borderBottomColor: C.separateur },
+                            estHeureActuelle && {
+                              backgroundColor: "#1D9E7519",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.heureTexte,
+                              { color: estHeureActuelle ? "#1D9E75" : C.texteMuted },
+                            ]}
+                          >
+                            {h}
+                          </Text>
+                        </View>
+                      );
+                    })}
                   </View>
                   <View style={styles.eventsCol}>
                     {/* RÈGLE : "ligne verticale fine et continue" (Timeline
@@ -1892,7 +1939,13 @@ export default function Planning() {
                     {HEURES.map((h, i) => (
                       <TouchableOpacity
                         key={h}
-                        style={styles.ligneFond}
+                        style={[
+                          styles.ligneFond,
+                          { borderBottomColor: C.separateur },
+                          i === heureActuelleIndex && {
+                            backgroundColor: "#1D9E7519",
+                          },
+                        ]}
                         activeOpacity={0.5}
                         onPress={() => ouvrirCreationRapide(`${HEURE_DEBUT + i}h00`)}
                       />
@@ -2231,7 +2284,12 @@ export default function Planning() {
                 />
               }
             >
-              <View style={styles.monthDayHeadRow}>
+              <View
+                style={[
+                  styles.monthDayHeadRow,
+                  { backgroundColor: C.fondSecondaire },
+                ]}
+              >
                 {JOURS_SEMAINE.map((j) => (
                   <Text
                     key={j}
@@ -2261,7 +2319,7 @@ export default function Planning() {
                             key={di}
                             style={[
                               styles.monthCell,
-                              { borderColor: C.separateur },
+                              { borderColor: appliquerOpacite(C.separateur, 0.8) },
                             ]}
                             activeOpacity={0.7}
                             onPress={() => ouvrirJour(jourDate)}
@@ -2275,7 +2333,7 @@ export default function Planning() {
                               style={[
                                 styles.monthNumCercle,
                                 estAujourdhui && {
-                                  borderWidth: 1.5,
+                                  borderWidth: 2,
                                   borderColor: "#1D9E75",
                                 },
                               ]}
@@ -3267,6 +3325,7 @@ const styles = StyleSheet.create({
     height: HAUTEUR_HEURE,
     justifyContent: "flex-start",
     paddingTop: 4,
+    borderBottomWidth: 0.5,
   },
   heureTexte: {
     fontSize: 10,
@@ -3274,12 +3333,15 @@ const styles = StyleSheet.create({
     paddingRight: 4,
   },
   eventsCol: { flex: 1, position: "relative" },
-  // RÈGLE : plus de bordure horizontale par heure (Timeline premium, demande
-  // du 2026-09-06) — remplacée par timelineSpine ci-dessous, une seule ligne
-  // verticale continue plutôt que 24 séparateurs horizontaux. Reste un
-  // TouchableOpacity invisible, uniquement comme cible de tap
-  // (ouvrirCreationRapide, cf. site d'appel).
-  ligneFond: { height: HAUTEUR_HEURE },
+  // RÈGLE : séparateurs horizontaux entre chaque heure réintroduits le
+  // 2026-09-12 (demande explicite) — la Timeline premium du 2026-09-06 les
+  // avait retirés au profit de timelineSpine seule (ligne verticale
+  // continue) ; Semaine avait cependant gardé les siens (ligneFondSemaine,
+  // borderTopWidth), rendant Jour incohérent avec Semaine entre-temps. Reste
+  // par ailleurs un TouchableOpacity, cible de tap (ouvrirCreationRapide, cf.
+  // site d'appel) — la couleur de bordure est posée inline (C.separateur),
+  // jamais ici (cf. convention du fichier, couleurs jamais statiques).
+  ligneFond: { height: HAUTEUR_HEURE, borderBottomWidth: 0.5 },
   // Ligne verticale fine et continue, à gauche de la colonne d'événements
   // ("Heures affichées à gauche de la ligne, événements accrochés à droite",
   // cf. demande) — hauteur posée par le site d'appel (HEURES.length *
@@ -3374,7 +3436,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   weekEventBlockTexte: { fontSize: 9, fontWeight: "600" },
-  monthDayHeadRow: { flexDirection: "row", marginBottom: 6 },
+  monthDayHeadRow: {
+    flexDirection: "row",
+    marginBottom: 6,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
   monthDayHead: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: "600" },
   monthGrid: {
     flex: 1,
@@ -3385,11 +3452,11 @@ const styles = StyleSheet.create({
   monthRow: { flex: 1, flexDirection: "row" },
   monthCell: {
     flex: 1,
-    borderWidth: 0.25,
+    borderWidth: 0.5,
     padding: 5,
   },
   monthNum: { fontSize: 13, fontWeight: "600" },
-  monthNumHorsMois: { opacity: 0.5 },
+  monthNumHorsMois: { opacity: 0.3 },
   // Cercle autour du numéro du jour (vue Mois, demande du 2026-09-06) —
   // bordure teal posée inline uniquement pour "aujourd'hui" (cf. site
   // d'appel), transparent sinon : garde la même taille de cellule qu'un
