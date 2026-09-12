@@ -377,6 +377,12 @@ export default function Dashboard() {
     couleurPartenaire,
     rafraichirEspace,
     rafraichirDonneesPartenaire,
+    // RÈGLE : uniquement pour renforcer le garde de chargement plus bas
+    // (`affichagePartage && chargementPartenaire`, cf. RÈGLE à son site) —
+    // ne jamais lire ses champs directement pour du calcul, la seule source
+    // de vérité "fusionnée" reste categoriesFusionnees (RÈGLE dans
+    // EspacePartageContext.tsx).
+    donneesPartenaire,
   } = useEspacePartage();
 
   // RÈGLE : mêmes chargeurs que ceux déjà appelés au montage/périodiquement
@@ -1608,8 +1614,22 @@ export default function Dashboard() {
             epargneMoisAffiche (calculées en tête de composant). Ne jamais
             réintroduire deux blocs JSX séparés ici — la seule branche encore
             nécessaire est l'attente du chargement des données du
-            partenaire. */}
-        {affichagePartage && chargementPartenaire ? (
+            partenaire.
+
+            RÈGLE : `|| !donneesPartenaire` ajouté le 2026-09-12 (bug de
+            flash corrigé) — chargementPartenaire est posé à `true` DANS
+            l'effet de EspacePartageContext.tsx qui réagit au changement de
+            vueActive, donc un cran APRÈS le rendu qui suit immédiatement le
+            passage à "partage" (React ne commite l'effet qu'après ce
+            premier rendu). Sur ce rendu-là, chargementPartenaire vaut encore
+            sa valeur précédente (false) alors que enveloppesAffichees
+            bascule déjà sur categoriesFusionnees — qui retombe sur [] tant
+            que donneesPartenaire n'a jamais été chargé cette session (cf.
+            RÈGLE sur categoriesFusionnees, EspacePartageContext.tsx),
+            produisant un instant de chiffres calculés sur un budget vide
+            plutôt que la vraie attente. `!donneesPartenaire` couvre
+            exactement cette fenêtre sans attendre le prochain rendu. */}
+        {affichagePartage && (chargementPartenaire || !donneesPartenaire) ? (
           <View style={styles.chargementPartageBox}>
             <ActivityIndicator color={C.accent} />
             <Text

@@ -1790,19 +1790,22 @@ export default function Planning() {
 
       <View style={{ flex: 1 }}>
           {vue === "jour" && (
-            // RÈGLE : fond Timeline premium (demande du 2026-09-06) —
-            // spécifique à Planning, jamais C.fondPage (#1A2530, utilisé
-            // partout ailleurs dans l'app) : divergence assumée pour cette
-            // seule refonte, cf. couleurs fournies explicitement.
+            // RÈGLE : fond Timeline premium (blanc/sombre spécifique,
+            // demande du 2026-09-06) RETIRÉ le 2026-09-12 (demande explicite)
+            // — Jour/Semaine reviennent au fond de page par défaut
+            // (C.fondPage, hérité du conteneur racine ligne ~1621), comme
+            // Mois qui n'avait jamais eu ce traitement (cf. RÈGLE conservée
+            // sur la vue Semaine ci-dessous). Les 3 vues sont maintenant
+            // uniformes sur ce point.
             // RÈGLE : height: "100%" en plus de flex: 1 (bug du 2026-09-06,
             // constaté uniquement sur device iOS physique, jamais reproduit
             // en web) — flex:1 seul ne se résolvait pas de façon fiable ici,
-            // laissant une zone vide en bas de la vue Jour/Semaine.
+            // laissant une zone vide en bas de la vue Jour/Semaine. Toujours
+            // valable indépendamment du fond retiré ci-dessus.
             <View
               style={{
                 flex: 1,
                 height: "100%",
-                backgroundColor: theme === "sombre" ? "#0D1B2A" : "#FFFFFF",
               }}
             >
               {evsToutLaJourneeJour(dateActuelle).length > 0 && (
@@ -2051,18 +2054,16 @@ export default function Planning() {
           )}
 
           {vue === "semaine" && (
-            // RÈGLE : même fond Timeline premium que la vue Jour, cf. RÈGLE
-            // détaillée là-bas — "une seule structure, deux systèmes de
-            // couleurs" (demande du 2026-09-06) s'applique aux deux vues
-            // Timeline (Jour/Semaine), jamais à Mois (qui garde son fond
-            // actuel, cf. point 3 de la demande : "conserver le principe
-            // actuel"). height: "100%" : cf. RÈGLE identique sur la vue Jour
-            // (bug du 2026-09-06, device iOS physique).
+            // RÈGLE : fond Timeline premium retiré le 2026-09-12, cf. RÈGLE
+            // détaillée sur la vue Jour — les 3 vues (Jour/Semaine/Mois)
+            // utilisent maintenant toutes le fond de page par défaut
+            // (C.fondPage). height: "100%" : cf. RÈGLE identique sur la vue
+            // Jour (bug du 2026-09-06, device iOS physique) — toujours
+            // valable indépendamment du fond retiré ci-dessus.
             <View
               style={{
                 flex: 1,
                 height: "100%",
-                backgroundColor: theme === "sombre" ? "#0D1B2A" : "#FFFFFF",
               }}
             >
               <View style={styles.weekHeadRow}>

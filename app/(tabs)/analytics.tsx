@@ -4494,6 +4494,21 @@ export default function Analytics() {
             </View>
           </View>
 
+          {/* RÈGLE À NE JAMAIS CASSER — MASQUÉ EN VUE PARTAGÉE (bug corrigé
+              le 2026-09-12) : categoriesComparees (et donc
+              categoriesCompareesChangees/Inchangees, depenseMoisActuel,
+              depenseMoisPrec) dérive de objStore.enveloppes SEUL, jamais
+              fusionné avec le partenaire — contrairement à tauxEpargne/
+              revenusCombines/depensesCombinees juste au-dessus, qui sont
+              déjà correctement consolidés. Cette carte affichait donc à tort
+              les chiffres personnels, sans le signaler, juste après la
+              ligne KPI correctement fusionnée — même limite documentée que
+              "Entrées et dépenses par catégorie" (masquée pour la même
+              raison) : reproduire cette comparaison par catégorie pour le
+              partenaire demanderait d'étendre son historique mensuel
+              archivé (cf. plan "Ajustements vue partagée"), un chantier à
+              part, jamais un second calcul bricolé ici. */}
+          {!(estDansUnEspace && vueActive === "partage") && (
           <View
             style={[
               styles.compareCard,
@@ -4641,6 +4656,7 @@ export default function Analytics() {
               </Text>
             )}
           </View>
+          )}
         </TiroirStats>
         </CibleTutoriel>
 
