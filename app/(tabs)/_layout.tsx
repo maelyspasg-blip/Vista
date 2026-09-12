@@ -139,6 +139,12 @@ export default function TabLayout() {
         objStore.chargerHistoriquePaiements(),
         objStore.chargerHistoriquesMois(),
       ]);
+      // RÈGLE À NE JAMAIS CASSER — cf. EtatStore.chargementInitialTermine :
+      // posé ICI, juste après ce premier Promise.all, avant verifierEtat()
+      // (qui peut lui-même prendre du temps) — c'est le signal que
+      // enveloppes/transactions reflètent enfin la réalité du compte, pas
+      // juste ETAT_INITIAL le temps que Supabase réponde.
+      objStore.marquerChargementInitialTermine();
       await verifierEtat();
     })();
 

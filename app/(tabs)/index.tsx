@@ -891,6 +891,14 @@ export default function Dashboard() {
     moisActuel: maintenant.getMonth(),
     anneeActuelle: maintenant.getFullYear(),
     etatsPrecedents: etatsInsights,
+    // RÈGLE À NE JAMAIS CASSER — cf. utils/conseils.ts section "Maturité du
+    // compte" : le compte invité a un seed réaliste dès la création
+    // (setup_guest_account() côté Supabase), le filtre "nouveau compte" ne
+    // doit jamais s'y appliquer.
+    estCompteInvite: isGuest,
+    dateCreationCompte: objStore.dateCreationCompte,
+    seuilEpargneConstante: objStore.seuilEpargneConstante,
+    chargementInitialTermine: objStore.chargementInitialTermine,
   });
   // RÈGLE À NE JAMAIS CASSER : "Nos conseils" est la source PRIORITAIRE —
   // il s'affiche toujours en entier, JAMAIS filtré par

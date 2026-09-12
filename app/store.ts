@@ -271,6 +271,13 @@ type EtatStore = {
   // avant que ce listener n'ait reçu son premier événement). null tant que
   // l'état d'auth n'est pas encore connu OU si l'utilisateur est déconnecté.
   userId: string | null;
+  // Même source unique que userId ci-dessus (posé par le même listener
+  // onAuthStateChange, jamais recalculé ailleurs) — `session.user.created_at`
+  // est toujours renseigné par Supabase Auth (y compris pour un compte
+  // invité anonyme). Sert uniquement à utils/conseils.ts::aAssezDeDonnees
+  // (maturité du compte pour les "insights de démarrage") ; ne conditionne
+  // aucun calcul financier.
+  dateCreationCompte: string | null;
   objectifs: Objectif[];
   epargneMois: number;
   enveloppes: Enveloppe[];
@@ -305,6 +312,18 @@ type EtatStore = {
   erreurSync: string | null;
   suggestionsIgnorees: string[];
   suggestionRecurrence: SuggestionRecurrence | null;
+  // RÈGLE À NE JAMAIS CASSER — DISTINGUER "PAS ENCORE CHARGÉ" DE "RÉELLEMENT
+  // VIDE" : enveloppes/transactions valent `[]` (ETAT_INITIAL) aussi bien
+  // pour un compte réellement neuf que pour n'importe quel compte le temps
+  // que le Promise.all de app/(tabs)/_layout.tsx se résolve après un
+  // démarrage à froid — les deux cas sont indiscernables en ne regardant que
+  // `.length === 0`. Posé une seule fois à `true` par _layout.tsx juste après
+  // ce premier chargement, jamais remis à `false` ailleurs qu'au passage par
+  // ETAT_INITIAL (déconnexion) — utils/conseils.ts::genererConseils s'appuie
+  // dessus pour ne jamais proposer le message de bienvenue "compte neuf" à un
+  // compte établi simplement parce que ses données n'ont pas fini d'arriver
+  // (bug confirmé en revue le 2026-09-12, jamais publié).
+  chargementInitialTermine: boolean;
 };
 
 // RÈGLE À NE JAMAIS CASSER — PROTECTION CONTRE LES DONNÉES QUI FUITENT
@@ -320,6 +339,7 @@ type EtatStore = {
 // qu'un nouveau compte ne charge ses propres données, jamais après.
 const ETAT_INITIAL: EtatStore = {
   userId: null,
+  dateCreationCompte: null,
   objectifs: [],
   epargneMois: 0,
   enveloppes: [],
@@ -343,6 +363,7 @@ const ETAT_INITIAL: EtatStore = {
   erreurSync: null,
   suggestionsIgnorees: [],
   suggestionRecurrence: null,
+  chargementInitialTermine: false,
 };
 
 let etat: EtatStore = { ...ETAT_INITIAL };
@@ -408,7 +429,10 @@ supabase.auth.onAuthStateChange((evenement, session) => {
     reinitialiserEtatUtilisateur();
     return;
   }
-  setEtat({ userId: session?.user?.id ?? null });
+  setEtat({
+    userId: session?.user?.id ?? null,
+    dateCreationCompte: session?.user?.created_at ?? null,
+  });
 });
 
 let minuteurErreurSync: ReturnType<typeof setTimeout> | null = null;
@@ -2353,6 +2377,7 @@ export function useObjectifs() {
 
   return {
     userId: local.userId,
+    dateCreationCompte: local.dateCreationCompte,
     objectifs: local.objectifs,
     epargneMois: local.epargneMois,
     enveloppes: local.enveloppes,
@@ -2379,10 +2404,19 @@ export function useObjectifs() {
     dernierMoisArchive: local.dernierMoisArchive,
     erreurSync: local.erreurSync,
     suggestionRecurrence: local.suggestionRecurrence,
+    chargementInitialTermine: local.chargementInitialTermine,
 
     effacerErreurSync: () => {
       if (minuteurErreurSync) clearTimeout(minuteurErreurSync);
       setEtat({ erreurSync: null });
+    },
+
+    // RÈGLE À NE JAMAIS CASSER — cf. EtatStore.chargementInitialTermine :
+    // appelé UNE SEULE FOIS par app/(tabs)/_layout.tsx, juste après le
+    // Promise.all du tout premier chargement (enveloppes, transactions,
+    // objectifs...). Ne jamais appeler ailleurs.
+    marquerChargementInitialTermine: () => {
+      setEtat({ chargementInitialTermine: true });
     },
 
     chargerEnveloppes: async () => {

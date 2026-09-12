@@ -95,7 +95,9 @@ export type Conseil = {
   texte: string;
   niveau: NiveauConseil;
   // null uniquement pour les 2 replis "tout va bien" / "données
-  // insuffisantes" — ce ne sont pas des situations suivies dans le temps.
+  // insuffisantes" et pour le message de bienvenue "demarrage" (cf.
+  // genererConseilDemarrage) — ce ne sont pas des situations suivies dans le
+  // temps.
   etat: EtatInsight | null;
   // Renseigné uniquement pour les situations qui portent sur UNE catégorie
   // précise (budget/tendance/dépense inhabituelle/récurrente/nouvelle
@@ -388,6 +390,84 @@ export async function purgerDonneesInsights(userId: string): Promise<void> {
   } catch {
     // Best-effort, même logique que sauvegarderEtatsInsights ci-dessus.
   }
+}
+
+// --- Maturité du compte : "insights de démarrage" --------------------------
+//
+// RÈGLE À NE JAMAIS CASSER : tant qu'un compte n'a pas assez de données, les
+// familles de detecterSituations ci-dessous (comparaisons au mois précédent,
+// tendances, moyennes sur 3 mois...) produisent des signaux qui n'ont pas de
+// sens, même s'ils sont individuellement bien protégés (ex: "vos dépenses
+// ont baissé de 100%" alors qu'il n'y a simplement aucune dépense du mois
+// précédent à comparer). genererConseils court-circuite donc ENTIÈREMENT le
+// moteur normal — pas seulement chaque famille une par une — tant que
+// aAssezDeDonnees() est faux, au profit d'un unique message de bienvenue
+// progressif (genererConseilDemarrage). Ne s'applique JAMAIS au compte
+// invité (estCompteInvite) : son seed (setup_guest_account() côté Supabase)
+// fournit déjà un historique réaliste dès la création, donc le filtre
+// "nouveau compte" ne doit pas s'y appliquer.
+export type SeuilsDonneesSuffisantes = {
+  nbTransactions: number;
+  nbJoursUtilisation: number;
+  nbEnveloppes: number;
+};
+
+export const SEUIL_DONNEES_SUFFISANTES: SeuilsDonneesSuffisantes = {
+  nbTransactions: 5,
+  nbJoursUtilisation: 7,
+  nbEnveloppes: 2,
+};
+
+// RÈGLE : `nbEnveloppes` ne compte que les catégories de DÉPENSE
+// (type !== "Entrée", cf. appelant) — une seule entrée de revenu déclarée ne
+// prouve pas qu'un compte a commencé à budgétiser quoi que ce soit.
+export function aAssezDeDonnees(params: {
+  nbTransactions: number;
+  nbJoursUtilisation: number;
+  nbEnveloppes: number;
+}): boolean {
+  return (
+    params.nbTransactions >= SEUIL_DONNEES_SUFFISANTES.nbTransactions &&
+    params.nbEnveloppes >= SEUIL_DONNEES_SUFFISANTES.nbEnveloppes &&
+    params.nbJoursUtilisation >= SEUIL_DONNEES_SUFFISANTES.nbJoursUtilisation
+  );
+}
+
+// Message affiché À LA PLACE du moteur de conseils normal tant que
+// aAssezDeDonnees() est faux (cf. genererConseils) — progression organisée
+// par nombre de transactions (l'axe le plus naturel pour un nouvel
+// utilisateur) ; nbJoursUtilisation n'intervient qu'à travers
+// aAssezDeDonnees() (dernière étape : seuils transactions/catégories déjà
+// atteints, mais délai minimum pas encore écoulé). Jamais de ton
+// moralisateur, cohérent avec la RÈGLE #4 du moteur de coaching plus bas.
+function genererConseilDemarrage(params: {
+  nbTransactions: number;
+  nbEnveloppes: number;
+  aAuMoinsUneEntree: boolean;
+  seuilEpargneConstante: number | null;
+}): Conseil {
+  let texte: string;
+  if (params.nbTransactions < 3) {
+    if (params.nbEnveloppes === 0) {
+      texte =
+        "Bienvenue sur Vista ! Commence par créer tes catégories habituelles — loyer, courses, transport...";
+    } else if (!params.aAuMoinsUneEntree) {
+      texte = "Ajoute tes revenus mensuels pour que Vista calcule ton budget disponible";
+    } else {
+      texte = "Astuce : utilise le Planning pour ne jamais oublier une dépense récurrente";
+    }
+  } else if (params.nbTransactions < SEUIL_DONNEES_SUFFISANTES.nbTransactions) {
+    texte =
+      params.nbTransactions === 3
+        ? "Tes premières dépenses sont enregistrées ! Continue pour que Vista puisse analyser tes habitudes"
+        : "Plus tu ajoutes de dépenses, plus les conseils Vista seront précis et personnalisés";
+  } else {
+    texte =
+      params.seuilEpargneConstante === null
+        ? "Astuce : configure ton épargne mensuelle dans Profil pour suivre tes objectifs"
+        : "Tu es sur la bonne voie ! Dans quelques jours, Vista pourra te donner tes premiers vrais insights";
+  }
+  return { texte, niveau: "bon", etat: null, cle: "demarrage" };
 }
 
 // --- Moteur de coaching "Nos conseils" (Aperçu) ----------------------------
@@ -1090,6 +1170,12 @@ function detecterSituations(
         aujourdHui,
         texte: `${a.e.nom} et ${b.e.nom} augmentent en même temps ce mois-ci (+${Math.round(a.pct * 100)}% et +${Math.round(b.pct * 100)}% vs ${MOIS_LABELS[moisPrec]}) — ensemble, ça représente environ ${Math.round(a.delta + b.delta)}€ de plus qu'habituellement.`,
         niveauConseil: "attention",
+        // RÈGLE : contrairement à "budget"/"tendance"/"objectif proche", ce
+        // % n'est pas borné structurellement (depensePrec peut être minime
+        // par rapport à e.depense) — sans pourcentagesAffiches, validerConseil
+        // ne pouvait pas rejeter un ratio aberrant ici (bug confirmé le
+        // 2026-09-12, cf. audit "insights peu de données").
+        pourcentagesAffiches: [Math.round(a.pct * 100), Math.round(b.pct * 100)],
       });
     }
   }
@@ -1157,6 +1243,12 @@ function detecterSituations(
         aujourdHui,
         texte: `Vos dépenses ${candidatBaisse.e.nom} ont baissé de ${Math.round(candidatBaisse.pct * 100)}% par rapport à ${MOIS_LABELS[moisPrec]}, soit environ ${Math.round(candidatBaisse.delta)}€ économisés ce mois-ci.`,
         categorieId: candidatBaisse.e.id,
+        // RÈGLE : défense en profondeur — ce ratio est structurellement
+        // borné à [0,100] (une dépense ne peut pas baisser de plus de 100%
+        // de sa valeur précédente), mais on le fait quand même passer par
+        // validerConseil comme les autres familles plutôt que de compter
+        // sur cette seule garantie de calcul.
+        pourcentagesAffiches: [Math.round(candidatBaisse.pct * 100)],
       });
     }
   }
@@ -1684,8 +1776,53 @@ export function genererConseils(params: {
   // filtre — ce n'est pas un insight qui "se répète", c'est un état vide
   // légitime sur chaque écran qui n'a rien à montrer.
   situationsExclues?: Set<string>;
+  // RÈGLE À NE JAMAIS CASSER — cf. section "Maturité du compte" plus haut :
+  // tant que aAssezDeDonnees() est faux (et estCompteInvite faux), le moteur
+  // ci-dessous est entièrement court-circuité au profit d'un unique message
+  // de bienvenue. dateCreationCompte vient de la même source unique que
+  // userId (app/store.ts, listener onAuthStateChange) — jamais recalculée
+  // localement ici.
+  estCompteInvite: boolean;
+  dateCreationCompte: string | null;
+  seuilEpargneConstante: number | null;
+  // RÈGLE À NE JAMAIS CASSER — cf. EtatStore.chargementInitialTermine
+  // (app/store.ts) : `enveloppes`/`transactions` valent `[]` aussi bien pour
+  // un compte réellement neuf que pour n'importe quel compte le temps que le
+  // chargement initial se termine après un démarrage à froid — les deux cas
+  // sont indiscernables sur la seule longueur des tableaux. Tant que ce flag
+  // est faux, on NE court-circuite JAMAIS vers le message de bienvenue (on
+  // laisse le moteur normal tourner, qui retombe sans risque sur son repli
+  // neutre existant "données insuffisantes"/"mois maîtrisé") — jamais
+  // affirmer à tort à un compte établi qu'il n'a "pas encore de catégories".
+  chargementInitialTermine: boolean;
 }): { conseils: Conseil[]; etatsAJour: EtatsInsightsMap; nouvellesResolutions: number } {
   const { maxConseils = 3, etatsPrecedents, situationsExclues } = params;
+
+  if (!params.estCompteInvite && params.chargementInitialTermine) {
+    const nbEnveloppesHorsEntree = params.enveloppes.filter((e) => e.type !== "Entrée").length;
+    const nbJoursUtilisation = params.dateCreationCompte
+      ? Math.floor((Date.now() - new Date(params.dateCreationCompte).getTime()) / 86400000)
+      : Infinity; // pas de date connue → repli sûr, ne jamais bloquer à tort un compte existant
+    const donneesSuffisantes = aAssezDeDonnees({
+      nbTransactions: params.transactions.length,
+      nbJoursUtilisation,
+      nbEnveloppes: nbEnveloppesHorsEntree,
+    });
+    if (!donneesSuffisantes) {
+      return {
+        conseils: [
+          genererConseilDemarrage({
+            nbTransactions: params.transactions.length,
+            nbEnveloppes: nbEnveloppesHorsEntree,
+            aAuMoinsUneEntree: params.enveloppes.some((e) => e.type === "Entrée"),
+            seuilEpargneConstante: params.seuilEpargneConstante,
+          }),
+        ],
+        etatsAJour: etatsPrecedents,
+        nouvellesResolutions: 0,
+      };
+    }
+  }
 
   const { situations, etatsAJour, nouvellesResolutions, objectifsAvecRythme } = detecterSituations(
     params,
