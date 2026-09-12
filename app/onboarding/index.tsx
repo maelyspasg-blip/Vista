@@ -1,25 +1,63 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     StyleSheet,
     TouchableOpacity,
     View,
 } from "react-native";
+import Svg, { Rect } from "react-native-svg";
+import { useGuest } from "../GuestContext";
 import { marquerOnboardingVu } from "../onboardingStorage";
 import { Text } from "../Texte";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
+import { ESPACE_PARTAGE_ACTIF } from "../../utils/premium";
 
 const PURPLE = "#8B6FE8";
 const PURPLE_LIGHT = "#F0EEFF";
 const MINT = "#5DC8A0";
 const PEACH = "#F4956A";
+// RÈGLE : même teal que le reste de l'app pour l'espace partagé (cf.
+// palette Vista dans CLAUDE.md — #1D9E75), jamais une des 3 couleurs
+// ci-dessus déjà utilisées par les slides de présentation "solo".
+const TEAL = "#1D9E75";
+const TEAL_LIGHT = "#E1F5EE";
+// Violet "Partenaire" déjà utilisé partout où la vue partagée distingue
+// les deux comptes (Aperçu/Budget/Stats/Planning, cf. CLAUDE.md) — jamais
+// une couleur inventée ici pour ce même rôle.
+const VIOLET_PARTENAIRE = "#c084fc";
 
-const SLIDES = [
+type SlideStandard = {
+  id: number;
+  type: "standard";
+  icone: React.ComponentProps<typeof Ionicons>["name"];
+  titre: string;
+  description: string;
+  couleur: string;
+  bg: string;
+};
+
+// RÈGLE : type distinct (pas juste un champ optionnel sur SlideStandard) —
+// ce slide n'a pas d'icône Ionicons unique en grand format à la place de
+// l'illustration, il a un mini-carrousel dédié (CarrouselVistaADeux
+// ci-dessous). Le distinguer par `type` évite un rendu accidentellement
+// incomplet si un champ `icone`/`bg` manquait sur une variante "couple".
+type SlideCouple = {
+  id: number;
+  type: "couple";
+  titre: string;
+  description: string;
+  couleur: string;
+};
+
+type Slide = SlideStandard | SlideCouple;
+
+const SLIDES_PRESENTATION: SlideStandard[] = [
   {
     id: 1,
-    icone: "hand-right-outline" as const,
+    type: "standard",
+    icone: "hand-right-outline",
     titre: "Bienvenue sur Vista",
     description:
       "Ton assistant financier personnel. Suis tes dépenses, anticipe tes besoins et garde le contrôle de ton budget.",
@@ -28,7 +66,8 @@ const SLIDES = [
   },
   {
     id: 2,
-    icone: "wallet-outline" as const,
+    type: "standard",
+    icone: "wallet-outline",
     titre: "Pilote ton budget",
     description:
       "Crée tes catégories, suis tes dépenses en temps réel et visualise ton prévisionnel du mois.",
@@ -37,7 +76,8 @@ const SLIDES = [
   },
   {
     id: 3,
-    icone: "calendar-outline" as const,
+    type: "standard",
+    icone: "calendar-outline",
     titre: "Organise ta semaine",
     description:
       "Planifie tes événements et connecte ton agenda à ton budget pour une vision complète de ta vie.",
@@ -46,13 +86,163 @@ const SLIDES = [
   },
 ];
 
+// RÈGLE À NE JAMAIS CASSER — ÉCRAN "VISTA À DEUX" (roadmap, ajouté le
+// 2026-09-12) : positionné après les 3 slides de présentation ci-dessus,
+// avant l'écran final de création de compte (/onboarding/inscription) —
+// cf. le calcul de `slides` plus bas, jamais ajouté ailleurs dans le
+// tableau. Visible UNIQUEMENT si ESPACE_PARTAGE_ACTIF === true (feature
+// encore désactivée en bêta, cf. utils/premium.ts) et jamais pour un
+// compte invité (un essai de découverte n'a pas de partenaire à inviter).
+const SLIDE_COUPLE: SlideCouple = {
+  id: 4,
+  type: "couple",
+  titre: "Vista à deux",
+  description:
+    "Invitez votre partenaire depuis votre Profil. Un code suffit pour lier vos comptes et gérer vos dépenses communes ensemble.",
+  couleur: TEAL,
+};
+
+// Mini illustration SVG 1/3 — code d'invitation stylisé + icône partage.
+function IllustrationCode() {
+  return (
+    <View style={styles.illustrationCoupleLigne}>
+      <View style={[styles.codeCarte, { borderColor: TEAL }]}>
+        <Ionicons name="share-social-outline" size={20} color={TEAL} />
+        <Text style={[styles.codeTexte, { color: TEAL }]}>VISTA-3F92K1</Text>
+      </View>
+    </View>
+  );
+}
+
+// Mini illustration SVG 2/3 — deux jauges côte à côte, badges "Moi" /
+// "Partenaire". Rect (react-native-svg) plutôt qu'une vraie jauge animée
+// de l'app (GraphiqueDonutCouple etc.) — volontairement statique et
+// simplifié, ceci est une illustration marketing d'onboarding, pas un vrai
+// graphique de données.
+function IllustrationJauges() {
+  return (
+    <View style={styles.illustrationCoupleLigne}>
+      <View style={styles.jaugeColonne}>
+        <View style={[styles.jaugeBadge, { backgroundColor: TEAL_LIGHT }]}>
+          <Text style={[styles.jaugeBadgeTexte, { color: TEAL }]}>Moi</Text>
+        </View>
+        <Svg width={56} height={96}>
+          <Rect x={4} y={0} width={48} height={96} rx={12} fill={`${TEAL}26`} />
+          <Rect x={4} y={38} width={48} height={58} rx={12} fill={TEAL} />
+        </Svg>
+      </View>
+      <View style={styles.jaugeColonne}>
+        <View
+          style={[
+            styles.jaugeBadge,
+            { backgroundColor: `${VIOLET_PARTENAIRE}26` },
+          ]}
+        >
+          <Text style={[styles.jaugeBadgeTexte, { color: VIOLET_PARTENAIRE }]}>
+            Partenaire
+          </Text>
+        </View>
+        <Svg width={56} height={96}>
+          <Rect
+            x={4}
+            y={0}
+            width={48}
+            height={96}
+            rx={12}
+            fill={`${VIOLET_PARTENAIRE}26`}
+          />
+          <Rect x={4} y={60} width={48} height={36} rx={12} fill={VIOLET_PARTENAIRE} />
+        </Svg>
+      </View>
+    </View>
+  );
+}
+
+// Mini illustration SVG 3/3 — balance partagée, deux prénoms + barre
+// bicolore (même esprit que la "Balance partagée" réelle de Stats, en
+// version très simplifiée pour l'onboarding).
+function IllustrationBalance() {
+  return (
+    <View style={styles.illustrationCoupleLigne}>
+      <View style={styles.balanceContenu}>
+        <View style={styles.balanceNomsRow}>
+          <Text style={[styles.balanceNom, { color: TEAL }]}>Toi</Text>
+          <Text style={[styles.balanceNom, { color: VIOLET_PARTENAIRE }]}>
+            Partenaire
+          </Text>
+        </View>
+        <Svg width={220} height={22}>
+          <Rect x={0} y={0} width={128} height={22} rx={11} fill={TEAL} />
+          <Rect x={130} y={0} width={90} height={22} rx={11} fill={VIOLET_PARTENAIRE} />
+        </Svg>
+      </View>
+    </View>
+  );
+}
+
+const ILLUSTRATIONS_COUPLE = [
+  IllustrationCode,
+  IllustrationJauges,
+  IllustrationBalance,
+];
+const DELAI_ROTATION_CARROUSEL_MS = 2000;
+
+// RÈGLE À NE JAMAIS CASSER — DÉFILEMENT UNIQUEMENT PENDANT LE MONTAGE DE
+// CE COMPOSANT : l'intervalle est créé/nettoyé par le cycle de vie normal
+// de ce composant (monté seulement quand le slide "couple" est affiché,
+// cf. site d'appel plus bas) — jamais un intervalle global qui tournerait
+// aussi pendant les autres slides.
+function CarrouselVistaADeux() {
+  const [indexActuel, setIndexActuel] = useState(0);
+
+  useEffect(() => {
+    const intervalle = setInterval(() => {
+      setIndexActuel((i) => (i + 1) % ILLUSTRATIONS_COUPLE.length);
+    }, DELAI_ROTATION_CARROUSEL_MS);
+    return () => clearInterval(intervalle);
+  }, []);
+
+  const Illustration = ILLUSTRATIONS_COUPLE[indexActuel];
+
+  return (
+    <View style={styles.carrouselCouple}>
+      <Illustration />
+      <View style={styles.carrouselDots}>
+        {ILLUSTRATIONS_COUPLE.map((_, i) => (
+          <View
+            key={i}
+            style={[
+              styles.carrouselDot,
+              {
+                backgroundColor: i === indexActuel ? TEAL : "#E0E0E0",
+                width: i === indexActuel ? 16 : 6,
+              },
+            ]}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 export default function Onboarding() {
   const router = useRouter();
   const estTablette = useEstTablette();
+  const { isGuest } = useGuest();
   const [slideActuel, setSlideActuel] = useState(0);
 
+  // RÈGLE : recalculé uniquement quand isGuest change — ESPACE_PARTAGE_ACTIF
+  // est une constante de module, jamais besoin de la revalider ici.
+  const slides = useMemo<Slide[]>(
+    () =>
+      ESPACE_PARTAGE_ACTIF && !isGuest
+        ? [...SLIDES_PRESENTATION, SLIDE_COUPLE]
+        : SLIDES_PRESENTATION,
+    [isGuest],
+  );
+
   const suivant = () => {
-    if (slideActuel < SLIDES.length - 1) {
+    if (slideActuel < slides.length - 1) {
       setSlideActuel(slideActuel + 1);
     } else {
       marquerOnboardingVu();
@@ -65,7 +255,14 @@ export default function Onboarding() {
     router.push("/onboarding/inscription");
   };
 
-  const slide = SLIDES[slideActuel];
+  const slide = slides[slideActuel];
+  const estDernierSlide = slideActuel === slides.length - 1;
+  // RÈGLE : le slide "couple" affiche toujours "Suivant", jamais
+  // "Commencer" — même s'il se trouve être le dernier du tableau (demande
+  // explicite) : c'est /onboarding/inscription, l'étape suivante, qui reste
+  // la véritable validation finale.
+  const texteBouton =
+    slide.type === "couple" ? "Suivant" : estDernierSlide ? "Commencer" : "Suivant";
 
   return (
     <View style={styles.container}>
@@ -84,9 +281,16 @@ export default function Onboarding() {
         <Text style={styles.skipTexte}>Passer</Text>
       </TouchableOpacity>
 
-      <View style={[styles.illustration, { backgroundColor: slide.bg }]}>
-        <Ionicons name={slide.icone} size={80} color="#1A1A1A" />
-      </View>
+      {slide.type === "standard" ? (
+        <View style={[styles.illustration, { backgroundColor: slide.bg }]}>
+          <Ionicons name={slide.icone} size={80} color="#1A1A1A" />
+        </View>
+      ) : (
+        <View style={[styles.illustration, { backgroundColor: TEAL_LIGHT }]}>
+          <Ionicons name="people-outline" size={64} color={TEAL} />
+          <CarrouselVistaADeux />
+        </View>
+      )}
 
       <View style={styles.content}>
         <Text style={[styles.titre, { color: slide.couleur }]}>
@@ -96,7 +300,7 @@ export default function Onboarding() {
       </View>
 
       <View style={styles.dots}>
-        {SLIDES.map((_, i) => (
+        {slides.map((_, i) => (
           <View
             key={i}
             style={[
@@ -115,9 +319,7 @@ export default function Onboarding() {
         onPress={suivant}
         activeOpacity={0.8}
       >
-        <Text style={styles.btnTexte}>
-          {slideActuel === SLIDES.length - 1 ? "Commencer" : "Suivant"}
-        </Text>
+        <Text style={styles.btnTexte}>{texteBouton}</Text>
       </BoutonPrincipal>
       </View>
     </View>
@@ -142,6 +344,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 40,
+    gap: 16,
   },
   content: { alignItems: "center", marginBottom: 32 },
   titre: {
@@ -170,4 +373,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   btnTexte: { fontSize: 16, fontWeight: "600", color: "#FFFFFF" },
+  // --- Slide "Vista à deux" ------------------------------------------------
+  carrouselCouple: { alignItems: "center", gap: 10 },
+  illustrationCoupleLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  carrouselDots: { flexDirection: "row", gap: 5, alignItems: "center" },
+  carrouselDot: { height: 6, borderRadius: 3 },
+  codeCarte: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    backgroundColor: "#FFFFFF",
+  },
+  codeTexte: { fontSize: 16, fontWeight: "700", letterSpacing: 1 },
+  jaugeColonne: { alignItems: "center", gap: 8, marginHorizontal: 12 },
+  jaugeBadge: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },
+  jaugeBadgeTexte: { fontSize: 11, fontWeight: "700" },
+  balanceContenu: { alignItems: "center", gap: 10 },
+  balanceNomsRow: { flexDirection: "row", justifyContent: "space-between", width: 220 },
+  balanceNom: { fontSize: 12, fontWeight: "700" },
 });
