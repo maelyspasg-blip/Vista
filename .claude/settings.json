@@ -16,7 +16,9 @@
       "Bash(lsof -ti:8081 -sTCP:LISTEN)",
       "Bash(tee /tmp/lint_after.txt)",
       "Bash(grep -n \"planning.tsx\\\\|store.ts\" /tmp/tsc_after.txt /tmp/lint_after.txt)",
-      "Bash(grep -n \"planning.tsx\" -A 15 /tmp/lint_after.txt)"
+      "Bash(grep -n \"planning.tsx\" -A 15 /tmp/lint_after.txt)",
+      "Bash(shasum -a 256)",
+      "Bash(git restore *)"
     ]
   },
   "hooks": {
