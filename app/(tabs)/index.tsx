@@ -383,6 +383,7 @@ export default function Dashboard() {
     // de vérité "fusionnée" reste categoriesFusionnees (RÈGLE dans
     // EspacePartageContext.tsx).
     donneesPartenaire,
+    epargneMoisPartenaireActuelle,
   } = useEspacePartage();
 
   // RÈGLE : mêmes chargeurs que ceux déjà appelés au montage/périodiquement
@@ -572,11 +573,22 @@ export default function Dashboard() {
   const enveloppesAffichees: Enveloppe[] = affichagePartage
     ? categoriesFusionnees
     : objStore.enveloppes;
-  // epargneMois n'a pas d'équivalent partagé (jamais mélangé à l'épargne
-  // personnelle du partenaire, cf. RÈGLE historique sur les totaux fusionnés
-  // — désormais héritée automatiquement par calculerResteEstimeCourant
-  // puisque c'est la seule chose qui distingue encore "Moi" de "Partagé").
-  const epargneMoisAffiche = affichagePartage ? 0 : objStore.epargneMois;
+  // RÈGLE À NE JAMAIS CASSER — ÉPARGNE FUSIONNÉE EN VUE PARTAGÉE (demande
+  // explicite du 2026-09-12, confirmée par Maëlys) : REVIENT sur une
+  // décision précédente ("jamais mélangée à l'épargne du partenaire") —
+  // "Argent immobilisé" additionne maintenant mon epargneMois et
+  // epargneMoisPartenaireActuelle (EspacePartageContext, RPC
+  // epargne_mois_partenaire, chargée dans le MÊME Promise.all que
+  // donneesPartenaire — cf. RÈGLE à sa définition, jamais un second calcul
+  // local). Le détail dépliable ("épargne générique" / contribution aux
+  // objectifs, plus bas) reste basé sur MES objectifs uniquement — cette
+  // ligne ne fusionne que le TOTAL affiché en tête, pas la ventilation
+  // détaillée du partenaire (hors scope de cette demande). Le garde de
+  // chargement plus bas (`chargementPartenaire || !donneesPartenaire`)
+  // couvre aussi ce champ : les deux sont chargés/réinitialisés ensemble.
+  const epargneMoisAffiche = affichagePartage
+    ? objStore.epargneMois + (epargneMoisPartenaireActuelle ?? 0)
+    : objStore.epargneMois;
   const [deltaRestePourcentage, setDeltaRestePourcentage] = useState(false);
   const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(false);
   const [triCategories, setTriCategories] = useState<

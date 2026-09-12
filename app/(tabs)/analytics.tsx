@@ -81,7 +81,6 @@ import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
 import {
   chargerRemboursementsMois,
   EnveloppePartenaire,
-  epargneMoisPartenaire,
   marquerRembourse,
   RemboursementEspace,
   SnapshotMoisPartenaire,
@@ -1176,6 +1175,7 @@ export default function Analytics() {
     donneesPartenaire,
     espaceId,
     historiqueMoisPartenaire,
+    epargneMoisPartenaireActuelle,
     modeBalance,
     ratioPersonnalise,
     changerModeBalance,
@@ -1229,28 +1229,10 @@ export default function Analytics() {
       annule = true;
     };
   }, [estDansUnEspace, vueActive, espaceId]);
-  // RÈGLE : épargne du MOIS EN COURS du partenaire — historiqueMoisPartenaire
-  // (EspacePartageContext) couvre déjà les mois archivés (snapshots_mois.
-  // epargne, cf. RÈGLE sur SnapshotMoisPartenaire, utils/espacePartage.ts),
-  // mais le mois en cours n'a par définition pas encore de snapshot. Chargé
-  // localement (comme remboursements ci-dessus) : seul "Évolution dans le
-  // temps" (ce fichier) en a besoin.
-  const [epargneMoisPartenaireActuelle, setEpargneMoisPartenaireActuelle] =
-    useState<number | null>(null);
-  useEffect(() => {
-    if (!estDansUnEspace || vueActive !== "partage") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- réinitialisation synchrone volontaire en quittant la vue Partagé, même précédent que remboursements ci-dessus.
-      setEpargneMoisPartenaireActuelle(null);
-      return;
-    }
-    let annule = false;
-    epargneMoisPartenaire().then((valeur) => {
-      if (!annule) setEpargneMoisPartenaireActuelle(valeur);
-    });
-    return () => {
-      annule = true;
-    };
-  }, [estDansUnEspace, vueActive]);
+  // RÈGLE : épargneMoisPartenaireActuelle déplacée dans EspacePartageContext
+  // le 2026-09-12 (cf. RÈGLE détaillée à sa définition) — Aperçu en a
+  // maintenant besoin aussi, chargée dans le même Promise.all que
+  // donneesPartenaire plutôt qu'un second cycle local ici.
   // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Stats — voir
   // estComptePremium (utils/premium.ts) pour ce qu'il combine.
   const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);

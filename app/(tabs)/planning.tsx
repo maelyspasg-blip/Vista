@@ -77,28 +77,6 @@ const AUJOURDHUI = new Date();
 // couleurs d'événements synthétiques venant de la catégorie/l'objectif liés.
 const COULEUR_ENTREE_PLANNING = "#1D9E75";
 
-// Force l'opacité d'une couleur de séparateur du thème (hex #RRGGBB ou
-// rgba(...), les deux formats existants dans COULEURS, cf. ThemeContext) à
-// une valeur donnée — utilisé pour "bordures de la vue Mois plus marquées"
-// (demande du 2026-09-12) : C.separateur en thème sombre est déjà une rgba
-// à faible opacité (0.1/0.35 selon le contraste renforcé), un simple
-// suffixe hex n'aurait aucun sens dessus, d'où ce petit helper plutôt qu'un
-// nouveau token de palette pour un seul écran.
-function appliquerOpacite(couleur: string, opacite: number): string {
-  const rgba = couleur.match(/^rgba\(([^,]+),([^,]+),([^,]+),([^)]+)\)$/);
-  if (rgba) {
-    return `rgba(${rgba[1]},${rgba[2]},${rgba[3]},${opacite})`;
-  }
-  const hex6 = couleur.match(/^#([0-9a-fA-F]{6})$/);
-  if (hex6) {
-    const alphaHex = Math.round(opacite * 255)
-      .toString(16)
-      .padStart(2, "0");
-    return `${couleur}${alphaHex}`;
-  }
-  return couleur;
-}
-
 function heureEnMinutes(heure: string): number {
   const [h, m] = heure.replace("h", ":").split(":");
   return parseInt(h) * 60 + (parseInt(m) || 0);
@@ -1598,6 +1576,18 @@ export default function Planning() {
   const heureActuelleIndex = memeJour(dateActuelle, AUJOURDHUI)
     ? maintenant.getHours()
     : -1;
+  // RÈGLE À NE JAMAIS CASSER — QUADRILLAGE PLUS VISIBLE EN MODE CLAIR
+  // (demande du 2026-09-12) : C.separateur reste utilisé tel quel en mode
+  // sombre (contraste déjà correct), mais en mode clair il est jugé trop
+  // discret pour les lignes du quadrillage Planning (Jour/Semaine/Mois) —
+  // noir à 8% d'opacité à la place, plus visible sans être une bordure
+  // agressive. UNE SEULE variable pour les 3 vues (remplace l'ancien helper
+  // appliquerOpacite(C.separateur, 0.8), qui ne visait que la vue Mois) —
+  // ne jamais utiliser C.separateur directement pour une ligne de grille
+  // Planning, toujours couleurGrillePlanning, pour que les 3 vues restent
+  // visuellement identiques sur ce point.
+  const couleurGrillePlanning =
+    theme === "sombre" ? C.separateur : "rgba(0,0,0,0.08)";
 
   // "vue" et "grille" sont toutes deux TOUJOURS montées (contrairement à
   // l'ancienne étape "evenement", retirée : elle dépendait de la présence
@@ -1810,7 +1800,7 @@ export default function Planning() {
             >
               {evsToutLaJourneeJour(dateActuelle).length > 0 && (
                 <View
-                  style={[styles.alldayZone, { borderColor: C.separateur }]}
+                  style={[styles.alldayZone, { borderColor: couleurGrillePlanning }]}
                 >
                   {evsToutLaJourneeJour(dateActuelle).map((ev) => (
                     <TouchableOpacity
@@ -1904,7 +1894,7 @@ export default function Planning() {
                           key={h}
                           style={[
                             styles.heureRow,
-                            { borderBottomColor: C.separateur },
+                            { borderBottomColor: couleurGrillePlanning },
                             estHeureActuelle && {
                               backgroundColor: "#1D9E7519",
                             },
@@ -1935,7 +1925,7 @@ export default function Planning() {
                         styles.timelineSpine,
                         {
                           height: HEURES.length * HAUTEUR_HEURE,
-                          backgroundColor: C.separateur,
+                          backgroundColor: couleurGrillePlanning,
                         },
                       ]}
                     />
@@ -1944,7 +1934,7 @@ export default function Planning() {
                         key={h}
                         style={[
                           styles.ligneFond,
-                          { borderBottomColor: C.separateur },
+                          { borderBottomColor: couleurGrillePlanning },
                           i === heureActuelleIndex && {
                             backgroundColor: "#1D9E7519",
                           },
@@ -2103,7 +2093,7 @@ export default function Planning() {
 
               {semaineADesEvenementsJourEntier && (
                 <View
-                  style={[styles.weekAlldayRow, { borderColor: C.separateur }]}
+                  style={[styles.weekAlldayRow, { borderColor: couleurGrillePlanning }]}
                 >
                   <View style={{ width: 32 }} />
                   {joursSemaineVue.map(({ evsToutLaJournee }, i) => (
@@ -2158,12 +2148,18 @@ export default function Planning() {
                 style={[
                   styles.timelineInner,
                   styles.weekTimelineInner,
-                  { borderColor: C.separateur },
+                  { borderColor: couleurGrillePlanning },
                 ]}
               >
                 <View style={styles.heuresCol}>
                   {HEURES.map((h) => (
-                    <View key={h} style={styles.heureRow}>
+                    <View
+                      key={h}
+                      style={[
+                        styles.heureRow,
+                        { borderBottomColor: couleurGrillePlanning },
+                      ]}
+                    >
                       <Text style={[styles.heureTexte, { color: C.texteMuted }]}>
                         {h}
                       </Text>
@@ -2177,7 +2173,7 @@ export default function Planning() {
                       key={i}
                       style={[
                         styles.weekDayTimelineCol,
-                        { borderLeftColor: C.separateur },
+                        { borderLeftColor: couleurGrillePlanning },
                         estAujourdhui && {
                           backgroundColor: teinteAujourdhui,
                         },
@@ -2188,7 +2184,7 @@ export default function Planning() {
                           key={h}
                           style={[
                             styles.ligneFondSemaine,
-                            { borderTopColor: C.separateur },
+                            { borderTopColor: couleurGrillePlanning },
                           ]}
                           activeOpacity={0.5}
                           onPress={() => {
@@ -2300,7 +2296,7 @@ export default function Planning() {
                   </Text>
                 ))}
               </View>
-              <View style={[styles.monthGrid, { borderColor: C.separateur }]}>
+              <View style={[styles.monthGrid, { borderColor: couleurGrillePlanning }]}>
                 {decouperEnSemaines(obtenirGrilleMoisComplete(dateActuelle)).map(
                   (semaine, si) => (
                     <View key={si} style={styles.monthRow}>
@@ -2320,7 +2316,7 @@ export default function Planning() {
                             key={di}
                             style={[
                               styles.monthCell,
-                              { borderColor: appliquerOpacite(C.separateur, 0.8) },
+                              { borderBottomColor: couleurGrillePlanning },
                             ]}
                             activeOpacity={0.7}
                             onPress={() => ouvrirJour(jourDate)}
@@ -3340,7 +3336,8 @@ const styles = StyleSheet.create({
   // continue) ; Semaine avait cependant gardé les siens (ligneFondSemaine,
   // borderTopWidth), rendant Jour incohérent avec Semaine entre-temps. Reste
   // par ailleurs un TouchableOpacity, cible de tap (ouvrirCreationRapide, cf.
-  // site d'appel) — la couleur de bordure est posée inline (C.separateur),
+  // site d'appel) — la couleur de bordure est posée inline
+  // (couleurGrillePlanning depuis le 2026-09-12, cf. RÈGLE à sa définition),
   // jamais ici (cf. convention du fichier, couleurs jamais statiques).
   ligneFond: { height: HAUTEUR_HEURE, borderBottomWidth: 0.5 },
   // Ligne verticale fine et continue, à gauche de la colonne d'événements
@@ -3451,21 +3448,29 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   monthRow: { flex: 1, flexDirection: "row" },
+  // RÈGLE : plus de bordure verticale entre les jours (demande du
+  // 2026-09-12, "même style que Semaine") — seule une ligne horizontale
+  // sous chaque semaine, même principe que les séparateurs d'heures de
+  // Jour/Semaine (borderBottomWidth seul, jamais un borderWidth sur les 4
+  // côtés) ; la délimitation extérieure de la grille reste assurée par
+  // monthGrid (bordure entière, inchangée).
   monthCell: {
     flex: 1,
-    borderWidth: 0.5,
+    borderBottomWidth: 0.5,
     padding: 5,
   },
-  monthNum: { fontSize: 13, fontWeight: "600" },
+  // fontSize/fontWeight relevés le 2026-09-12 (13→16, 600→700) — "mettre en
+  // valeur les chiffres de chaque jour, plus grands, plus lisibles".
+  monthNum: { fontSize: 16, fontWeight: "700" },
   monthNumHorsMois: { opacity: 0.3 },
   // Cercle autour du numéro du jour (vue Mois, demande du 2026-09-06) —
   // bordure teal posée inline uniquement pour "aujourd'hui" (cf. site
   // d'appel), transparent sinon : garde la même taille de cellule qu'un
-  // jour normal.
+  // jour normal. Agrandi le 2026-09-12 (24→28) pour accompagner monthNum.
   monthNumCercle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
   },

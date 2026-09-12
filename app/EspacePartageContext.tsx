@@ -15,6 +15,7 @@ import {
   chargerEvenementsPartenaire,
   chargerHistoriqueMoisPartenaire,
   DonneesPartenaire,
+  epargneMoisPartenaire,
   EvenementPartenaire,
   fusionnerCategoriesParNom,
   getMembreEspace,
@@ -108,6 +109,21 @@ type EspacePartageContextType = {
   // hors vue "partage"/hors espace actif, jamais `null`, même convention que
   // evenementsPartenaire/categoriesFusionnees.
   historiqueMoisPartenaire: SnapshotMoisPartenaire[];
+  // RÈGLE À NE JAMAIS CASSER — ÉPARGNE DU MOIS EN COURS DU PARTENAIRE,
+  // SOURCE UNIQUE (déplacé le 2026-09-12 depuis un state local à
+  // app/(tabs)/analytics.tsx, qui en était l'unique consommateur à
+  // l'origine — Aperçu en a maintenant besoin aussi pour "Argent
+  // immobilisé" en vue partagée). historiqueMoisPartenaire ci-dessus
+  // couvre déjà les mois ARCHIVÉS (snapshots_mois.epargne), mais le mois en
+  // cours n'a par définition pas encore de snapshot — d'où ce champ séparé,
+  // chargé via la RPC epargne_mois_partenaire (utils/espacePartage.ts::
+  // epargneMoisPartenaire, profils n'exposant jamais epargne_mois en
+  // lecture cross-compte directe). Chargé DANS LE MÊME Promise.all que
+  // donneesPartenaire/evenementsPartenaire/historiqueMoisPartenaire (cf.
+  // effet plus bas) — jamais un second cycle de chargement séparé, qui
+  // laisserait cette valeur visiblement en retard sur les autres pendant un
+  // instant. `null` tant que non chargé/hors vue "partage".
+  epargneMoisPartenaireActuelle: number | null;
   // RÈGLE À NE JAMAIS CASSER : réglage DU COUPLE (posé sur espaces_partages),
   // jamais par compte — cf. RÈGLE détaillée sur ModeBalance (utils/
   // espacePartage.ts). "50_50" par défaut tant que non chargé/hors espace.
@@ -136,6 +152,7 @@ const EspacePartageContext = createContext<EspacePartageContextType>({
   couleurMoi: "#1D9E75",
   couleurPartenaire: "#1D9E75",
   historiqueMoisPartenaire: [],
+  epargneMoisPartenaireActuelle: null,
   modeBalance: "50_50",
   ratioPersonnalise: 0.5,
   changerModeBalance: async () => false,
@@ -169,6 +186,8 @@ export function EspacePartageProvider({
   const [historiqueMoisPartenaire, setHistoriqueMoisPartenaire] = useState<
     SnapshotMoisPartenaire[]
   >([]);
+  const [epargneMoisPartenaireActuelle, setEpargneMoisPartenaireActuelle] =
+    useState<number | null>(null);
   const [chargementPartenaire, setChargementPartenaire] = useState(false);
   const [modeBalance, setModeBalance] = useState<ModeBalance>("50_50");
   const [ratioPersonnalise, setRatioPersonnalise] = useState(0.5);
@@ -320,20 +339,23 @@ export function EspacePartageProvider({
       setDonneesPartenaire(null);
       setEvenementsPartenaire([]);
       setHistoriqueMoisPartenaire([]);
+      setEpargneMoisPartenaireActuelle(null);
       return;
     }
     let annule = false;
     (async () => {
       setChargementPartenaire(true);
-      const [donnees, evenements, historique] = await Promise.all([
+      const [donnees, evenements, historique, epargneActuelle] = await Promise.all([
         chargerDonneesPartenaire(membrePartenaire.id),
         chargerEvenementsPartenaire(membrePartenaire.id),
         chargerHistoriqueMoisPartenaire(membrePartenaire.id),
+        epargneMoisPartenaire(),
       ]);
       if (annule) return;
       setDonneesPartenaire(donnees);
       setEvenementsPartenaire(evenements);
       setHistoriqueMoisPartenaire(historique);
+      setEpargneMoisPartenaireActuelle(epargneActuelle);
       setChargementPartenaire(false);
     })();
     return () => {
@@ -359,12 +381,14 @@ export function EspacePartageProvider({
     if (vueActive !== "partage" || !estDansUnEspace || !membrePartenaire) {
       return;
     }
-    const [donnees, historique] = await Promise.all([
+    const [donnees, historique, epargneActuelle] = await Promise.all([
       chargerDonneesPartenaire(membrePartenaire.id),
       chargerHistoriqueMoisPartenaire(membrePartenaire.id),
+      epargneMoisPartenaire(),
     ]);
     setDonneesPartenaire(donnees);
     setHistoriqueMoisPartenaire(historique);
+    setEpargneMoisPartenaireActuelle(epargneActuelle);
   }, [vueActive, estDansUnEspace, membrePartenaire]);
 
   // RÈGLE : mAj locale UNIQUEMENT après succès de la RPC, jamais avant
@@ -448,6 +472,7 @@ export function EspacePartageProvider({
         couleurMoi,
         couleurPartenaire,
         historiqueMoisPartenaire,
+        epargneMoisPartenaireActuelle,
         modeBalance,
         ratioPersonnalise,
         changerModeBalance,
