@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { AD_UNIT_ID_REWARDED, TESTFLIGHT_MODE } from "../utils/premium";
+import { ADMOB_ACTIF, AD_UNIT_ID_REWARDED, TESTFLIGHT_MODE } from "../utils/premium";
 import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
 // RÈGLE À NE JAMAIS CASSER : import depuis la paire utils/adMobModule.ts/
@@ -32,39 +32,43 @@ import { AdEventType, RewardedAd, RewardedAdEventType } from "../utils/adMobModu
 // (Ionicons + couleur simple) utilisée dans budget.tsx.
 const COULEUR_CADENAS = "#2D3A4A";
 
-// RÈGLE À NE JAMAIS CASSER — AdMob NÉCESSITE UN REBUILD NATIF EAS : ce
-// composant ne peut PAS être testé avec le dev client seul (le module
-// natif react-native-google-mobile-ads doit être compilé dans le binaire).
-// Sur dev client sans ce rebuild, le SDK natif est absent — c'est
-// justement pour ça que le fallback ci-dessous (pubChargee toujours false
-// si `load()` n'aboutit jamais) retombe sur l'Alert simulé plutôt que de
-// planter.
-export function InsightVerrouille({
-  deverrouille,
-  onDeverrouille,
-  children,
-}: {
-  deverrouille: boolean;
-  onDeverrouille: () => void;
-  children: ReactNode;
-}) {
-  const { theme, couleurs: C } = useTheme();
+// RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE POUR "COMMENT DÉCLENCHER UNE PUB
+// RÉCOMPENSÉE" DANS TOUTE L'APP (refonte monétisation du 2026-09-12) :
+// utilisé par <InsightVerrouille> ci-dessous ET directement par tout autre
+// site qui a besoin du même déclencheur sans l'habillage visuel du
+// composant (ex: le sélecteur de période de Stats, qui ouvre l'Alert
+// directement depuis le tap sur une option verrouillée plutôt que depuis un
+// overlay). Ne jamais dupliquer cette logique ailleurs — un seul endroit à
+// faire évoluer le jour où AdMob est réintégré (ADMOB_ACTIF, utils/premium.ts).
+//
+// RÈGLE À NE JAMAIS CASSER — AdMob NÉCESSITE UN REBUILD NATIF EAS : ce hook
+// ne peut PAS être testé avec le dev client seul (le module natif
+// react-native-google-mobile-ads doit être compilé dans le binaire). Sur
+// dev client sans ce rebuild (ou tant que ADMOB_ACTIF est false), le SDK
+// natif n'est jamais sollicité — c'est justement pour ça que le fallback
+// simulé existe, jamais un plantage silencieux.
+export function useDeblocagePub(
+  onDeverrouille: () => void,
+  // RÈGLE : optionnel — passer l'état "déjà déverrouillé" connu de
+  // l'appelant (premium/invité/session déjà débloquée) quand il existe
+  // (cf. <InsightVerrouille>/<TonBilanVerrou> plus bas) pour ne jamais
+  // charger une pub inutilement pour un contenu déjà accessible. Un site
+  // d'appel qui n'a pas un seul booléen "tout est débloqué" pertinent
+  // (ex: le sélecteur de période de Stats, plusieurs paliers indépendants)
+  // peut l'omettre — aucun appel AdMob n'est fait tant qu'ADMOB_ACTIF est
+  // false de toute façon.
+  dejaDeverrouille = false,
+) {
   const [enCoursDeblocage, setEnCoursDeblocage] = useState(false);
   const [pubChargee, setPubChargee] = useState(false);
   const rewardedRef = useRef<any>(null);
 
-  // RÈGLE À NE JAMAIS CASSER — TOUS LES HOOKS AVANT TOUT RETURN
-  // CONDITIONNEL : `deverrouille`/TESTFLIGHT_MODE ne doivent jamais changer
-  // l'ORDRE des hooks appelés d'un rendu à l'autre (règle React) — d'où cet
-  // effet toujours déclaré ici, son corps décidant lui-même s'il a quelque
-  // chose à faire, plutôt qu'un hook placé après un `if (...) return`.
-  //
   // RÈGLE : chargée une seule fois au montage ([] volontaire) — TESTFLIGHT_
-  // MODE ou un insight déjà déverrouillé au moment du montage n'ont jamais
-  // besoin d'une pub, jamais chargée dans ce cas (aucun appel AdMob inutile
-  // pendant la période TestFlight).
+  // MODE, ADMOB_ACTIF=false ou un contenu déjà déverrouillé au moment du
+  // montage n'ont jamais besoin d'une pub, jamais chargée dans ce cas
+  // (aucun appel AdMob inutile).
   useEffect(() => {
-    if (TESTFLIGHT_MODE || deverrouille || !RewardedAd) return;
+    if (TESTFLIGHT_MODE || !ADMOB_ACTIF || dejaDeverrouille || !RewardedAd) return;
 
     // RÈGLE À NE JAMAIS CASSER — SECOND GARDE, INDISPENSABLE EN PLUS DU
     // try/catch DANS utils/adMobModule.ts : ce dernier protège uniquement
@@ -115,7 +119,7 @@ export function InsightVerrouille({
       };
     } catch (e) {
       console.error(
-        "[InsightVerrouille] Initialisation AdMob (RewardedAd) a échoué — fallback Alert simulé :",
+        "[useDeblocagePub] Initialisation AdMob (RewardedAd) a échoué — fallback Alert simulé :",
         e,
       );
       rewardedRef.current = null;
@@ -123,16 +127,29 @@ export function InsightVerrouille({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // RÈGLE À NE JAMAIS CASSER : TESTFLIGHT_MODE n'affiche JAMAIS le cadenas,
-  // quel que soit `deverrouille` — cf. utils/premium.ts.
-  if (TESTFLIGHT_MODE || deverrouille) return <>{children}</>;
+  // RÈGLE : Alert simulée — "Pub simulée" + bouton "Fermer" qui déverrouille
+  // directement (demande explicite du 2026-09-12, refonte monétisation) :
+  // pas d'étape de confirmation intermédiaire ni de délai artificiel,
+  // remplacée le jour où AdMob est réintégré par le vrai SDK (ci-dessus),
+  // jamais l'inverse.
+  const demanderDeblocageSimule = () => {
+    Alert.alert("Pub simulée", "AdMob n'est pas encore réintégré — ceci simule le visionnage d'une publicité récompensée.", [
+      {
+        text: "Fermer",
+        onPress: () => {
+          onDeverrouille();
+        },
+      },
+    ]);
+  };
 
-  // RÈGLE À NE JAMAIS CASSER — FALLBACK SI PUB NON DISPONIBLE : si la pub
-  // AdMob n'a pas fini de charger (ou a échoué — device sans le rebuild
-  // natif EAS, pas de réseau, aucun inventaire disponible...), on retombe
-  // sur l'Alert simulé plutôt que de laisser le bouton sans effet.
-  const demanderDeblocage = () => {
-    if (RewardedAd && pubChargee && rewardedRef.current) {
+  // RÈGLE À NE JAMAIS CASSER — FALLBACK SI PUB NON DISPONIBLE : si
+  // ADMOB_ACTIF est faux, ou si la pub AdMob n'a pas fini de charger (ou a
+  // échoué — device sans le rebuild natif EAS, pas de réseau, aucun
+  // inventaire disponible...), on retombe sur l'Alert simulé plutôt que de
+  // laisser le déclencheur sans effet.
+  const declencherPub = () => {
+    if (ADMOB_ACTIF && RewardedAd && pubChargee && rewardedRef.current) {
       setEnCoursDeblocage(true);
       // RÈGLE : try/catch en plus du .catch() sur la promesse — show() peut
       // aussi planter de façon SYNCHRONE (pas seulement via une promesse
@@ -152,30 +169,38 @@ export function InsightVerrouille({
     demanderDeblocageSimule();
   };
 
-  const demanderDeblocageSimule = () => {
-    Alert.alert(
-      "Débloquer les analyses",
-      "Regardez une courte publicité pour accéder à toutes vos analyses personnalisées.",
-      [
-        { text: "Annuler", style: "cancel" },
-        {
-          text: "Regarder la pub",
-          onPress: () => {
-            setEnCoursDeblocage(true);
-            // Simulation de la pub récompensée (fallback) — même délai/
-            // même déclenchement de onDeverrouille que le vrai SDK AdMob
-            // ci-dessus, pour un comportement identique du point de vue de
-            // l'utilisateur quel que soit le chemin emprunté.
-            setTimeout(() => {
-              setEnCoursDeblocage(false);
-              onDeverrouille();
-              Alert.alert("Analyses débloquées !");
-            }, 1500);
-          },
-        },
-      ],
-    );
-  };
+  return { declencherPub, enCoursDeblocage };
+}
+
+// RÈGLE À NE JAMAIS CASSER : à la différence de PremiumVerrou (Premium
+// uniquement, ne montre jamais le contenu verrouillé), ce composant montre
+// TOUJOURS le contenu réel en dessous (flouté visuellement par l'overlay
+// pointerEvents="none"), déblocage par pub via useDeblocagePub ci-dessus.
+export function InsightVerrouille({
+  deverrouille,
+  onDeverrouille,
+  texteCadenas = "Débloquer mes analyses",
+  children,
+}: {
+  deverrouille: boolean;
+  onDeverrouille: () => void;
+  // RÈGLE : personnalisable depuis le 2026-09-12 — ce même composant sert
+  // maintenant aussi de verrou consolidé pour "Ton bilan" (onglets Vista/
+  // Santé/Trophées/Simulateur, app/(tabs)/analytics.tsx), pas seulement les
+  // insights — jamais un second composant qui dupliquerait
+  // useDeblocagePub/l'habillage visuel pour un texte différent.
+  texteCadenas?: string;
+  children: ReactNode;
+}) {
+  const { theme, couleurs: C } = useTheme();
+  const { declencherPub, enCoursDeblocage } = useDeblocagePub(
+    onDeverrouille,
+    deverrouille,
+  );
+
+  // RÈGLE À NE JAMAIS CASSER : TESTFLIGHT_MODE n'affiche JAMAIS le cadenas,
+  // quel que soit `deverrouille` — cf. utils/premium.ts.
+  if (TESTFLIGHT_MODE || deverrouille) return <>{children}</>;
 
   return (
     <View style={styles.conteneur}>
@@ -189,13 +214,13 @@ export function InsightVerrouille({
         ]}
       >
         <Ionicons name="lock-closed" size={24} color={COULEUR_CADENAS} />
-        <Text style={styles.texteDeverrouiller}>Débloquer mes analyses</Text>
+        <Text style={styles.texteDeverrouiller}>{texteCadenas}</Text>
       </View>
       <Pressable
         style={StyleSheet.absoluteFill}
-        onPress={demanderDeblocage}
+        onPress={declencherPub}
         disabled={enCoursDeblocage}
-        accessibilityLabel="Déverrouiller mes analyses"
+        accessibilityLabel={texteCadenas}
       />
     </View>
   );

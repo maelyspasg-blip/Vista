@@ -35,6 +35,44 @@ export const TESTFLIGHT_MODE = true;
 // app/profil.tsx).
 export const ESPACE_PARTAGE_ACTIF = false;
 
+// RÈGLE À NE JAMAIS CASSER — REFONTE MONÉTISATION V1 (2026-09-12, demande
+// explicite) : Premium est retiré du modèle économique de la V1, remplacé
+// par 3 emplacements de pub récompensée (session-scoped) — cf. RÈGLE sur
+// chacun à son site : Ton bilan (verrou consolidé, app/(tabs)/analytics.tsx),
+// Insights Vista dans Aperçu (app/(tabs)/index.tsx), période au-delà d'1 mois
+// dans Stats (app/(tabs)/analytics.tsx). Le code Premium existant
+// (estComptePremium ci-dessous, PremiumContext, PremiumVerrou, la section
+// "PASSER PREMIUM" de profil.tsx, les 2 toggles admin "Simuler
+// Premium"/"Simuler compte non-premium"...) reste EN PLACE, jamais
+// supprimé — seulement masqué derrière ce flag, pour permettre une
+// réactivation rapide si le modèle économique change à nouveau. Un compte
+// admin voit toujours tout sans restriction, quel que soit ce flag (cf.
+// RÈGLE existante sur estComptePremium — jamais un besoin de vérifier
+// PREMIUM_ACTIF en plus de isAdmin dans un site déjà gardé par isAdmin).
+export const PREMIUM_ACTIF = false;
+
+// RÈGLE : point d'entrée UNIQUE pour savoir si l'UI Premium (badges, section
+// "PASSER PREMIUM", mentions "Premium"/"Abonnement") doit être visible —
+// jamais PREMIUM_ACTIF directement dans un site gardé, même raison que
+// estEspacePartageActif ci-dessus (un compte admin doit toujours voir cette
+// UI, y compris pour les outils de simulation, même si elle est masquée
+// pour tout le monde d'autre).
+export function premiumUIVisible(isAdmin: boolean): boolean {
+  return PREMIUM_ACTIF || isAdmin;
+}
+
+// RÈGLE À NE JAMAIS CASSER — AdMob PAS ENCORE RÉINTÉGRÉ (rebuild EAS natif
+// requis, cf. RÈGLE existante sur AD_UNIT_ID_REWARDED plus bas) : tant que
+// `false`, les 3 emplacements de pub de la V1 n'essaient JAMAIS d'appeler le
+// SDK AdMob réel — ils utilisent systématiquement la simulation (Alert
+// "Pub simulée" + bouton "Fermer" qui déverrouille, cf.
+// app/InsightVerrouille.tsx::useDeblocagePub). Repasser à `true` le jour où
+// AdMob est réintégré : useDeblocagePub retombera alors sur son
+// comportement déjà existant (tenter le SDK réel, se rabattre sur la
+// simulation seulement si le SDK échoue/n'est pas disponible) sans qu'aucun
+// site d'appel n'ait besoin d'être modifié.
+export const ADMOB_ACTIF = false;
+
 // RÈGLE À NE JAMAIS CASSER — SEUL POINT D'ENTRÉE POUR SAVOIR SI L'ESPACE
 // PARTAGÉ DOIT ÊTRE VISIBLE, JAMAIS ESPACE_PARTAGE_ACTIF DIRECTEMENT DANS UN
 // SITE GARDÉ : décision du 2026-09-05 — un compte admin doit pouvoir tester

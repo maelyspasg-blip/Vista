@@ -417,16 +417,12 @@ export default function Dashboard() {
   // session en cours" signifie qu'il doit revenir à false à la prochaine
   // ouverture de l'app, jamais survivre à un redémarrage.
   //
-  // RÈGLE À NE JAMAIS CASSER — DÉBLOCAGE PAR INSIGHT, JAMAIS GLOBAL :
-  // Set<number> des INDEX de conseils débloqués (indices dans `conseils`,
-  // pas dans `conseils.slice(1)`) — regarder une pub débloque UNIQUEMENT
-  // l'insight sur lequel on a tapé le cadenas. Un ancien booléen unique
-  // (conseilsDebloques) débloquait TOUS les conseils verrouillés d'un coup
-  // dès qu'une seule pub était regardée, ce qui n'est plus le comportement
-  // voulu.
-  const [insightsDebloques, setInsightsDebloques] = useState<Set<number>>(
-    new Set(),
-  );
+  // RÈGLE À NE JAMAIS CASSER — DÉBLOCAGE GLOBAL (refonte monétisation du
+  // 2026-09-12, demande explicite confirmée) : REVIENT sur une décision
+  // précédente (Set<number> par index de conseil, une pub par conseil) —
+  // un seul booléen désormais, un seul cadenas au-dessus de TOUS les
+  // conseils verrouillés, une seule pub les débloque tous pour la session.
+  const [insightsDebloque, setInsightsDebloque] = useState(false);
   // RÈGLE À NE JAMAIS CASSER : chargement des états persistés (AsyncStorage,
   // cf. utils/conseils.ts) — genererConseils reste une fonction pure et
   // synchrone, c'est ce useEffect qui fait la seule partie asynchrone
@@ -1939,26 +1935,21 @@ export default function Dashboard() {
             {/* RÈGLE À NE JAMAIS CASSER : le tout premier conseil reste
                 toujours gratuit, quel que soit l'état de déblocage — c'est
                 ce qui donne un aperçu de valeur avant que les suivants ne
-                soient verrouillés chacun individuellement. */}
+                soient rassemblés derrière un seul cadenas commun (cf.
+                RÈGLE sur insightsDebloque plus haut). */}
             {ligneConseil(conseils[0], 0, C)}
-            {conseils.slice(1).map((conseil, i) => {
-              const index = i + 1;
-              return (
-                <InsightVerrouille
-                  key={index}
-                  deverrouille={premium || insightsDebloques.has(index)}
-                  onDeverrouille={() =>
-                    setInsightsDebloques((prev) => {
-                      const suivant = new Set(prev);
-                      suivant.add(index);
-                      return suivant;
-                    })
-                  }
-                >
-                  {ligneConseil(conseil, index, C)}
-                </InsightVerrouille>
-              );
-            })}
+            {conseils.length > 1 && (
+              <InsightVerrouille
+                deverrouille={premium || insightsDebloque}
+                onDeverrouille={() => setInsightsDebloque(true)}
+                texteCadenas="Regarder une pub pour voir tes insights"
+              >
+                {conseils.slice(1).map((conseil, i) => {
+                  const index = i + 1;
+                  return ligneConseil(conseil, index, C);
+                })}
+              </InsightVerrouille>
+            )}
           </View>
         )}
 

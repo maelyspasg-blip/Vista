@@ -29,13 +29,11 @@ import { calculerScrollAutoTutoriel } from "../../utils/tutorielScroll";
 import { useTheme } from "../ThemeContext";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
-import { usePremium } from "../PremiumContext";
 import { useGuest } from "../GuestContext";
 import { useEspacePartage } from "../EspacePartageContext";
 import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
 import { bloquerSiInvite } from "../guestGate";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
-import { estComptePremium } from "../../utils/premium";
 import { PALETTE_COULEURS } from "../ColorPicker";
 import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
@@ -157,9 +155,6 @@ function premierJourMoisISO(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
-// Nombre de mois en arrière (en plus du mois en cours) consultables par un
-// compte non-premium — cf. estComptePremium (utils/premium.ts).
-const LIMITE_MOIS_GRATUIT_BUDGET = 1;
 
 function formaterDateCourte(dateISO: string): string {
   const d = new Date(dateISO);
@@ -176,7 +171,6 @@ function formaterDateLongue(dateISO: string): string {
 export default function Budget() {
   const objStore = useObjectifs();
   const estTablette = useEstTablette();
-  const { estPremium, simulerNonPremium } = usePremium();
   const { isGuest } = useGuest();
   const {
     estDansUnEspace,
@@ -215,9 +209,6 @@ export default function Budget() {
       setRafraichissementEnCours(false);
     }
   };
-  // RÈGLE À NE JAMAIS CASSER : point d'entrée unique pour tout Budget —
-  // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
-  const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
   const { couleurs: C, theme } = useTheme();
   const { reduireAnimations } = useAccessibilite();
   const params = useLocalSearchParams<{
@@ -429,23 +420,13 @@ export default function Budget() {
     if (cible) setMoisSelectionne({ mois: cible.mois, annee: cible.annee });
   };
 
-  // RÈGLE À NE JAMAIS CASSER : un compte non-premium ne peut consulter que
-  // le mois en cours + LIMITE_MOIS_GRATUIT_BUDGET mois en arrière — la
-  // limite s'applique aux DEUX sélecteurs de mois (les flèches ← → ET la
-  // modale "Choisir un mois", qui permet sinon de sauter directement à
-  // n'importe quel mois archivé en contournant les flèches). Un compte
-  // invité (isGuest) est exempté aux 3 sites d'usage ci-dessous (jamais de
-  // verrou/cadenas visible pour un invité, cf. RÈGLE dans profil.tsx) —
-  // `indexMinAutorise` lui-même reste calculé pareil, seule sa
-  // CONSULTATION est court-circuitée par `!isGuest`.
-  const indexActuelMois = moisDisponibles.findIndex((m) => m.estActuel);
-  const indexMinAutorise =
-    premium || indexActuelMois === -1
-      ? 0
-      : Math.max(0, indexActuelMois - LIMITE_MOIS_GRATUIT_BUDGET);
-  const gererTapMoisVerrouille = () => {
-    Alert.alert("Premium", "Accédez à tout votre historique avec Premium.");
-  };
+  // RÈGLE : la limite d'historique non-premium (LIMITE_MOIS_GRATUIT_BUDGET,
+  // indexMinAutorise, gererTapMoisVerrouille) a été retirée le 2026-09-12 —
+  // refonte monétisation, décision explicite de déverrouiller entièrement
+  // l'historique de Budget plutôt que de laisser un verrou Premium
+  // définitivement inatteignable (Premium n'étant plus jamais accessible à
+  // un compte non-admin, cf. PREMIUM_ACTIF, utils/premium.ts). Aucun des 3
+  // sites d'usage ci-dessous ne restreint donc plus la navigation.
 
   // Filet de sécurité complémentaire : l'app reste souvent en vie en
   // arrière-plan sur mobile (pas de vrai remount), donc si l'utilisateur avait
@@ -1530,27 +1511,17 @@ export default function Budget() {
           >
           <View style={styles.selecteurMoisRow}>
             <TouchableOpacity
-              onPress={() => {
-                if (!premium && !isGuest && indexMois <= indexMinAutorise) {
-                  gererTapMoisVerrouille();
-                  return;
-                }
-                allerAuMois(indexMois - 1);
-              }}
+              onPress={() => allerAuMois(indexMois - 1)}
               disabled={indexMois === 0}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
               accessibilityLabel="Mois précédent"
             >
-              {!premium && !isGuest && indexMois <= indexMinAutorise && indexMois > 0 ? (
-                <Ionicons name="lock-closed" size={13} color={C.texteMuted} />
-              ) : (
-                <Ionicons
-                  name="chevron-back"
-                  size={16}
-                  color={indexMois === 0 ? C.separateur : C.texteMuted}
-                />
-              )}
+              <Ionicons
+                name="chevron-back"
+                size={16}
+                color={indexMois === 0 ? C.separateur : C.texteMuted}
+              />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => setModalMoisVisible(true)}
@@ -2558,17 +2529,11 @@ export default function Budget() {
               Choisir un mois
             </Text>
             <ScrollView showsVerticalScrollIndicator={false}>
-              {moisDisponibles
-                .map((m, idx) => ({ m, idx }))
+              {[...moisDisponibles]
                 .reverse()
-                .map(({ m, idx }) => {
+                .map((m) => {
                   const selectionne =
                     m.mois === moisAffiche.mois && m.annee === moisAffiche.annee;
-                  // RÈGLE À NE JAMAIS CASSER : même limite que les flèches
-                  // ← → ci-dessus (indexMinAutorise) — cette modale permet
-                  // sinon de sauter directement à un mois verrouillé sans
-                  // passer par les flèches.
-                  const verrouille = !premium && !isGuest && idx < indexMinAutorise;
                   return (
                     <TouchableOpacity
                       key={`${m.annee}-${m.mois}`}
@@ -2577,30 +2542,17 @@ export default function Budget() {
                         { borderBottomColor: C.separateur },
                       ]}
                       onPress={() => {
-                        if (verrouille) {
-                          gererTapMoisVerrouille();
-                          return;
-                        }
                         setMoisSelectionne({ mois: m.mois, annee: m.annee });
                         setModalMoisVisible(false);
                       }}
                       activeOpacity={0.7}
                     >
-                      <Text
-                        style={[
-                          styles.moisOptionTexte,
-                          { color: verrouille ? C.texteMuted : C.texte },
-                        ]}
-                      >
+                      <Text style={[styles.moisOptionTexte, { color: C.texte }]}>
                         {MOIS_LABELS[m.mois]} {m.annee}
                         {m.estActuel ? " (en cours)" : ""}
                       </Text>
-                      {verrouille ? (
-                        <Ionicons name="lock-closed" size={14} color={C.texteMuted} />
-                      ) : (
-                        selectionne && (
-                          <Ionicons name="checkmark" size={18} color={C.purple} />
-                        )
+                      {selectionne && (
+                        <Ionicons name="checkmark" size={18} color={C.purple} />
                       )}
                     </TouchableOpacity>
                   );

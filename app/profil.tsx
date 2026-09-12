@@ -55,7 +55,11 @@ import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { reinitialiserEtatUtilisateur, useObjectifs } from "./store";
 import { usePremium } from "./PremiumContext";
 import { styleModaleTablette, useEstTablette } from "./useTablette";
-import { estComptePremium, estEspacePartageActif } from "../utils/premium";
+import {
+  estComptePremium,
+  estEspacePartageActif,
+  premiumUIVisible,
+} from "../utils/premium";
 import {
   creerEspacePartage,
   EtatEspacePartage,
@@ -174,7 +178,6 @@ export default function Profil() {
   // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
   const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
   const scrollProfilRef = useRef<ScrollView>(null);
-  const [yPasserPremium, setYPasserPremium] = useState(0);
 
   const [email, setEmail] = useState("");
   const [prenomTemp, setPrenomTemp] = useState(objStore.prenom);
@@ -771,20 +774,10 @@ export default function Profil() {
     );
   };
 
-  const gererTapFonctionVerrouillee = () => {
-    Alert.alert(
-      "Cette fonctionnalité est réservée aux comptes Premium",
-      undefined,
-      [
-        { text: "Annuler", style: "cancel" },
-        {
-          text: "Découvrir Premium",
-          onPress: () =>
-            scrollProfilRef.current?.scrollTo({ y: yPasserPremium, animated: true }),
-        },
-      ],
-    );
-  };
+  // RÈGLE : gererTapFonctionVerrouillee (interception de tap sur les 2
+  // exports Premium) retirée le 2026-09-12 — refonte monétisation, ces 2
+  // exports sont désormais déverrouillés pour tout le monde (cf. RÈGLE sur
+  // leur site d'appel plus bas), plus rien à intercepter.
 
   const seDeconnecter = () => {
     if (!isGuest) {
@@ -1422,16 +1415,20 @@ export default function Profil() {
           DONNÉES
         </Text>
         <View style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.vert, contrasteRenforce)]}>
+          {/* RÈGLE À NE JAMAIS CASSER — REFONTE MONÉTISATION DU 2026-09-12 :
+              les 2 exports ci-dessous étaient réservés Premium — décision
+              explicite lors du retrait de Premium du modèle économique de
+              la V1 (cf. PREMIUM_ACTIF, utils/premium.ts) de les
+              déverrouiller ENTIÈREMENT plutôt que de les laisser
+              définitivement inaccessibles (Premium n'étant plus jamais
+              atteignable pour un compte non-admin). Ne jamais réintroduire
+              le gate `premium ||` ici sans repenser ce choix. */}
           <TouchableOpacity
             style={[
               styles.btnSecondaire,
               { borderColor: C.separateur, justifyContent: "space-between" },
             ]}
-            onPress={() =>
-              premium || isGuest
-                ? setModalExportVisible(true)
-                : gererTapFonctionVerrouillee()
-            }
+            onPress={() => setModalExportVisible(true)}
             activeOpacity={0.7}
           >
             <View style={styles.btnSecondaireGauche}>
@@ -1440,11 +1437,6 @@ export default function Profil() {
                 Exporter mes données (Excel)
               </Text>
             </View>
-            {/* RÈGLE : jamais de cadenas pour un invité, cf. RÈGLE sur la
-                section "PASSER PREMIUM" plus bas. */}
-            {!premium && !isGuest && (
-              <Ionicons name="lock-closed" size={14} color={C.texteMuted} />
-            )}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1452,11 +1444,7 @@ export default function Profil() {
               styles.btnSecondaire,
               { borderColor: C.separateur, marginTop: 12, justifyContent: "space-between" },
             ]}
-            onPress={() =>
-              premium || isGuest
-                ? setModalRapportVisible(true)
-                : gererTapFonctionVerrouillee()
-            }
+            onPress={() => setModalRapportVisible(true)}
             activeOpacity={0.7}
           >
             <View style={styles.btnSecondaireGauche}>
@@ -1465,9 +1453,6 @@ export default function Profil() {
                 Exporter un résumé visuel
               </Text>
             </View>
-            {!premium && !isGuest && (
-              <Ionicons name="lock-closed" size={14} color={C.texteMuted} />
-            )}
           </TouchableOpacity>
         </View>
 
@@ -1594,9 +1579,19 @@ export default function Profil() {
             découverte, pas un compte non-premium à convertir en Premium —
             "Créer mon compte" (bloquerSiInvite) est la seule invitation à
             lui montrer, jamais "Passer Premium". Même raisonnement pour le
-            cadenas Export/Rapport juste au-dessus. */}
-        {!premium && !isGuest && (
-          <View onLayout={(e) => setYPasserPremium(e.nativeEvent.layout.y)}>
+            cadenas Export/Rapport juste au-dessus.
+
+            RÈGLE À NE JAMAIS CASSER — REFONTE MONÉTISATION DU 2026-09-12 :
+            premiumUIVisible(isAdmin) ajouté — Premium est retiré du modèle
+            économique de la V1 (cf. PREMIUM_ACTIF, utils/premium.ts), cette
+            section reste masquée pour tout compte non-admin même le jour
+            où TESTFLIGHT_MODE repasse à false (aujourd'hui déjà masquée
+            pour ces comptes par TESTFLIGHT_MODE=true qui rend `premium`
+            vrai pour tout le monde — ce garde supplémentaire protège le
+            comportement en production). Un admin continue de la voir
+            (outil de test), cf. RÈGLE sur premiumUIVisible. */}
+        {!premium && !isGuest && premiumUIVisible(objStore.isAdmin) && (
+          <View>
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
               PASSER PREMIUM
             </Text>

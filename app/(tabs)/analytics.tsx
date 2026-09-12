@@ -68,8 +68,8 @@ import { TextInput } from "../TexteInput";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
 import { useLargeurAnimee } from "../BarreProgression";
 import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
-import { InsightVerrouille } from "../InsightVerrouille";
-import { PremiumVerrou } from "../PremiumVerrou";
+import { InsightVerrouille, useDeblocagePub } from "../InsightVerrouille";
+import { TonBilanVerrou } from "../TonBilanVerrou";
 import { GraphiqueFlux, LienFlux, NoeudFlux } from "../GraphiqueFlux";
 import { usePremium } from "../PremiumContext";
 import { estComptePremium } from "../../utils/premium";
@@ -242,9 +242,13 @@ function construireMoisPeriode(
 }
 
 const PERIODE_MAX_MOIS = 120; // plafond fixe (10 ans), indépendant des données de l'utilisateur
-// Nombre de mois consultables par un compte non-premium sur Stats — cf.
-// estComptePremium (utils/premium.ts) pour qui est concerné.
-const LIMITE_MOIS_GRATUIT_STATS = 2;
+// RÈGLE À NE JAMAIS CASSER — REFONTE MONÉTISATION DU 2026-09-12 (demande
+// explicite) : Stats affiche par défaut UNIQUEMENT le mois en cours (cf.
+// nbMoisSelectionne, initialisé à 1) — au-delà, le sélecteur de période
+// (3/6/12 mois...) est verrouillé derrière une pub (session-scoped,
+// statsPeriodeDebloque), plus derrière Premium. Un compte invité (isGuest)
+// reste exempté comme partout ailleurs.
+const LIMITE_MOIS_GRATUIT_STATS = 1;
 
 type OptionPeriode = {
   valeur: number;
@@ -1324,12 +1328,32 @@ export default function Analytics() {
     scrollRef.current.scrollTo({ y, animated: false });
     setScrollOffsetStats(y);
   };
-  const [nbMoisSelectionne, setNbMoisSelectionne] = useState(3);
-  // RÈGLE À NE JAMAIS CASSER : state local (pas persisté) — "pour la
-  // session en cours" signifie qu'il revient à false à la prochaine
-  // ouverture de l'app. Même mécanisme que conseilsDebloques dans
-  // app/(tabs)/index.tsx, voir InsightVerrouille pour le composant partagé.
-  const [retenirDebloque, setRetenirDebloque] = useState(false);
+  // RÈGLE : défaut passé de 3 à 1 le 2026-09-12 (refonte monétisation,
+  // demande explicite "Stats affiche par défaut uniquement le mois en
+  // cours") — cf. RÈGLE détaillée sur LIMITE_MOIS_GRATUIT_STATS plus haut.
+  const [nbMoisSelectionne, setNbMoisSelectionne] = useState(1);
+  // RÈGLE : session-scoped (comme tonBilanDebloque plus bas) — une pub
+  // débloque toutes les périodes du sélecteur pour la session, revient à
+  // false à la prochaine ouverture de l'app.
+  const [statsPeriodeDebloque, setStatsPeriodeDebloque] = useState(false);
+  // RÈGLE : useDeblocagePub (app/InsightVerrouille.tsx) plutôt qu'un second
+  // mécanisme de pub — même source unique que "Ton bilan"/Aperçu, jamais
+  // dupliquée. Déclenché depuis onValueChange du Picker de période plus
+  // bas, pas depuis un composant <InsightVerrouille>/<TonBilanVerrou> (le
+  // Picker natif n'a pas d'overlay à habiller, juste une interception de
+  // tap sur une option verrouillée).
+  const { declencherPub: declencherPubPeriodeStats } = useDeblocagePub(
+    () => setStatsPeriodeDebloque(true),
+    statsPeriodeDebloque,
+  );
+  // RÈGLE À NE JAMAIS CASSER — VERROU UNIQUE POUR TOUT "TON BILAN" (refonte
+  // monétisation du 2026-09-12, demande explicite — REVIENT sur l'ancienne
+  // séparation en verrous individuels : 4 onglets PremiumVerrou distincts +
+  // 2 InsightVerrouille distincts, cf. git log) : une seule pub débloque
+  // désormais TOUT Ton bilan (onglets Vista/Santé/Trophées/Simulateur +
+  // les 2 encarts d'insights ci-dessous) pour la session — state local (pas
+  // persisté), revient à false à la prochaine ouverture de l'app.
+  const [tonBilanDebloque, setTonBilanDebloque] = useState(false);
   // Comparaison mensuelle par catégorie : un seul état pour toute la
   // section (pas de toggle par ligne) — taper n'importe quelle valeur
   // affichée (une ligne ou le delta total en haut) bascule tout d'un coup.
@@ -1410,12 +1434,12 @@ export default function Analytics() {
   // RÈGLE À NE JAMAIS CASSER : "Ton bilan" doit garder EXACTEMENT la même
   // hauteur de conteneur quel que soit l'onglet actif — modalCardBadges a
   // désormais une hauteur FIXE (HAUTEUR_MODALE_TON_BILAN ci-dessus, cf.
-  // RÈGLE juste au-dessus), donc un onglet verrouillé (PremiumVerrou,
+  // RÈGLE juste au-dessus), donc un onglet verrouillé (TonBilanVerrou,
   // contenu court par nature) ne rétrécit plus la modale par construction.
   // HAUTEUR_ONGLET_VERROUILLE reste néanmoins utile pour que le contenu
   // verrouillé lui-même remplisse visuellement l'espace disponible dans
   // cette hauteur fixe, plutôt que de laisser un grand vide sous
-  // PremiumVerrou.
+  // TonBilanVerrou.
   const HAUTEUR_ONGLET_VERROUILLE = Dimensions.get("window").height * 0.85 - 220;
   const changerVueModalStats = (
     v: "vista" | "sante" | "trophees" | "simulateur",
@@ -2208,28 +2232,32 @@ export default function Analytics() {
     setEditionSeuilOuverte(false);
   };
 
-  // RÈGLE À NE JAMAIS CASSER : verrouillePremium marque les options
-  // au-delà de LIMITE_MOIS_GRATUIT_STATS pour un compte non-premium — le
-  // Picker natif ne permet pas d'afficher une icône par option ni
-  // d'intercepter un tap avant sélection, donc le verrou passe par un
-  // suffixe de label ("(Premium)", même convention que "(bientôt
-  // disponible)" pour `prochaine`) + une interception dans onValueChange
-  // (cf. Picker plus bas) qui annule la sélection et affiche une alerte au
-  // lieu de laisser passer.
+  // RÈGLE À NE JAMAIS CASSER : verrouillePub marque les options au-delà de
+  // LIMITE_MOIS_GRATUIT_STATS tant que ni premium/invité ni
+  // statsPeriodeDebloque (pub regardée cette session) — le Picker natif ne
+  // permet pas d'afficher une icône par option ni d'intercepter un tap
+  // avant sélection, donc le verrou passe par un suffixe de label
+  // ("(Pub)", même convention que "(bientôt disponible)" pour `prochaine`)
+  // + une interception dans onValueChange (cf. Picker plus bas) qui
+  // déclenche la pub au lieu de laisser passer la sélection.
   // RÈGLE : un compte invité (isGuest) est exempté ici comme partout
-  // ailleurs — jamais de suffixe "(Premium)"/verrou sur le Picker pour un
-  // invité, cf. RÈGLE dans profil.tsx sur les autres éléments Premium.
+  // ailleurs — jamais de suffixe/verrou sur le Picker pour un invité, cf.
+  // RÈGLE dans profil.tsx sur les autres éléments Premium.
   const optionsPeriode = genererOptionsPeriode(
     objStore.historiquesMois.length + 1,
   ).map((o) => ({
     ...o,
-    verrouillePremium: !premium && !isGuest && o.valeur > LIMITE_MOIS_GRATUIT_STATS,
+    verrouillePub:
+      !premium &&
+      !isGuest &&
+      !statsPeriodeDebloque &&
+      o.valeur > LIMITE_MOIS_GRATUIT_STATS,
   }));
 
   // Clamp indépendant de la sélection courante du Picker : protège aussi
-  // le cas d'un compte redevenu non-premium alors que nbMoisSelectionne
-  // était encore réglé au-delà de la limite gratuite.
-  const nbMois = premium || isGuest
+  // le cas d'un compte redevenu non-premium/session sans pub alors que
+  // nbMoisSelectionne était encore réglé au-delà de la limite gratuite.
+  const nbMois = premium || isGuest || statsPeriodeDebloque
     ? nbMoisSelectionne
     : Math.min(nbMoisSelectionne, LIMITE_MOIS_GRATUIT_STATS);
   // Suffixe de titre pour les sections calculées sur la période sélectionnée
@@ -2944,9 +2972,12 @@ export default function Analytics() {
     anneeActuelle: ANNEE_ACTUELLE,
     situationsExclues: situationsDejaAffichees(),
   });
-  // RÈGLE À NE JAMAIS CASSER : premium voit toujours tous les insights sans
-  // pub — voir la même règle dans app/(tabs)/index.tsx.
-  const retenirTousVisibles = premium || retenirDebloque;
+  // RÈGLE À NE JAMAIS CASSER : premium/invité voient toujours tout Ton
+  // bilan sans pub — même condition que les 4 anciens PremiumVerrou
+  // (Vista/Santé/Trophées/Simulateur, cf. leur site d'appel plus bas),
+  // désormais partagée par TOUT le contenu de "Ton bilan" via une seule
+  // variable, cf. RÈGLE sur tonBilanDebloque plus haut.
+  const tonBilanVisible = premium || isGuest || tonBilanDebloque;
 
   // Comparaison mensuelle par catégorie : uniquement les catégories présentes
   // dans LES DEUX mois comparés (sinon la comparaison n'a pas de sens), plus
@@ -3086,8 +3117,9 @@ export default function Analytics() {
   // RÈGLE À NE JAMAIS CASSER : ne montre QUE des montants réels déjà
   // enregistrés (enveloppe.depense, épargne réelle), jamais un budget prévu
   // ni une projection — voir aussi la RÈGLE en tête de GraphiqueFlux.tsx.
-  // Graphique réservé Premium (cf. PremiumVerrou dans le JSX) : pas de
-  // palier gratuit ici, contrairement aux autres tiroirs de Stats.
+  // Graphique réservé (cf. TonBilanVerrou dans le JSX, verrou consolidé
+  // "Ton bilan" depuis le 2026-09-12) : pas de palier gratuit ici,
+  // contrairement aux autres tiroirs de Stats.
   const [nbMoisFlux, setNbMoisFlux] = useState(1);
   // RÈGLE À NE JAMAIS CASSER — VERROUILLÉ AU MOIS EN COURS EN VUE PARTAGÉE
   // (décision explicite de l'utilisateur) : reproduire le détail par
@@ -4229,11 +4261,8 @@ export default function Analytics() {
                   const option = optionsPeriode.find(
                     (o) => o.valeur === Number(valeur),
                   );
-                  if (option?.verrouillePremium) {
-                    Alert.alert(
-                      "Premium",
-                      "Accédez à tout votre historique avec Premium.",
-                    );
+                  if (option?.verrouillePub) {
+                    declencherPubPeriodeStats();
                     return;
                   }
                   setNbMoisSelectionne(Number(valeur));
@@ -4246,15 +4275,15 @@ export default function Analytics() {
                     label={
                       o.prochaine
                         ? `${o.label} (bientôt disponible)`
-                        : o.verrouillePremium
-                          ? `${o.label} (Premium)`
+                        : o.verrouillePub
+                          ? `${o.label} (Pub)`
                           : o.label
                     }
                     value={o.valeur}
                     enabled={o.disponible}
                     color={
                       Platform.OS === "android"
-                        ? o.disponible && !o.verrouillePremium
+                        ? o.disponible && !o.verrouillePub
                           ? C.texte
                           : C.texteMuted
                         : undefined
@@ -5514,7 +5543,7 @@ export default function Analytics() {
             ]}
           >
             {/* RÈGLE À NE JAMAIS CASSER : le tout premier insight reste
-                toujours gratuit, quel que soit retenirTousVisibles — les
+                toujours gratuit, quel que soit tonBilanVisible — les
                 suivants sont regroupés derrière un seul bloc verrouillé
                 (InsightVerrouille), pas un par insight. */}
             {insights.length > 0 && (
@@ -5527,8 +5556,8 @@ export default function Analytics() {
             )}
             {insights.length > 1 && (
               <InsightVerrouille
-                deverrouille={retenirTousVisibles}
-                onDeverrouille={() => setRetenirDebloque(true)}
+                deverrouille={tonBilanVisible}
+                onDeverrouille={() => setTonBilanDebloque(true)}
               >
                 {insights.slice(1).map((txt, i) => (
                   <View
@@ -5646,11 +5675,13 @@ export default function Analytics() {
               ))}
             </View>
 
-            {/* === Onglet 1 : "Vista" — visible pour TOUS les comptes
-                (contrairement aux 3 autres onglets, Premium uniquement),
-                même logique qu'un aperçu gratuit sur "Nos conseils"
-                d'Aperçu. Ordre vertical : graphique de flux → "Ce que Vista
-                a remarqué". */}
+            {/* === Onglet 1 : "Vista" — RÈGLE mise à jour le 2026-09-12 :
+                les 4 onglets (Vista/Santé/Trophées/Simulateur) partagent
+                désormais le même verrou consolidé "Ton bilan" (une seule
+                pub débloque les 4, cf. tonBilanVisible/TonBilanVerrou) —
+                plus de distinction "Vista gratuit vs les 3 autres Premium
+                uniquement". Ordre vertical : graphique de flux → "Ce que
+                Vista a remarqué". */}
             {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
                 `display` : les 4 ScrollView des onglets restent montés en
                 permanence dès l'ouverture de la modale (jamais un
@@ -5700,7 +5731,7 @@ export default function Analytics() {
                   bloquerSiInvite sur creerObjectifDepuisSimulationInverse/
                   confirmerAdoptionScenario plus bas), jamais pour la
                   consultation. */}
-              {premium || isGuest ? (
+              {tonBilanVisible ? (
                 <>
                   <View style={styles.chipRow}>
                     {/* RÈGLE À NE JAMAIS CASSER : sélecteur de période masqué
@@ -5809,7 +5840,10 @@ export default function Analytics() {
                   )}
                 </>
               ) : (
-                <PremiumVerrou hauteur={260} />
+                <TonBilanVerrou
+                  hauteur={260}
+                  onDeverrouille={() => setTonBilanDebloque(true)}
+                />
               )}
             </View>
 
@@ -5842,8 +5876,8 @@ export default function Analytics() {
                   </Text>
                 </View>
                 <InsightVerrouille
-                  deverrouille={retenirTousVisibles}
-                  onDeverrouille={() => setRetenirDebloque(true)}
+                  deverrouille={tonBilanVisible}
+                  onDeverrouille={() => setTonBilanDebloque(true)}
                 >
                   <View style={[styles.observationLigne, { marginTop: 6 }]}>
                     <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
@@ -5858,8 +5892,8 @@ export default function Analytics() {
             <View style={{ height: 32 }} />
             </ScrollView>
 
-            {/* === Onglet 2 : "Santé" — Premium uniquement, pas de
-                déblocage par pub (contrairement à InsightVerrouille), sauf
+            {/* === Onglet 2 : "Santé" — verrou consolidé "Ton bilan" depuis
+                le 2026-09-12 (TonBilanVerrou, déblocage par pub), sauf
                 invité (cf. RÈGLE sur l'onglet Vista plus haut). */}
             {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
                 `display` : cf. RÈGLE identique sur l'onglet Vista plus haut
@@ -5867,10 +5901,13 @@ export default function Analytics() {
                 (indépendamment de l'onglet actif), seule sa visibilité
                 bascule via `display`, jamais un montage/démontage au
                 changement d'onglet. */}
-            {!premium && !isGuest && vueModalStats === "sante" && (
-              <PremiumVerrou hauteur={HAUTEUR_ONGLET_VERROUILLE} />
+            {!tonBilanVisible && vueModalStats === "sante" && (
+              <TonBilanVerrou
+                hauteur={HAUTEUR_ONGLET_VERROUILLE}
+                onDeverrouille={() => setTonBilanDebloque(true)}
+              />
             )}
-            {(premium || isGuest) && (
+            {tonBilanVisible && (
               <ScrollView
                 ref={scrollSanteRef}
                 showsVerticalScrollIndicator
@@ -6291,14 +6328,18 @@ export default function Analytics() {
 
             {/* === Onglet 3 : "Trophées" — regroupe les cartes de séries
                 (déjà chacune sa propre carte) et la grille de trophées.
-                Premium uniquement, pas de déblocage par pub, sauf invité
-                (cf. RÈGLE sur l'onglet Vista plus haut). */}
+                Verrou consolidé "Ton bilan" depuis le 2026-09-12
+                (TonBilanVerrou, déblocage par pub), sauf invité (cf. RÈGLE
+                sur l'onglet Vista plus haut). */}
             {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
                 `display` : cf. RÈGLE identique sur l'onglet Vista plus haut. */}
-            {!premium && !isGuest && vueModalStats === "trophees" && (
-              <PremiumVerrou hauteur={HAUTEUR_ONGLET_VERROUILLE} />
+            {!tonBilanVisible && vueModalStats === "trophees" && (
+              <TonBilanVerrou
+                hauteur={HAUTEUR_ONGLET_VERROUILLE}
+                onDeverrouille={() => setTonBilanDebloque(true)}
+              />
             )}
-            {(premium || isGuest) && (
+            {tonBilanVisible && (
               <ScrollView
                 ref={scrollTropheesRef}
                 showsVerticalScrollIndicator
@@ -6655,20 +6696,25 @@ export default function Analytics() {
               </ScrollView>
             )}
 
-            {/* === Onglet 4 : "Et si..." (Simulateur) — Premium uniquement,
-                pas de déblocage par pub. Un invité PEUT consulter cet
-                onglet comme les 3 autres (cf. RÈGLE sur l'onglet Vista plus
-                haut) — c'est le seul onglet où, contrairement aux 3 autres,
-                le blocage invité reste actif, mais déplacé au niveau des
+            {/* === Onglet 4 : "Et si..." (Simulateur) — verrou consolidé
+                "Ton bilan" depuis le 2026-09-12 (TonBilanVerrou, déblocage
+                par pub), comme les 3 autres onglets. Un invité PEUT
+                consulter cet onglet comme les 3 autres (cf. RÈGLE sur
+                l'onglet Vista plus haut) — c'est le seul onglet où,
+                contrairement aux 3 autres, le blocage invité reste actif,
+                mais déplacé au niveau des
                 actions qui écrivent réellement en base (bloquerSiInvite sur
                 creerObjectifDepuisSimulationInverse/
                 confirmerAdoptionScenario), jamais sur la simple lecture. */}
             {/* RÈGLE À NE JAMAIS CASSER — TOUJOURS MONTÉ, VISIBILITÉ VIA
                 `display` : cf. RÈGLE identique sur l'onglet Vista plus haut. */}
-            {!premium && !isGuest && vueModalStats === "simulateur" && (
-              <PremiumVerrou hauteur={HAUTEUR_ONGLET_VERROUILLE} />
+            {!tonBilanVisible && vueModalStats === "simulateur" && (
+              <TonBilanVerrou
+                hauteur={HAUTEUR_ONGLET_VERROUILLE}
+                onDeverrouille={() => setTonBilanDebloque(true)}
+              />
             )}
-            {(premium || isGuest) && (
+            {tonBilanVisible && (
               <ScrollView
                 ref={scrollSimulateurRef}
                 showsVerticalScrollIndicator
