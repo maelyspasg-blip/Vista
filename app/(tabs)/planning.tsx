@@ -1912,8 +1912,19 @@ export default function Planning() {
                           style={[
                             styles.heureRow,
                             { borderBottomColor: couleurGrillePlanning },
+                            // RÈGLE : violet #c084fc26 (demande du
+                            // 2026-09-12) — remplace le teal, même famille
+                            // violette que teinteAujourdhui (la surbrillance
+                            // déjà en place sur la vue Semaine), mais une
+                            // constante fixe ici, pas adaptée clair/sombre
+                            // comme teinteAujourdhui (même limite que
+                            // l'ancien #1D9E7519 qu'elle remplace). Le
+                            // cercle teal #1D9E75 autour de la date du jour
+                            // (vue Mois, header weekHeadNumAujourdhui)
+                            // n'est PAS concerné, seule cette surbrillance
+                            // de ligne.
                             estHeureActuelle && {
-                              backgroundColor: "#1D9E7519",
+                              backgroundColor: "#c084fc26",
                             },
                           ]}
                         >
@@ -1922,7 +1933,7 @@ export default function Planning() {
                               styles.heureTexte,
                               {
                                 color: estHeureActuelle
-                                  ? "#1D9E75"
+                                  ? "#c084fc"
                                   : couleurTexteGrilleSecondaire,
                               },
                             ]}
@@ -1956,8 +1967,12 @@ export default function Planning() {
                         style={[
                           styles.ligneFond,
                           { borderBottomColor: couleurGrillePlanning },
+                          // RÈGLE : violet #c084fc26, cf. RÈGLE identique
+                          // sur heureRow (colonne des heures) — même
+                          // surbrillance appliquée aux deux colonnes pour
+                          // une bande continue sur toute la largeur.
                           i === heureActuelleIndex && {
-                            backgroundColor: "#1D9E7519",
+                            backgroundColor: "#c084fc26",
                           },
                         ]}
                         activeOpacity={0.5}
