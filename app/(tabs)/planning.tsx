@@ -2359,13 +2359,18 @@ export default function Planning() {
                               styles.monthCell,
                               { borderBottomColor: couleurGrillePlanning },
                               // RÈGLE : fond de cellule "aujourd'hui" —
-                              // RÉINTRODUIT le 2026-09-12 (demande explicite,
-                              // teal 10%), en plus du cercle ci-dessous.
-                              // Reversait la RÈGLE du 2026-09-06 qui
-                              // l'excluait volontairement ("jamais un fond
-                              // de cellule") ; les deux se combinent
+                              // RÉINTRODUIT le 2026-09-12 (demande explicite),
+                              // en plus du cercle ci-dessous. Reversait la
+                              // RÈGLE du 2026-09-06 qui l'excluait
+                              // volontairement ("jamais un fond de
+                              // cellule") ; les deux se combinent
                               // maintenant, cf. site d'appel du cercle.
-                              estAujourdhui && { backgroundColor: "#1D9E7519" },
+                              // Couleur passée de teal à violet #c084fc26
+                              // le même jour (même famille que Jour/
+                              // Semaine, cf. RÈGLE sur heureRow) — le
+                              // cercle autour du chiffre RESTE teal
+                              // #1D9E75, seul le fond de cellule change.
+                              estAujourdhui && { backgroundColor: "#c084fc26" },
                             ]}
                             activeOpacity={0.7}
                             onPress={() => ouvrirJour(jourDate)}
