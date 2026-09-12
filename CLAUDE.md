@@ -50,7 +50,15 @@ App mobile de gestion de budget personnel et partagé.
 - Jamais écraser un snapshot existant avec des données moins complètes
 
 ### Sécurité
-- Toute suppression Supabase doit avoir un filtre `user_id` explicite
+
+**Toute opération destructive (DELETE, UPDATE qui écrase/vide une donnée, upsert qui pourrait écraser avec moins complet) doit avoir, dans cet ordre :**
+1. Un filtre `user_id` (ou équivalent d'appartenance) explicite côté client — jamais compter sur RLS seule comme unique ligne de défense.
+2. Une confirmation utilisateur explicite avant déclenchement (`Alert.alert` avec libellé clair de l'irréversibilité pour toute suppression visible de l'utilisateur — catégorie, transaction, objectif, événement).
+3. Un log dans `audit_operations` (`journaliserOperationAudit`, `app/store.ts`) — best-effort, ne bloque jamais l'opération elle-même si l'écriture du log échoue.
+- Jamais de `truncate`, jamais de `DELETE`/`UPDATE` sans `WHERE` (toujours au minimum `.eq("id", ...)`, en pratique doublé de `.eq("user_id", ...)`).
+- Inventaire complet des opérations destructives du code, leur statut (filtre/confirmation/log) et les corrections déjà appliquées : voir `AUDIT_V1.md`, section "Audit sécurité données" (audit du 2026-09-12).
+- Exception documentée et volontaire : `supprimerModeleDepense` n'écrit pas dans `audit_operations` — un modèle de dépense ("Ajout rapide") est un raccourci UI, jamais une donnée financière réelle (cf. P001, `AUDIT_V1.md`).
+- **Exception à la règle n°1 (filtre `user_id`)** : la table `evenements` a une écriture cross-compte RLS volontaire pour les événements `visibilite = 'commun'` (`evenements_update_espace_partage`/`evenements_delete_espace_partage`, `20260905091000_planning_partage_rls.sql`) — un événement commun créé par le partenaire A doit rester modifiable/supprimable par le partenaire B, dont l'id ne correspond pas à `evenements.user_id`. N'ajoutez JAMAIS de `.eq("user_id", ...)` sur une écriture `evenements` (DELETE ou UPDATE) : ça exclurait silencieusement ces lignes (aucune erreur renvoyée) et recréerait le bug "événement/catégorie fantôme". RLS seule est la protection voulue sur cette table précise — trouvé et corrigé en revue le 2026-09-12, avant tout commit (cf. `AUDIT_V1.md`).
 - `appliquerEnveloppes()` ne doit jamais recevoir un tableau vide accidentellement
 - 13 fichiers utilitaires marqués "aucune écriture Supabase autorisée" — ne jamais y ajouter d'appels Supabase en écriture :
   - `utils/conseils.ts`, `utils/tendancesPeriode.ts`, `utils/bilanVista.ts`
@@ -59,9 +67,15 @@ App mobile de gestion de budget personnel et partagé.
   - `app/PremiumVerrou.tsx`, `utils/widgetsSync.ts`
 
 ### RLS
-- Ne jamais créer de policy SELECT qui se référence elle-même (récursion infinie)
+- Ne jamais créer de policy SELECT qui se référence elle-même (récursion infinie) — passer par une fonction `security definer` (ex. `est_membre_espace()`) si une policy a besoin d'interroger sa propre table.
 - Toujours utiliser des fonctions `security definer` pour les requêtes cross-utilisateur
+- Toute fonction `security definer` doit revalider `auth.uid()` en interne — ne jamais faire confiance à un `user_id`/`espace_id` fourni en paramètre par le client pour établir l'identité de l'appelant (un paramètre peut désigner un ID cible à consulter — ex. `partage_un_espace_avec(p_autre_user_id)` — mais jamais servir à s'authentifier soi-même).
 - Tester : `partage_un_espace_avec()`, `est_membre_espace()`, `fusionner_evenements()`
+
+### Migrations Supabase — additive uniquement
+- Toute migration doit être `if not exists`/additive — jamais `DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, ni `DELETE`/`UPDATE` sans condition d'appartenance étroite (`user_id`, `is_guest = true` pour les réparations de comptes de démo, etc.).
+- `DROP POLICY IF EXISTS` suivi immédiatement d'un `CREATE POLICY` (même transaction/fichier) est l'idiome établi et sûr pour faire évoluer une policy — ce n'est pas une exception à la règle ci-dessus, juste le seul moyen de remplacer une policy existante.
+- `CREATE OR REPLACE FUNCTION` pour toute évolution de fonction — jamais `DROP FUNCTION` suivi d'une recréation séparée (risque de casser des permissions/dépendances entre les deux étapes).
 
 ### GraphiqueFlux
 - `ESPACEMENT_MIN = 14` — validé sur device physique

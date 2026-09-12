@@ -3106,6 +3106,13 @@ export function useObjectifs() {
         );
         return;
       }
+      // RÈGLE : log audit_operations ajouté lors de l'audit sécurité
+      // données du 2026-09-12 — cette fonction avait déjà le filtre
+      // user_id et le backup AsyncStorage, il ne lui manquait que ça.
+      journaliserOperationAudit("suppression_objectif", {
+        objectifId: id,
+        nom: objectif?.nom,
+      });
       setEtat({ objectifs: etat.objectifs.filter((o) => o.id !== id) });
     },
 
@@ -3221,6 +3228,27 @@ export function useObjectifs() {
       const enveloppe = etat.enveloppes.find((e) => e.id === id);
       if (!enveloppe) return;
 
+      // RÈGLE À NE JAMAIS CASSER — AUDIT SÉCURITÉ DONNÉES DU 2026-09-12 :
+      // cette fonction manquait de 3 protections déjà présentes sur sa
+      // fonction sœur supprimerObjectif (voir juste au-dessus) — filtre
+      // user_id explicite côté client, backup AsyncStorage avant
+      // suppression, log audit_operations après. Corrigé ici pour aligner
+      // les deux : une catégorie entraîne en plus la perte de TOUTES ses
+      // transactions liées (cf. plus bas), donc au moins aussi sensible
+      // qu'un objectif.
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        console.error(
+          "Suppression de catégorie refusée : aucun utilisateur connecté.",
+        );
+        signalerErreurSync("Tu dois être connecté pour supprimer une catégorie.");
+        return;
+      }
+
+      sauvegarderEnveloppesSupprimees([enveloppe]);
+
       // La suppression de la catégorie passe en premier, avant tout autre
       // effet de bord : snapshot_enveloppes.enveloppe_id est en ON DELETE
       // NO ACTION, donc une catégorie déjà archivée dans un mois passé sera
@@ -3228,7 +3256,11 @@ export function useObjectifs() {
       // transactions/événements liés tant que ce n'est pas confirmé, pour ne
       // jamais désynchroniser l'UI et la base, ni perdre des transactions
       // pour une suppression qui n'aura finalement pas lieu.
-      const { error } = await supabase.from("enveloppes").delete().eq("id", id);
+      const { error } = await supabase
+        .from("enveloppes")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id);
       if (error) {
         console.error("Supabase delete enveloppe a échoué :", error);
         signalerErreurSync(
@@ -3238,6 +3270,11 @@ export function useObjectifs() {
         );
         return;
       }
+      journaliserOperationAudit("suppression_enveloppe", {
+        enveloppeId: id,
+        nom: enveloppe.nom,
+        type: enveloppe.type,
+      });
 
       const evenementsLies = etat.evenements.filter(
         (e) => e.categorieLiee === enveloppe.nom,
@@ -3267,7 +3304,8 @@ export function useObjectifs() {
       const { error: erreurTransactions } = await supabase
         .from("transactions")
         .delete()
-        .eq("enveloppe_id", id);
+        .eq("enveloppe_id", id)
+        .eq("user_id", user.id);
       if (erreurTransactions) {
         console.error(
           "Supabase delete transactions liées a échoué :",
@@ -3281,7 +3319,8 @@ export function useObjectifs() {
       const { error: erreurModeles } = await supabase
         .from("modeles_depenses")
         .delete()
-        .eq("enveloppe_id", id);
+        .eq("enveloppe_id", id)
+        .eq("user_id", user.id);
       if (erreurModeles) {
         console.error(
           "Supabase delete modeles_depenses liés a échoué :",
@@ -3293,6 +3332,17 @@ export function useObjectifs() {
       }
 
       for (const e of evenementsLies) {
+        // RÈGLE À NE JAMAIS CASSER — PAS DE FILTRE user_id ICI : évenements
+        // est la SEULE table du projet avec une écriture cross-compte RLS
+        // volontaire (evenements_update_espace_partage,
+        // 20260905091000_planning_partage_rls.sql) — un événement "commun"
+        // dissociable par le partenaire a un user_id qui N'EST PAS le mien.
+        // Ajouter .eq("user_id", user.id) exclurait silencieusement ces
+        // lignes (0 ligne affectée, aucune erreur renvoyée) alors que
+        // l'état local a déjà été mis à jour, recréant exactement le bug
+        // "catégorie fantôme" que ce correctif est censé éviter (trouvé en
+        // revue le 2026-09-12, jamais corrigé initialement par erreur).
+        // RLS seule reste la protection ici, comme avant cet audit.
         const { error: erreurEvenement } = await supabase
           .from("evenements")
           .update({ categorie_liee: null })
@@ -3566,6 +3616,19 @@ export function useObjectifs() {
         ajusterForecastEvenementsFinanciers(ev.categorieLiee);
       }
 
+      // RÈGLE À NE JAMAIS CASSER — PAS DE FILTRE user_id SUR CE DELETE :
+      // evenements est la SEULE table du projet avec une écriture
+      // cross-compte RLS volontaire (evenements_delete_espace_partage,
+      // 20260905091000_planning_partage_rls.sql) — un événement "commun"
+      // supprimable par le partenaire a un user_id qui n'est pas le mien.
+      // Un .eq("user_id", ...) exclurait silencieusement ces lignes (0
+      // ligne affectée, aucune erreur renvoyée) alors que l'état local a
+      // déjà retiré l'événement, recréant le bug "événement fantôme qui
+      // réapparaît après suppression" (trouvé en revue le 2026-09-12,
+      // jamais corrigé initialement par erreur — cf. RÈGLE identique sur
+      // supprimerEnveloppe/dissociation categorie_liee). RLS seule reste
+      // la protection ici, comme avant cet audit — log audit_operations
+      // ajouté (aucun rapport avec cette RÈGLE).
       supabase
         .from("evenements")
         .delete()
@@ -3576,7 +3639,12 @@ export function useObjectifs() {
             signalerErreurSync(
               `Impossible de supprimer l'événement : ${error.message}`,
             );
+            return;
           }
+          journaliserOperationAudit("suppression_evenement", {
+            evenementId: id,
+            nom: ev?.nom,
+          });
         });
     },
 
@@ -3815,18 +3883,35 @@ export function useObjectifs() {
       appliquerEnveloppes(enveloppesMaj);
       synchroniserWidgetAjoutRapide(transactionsMaj);
       synchroniserWidgetPlanning(etat.evenements, transactionsMaj);
-      supabase
-        .from("transactions")
-        .delete()
-        .eq("id", id)
-        .then(({ error }) => {
-          if (error) {
-            console.error("Supabase delete transaction a échoué :", error);
-            signalerErreurSync(
-              `Impossible de supprimer la dépense : ${error.message}`,
-            );
-          }
-        });
+      // RÈGLE : cf. RÈGLE identique sur supprimerEvenement (audit sécurité
+      // données du 2026-09-12) — filtre user_id + log audit_operations.
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (!user) {
+          console.error(
+            "Suppression de dépense refusée : aucun utilisateur connecté.",
+          );
+          return;
+        }
+        supabase
+          .from("transactions")
+          .delete()
+          .eq("id", id)
+          .eq("user_id", user.id)
+          .then(({ error }) => {
+            if (error) {
+              console.error("Supabase delete transaction a échoué :", error);
+              signalerErreurSync(
+                `Impossible de supprimer la dépense : ${error.message}`,
+              );
+              return;
+            }
+            journaliserOperationAudit("suppression_transaction", {
+              transactionId: id,
+              montant: tx.montant,
+              enveloppeId: tx.enveloppeId,
+            });
+          });
+      });
     },
 
     ajouterModeleDepense: async (
@@ -3873,22 +3958,32 @@ export function useObjectifs() {
       }
     },
 
+    // RÈGLE : filtre user_id ajouté lors de l'audit sécurité données du
+    // 2026-09-12 (défense en profondeur, cohérent avec les autres
+    // suppressions de ce fichier) — pas de log audit_operations ici,
+    // délibérément : un modèle de dépense est un simple raccourci "Ajout
+    // rapide" (budget.tsx), jamais une donnée financière réelle, cf. P001
+    // (AUDIT_V1.md) sur son orphelinage sans impact utilisateur.
     supprimerModeleDepense: (id: string) => {
       setEtat({
         modelesDepenses: etat.modelesDepenses.filter((m) => m.id !== id),
       });
-      supabase
-        .from("modeles_depenses")
-        .delete()
-        .eq("id", id)
-        .then(({ error }) => {
-          if (error) {
-            console.error("Supabase delete modele_depense a échoué :", error);
-            signalerErreurSync(
-              `Impossible de supprimer le raccourci : ${error.message}`,
-            );
-          }
-        });
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (!user) return;
+        supabase
+          .from("modeles_depenses")
+          .delete()
+          .eq("id", id)
+          .eq("user_id", user.id)
+          .then(({ error }) => {
+            if (error) {
+              console.error("Supabase delete modele_depense a échoué :", error);
+              signalerErreurSync(
+                `Impossible de supprimer le raccourci : ${error.message}`,
+              );
+            }
+          });
+      });
     },
   };
 }

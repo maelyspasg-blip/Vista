@@ -337,8 +337,88 @@ partagée (bloc contribution, badges Commun/Moi/[Prénom]).
 
 - [ ] Persistance (reset/seed/migrations, cf. CLAUDE.md)
 - [ ] Doublons (catégories, transactions, événements)
-- [ ] Sécurité (RLS, suppressions avec filtre `user_id`)
+- [x] Sécurité (RLS, suppressions avec filtre `user_id`) — voir 5.1 ci-dessous
 - [ ] Ergonomie (questions UX de CLAUDE.md, à rejouer écran par écran)
+
+### 5.1 Audit sécurité données (2026-09-12)
+
+Audit à 4 niveaux demandé explicitement (code destructif / sauvegardes /
+RLS / migrations), réalisé par deux passes de lecture exhaustive : tout
+`app/store.ts`, `app/EspacePartageContext.tsx`, `utils/espacePartage.ts`,
+`app/profil.tsx`, les 3 Edge Functions, et les 48 fichiers de
+`supabase/migrations/` en ordre chronologique.
+
+#### A. Inventaire des opérations destructives (code applicatif)
+
+| Fonction | Table(s) | Filtre `user_id` avant correctif | Confirmation UI | Log `audit_operations` avant correctif |
+|---|---|---|---|---|
+| `appliquerEnveloppes` (interne) | `enveloppes` (DELETE), `enveloppes` (UPDATE) | ✅ (DELETE) / ❌ (UPDATE, RLS seule) | implicite (édition catégorie) | ✅ |
+| `majObjectifSupabase`/`majEvenementSupabase` (internes, UPDATE) | `objectifs`, `evenements` | ❌ (RLS seule) | implicite | n/a (UPDATE, pas destructif au sens strict) |
+| `enregistrerSnapshotMoisSupabase` (interne) | `snapshots_mois` (upsert), `snapshot_enveloppes`/`snapshot_objectifs` (DELETE post-insert vérifié) | ✅ | n/a (automatique, protégé par garde-fou anti-écrasement) | n/a |
+| `archiverMoisActuelInterne` | remise à zéro `depense` en mémoire + Supabase | ✅ (via les fonctions ci-dessus) | n/a (automatique, mensuel) | ✅ (succès et échec) |
+| `supprimerObjectif` | `objectifs` | ✅ | à confirmer visuellement (3 sites d'appel repérés sans `Alert.alert` tracé autour) | ❌ → **corrigé** |
+| **`supprimerEnveloppe`** | `enveloppes`, `transactions` liées, `modeles_depenses` liés | ❌ sur les 3 → **corrigé** | ✅ (`Alert.alert` explicite, irréversibilité mentionnée) | ❌ → **corrigé** |
+| `supprimerEnveloppe` — dissociation `evenements` (categorie_liee) | `evenements` | RLS seule, **volontairement** — voir note ⚠️ ci-dessous | idem | ❌ → **corrigé** (log seul, sans filtre) |
+| `supprimerEvenement` | `evenements` | RLS seule, **volontairement** — voir note ⚠️ ci-dessous | ✅ pour un événement "commun" en espace partagé ; personnel non tracé | ❌ → **corrigé** |
+| `supprimerTransaction` | `transactions` | ❌ → **corrigé** | ✅ (`Alert.alert`, montant affiché) | ❌ → **corrigé** |
+| `supprimerModeleDepense` | `modeles_depenses` | ❌ → **corrigé** (filtre seulement, log volontairement omis, cf. CLAUDE.md) | non tracée (raccourci UI mineur) | n/a par choix documenté |
+| `renommerCategoriePartout` | `enveloppes`, `snapshot_enveloppes` (rétroactif, volontaire) | ✅ | implicite | n/a (renommage, pas une suppression) |
+| `televerserAvatar` | `profils` (avatar_url) | ✅ | n/a | n/a |
+| RPC espace partagé (`creer_espace_partage`, `rejoindre_espace_par_code`, `quitter_espace_partage`, `modifier_mode_balance_espace`, `fusionner_evenements`) | — | `security definer`, identité toujours dérivée de `auth.uid()` côté serveur | ✅ (ex. `quitter_espace_partage` côté `profil.tsx`) | n/a |
+| `supprimerDonneesUtilisateur` (Edge Function partagée) | `transactions`, `evenements`, `historique_paiements`, `snapshots_mois` (+ enfants), `objectifs`, `enveloppes`, `profils` | ✅ toutes scopées `user_id` | n/a (déclenché par `delete-account`/`cleanup-expired-guests`) | n/a |
+
+**Corrections appliquées** (commit de ce jour) :
+- `supprimerEnveloppe` : ajout du filtre `.eq("user_id", user.id)` sur 3 des 4 écritures (enveloppes, transactions, modeles_depenses — **pas** `evenements`, voir note ⚠️ ci-dessous), ajout d'un backup `sauvegarderEnveloppesSupprimees` avant suppression (absent sur ce chemin précis — n'existait que dans `appliquerEnveloppes`), ajout d'un log `journaliserOperationAudit("suppression_enveloppe", ...)`.
+- `supprimerObjectif` : ajout du log `journaliserOperationAudit("suppression_objectif", ...)` (le filtre `user_id` et le backup existaient déjà).
+- `supprimerEvenement` : log `journaliserOperationAudit("suppression_evenement", ...)` ajouté, **sans** filtre `user_id` (voir note ⚠️ ci-dessous).
+- `supprimerTransaction` : filtre `user_id` + log `journaliserOperationAudit("suppression_transaction", ...)`.
+- `supprimerModeleDepense` : filtre `user_id` ajouté ; log volontairement omis (raccourci UI, pas une donnée financière — cf. P001).
+
+**⚠️ Correctif appliqué PUIS PARTIELLEMENT REVERTÉ en revue (2026-09-12), avant tout commit** — régression trouvée par le code-reviewer, jamais publiée : la première version de ce correctif ajoutait `.eq("user_id", user.id)` aux 2 écritures `evenements` (`supprimerEvenement`, et la dissociation `categorie_liee` dans `supprimerEnveloppe`). C'est incorrect pour cette table précise : `evenements` est la SEULE table du projet avec une écriture cross-compte RLS volontaire (`evenements_update_espace_partage`/`evenements_delete_espace_partage`, `20260905091000_planning_partage_rls.sql`) — un événement `commun` créé par le partenaire A doit rester supprimable/dissociable par le partenaire B, alors que `evenements.user_id` vaut A, pas B. Un filtre `.eq("user_id", B)` aurait exclu silencieusement ces lignes (0 ligne affectée, Supabase ne renvoie aucune erreur pour un DELETE/UPDATE qui ne matche rien) alors que l'état local avait déjà été mis à jour côté UI — recréant exactement les bugs "événement fantôme qui réapparaît" / "catégorie fantôme" interdits par CLAUDE.md. **Corrigé avant commit** : le filtre `user_id` a été retiré de ces 2 écritures précises (retour à RLS seule, comme avant cet audit) ; le log `audit_operations` et le reste du correctif restent en place.
+
+**Non corrigé dans cette passe (documenté, pas oublié)** :
+- 🟡 `delete-account` ne fait aucun export/sauvegarde des données avant suppression définitive du compte (contrairement à l'archivage mensuel/aux suppressions de catégorie-objectif, qui ont toutes un filet de secours). Identité de l'appelant vérifiée correctement (JWT via `auth.getUser()`, jamais un `user_id` de body) — pas une faille d'accès, une absence de filet de récupération en cas de suppression accidentelle.
+- 🟡 Confirmation UI non tracée avec certitude pour `supprimerObjectif` (3 sites d'appel dans `index.tsx`) et pour un événement personnel (non "commun") dans `supprimerEvenement` — à vérifier visuellement dans l'app plutôt que supposer une régression à partir d'un simple grep.
+- 🟡 La plupart des `UPDATE` (objectifs, evenements, transactions, modeles_depenses) n'ont toujours pas de filtre `user_id` client explicite — protégés uniquement par RLS. Risque théorique si une policy RLS venait à régresser ; non corrigé ici pour rester proportionné (ce sont des mises à jour, pas des suppressions, et RLS est vérifiée saine en section suivante).
+- 🟡 `supprimerEnveloppe` : en cas d'échec du DELETE `transactions`/`modeles_depenses` liés APRÈS que l'état local les ait déjà retirés, l'UI et la base peuvent diverger (transactions orphelines invisibles côté client) — erreur seulement logguée, jamais réconciliée automatiquement. Pas corrigé (nécessiterait une vraie logique de rollback/retry, hors scope d'un audit).
+
+#### B. Statut RLS par table
+
+Les 48 migrations ont été lues intégralement. **Toutes les tables trouvées ont RLS activée**, aucune table sans RLS détectée :
+
+| Table | RLS | Policies |
+|---|---|---|
+| `enveloppes`, `transactions`, `objectifs`, `evenements`, `profils`, `snapshots_mois`, `historique_paiements`, `modeles_depenses` | ✅ | SELECT/INSERT/UPDATE/DELETE toutes `auth.uid() = user_id`, symétriques |
+| `snapshot_enveloppes`, `snapshot_objectifs` | ✅ | scopées via `snapshots_mois.user_id`, cohérent sur les 4 commandes |
+| `espaces_partages`, `membres_espace` | ✅ | scopées via `est_membre_espace()` / rôle propriétaire — historique de 2 policies trop larges, **corrigées avant l'état actuel** (voir points de vulnérabilité) |
+| `audit_operations` | ✅ | SELECT/INSERT `user_id`, **aucune UPDATE/DELETE** (voulu — journal immuable) |
+| `remboursements_espace` | ✅ | SELECT/INSERT scopées `est_membre_espace()`, pas d'UPDATE/DELETE (append-only, voulu) |
+| `enveloppes`/`transactions` — lecture partenaire | ✅ | `enveloppes_select_espace_partage`/`transactions_select_espace_partage` : accès en LECTURE complet une fois lié (décision produit assumée et documentée, jamais l'écriture) |
+| `evenements` — écriture partenaire | ✅ | UPDATE/DELETE cross-compte restreints à `visibilite = 'commun'`, plus étroit que la policy SELECT correspondante |
+
+**Fonctions `security definer`** (`est_membre_espace`, `creer_espace_partage`, `rejoindre_espace_par_code`, `quitter_espace_partage`, `partage_un_espace_avec`, `fusionner_evenements`, `modifier_mode_balance_espace`, `epargne_mois_partenaire`, `couleur_espace_partage_partenaire`) : **toutes revalident `auth.uid()` en interne**, aucune ne fait confiance à un `user_id`/`espace_id` fourni par le client pour établir l'identité de l'appelant. Un seul cas nuancé : `desactiver_expiration_espace(p_espace_id)`, jamais exposée en RPC publique (appelée uniquement en interne par `rejoindre_espace_par_code`, déjà validée) mais sans revalidation propre — **corrigé** (voir Points de vulnérabilité).
+
+Aucune récursion RLS active aujourd'hui (`membres_espace_select_own_or_cospace` en a eu une, corrigée dès `20260830150000` en extrayant la sous-requête dans `est_membre_espace()`).
+
+#### C. Points de vulnérabilité identifiés
+
+- 🟡 **`desactiver_expiration_espace(p_espace_id)` sans revalidation d'appartenance** — sans risque en l'état (jamais appelée directement par le client), mais fragile si un jour exposée en RPC publique sans y repenser. **Corrigé** : migration `20260912100000_desactiver_expiration_espace_defense_profondeur.sql` (SQL fourni ci-dessous, à exécuter manuellement dans le dashboard Supabase — aucun accès CLI depuis cet environnement) ajoute `and exists (select 1 from membres_espace where espace_id = p_espace_id and user_id = auth.uid())` à la clause `where` de l'`UPDATE`. Comportement inchangé pour son unique appelant actuel.
+- 🟡 **Accès lecture complet du partenaire sur `enveloppes`/`transactions`** une fois deux comptes liés (`20260831160000_espace_partage_acces_complet.sql`) — décision produit déjà assumée et documentée dans la migration elle-même, pas un bug. Signalé pour confirmation explicite avant la V1 grand public : `ESPACE_PARTAGE_ACTIF = false` limite le risque actuel en bêta.
+- 🟡 **Historique de 2 policies temporairement trop larges** (`espaces_partages_select_auth` : tout utilisateur authentifié pouvait lister tous les codes d'invitation ; `membres_espace_insert_own` : auto-ajout à un `espace_id` arbitraire) — **toutes deux corrigées** dans une migration ultérieure (`20260831110000`), avant l'état actuel du schéma. Si les migrations ont été appliquées en production de façon échelonnée, il y a pu avoir une fenêtre d'exposition réelle entre les deux — à vérifier côté dashboard (date de déploiement), pas déductible depuis ce repo seul.
+- 🔵 10 tables (`enveloppes`, `transactions`, `objectifs`, `evenements`, `profils`, `snapshots_mois`, `snapshot_enveloppes`, `snapshot_objectifs`, `historique_paiements`, `modeles_depenses`) n'ont jamais de `CREATE TABLE` versionné — créées hors bande (dashboard). Pas une faille RLS (RLS bien vérifiée dessus), mais une zone aveugle documentaire pour tout futur audit (contraintes/triggers non versionnés invérifiables depuis ce repo seul).
+
+**Aucun 🔴 critique trouvé** — ni côté opérations destructives applicatives, ni côté RLS/migrations.
+
+#### D. Migrations — sécurité additive
+
+Aucun `DROP TABLE`, `DROP COLUMN`, `TRUNCATE` dans les 48 migrations. Les 6 `DELETE FROM` trouvés sont tous étroits et sûrs : 2 réparations de doublons scopées `profils.is_guest = true` (jamais un vrai compte), 4 dans des RPC `security definer` où l'id supprimé est systématiquement dérivé de `auth.uid()`/d'une vérification d'appartenance déjà faite dans la même transaction. `DROP POLICY IF EXISTS` suivi d'un `CREATE POLICY` (idiome bénin de remplacement) est le seul "DROP" fréquent du corpus. Convention additive (`IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `CREATE OR REPLACE FUNCTION`) respectée de façon quasi systématique — **déjà conforme à la règle demandée, désormais documentée explicitement dans CLAUDE.md** ("Migrations Supabase — additive uniquement").
+
+#### E. Ce qui est déjà solide (à ne pas casser)
+
+- `archiverMoisActuelInterne` : snapshot créé et validé AVANT toute remise à zéro, abandon total si la validation échoue, backup AsyncStorage avec rotation, log succès **et** échec — un modèle de robustesse pour toute future fonction destructive.
+- `delete-account`/`cleanup-expired-guests` : identité vérifiée par JWT (`auth.getUser()`), jamais un `user_id` de body ; double condition réelle (`is_guest` + expiration) vérifiée par `SELECT` avant toute suppression en masse ; secret cron obligatoire sans bypass silencieux.
+- `audit_operations` : journal immuable (aucune policy UPDATE/DELETE exposée).
+- Toutes les fonctions `security definer` cross-compte dérivent l'identité de `auth.uid()`, jamais d'un paramètre client — y compris `fusionner_evenements()` qui revalide même une règle métier fine (masquage des événements personnels) malgré le bypass RLS.
 
 ---
 
