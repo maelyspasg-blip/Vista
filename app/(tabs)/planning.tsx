@@ -1618,13 +1618,24 @@ export default function Planning() {
   // Jour, pas à chaque changement de jour affiché à l'intérieur de cette
   // vue — naviguer vers un autre jour puis revenir à aujourd'hui sans
   // quitter la vue Jour ne redéclenche pas ce recentrage.
+  //
+  // RÈGLE : HAUTEUR_CHROME (ajustement du 2026-09-13) — Dimensions.get
+  // ("window").height est la hauteur de L'ÉCRAN ENTIER, pas celle,
+  // réellement plus petite, de la zone visible du ScrollView : le header
+  // (titre + sélecteur Jour/Semaine/Mois) au-dessus et la tab bar en
+  // dessous grignotent tous deux de l'espace, sans quoi l'heure actuelle
+  // atterrissait visiblement sous le centre réel de l'écran (bug confirmé
+  // par l'utilisatrice). Valeur approximative posée en dur (pas mesurée
+  // dynamiquement via onLayout) — à ajuster à nouveau si un futur
+  // changement de mise en page du header/de la tab bar la rend imprécise.
+  const HAUTEUR_CHROME = 220; // header + sélecteur Jour/Semaine/Mois + tab bar
   const scrollJourRef = useRef<ScrollView>(null);
   useEffect(() => {
     if (vue !== "jour" || !memeJour(dateActuelle, AUJOURDHUI)) return;
     const hauteurEcran = Dimensions.get("window").height;
     const heureActuelle = maintenant.getHours() + maintenant.getMinutes() / 60;
     const positionY = heureActuelle * HAUTEUR_HEURE;
-    const positionCentree = positionY - hauteurEcran / 2;
+    const positionCentree = positionY - hauteurEcran / 2 + HAUTEUR_CHROME / 2;
     scrollJourRef.current?.scrollTo({
       y: Math.max(0, positionCentree),
       animated: false,
