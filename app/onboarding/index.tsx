@@ -6,11 +6,12 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import Svg, { Circle, Rect } from "react-native-svg";
+import Svg, { Rect } from "react-native-svg";
 import { useGuest } from "../GuestContext";
 import { marquerOnboardingVu } from "../onboardingStorage";
 import { Text } from "../Texte";
 import { BoutonPrincipal } from "../BoutonPrincipal";
+import { useTheme } from "../ThemeContext";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { ESPACE_PARTAGE_ACTIF } from "../../utils/premium";
 
@@ -39,22 +40,15 @@ type SlideStandard = {
 };
 
 // RÈGLE : type distinct (pas juste un champ optionnel sur SlideStandard) —
-// ce slide n'a pas d'icône Ionicons unique en grand format à la place de
-// l'illustration, il a sa propre composition (illustration Profil +
-// légende + mini-carrousel, cf. le rendu conditionnel plus bas). Le
+// ce slide a sa propre composition (icône + titre + description + mockup
+// Espace partagé + mini-carrousel, cf. le rendu conditionnel plus bas). Le
 // distinguer par `type` évite un rendu accidentellement incomplet si un
 // champ `icone`/`bg` manquait sur une variante "couple".
 type SlideCouple = {
   id: number;
   type: "couple";
   titre: string;
-  // Texte d'introduction affiché sous le titre (rôle équivalent à
-  // `description` sur un SlideStandard, juste renommé pour plus de clarté
-  // vu qu'un second texte — `legende` — existe aussi sur ce slide).
   description: string;
-  // Texte affiché SOUS l'illustration Profil (cf. IllustrationProfilMockup
-  // plus bas), distinct de `description` qui reste au-dessus.
-  legende: string;
   couleur: string;
 };
 
@@ -114,53 +108,40 @@ const SLIDE_COUPLE: SlideCouple = {
   id: 2,
   type: "couple",
   titre: "Vista à deux",
-  description: "Vous pouvez aussi gérer votre budget à deux.",
-  legende: "Depuis votre Profil, créez un code et invitez votre partenaire.",
+  description:
+    "Depuis votre Profil, accédez à la section Espace partagé pour inviter votre partenaire.",
   couleur: TEAL,
 };
 
-// RÈGLE : mockup TRÈS simplifié de la page Profil (pas les vrais
-// composants de app/profil.tsx — ceci est une illustration marketing
-// d'onboarding, jamais un vrai rendu de l'écran) — seule la section
-// "Espace partagé" est mise en avant (rectangle teal), le reste n'est que
-// des blocs génériques neutres représentant les autres sections de Profil.
-// RÈGLE : construite en SVG (Rect/Circle), comme IllustrationJauges/
-// IllustrationBalance ci-dessous — demande explicite du 2026-09-13 (la
-// première version de ce mockup utilisait des View stylées, pas du SVG).
-// Seuls l'icône Ionicons et le texte "Espace partagé" restent en overlay
-// (une View absolument positionnée par-dessus le canvas SVG) : react-
-// native-svg ne peut pas afficher un glyphe d'icône vectorielle nativement
-// (même convention que TutorielOverlay.tsx — mélange SVG + overlay plain
-// View pour texte/icônes).
-function IllustrationProfilMockup() {
+// RÈGLE À NE JAMAIS CASSER — MOCKUP EN VIEW (PAS EN SVG), CORRECTIF DU
+// 2026-09-13 : la version précédente construisait ce mockup en primitives
+// react-native-svg (Svg/Rect/Circle) — signalée par l'utilisateur comme ne
+// s'affichant toujours pas correctement en test. Remplacée ici par une
+// simple carte View/Text/Ionicons — approche plus simple et plus fiable,
+// demande explicite. Ne jamais réintroduire de canvas SVG pour cet écran
+// précis (les 3 mini-illustrations du carrousel plus bas, elles, restent en
+// SVG — pas concernées par ce correctif).
+//
+// RÈGLE : mockup TRÈS simplifié de la section "Espace partagé" de la page
+// Profil (pas les vrais composants de app/profil.tsx — ceci est une
+// illustration marketing d'onboarding, jamais un vrai rendu de l'écran).
+function MockupEspacePartage() {
+  const { couleurs: C } = useTheme();
   return (
-    <View style={styles.profilMockup}>
-      <Svg width={220} height={130}>
-        {/* Écran de téléphone (rectangle arrondi englobant) */}
-        <Rect x={0} y={0} width={220} height={130} rx={16} fill="#FFFFFF" />
-        {/* En-tête Profil : avatar + lignes de texte simplifiées */}
-        <Circle cx={20} cy={20} r={10} fill="#E5E5EA" />
-        <Rect x={38} y={14} width={60} height={7} rx={4} fill="#E5E5EA" />
-        <Rect x={38} y={25} width={38} height={6} rx={4} fill="#EFEFEF" />
-        {/* Deux sections génériques (autres réglages de Profil) */}
-        <Rect x={10} y={44} width={200} height={18} rx={8} fill="#F1F1F3" />
-        <Rect x={10} y={68} width={200} height={18} rx={8} fill="#F1F1F3" />
-        {/* Section "Espace partagé" mise en évidence (rectangle teal) */}
-        <Rect
-          x={10}
-          y={92}
-          width={200}
-          height={26}
-          rx={10}
-          fill="#FFFFFF"
-          stroke={TEAL}
-          strokeWidth={2}
-        />
-      </Svg>
-      <View style={styles.profilMockupSectionEspacePartage} pointerEvents="none">
-        <Ionicons name="people-outline" size={15} color={TEAL} />
-        <Text style={[styles.profilMockupSectionTexte, { color: TEAL }]}>
+    <View style={[styles.mockupCarte, { backgroundColor: C.carte }]}>
+      <View style={styles.mockupEntete}>
+        <Ionicons name="people-outline" size={24} color={TEAL} />
+        <Text style={[styles.mockupEnteteTexte, { color: C.texte }]}>
           Espace partagé
+        </Text>
+      </View>
+      <Text style={[styles.mockupTexte, { color: C.texteMuted }]}>
+        Crée un code d&apos;invitation et partage-le à ton partenaire
+      </Text>
+      <View style={[styles.mockupCodeBloc, { backgroundColor: `${TEAL}15` }]}>
+        <Text style={styles.mockupCodeTexte}>VISTA-XXXXXX</Text>
+        <Text style={[styles.mockupCodeLegende, { color: C.texteMuted }]}>
+          Code d&apos;invitation
         </Text>
       </View>
     </View>
@@ -361,13 +342,20 @@ export default function Onboarding() {
         </>
       ) : (
         // RÈGLE À NE JAMAIS CASSER — COMPOSITION DÉDIÉE AU SLIDE "COUPLE"
-        // (demande du 2026-09-13) : titre + texte d'introduction D'ABORD
-        // (contrairement aux slides standard, où l'illustration précède le
-        // texte) — ordre explicitement demandé : introduction, puis
-        // illustration Profil + légende, puis mini-carrousel. Ne jamais
-        // réutiliser `styles.illustration` (hauteur fixe 280, pensée pour
-        // une simple icône) pour ce bloc, qui a bien plus de contenu.
+        // (restructurée le 2026-09-13, correctif suite à un mockup SVG ne
+        // s'affichant pas de façon fiable) : icône people-outline en grand
+        // D'ABORD, puis titre + description, puis la carte
+        // MockupEspacePartage (View simple, pas de SVG), puis le
+        // mini-carrousel. Ne jamais réutiliser `styles.illustration`
+        // (hauteur fixe 280, pensée pour une simple icône) pour ce bloc,
+        // qui a bien plus de contenu.
         <View style={styles.coupleContenu}>
+          <Ionicons
+            name="people-outline"
+            size={48}
+            color={TEAL}
+            style={styles.coupleIconeTop}
+          />
           <View style={styles.contentCouple}>
             <Text style={[styles.titre, { color: slide.couleur }]}>
               {slide.titre}
@@ -375,10 +363,7 @@ export default function Onboarding() {
             <Text style={styles.description}>{slide.description}</Text>
           </View>
 
-          <View style={[styles.coupleProfilBloc, { backgroundColor: TEAL_LIGHT }]}>
-            <IllustrationProfilMockup />
-            <Text style={styles.coupleLegende}>{slide.legende}</Text>
-          </View>
+          <MockupEspacePartage />
 
           <CarrouselVistaADeux />
         </View>
@@ -459,44 +444,44 @@ const styles = StyleSheet.create({
   },
   btnTexte: { fontSize: 16, fontWeight: "600", color: "#FFFFFF" },
   // --- Slide "Vista à deux" ------------------------------------------------
-  coupleContenu: { width: "100%", alignItems: "center", marginBottom: 24 },
-  // RÈGLE : marges/paddings resserrés en revue (2026-09-13) — risque de
-  // dépassement vertical sur petit écran signalé (empilement titre+intro
-  // + mockup Profil + carrousel + chrome partagé, sans ScrollView dans ce
-  // fichier). Toujours à confirmer sur device avant diffusion large.
-  contentCouple: { alignItems: "center", marginBottom: 12 },
-  coupleProfilBloc: {
+  coupleContenu: { width: "100%", alignItems: "center", marginBottom: 18 },
+  // RÈGLE : taille réduite (48, initialement 64) + marge resserrée — revue
+  // du 2026-09-13, l'icône pleine taille aggravait de ~66px le risque de
+  // dépassement vertical déjà documenté ci-dessous (chaque valeur de ce
+  // bloc "Vista à deux" a été resserrée en réaction à ce même constat).
+  coupleIconeTop: { marginBottom: 8 },
+  // RÈGLE : marges/paddings resserrés en revue (2026-09-13, puis à nouveau
+  // après l'ajout de coupleIconeTop ci-dessus) — risque de dépassement
+  // vertical sur petit écran signalé (empilement icône+titre+intro +
+  // mockup Espace partagé + carrousel + chrome partagé, sans ScrollView
+  // dans ce fichier). Toujours à confirmer sur device avant diffusion
+  // large — resserrer encore ou retirer coupleIconeTop (redondant avec
+  // l'icône déjà présente dans MockupEspacePartage) si le dépassement est
+  // confirmé.
+  contentCouple: { alignItems: "center", marginBottom: 10 },
+  // RÈGLE : `width:"100%"` plutôt que le `marginHorizontal` initialement
+  // proposé — `container` applique déjà `paddingHorizontal:28` (cf. plus
+  // haut), un marginHorizontal supplémentaire ici aurait doublé l'inset
+  // (28+24) et inutilement rétréci la carte.
+  mockupCarte: {
     width: "100%",
-    borderRadius: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 10,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 2,
+    borderColor: TEAL,
+    marginBottom: 14,
   },
-  coupleLegende: {
-    fontSize: 13,
-    color: "#5C7268",
-    textAlign: "center",
-    lineHeight: 19,
-    paddingHorizontal: 6,
+  mockupEntete: { flexDirection: "row", alignItems: "center", gap: 10 },
+  mockupEnteteTexte: { fontWeight: "700", fontSize: 15 },
+  mockupTexte: { marginTop: 6, fontSize: 13, lineHeight: 18 },
+  mockupCodeBloc: { borderRadius: 10, padding: 10, marginTop: 10, alignItems: "center" },
+  mockupCodeTexte: {
+    fontFamily: "monospace",
+    fontSize: 18,
+    fontWeight: "700",
+    color: TEAL,
   },
-  profilMockup: {
-    width: 220,
-    height: 130,
-  },
-  // RÈGLE : positionnement en dur aligné sur les coordonnées du Rect
-  // teal du SVG ci-dessus (x=10 y=92 width=200 height=26) — toute
-  // modification de ce Rect doit garder cet overlay centré dessus.
-  profilMockupSectionEspacePartage: {
-    position: "absolute",
-    left: 18,
-    top: 97,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  profilMockupSectionTexte: { fontSize: 11, fontWeight: "700" },
+  mockupCodeLegende: { fontSize: 11, marginTop: 4 },
   carrouselCouple: { alignItems: "center", gap: 10 },
   illustrationCoupleLigne: {
     flexDirection: "row",
