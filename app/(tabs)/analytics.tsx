@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { Picker } from "@react-native-picker/picker";
 import Slider from "@react-native-community/slider";
 import { useIsFocused, useRouter } from "expo-router";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
@@ -9,7 +8,6 @@ import {
   Animated,
   Dimensions,
   Modal,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -243,13 +241,23 @@ function construireMoisPeriode(
 }
 
 const PERIODE_MAX_MOIS = 120; // plafond fixe (10 ans), indépendant des données de l'utilisateur
-// RÈGLE À NE JAMAIS CASSER — REFONTE MONÉTISATION DU 2026-09-12 (demande
-// explicite) : Stats affiche par défaut UNIQUEMENT le mois en cours (cf.
-// nbMoisSelectionne, initialisé à 1) — au-delà, le sélecteur de période
-// (3/6/12 mois...) est verrouillé derrière une pub (session-scoped,
-// statsPeriodeDebloque), plus derrière Premium. Un compte invité (isGuest)
-// reste exempté comme partout ailleurs.
-const LIMITE_MOIS_GRATUIT_STATS = 1;
+// RÈGLE À NE JAMAIS CASSER — REFONTE MONÉTISATION DU 2026-09-12, SEUIL
+// RELEVÉ LE 2026-09-13 (demande explicite) : 1 et 2 mois toujours
+// accessibles sans pub — au-delà (3 mois et plus), le sélecteur de période
+// est verrouillé derrière une pub (session-scoped par vue, cf.
+// statsPeriodeDebloquePerso/statsPeriodeDebloquePartage), plus derrière
+// Premium. Un compte invité (isGuest) reste exempté comme partout
+// ailleurs. nbMoisSelectionne reste initialisé à 1 (cf. RÈGLE à sa
+// définition) — le relèvement du seuil n'a pas besoin de changer le
+// défaut affiché avant tout chargement AsyncStorage/calcul par ancienneté.
+const LIMITE_MOIS_GRATUIT_STATS = 2;
+// RÈGLE À NE JAMAIS CASSER — OPTIONS DU SÉLECTEUR DE PÉRIODE (redesign du
+// 2026-09-13, remplace le Picker natif par une rangée de chips avec icône
+// cadenas par option — un Picker natif ne peut pas afficher d'icône par
+// option). Volontairement réduit à ces 5 valeurs (pas les 1-12 + paliers
+// annuels de l'ancien Picker) : assez pour couvrir les 3 paliers du
+// modèle (1/2 gratuit, 3+ pub) sans surcharger une rangée de boutons.
+const OPTIONS_PERIODE_STATS = [1, 2, 3, 6, 12];
 
 // RÈGLE : clé AsyncStorage namespacée par userId — même convention que
 // PREFIXE_CLE_ETATS_INSIGHTS (utils/conseils.ts) : jamais un slot global
@@ -1402,20 +1410,49 @@ export default function Analytics() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objStore.userId]);
-  // RÈGLE : session-scoped (comme tonBilanDebloque plus bas) — une pub
-  // débloque toutes les périodes du sélecteur pour la session, revient à
-  // false à la prochaine ouverture de l'app.
-  const [statsPeriodeDebloque, setStatsPeriodeDebloque] = useState(false);
+  // RÈGLE À NE JAMAIS CASSER — DÉVERROUILLAGE INDÉPENDANT PAR VUE (demande
+  // du 2026-09-13) : vue perso et vue partagée ont chacune leur PROPRE
+  // état de déverrouillage — regarder une pub en vue perso ne débloque pas
+  // les périodes verrouillées en vue partagée, et inversement. Session-
+  // scoped (comme tonBilanDebloque plus bas) — revient à false à la
+  // prochaine ouverture de l'app. `statsPeriodeDebloque`/
+  // `declencherPubPeriodeStats` ci-dessous résolvent vers la bonne paire
+  // selon `vueActive` au moment du rendu — jamais un site d'appel plus bas
+  // qui choisirait lui-même perso vs partagé, un seul point de résolution
+  // ici.
+  const [statsPeriodeDebloquePerso, setStatsPeriodeDebloquePerso] =
+    useState(false);
+  const [statsPeriodeDebloquePartage, setStatsPeriodeDebloquePartage] =
+    useState(false);
   // RÈGLE : useDeblocagePub (app/InsightVerrouille.tsx) plutôt qu'un second
   // mécanisme de pub — même source unique que "Ton bilan"/Aperçu, jamais
-  // dupliquée. Déclenché depuis onValueChange du Picker de période plus
-  // bas, pas depuis un composant <InsightVerrouille>/<TonBilanVerrou> (le
-  // Picker natif n'a pas d'overlay à habiller, juste une interception de
-  // tap sur une option verrouillée).
-  const { declencherPub: declencherPubPeriodeStats } = useDeblocagePub(
-    () => setStatsPeriodeDebloque(true),
-    statsPeriodeDebloque,
+  // dupliquée. Déclenché depuis le tap sur un chip de période verrouillé
+  // plus bas (jamais depuis un composant <InsightVerrouille>/
+  // <TonBilanVerrou> : ces chips gèrent leur propre icône cadenas, pas
+  // besoin de l'habillage overlay de InsightVerrouille).
+  const { declencherPub: declencherPubPeriodeStatsPerso } = useDeblocagePub(
+    () => setStatsPeriodeDebloquePerso(true),
+    statsPeriodeDebloquePerso,
   );
+  // RÈGLE : `|| !estDansUnEspace` (revue du 2026-09-13) — évite de charger
+  // une 2e pub RewardedAd pour la vue partagée sur un compte qui n'est même
+  // pas dans un espace (jamais besoin de ce verrou dans ce cas). N'affecte
+  // que le CHARGEMENT anticipé (cf. useDeblocagePub, dejaDeverrouille) —
+  // declencherPub retombe de toute façon sur l'Alert simulée si jamais
+  // appelé sans pub chargée, jamais un comportement cassé si estDansUnEspace
+  // change en cours de session.
+  const { declencherPub: declencherPubPeriodeStatsPartage } = useDeblocagePub(
+    () => setStatsPeriodeDebloquePartage(true),
+    statsPeriodeDebloquePartage || !estDansUnEspace,
+  );
+  const statsPeriodeDebloque =
+    vueActive === "partage"
+      ? statsPeriodeDebloquePartage
+      : statsPeriodeDebloquePerso;
+  const declencherPubPeriodeStats =
+    vueActive === "partage"
+      ? declencherPubPeriodeStatsPartage
+      : declencherPubPeriodeStatsPerso;
   // RÈGLE À NE JAMAIS CASSER — VERROU UNIQUE POUR TOUT "TON BILAN" (refonte
   // monétisation du 2026-09-12, demande explicite — REVIENT sur l'ancienne
   // séparation en verrous individuels : 4 onglets PremiumVerrou distincts +
@@ -1446,7 +1483,6 @@ export default function Analytics() {
   >("pct");
   const [categoriesInchangeesOuvert, setCategoriesInchangeesOuvert] =
     useState(false);
-  const [periodePickerVisible, setPeriodePickerVisible] = useState(false);
   const [vue, setVue] = useState<Vue>("global");
   const [titoirOuvert, setTiroirOuvert] = useState(false);
   const [categoriesSelectionnees, setCategoriesSelectionnees] = useState<
@@ -2327,25 +2363,26 @@ export default function Analytics() {
 
   // RÈGLE À NE JAMAIS CASSER : verrouillePub marque les options au-delà de
   // LIMITE_MOIS_GRATUIT_STATS tant que ni premium/invité ni
-  // statsPeriodeDebloque (pub regardée cette session) — le Picker natif ne
-  // permet pas d'afficher une icône par option ni d'intercepter un tap
-  // avant sélection, donc le verrou passe par un suffixe de label
-  // ("(Pub)", même convention que "(bientôt disponible)" pour `prochaine`)
-  // + une interception dans onValueChange (cf. Picker plus bas) qui
-  // déclenche la pub au lieu de laisser passer la sélection.
+  // statsPeriodeDebloque (pub regardée cette session, POUR LA VUE
+  // ACTIVE — cf. RÈGLE sur statsPeriodeDebloquePerso/Partage plus haut) —
+  // chaque chip verrouillé affiche une icône cadenas (styles.periodeChip*
+  // plus bas) et intercepte le tap pour déclencher la pub au lieu de
+  // sélectionner directement.
   // RÈGLE : un compte invité (isGuest) est exempté ici comme partout
-  // ailleurs — jamais de suffixe/verrou sur le Picker pour un invité, cf.
-  // RÈGLE dans profil.tsx sur les autres éléments Premium.
+  // ailleurs — jamais de verrou sur ce sélecteur pour un invité, cf. RÈGLE
+  // dans profil.tsx sur les autres éléments Premium.
   const optionsPeriode = genererOptionsPeriode(
     objStore.historiquesMois.length + 1,
-  ).map((o) => ({
-    ...o,
-    verrouillePub:
-      !premium &&
-      !isGuest &&
-      !statsPeriodeDebloque &&
-      o.valeur > LIMITE_MOIS_GRATUIT_STATS,
-  }));
+  )
+    .filter((o) => OPTIONS_PERIODE_STATS.includes(o.valeur))
+    .map((o) => ({
+      ...o,
+      verrouillePub:
+        !premium &&
+        !isGuest &&
+        !statsPeriodeDebloque &&
+        o.valeur > LIMITE_MOIS_GRATUIT_STATS,
+    }));
 
   // Clamp indépendant de la sélection courante du Picker : protège aussi
   // le cas d'un compte redevenu non-premium/session sans pub alors que
@@ -4299,114 +4336,94 @@ export default function Analytics() {
           </Text>
         )}
 
+        {/* RÈGLE À NE JAMAIS CASSER — REDESIGN DU 2026-09-13 (remplace le
+            Picker natif modal) : rangée de chips, un par valeur de
+            OPTIONS_PERIODE_STATS — chaque chip verrouillé (verrouillePub)
+            affiche une icône cadenas et déclenche la pub au tap au lieu de
+            sélectionner directement ; "prochaine" (pas assez d'historique)
+            reste désactivé (disabled), jamais cliquable. La sélection
+            visible (fond plein) suit `nbMois` (déjà clampé), jamais
+            `nbMoisSelectionne` brut — même RÈGLE que le label déjà en place
+            plus bas pour "Ce qu'il faut retenir", jamais une valeur non
+            réellement affichée montrée comme sélectionnée. */}
         <CibleTutoriel
           id="periode"
           onMesure={mesurerCibleTutoriel}
           cleFocus={cleFocusTutoriel}
         >
-        <TouchableOpacity
-          style={[
-            styles.periodeBouton,
-            { backgroundColor: C.fondSecondaire, borderColor: C.carteBorder },
-          ]}
-          onPress={() => setPeriodePickerVisible(true)}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.periodeBoutonLabel, { color: C.texteMuted }]}>
-            PÉRIODE
-          </Text>
-          <Text style={[styles.periodeBoutonValeur, { color: C.texte }]}>
-            {formaterPeriode(nbMois)}
-          </Text>
-        </TouchableOpacity>
-        </CibleTutoriel>
-
-        <Modal
-          visible={periodePickerVisible}
-          transparent
-          animationType={reduireAnimations ? "none" : "slide"}
-          onRequestClose={() => setPeriodePickerVisible(false)}
-        >
-          <TouchableOpacity
-            style={[
-              styles.modalOverlayTouch,
-              estTablette && styles.modalOverlayTouchTablette,
-            ]}
-            activeOpacity={1}
-            onPress={() => setPeriodePickerVisible(false)}
-          >
-            <TouchableOpacity
-              style={[
-                styles.modalCard,
-                { backgroundColor: C.carte },
-                styleModaleTablette(estTablette),
-              ]}
-              activeOpacity={1}
-              onPress={() => {}}
-            >
-              <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitre, { color: C.texte }]}>
-                  Période
-                </Text>
+          <View style={styles.periodeChipsRow}>
+            {optionsPeriode.map((o) => {
+              const actif = nbMois === o.valeur && !o.verrouillePub;
+              return (
                 <TouchableOpacity
-                  onPress={() => setPeriodePickerVisible(false)}
-                  activeOpacity={0.6}
+                  key={o.valeur}
+                  style={[
+                    styles.periodeChip,
+                    {
+                      backgroundColor: C.fondSecondaire,
+                      borderColor: C.carteBorder,
+                    },
+                    actif && { backgroundColor: C.purple, borderColor: C.purple },
+                  ]}
+                  disabled={!o.disponible}
+                  onPress={() => {
+                    if (o.verrouillePub) {
+                      declencherPubPeriodeStats();
+                      return;
+                    }
+                    setNbMoisSelectionne(o.valeur);
+                    // RÈGLE : persisté UNIQUEMENT sur un choix explicite de
+                    // l'utilisateur (jamais la valeur calculée par
+                    // periodeParDefautSelonAnciennete) — cf. RÈGLE sur
+                    // l'effet de chargement plus haut, "si l'utilisateur a
+                    // déjà choisi une période, garder son choix".
+                    if (objStore.userId) {
+                      AsyncStorage.setItem(
+                        `${PREFIXE_CLE_PERIODE_STATS}${objStore.userId}`,
+                        String(o.valeur),
+                      ).catch(() => {});
+                    }
+                  }}
+                  activeOpacity={0.7}
                 >
-                  <Text style={[styles.modalTermine, { color: C.purple }]}>
-                    Terminé
+                  <Text
+                    style={[
+                      styles.periodeChipTexte,
+                      {
+                        color: actif
+                          ? "#FFFFFF"
+                          : o.disponible
+                            ? C.texte
+                            : C.texteMuted,
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {/* RÈGLE : suffixe "bientôt" pour une option pas encore
+                        disponible faute d'historique suffisant (o.prochaine)
+                        — sans lui, un chip grisé était indiscernable d'un
+                        bug (revue du 2026-09-13). Même esprit que l'ancien
+                        suffixe "(bientôt disponible)" du Picker retiré,
+                        raccourci pour tenir dans un chip. */}
+                    {o.prochaine ? `${o.label} (bientôt)` : o.label}
                   </Text>
+                  {/* RÈGLE : le cadenas ne s'affiche que si l'option est
+                      RÉELLEMENT accessible via une pub (o.disponible) —
+                      une option pas encore disponible faute d'historique
+                      suffisant est juste grisée/désactivée, jamais un
+                      cadenas trompeur suggérant qu'une pub suffirait. */}
+                  {o.verrouillePub && o.disponible && (
+                    <Ionicons
+                      name="lock-closed-outline"
+                      size={13}
+                      color={actif ? "#FFFFFF" : C.texteMuted}
+                    />
+                  )}
                 </TouchableOpacity>
-              </View>
-              <Picker
-                selectedValue={nbMoisSelectionne}
-                onValueChange={(valeur) => {
-                  const option = optionsPeriode.find(
-                    (o) => o.valeur === Number(valeur),
-                  );
-                  if (option?.verrouillePub) {
-                    declencherPubPeriodeStats();
-                    return;
-                  }
-                  setNbMoisSelectionne(Number(valeur));
-                  // RÈGLE : persisté UNIQUEMENT sur un choix explicite de
-                  // l'utilisateur (jamais la valeur calculée par
-                  // periodeParDefautSelonAnciennete) — cf. RÈGLE sur l'effet
-                  // de chargement plus haut, "si l'utilisateur a déjà
-                  // choisi une période, garder son choix".
-                  if (objStore.userId) {
-                    AsyncStorage.setItem(
-                      `${PREFIXE_CLE_PERIODE_STATS}${objStore.userId}`,
-                      String(Number(valeur)),
-                    ).catch(() => {});
-                  }
-                }}
-                itemStyle={{ color: C.texte }}
-              >
-                {optionsPeriode.map((o) => (
-                  <Picker.Item
-                    key={o.valeur}
-                    label={
-                      o.prochaine
-                        ? `${o.label} (bientôt disponible)`
-                        : o.verrouillePub
-                          ? `${o.label} (Pub)`
-                          : o.label
-                    }
-                    value={o.valeur}
-                    enabled={o.disponible}
-                    color={
-                      Platform.OS === "android"
-                        ? o.disponible && !o.verrouillePub
-                          ? C.texte
-                          : C.texteMuted
-                        : undefined
-                    }
-                  />
-                ))}
-              </Picker>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
+              );
+            })}
+          </View>
+        </CibleTutoriel>
 
         {pasSuffisammentDonnees && (
           <View
@@ -4805,9 +4822,25 @@ export default function Analytics() {
                 <View style={styles.modeBalanceRow}>
                   {(
                     [
-                      { valeur: "50_50" as const, label: "50/50" },
-                      { valeur: "revenus" as const, label: "Revenus" },
-                      { valeur: "personnalise" as const, label: "Personnalisé" },
+                      { valeur: "50_50" as const, label: "50/50", info: null },
+                      {
+                        valeur: "revenus" as const,
+                        label: "Revenus",
+                        info: {
+                          titre: "Contribution proportionnelle aux revenus",
+                          message:
+                            "Chacun contribue selon ce qu'il gagne. Si Maëlys gagne 2x plus que Louis, elle contribue 2x plus aux dépenses communes.",
+                        },
+                      },
+                      {
+                        valeur: "personnalise" as const,
+                        label: "Personnalisé",
+                        info: {
+                          titre: "Contribution personnalisée",
+                          message:
+                            "Définissez librement le pourcentage de contribution de chaque personne avec le curseur ci-dessous.",
+                        },
+                      },
                     ]
                   ).map((option) => (
                     <TouchableOpacity
@@ -4835,9 +4868,38 @@ export default function Analytics() {
                                 : C.texte,
                           },
                         ]}
+                        numberOfLines={1}
                       >
                         {option.label}
                       </Text>
+                      {/* RÈGLE : bulle d'info — demande du 2026-09-13. Pas de
+                          tooltip flottant custom (trop complexe) : un simple
+                          Alert au tap. TouchableOpacity imbriqué dans le chip
+                          parent — React Native ne fait remonter le press qu'au
+                          responder le plus interne, jamais aux deux à la
+                          fois, donc pas de risque de déclencher aussi
+                          changerModeBalance en tapant l'icône. hitSlop élargit
+                          la zone tactile sans agrandir visuellement l'icône
+                          (14px max, cf. contrainte visuelle). */}
+                      {option.info && (
+                        <TouchableOpacity
+                          onPress={() =>
+                            Alert.alert(option.info!.titre, option.info!.message)
+                          }
+                          hitSlop={8}
+                          activeOpacity={0.6}
+                        >
+                          <Ionicons
+                            name="information-circle-outline"
+                            size={14}
+                            color={
+                              modeBalance === option.valeur
+                                ? "#FFFFFFB3"
+                                : "#1D9E75B3"
+                            }
+                          />
+                        </TouchableOpacity>
+                      )}
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -7744,21 +7806,27 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   sousTitre: { fontSize: 13, color: "#999", marginTop: 2 },
-  periodeBouton: {
-    borderRadius: 13,
-    borderWidth: 0.5,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  // RÈGLE : remplace periodeBouton/periodeBoutonLabel/periodeBoutonValeur
+  // (ancien bouton ouvrant le Picker modal, retiré au redesign du
+  // 2026-09-13).
+  periodeChipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
     marginBottom: 10,
-    alignSelf: "flex-start",
   },
-  periodeBoutonLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-    marginBottom: 2,
+  periodeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  periodeBoutonValeur: { fontSize: 15, fontWeight: "700" },
+  // RÈGLE : flexShrink:1 (contrainte visuelle demandée) — le label rétrécit
+  // plutôt que de forcer le chip (ou la rangée) à déborder.
+  periodeChipTexte: { fontSize: 13, fontWeight: "600", flexShrink: 1 },
   modalOverlayTouch: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.3)",
@@ -8318,12 +8386,19 @@ const styles = StyleSheet.create({
   modeBalanceRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
   modeBalanceChip: {
     flex: 1,
+    flexDirection: "row",
     paddingVertical: 9,
+    paddingHorizontal: 6,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
   },
-  modeBalanceChipTexte: { fontSize: 13, fontWeight: "600" },
+  // RÈGLE : flexShrink:1 (demande du 2026-09-13) — permet au label de
+  // rétrécir plutôt que de pousser l'icône info hors du chip ou de passer
+  // à la ligne, sur les libellés les plus longs ("Personnalisé").
+  modeBalanceChipTexte: { fontSize: 13, fontWeight: "600", flexShrink: 1 },
   balanceBarreLabelsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
