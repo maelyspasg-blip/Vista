@@ -6,7 +6,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import Svg, { Rect } from "react-native-svg";
+import Svg, { Circle, Rect } from "react-native-svg";
 import { useGuest } from "../GuestContext";
 import { marquerOnboardingVu } from "../onboardingStorage";
 import { Text } from "../Texte";
@@ -115,8 +115,7 @@ const SLIDE_COUPLE: SlideCouple = {
   type: "couple",
   titre: "Vista à deux",
   description: "Vous pouvez aussi gérer votre budget à deux.",
-  legende:
-    "Depuis votre Profil, créez un code d'invitation et partagez-le à votre partenaire.",
+  legende: "Depuis votre Profil, créez un code et invitez votre partenaire.",
   couleur: TEAL,
 };
 
@@ -125,25 +124,40 @@ const SLIDE_COUPLE: SlideCouple = {
 // d'onboarding, jamais un vrai rendu de l'écran) — seule la section
 // "Espace partagé" est mise en avant (rectangle teal), le reste n'est que
 // des blocs génériques neutres représentant les autres sections de Profil.
+// RÈGLE : construite en SVG (Rect/Circle), comme IllustrationJauges/
+// IllustrationBalance ci-dessous — demande explicite du 2026-09-13 (la
+// première version de ce mockup utilisait des View stylées, pas du SVG).
+// Seuls l'icône Ionicons et le texte "Espace partagé" restent en overlay
+// (une View absolument positionnée par-dessus le canvas SVG) : react-
+// native-svg ne peut pas afficher un glyphe d'icône vectorielle nativement
+// (même convention que TutorielOverlay.tsx — mélange SVG + overlay plain
+// View pour texte/icônes).
 function IllustrationProfilMockup() {
   return (
     <View style={styles.profilMockup}>
-      <View style={styles.profilMockupEntete}>
-        <View style={styles.profilMockupAvatar} />
-        <View style={styles.profilMockupLignesEntete}>
-          <View style={styles.profilMockupLigneCourte} />
-          <View style={styles.profilMockupLigneTresCourte} />
-        </View>
-      </View>
-      <View style={styles.profilMockupSection} />
-      <View style={styles.profilMockupSection} />
-      <View
-        style={[
-          styles.profilMockupSection,
-          styles.profilMockupSectionEspacePartage,
-          { borderColor: TEAL },
-        ]}
-      >
+      <Svg width={220} height={130}>
+        {/* Écran de téléphone (rectangle arrondi englobant) */}
+        <Rect x={0} y={0} width={220} height={130} rx={16} fill="#FFFFFF" />
+        {/* En-tête Profil : avatar + lignes de texte simplifiées */}
+        <Circle cx={20} cy={20} r={10} fill="#E5E5EA" />
+        <Rect x={38} y={14} width={60} height={7} rx={4} fill="#E5E5EA" />
+        <Rect x={38} y={25} width={38} height={6} rx={4} fill="#EFEFEF" />
+        {/* Deux sections génériques (autres réglages de Profil) */}
+        <Rect x={10} y={44} width={200} height={18} rx={8} fill="#F1F1F3" />
+        <Rect x={10} y={68} width={200} height={18} rx={8} fill="#F1F1F3" />
+        {/* Section "Espace partagé" mise en évidence (rectangle teal) */}
+        <Rect
+          x={10}
+          y={92}
+          width={200}
+          height={26}
+          rx={10}
+          fill="#FFFFFF"
+          stroke={TEAL}
+          strokeWidth={2}
+        />
+      </Svg>
+      <View style={styles.profilMockupSectionEspacePartage} pointerEvents="none">
         <Ionicons name="people-outline" size={15} color={TEAL} />
         <Text style={[styles.profilMockupSectionTexte, { color: TEAL }]}>
           Espace partagé
@@ -468,49 +482,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   profilMockup: {
-    width: "100%",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 8,
-    gap: 6,
+    width: 220,
+    height: 130,
   },
-  profilMockupEntete: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 4,
-  },
-  profilMockupAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#E5E5EA",
-  },
-  profilMockupLignesEntete: { gap: 5 },
-  profilMockupLigneCourte: {
-    width: 70,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: "#E5E5EA",
-  },
-  profilMockupLigneTresCourte: {
-    width: 44,
-    height: 6,
-    borderRadius: 4,
-    backgroundColor: "#EFEFEF",
-  },
-  profilMockupSection: {
-    height: 18,
-    borderRadius: 8,
-    backgroundColor: "#F1F1F3",
-  },
+  // RÈGLE : positionnement en dur aligné sur les coordonnées du Rect
+  // teal du SVG ci-dessus (x=10 y=92 width=200 height=26) — toute
+  // modification de ce Rect doit garder cet overlay centré dessus.
   profilMockupSectionEspacePartage: {
+    position: "absolute",
+    left: 18,
+    top: 97,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 8,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
   },
   profilMockupSectionTexte: { fontSize: 11, fontWeight: "700" },
   carrouselCouple: { alignItems: "center", gap: 10 },
