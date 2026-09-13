@@ -1597,9 +1597,18 @@ export default function Planning() {
   // sombre sans dépendre de la teinte "muted" du thème. Trois paliers,
   // mêmes 3 vues : 0.9 = élément principal (chiffre du jour, Mois), 0.7 =
   // élément secondaire (heure, Jour/Semaine), 0.3 = atténué (jour hors mois
-  // actuel, Mois). Ne s'applique PAS aux noms de jours (L M M J V S D,
-  // weekHeadNom/monthDayHead) ni aux headers de colonnes (déjà clairs via
-  // C.texte) — hors périmètre de cette demande.
+  // actuel, Mois). Ne s'applique PAS aux headers de colonnes — hors
+  // périmètre de cette demande.
+  //
+  // RÈGLE : noms de jours (L M M J V S D) — CORRECTIF du 2026-09-13,
+  // vue Mois seulement (monthDayHead) : fond retiré (transparent, plus de
+  // bande C.fondSecondaire) et texte passé en noir/blanc littéral PLEIN
+  // (`#000000`/`#FFFFFF`, pas une opacité comme ci-dessus) + gras (700).
+  // vue Semaine (weekHeadNom) volontairement INCHANGÉE ici (reste
+  // C.texteMuted, hors périmètre de cette demande précise, qui ne visait
+  // que la vue Mois) — donc les deux vues n'ont plus le même traitement
+  // visuel sur ce point, une divergence désormais réelle et assumée,
+  // jamais un oubli.
   const couleurTexteGrillePrincipal =
     theme === "sombre" ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.9)";
   const couleurTexteGrilleSecondaire =
@@ -2365,16 +2374,14 @@ export default function Planning() {
                 />
               }
             >
-              <View
-                style={[
-                  styles.monthDayHeadRow,
-                  { backgroundColor: C.fondSecondaire },
-                ]}
-              >
+              <View style={styles.monthDayHeadRow}>
                 {JOURS_SEMAINE.map((j) => (
                   <Text
                     key={j}
-                    style={[styles.monthDayHead, { color: C.texteMuted }]}
+                    style={[
+                      styles.monthDayHead,
+                      { color: theme === "sombre" ? "#FFFFFF" : "#000000" },
+                    ]}
                   >
                     {j.charAt(0)}
                   </Text>
@@ -3537,9 +3544,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     marginBottom: 6,
     paddingVertical: 4,
-    borderRadius: 8,
   },
-  monthDayHead: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: "600" },
+  monthDayHead: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: "700" },
   monthGrid: {
     flex: 1,
     borderWidth: 0.5,

@@ -198,9 +198,20 @@ export function InsightVerrouille({
     deverrouille,
   );
 
-  // RÈGLE À NE JAMAIS CASSER : TESTFLIGHT_MODE n'affiche JAMAIS le cadenas,
-  // quel que soit `deverrouille` — cf. utils/premium.ts.
-  if (TESTFLIGHT_MODE || deverrouille) return <>{children}</>;
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-13 (bug trouvé en test) :
+  // ce composant ne doit JAMAIS court-circuiter sur TESTFLIGHT_MODE
+  // directement — seul `deverrouille` décide, exactement comme
+  // <TonBilanVerrou>/le Picker de période Stats (app/(tabs)/analytics.tsx),
+  // qui n'ont jamais eu ce court-circuit. `deverrouille` encode déjà
+  // TESTFLIGHT_MODE correctement via estComptePremium (utils/premium.ts) :
+  // un testeur TestFlight non-admin reste TOUJOURS débloqué (branche
+  // TESTFLIGHT_MODE d'estComptePremium, aucune régression pour lui). Seul
+  // un ADMIN avec "Simuler compte non-premium" activé profitait de l'ancien
+  // court-circuit pour ne jamais voir le cadenas — cassant justement le
+  // seul mécanisme prévu pour qu'un admin puisse tester ce cadenas/la pub
+  // simulée tout en restant libre de le désactiver à tout moment (jamais
+  // bloqué : ce même toggle admin se désactive en un geste).
+  if (deverrouille) return <>{children}</>;
 
   return (
     <View style={styles.conteneur}>

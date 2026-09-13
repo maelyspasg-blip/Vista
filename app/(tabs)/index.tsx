@@ -1580,18 +1580,28 @@ export default function Dashboard() {
               style={[
                 styles.avatar,
                 { backgroundColor: C.hero },
-                // RÈGLE À NE JAMAIS CASSER : la visibilité de l'anneau suit
-                // TOUJOURS `premium` (estComptePremium), jamais isAdmin/
-                // estPremium directement — sinon simulerNonPremium ne
-                // masque rien. La COULEUR distingue ensuite deux cas :
+                // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-13 (bug
+                // trouvé en test, "aucune mention de premium visible pour
+                // l'utilisateur") : `premium` SEUL ne doit JAMAIS suffire à
+                // afficher l'anneau — TESTFLIGHT_MODE le rend vrai pour
+                // TOUT compte non-admin/non-invité (cf. estComptePremium,
+                // utils/premium.ts), donc n'importe quel testeur régulier
+                // se voyait afficher un anneau doré "Premium" pendant toute
+                // la bêta. `(objStore.isAdmin || estPremium)` restreint
+                // l'anneau aux seuls cas où il a un sens : un admin, ou un
+                // compte réellement Premium (estPremium — aujourd'hui
+                // réservé au toggle "Simuler Premium", admin uniquement,
+                // cf. RÈGLE sur CLE_PREMIUM_SIMULE ; représentera un vrai
+                // abonnement RevenueCat le jour où il sera branché, sans
+                // qu'aucun consommateur n'ait besoin de changer). `premium`
+                // reste nécessaire en plus : un admin avec "Simuler compte
+                // non-premium" actif (premium=false) ne doit toujours voir
+                // aucun anneau. La COULEUR distingue ensuite deux cas :
                 // admin "par défaut" (isAdmin vrai, "Simuler Premium" PAS
                 // actif) → anneau admin lavande ; toute autre situation
                 // premium (admin avec "Simuler Premium" actif, ou vrai
-                // compte Premium non-admin) → anneau doré. Avant ce
-                // correctif, la branche isAdmin passait en premier
-                // inconditionnellement et cachait le doré même quand
-                // l'admin activait "Simuler Premium".
-                premium
+                // compte Premium non-admin) → anneau doré.
+                (objStore.isAdmin || estPremium) && premium
                   ? objStore.isAdmin && !estPremium
                     ? { borderWidth: 2.5, borderColor: "#7C6FAD" }
                     : { borderWidth: 2, borderColor: "#C9A84C" }
