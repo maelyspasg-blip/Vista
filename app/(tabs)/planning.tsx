@@ -10,6 +10,7 @@ import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -1606,6 +1607,31 @@ export default function Planning() {
   const couleurTexteGrilleAttenue =
     theme === "sombre" ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)";
 
+  // RÈGLE À NE JAMAIS CASSER — SCROLL AUTOMATIQUE SUR L'HEURE ACTUELLE,
+  // VUE JOUR (demande du 2026-09-13) : centre l'heure actuelle dans
+  // l'écran visible à l'ouverture de la vue Jour, UNIQUEMENT quand le jour
+  // affiché est réellement aujourd'hui (memeJour(dateActuelle,
+  // AUJOURDHUI)) — jamais pour un autre jour, qui garde le comportement
+  // existant (contentOffset statique sur HEURE_SCROLL_INITIAL, cf. site
+  // d'appel du ScrollView vue Jour). Dépendance [vue] volontairement seule
+  // (demande explicite) : ce scroll se déclenche à l'ENTRÉE dans la vue
+  // Jour, pas à chaque changement de jour affiché à l'intérieur de cette
+  // vue — naviguer vers un autre jour puis revenir à aujourd'hui sans
+  // quitter la vue Jour ne redéclenche pas ce recentrage.
+  const scrollJourRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (vue !== "jour" || !memeJour(dateActuelle, AUJOURDHUI)) return;
+    const hauteurEcran = Dimensions.get("window").height;
+    const heureActuelle = maintenant.getHours() + maintenant.getMinutes() / 60;
+    const positionY = heureActuelle * HAUTEUR_HEURE;
+    const positionCentree = positionY - hauteurEcran / 2;
+    scrollJourRef.current?.scrollTo({
+      y: Math.max(0, positionCentree),
+      animated: false,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vue]);
+
   // "vue" et "grille" sont toutes deux TOUJOURS montées (contrairement à
   // l'ancienne étape "evenement", retirée : elle dépendait de la présence
   // d'un événement le jour affiché, un cas absent dès qu'un compte est
@@ -1884,6 +1910,7 @@ export default function Planning() {
                 style={{ flex: 1 }}
               >
               <ScrollView
+                ref={scrollJourRef}
                 style={styles.timeline}
                 // RÈGLE : flexGrow:1 (bug du 2026-09-06, device iOS physique,
                 // cf. RÈGLE sur le wrapper flex/height ci-dessus) — garantit
@@ -1893,6 +1920,11 @@ export default function Planning() {
                 // ne suffirait pas à elle seule.
                 contentContainerStyle={{ flexGrow: 1 }}
                 showsVerticalScrollIndicator={false}
+                // RÈGLE : contentOffset reste le comportement par défaut
+                // (jour différent d'aujourd'hui) — l'effet sur
+                // scrollJourRef (cf. sa RÈGLE plus haut) le SURCHARGE avec
+                // un scroll centré sur l'heure actuelle, uniquement quand le
+                // jour affiché est réellement aujourd'hui.
                 contentOffset={{ x: 0, y: HEURE_SCROLL_INITIAL * HAUTEUR_HEURE }}
                 refreshControl={
                   <RefreshControl
