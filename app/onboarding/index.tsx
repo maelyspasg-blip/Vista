@@ -40,67 +40,118 @@ type SlideStandard = {
 
 // RÈGLE : type distinct (pas juste un champ optionnel sur SlideStandard) —
 // ce slide n'a pas d'icône Ionicons unique en grand format à la place de
-// l'illustration, il a un mini-carrousel dédié (CarrouselVistaADeux
-// ci-dessous). Le distinguer par `type` évite un rendu accidentellement
-// incomplet si un champ `icone`/`bg` manquait sur une variante "couple".
+// l'illustration, il a sa propre composition (illustration Profil +
+// légende + mini-carrousel, cf. le rendu conditionnel plus bas). Le
+// distinguer par `type` évite un rendu accidentellement incomplet si un
+// champ `icone`/`bg` manquait sur une variante "couple".
 type SlideCouple = {
   id: number;
   type: "couple";
   titre: string;
+  // Texte d'introduction affiché sous le titre (rôle équivalent à
+  // `description` sur un SlideStandard, juste renommé pour plus de clarté
+  // vu qu'un second texte — `legende` — existe aussi sur ce slide).
   description: string;
+  // Texte affiché SOUS l'illustration Profil (cf. IllustrationProfilMockup
+  // plus bas), distinct de `description` qui reste au-dessus.
+  legende: string;
   couleur: string;
 };
 
 type Slide = SlideStandard | SlideCouple;
 
+const SLIDE_APERCU: SlideStandard = {
+  id: 1,
+  type: "standard",
+  icone: "hand-right-outline",
+  titre: "Bienvenue sur Vista",
+  description:
+    "Ton assistant financier personnel. Suis tes dépenses, anticipe tes besoins et garde le contrôle de ton budget.",
+  couleur: PURPLE,
+  bg: PURPLE_LIGHT,
+};
+const SLIDE_BUDGET: SlideStandard = {
+  id: 3,
+  type: "standard",
+  icone: "wallet-outline",
+  titre: "Pilote ton budget",
+  description:
+    "Crée tes catégories, suis tes dépenses en temps réel et visualise ton prévisionnel du mois.",
+  couleur: MINT,
+  bg: "#E8F8F2",
+};
+const SLIDE_PLANNING: SlideStandard = {
+  id: 4,
+  type: "standard",
+  icone: "calendar-outline",
+  titre: "Organise ta semaine",
+  description:
+    "Planifie tes événements et connecte ton agenda à ton budget pour une vision complète de ta vie.",
+  couleur: PEACH,
+  bg: "#FFF0EA",
+};
+
+// RÈGLE À NE JAMAIS CASSER : ordre des 3 slides de présentation "solo" —
+// SLIDE_COUPLE (juste en dessous) s'insère entre SLIDE_APERCU et
+// SLIDE_BUDGET (cf. calcul de `slides` plus bas), jamais à la fin de ce
+// tableau.
 const SLIDES_PRESENTATION: SlideStandard[] = [
-  {
-    id: 1,
-    type: "standard",
-    icone: "hand-right-outline",
-    titre: "Bienvenue sur Vista",
-    description:
-      "Ton assistant financier personnel. Suis tes dépenses, anticipe tes besoins et garde le contrôle de ton budget.",
-    couleur: PURPLE,
-    bg: PURPLE_LIGHT,
-  },
-  {
-    id: 2,
-    type: "standard",
-    icone: "wallet-outline",
-    titre: "Pilote ton budget",
-    description:
-      "Crée tes catégories, suis tes dépenses en temps réel et visualise ton prévisionnel du mois.",
-    couleur: MINT,
-    bg: "#E8F8F2",
-  },
-  {
-    id: 3,
-    type: "standard",
-    icone: "calendar-outline",
-    titre: "Organise ta semaine",
-    description:
-      "Planifie tes événements et connecte ton agenda à ton budget pour une vision complète de ta vie.",
-    couleur: PEACH,
-    bg: "#FFF0EA",
-  },
+  SLIDE_APERCU,
+  SLIDE_BUDGET,
+  SLIDE_PLANNING,
 ];
 
-// RÈGLE À NE JAMAIS CASSER — ÉCRAN "VISTA À DEUX" (roadmap, ajouté le
-// 2026-09-12) : positionné après les 3 slides de présentation ci-dessus,
-// avant l'écran final de création de compte (/onboarding/inscription) —
-// cf. le calcul de `slides` plus bas, jamais ajouté ailleurs dans le
-// tableau. Visible UNIQUEMENT si ESPACE_PARTAGE_ACTIF === true (feature
-// encore désactivée en bêta, cf. utils/premium.ts) et jamais pour un
-// compte invité (un essai de découverte n'a pas de partenaire à inviter).
+// RÈGLE À NE JAMAIS CASSER — ÉCRAN "VISTA À DEUX" (roadmap) : positionné
+// JUSTE APRÈS le slide Aperçu (demande du 2026-09-13, corrige un
+// positionnement précédent en toute fin de présentation) — cf. le calcul
+// de `slides` plus bas, jamais ajouté ailleurs dans le tableau. Présente
+// l'espace partagé comme une extension naturelle d'Aperçu, pas comme un
+// écran à part détaché du reste de la présentation. Visible UNIQUEMENT si
+// ESPACE_PARTAGE_ACTIF === true (feature encore désactivée en bêta, cf.
+// utils/premium.ts) et jamais pour un compte invité (un essai de
+// découverte n'a pas de partenaire à inviter).
 const SLIDE_COUPLE: SlideCouple = {
-  id: 4,
+  id: 2,
   type: "couple",
   titre: "Vista à deux",
-  description:
-    "Invitez votre partenaire depuis votre Profil. Un code suffit pour lier vos comptes et gérer vos dépenses communes ensemble.",
+  description: "Vous pouvez aussi gérer votre budget à deux.",
+  legende:
+    "Depuis votre Profil, créez un code d'invitation et partagez-le à votre partenaire.",
   couleur: TEAL,
 };
+
+// RÈGLE : mockup TRÈS simplifié de la page Profil (pas les vrais
+// composants de app/profil.tsx — ceci est une illustration marketing
+// d'onboarding, jamais un vrai rendu de l'écran) — seule la section
+// "Espace partagé" est mise en avant (rectangle teal), le reste n'est que
+// des blocs génériques neutres représentant les autres sections de Profil.
+function IllustrationProfilMockup() {
+  return (
+    <View style={styles.profilMockup}>
+      <View style={styles.profilMockupEntete}>
+        <View style={styles.profilMockupAvatar} />
+        <View style={styles.profilMockupLignesEntete}>
+          <View style={styles.profilMockupLigneCourte} />
+          <View style={styles.profilMockupLigneTresCourte} />
+        </View>
+      </View>
+      <View style={styles.profilMockupSection} />
+      <View style={styles.profilMockupSection} />
+      <View
+        style={[
+          styles.profilMockupSection,
+          styles.profilMockupSectionEspacePartage,
+          { borderColor: TEAL },
+        ]}
+      >
+        <Ionicons name="people-outline" size={15} color={TEAL} />
+        <Text style={[styles.profilMockupSectionTexte, { color: TEAL }]}>
+          Espace partagé
+        </Text>
+      </View>
+    </View>
+  );
+}
 
 // Mini illustration SVG 1/3 — code d'invitation stylisé + icône partage.
 function IllustrationCode() {
@@ -126,9 +177,9 @@ function IllustrationJauges() {
         <View style={[styles.jaugeBadge, { backgroundColor: TEAL_LIGHT }]}>
           <Text style={[styles.jaugeBadgeTexte, { color: TEAL }]}>Moi</Text>
         </View>
-        <Svg width={56} height={96}>
-          <Rect x={4} y={0} width={48} height={96} rx={12} fill={`${TEAL}26`} />
-          <Rect x={4} y={38} width={48} height={58} rx={12} fill={TEAL} />
+        <Svg width={56} height={80}>
+          <Rect x={4} y={0} width={48} height={80} rx={12} fill={`${TEAL}26`} />
+          <Rect x={4} y={30} width={48} height={50} rx={12} fill={TEAL} />
         </Svg>
       </View>
       <View style={styles.jaugeColonne}>
@@ -142,16 +193,16 @@ function IllustrationJauges() {
             Partenaire
           </Text>
         </View>
-        <Svg width={56} height={96}>
+        <Svg width={56} height={80}>
           <Rect
             x={4}
             y={0}
             width={48}
-            height={96}
+            height={80}
             rx={12}
             fill={`${VIOLET_PARTENAIRE}26`}
           />
-          <Rect x={4} y={60} width={48} height={36} rx={12} fill={VIOLET_PARTENAIRE} />
+          <Rect x={4} y={48} width={48} height={32} rx={12} fill={VIOLET_PARTENAIRE} />
         </Svg>
       </View>
     </View>
@@ -171,9 +222,9 @@ function IllustrationBalance() {
             Partenaire
           </Text>
         </View>
-        <Svg width={220} height={22}>
-          <Rect x={0} y={0} width={128} height={22} rx={11} fill={TEAL} />
-          <Rect x={130} y={0} width={90} height={22} rx={11} fill={VIOLET_PARTENAIRE} />
+        <Svg width={200} height={20}>
+          <Rect x={0} y={0} width={116} height={20} rx={10} fill={TEAL} />
+          <Rect x={118} y={0} width={82} height={20} rx={10} fill={VIOLET_PARTENAIRE} />
         </Svg>
       </View>
     </View>
@@ -233,10 +284,12 @@ export default function Onboarding() {
 
   // RÈGLE : recalculé uniquement quand isGuest change — ESPACE_PARTAGE_ACTIF
   // est une constante de module, jamais besoin de la revalider ici.
+  // RÈGLE : SLIDE_COUPLE inséré en position 1 (juste après SLIDE_APERCU),
+  // jamais ajouté à la fin — cf. RÈGLE sur SLIDE_COUPLE plus haut.
   const slides = useMemo<Slide[]>(
     () =>
       ESPACE_PARTAGE_ACTIF && !isGuest
-        ? [...SLIDES_PRESENTATION, SLIDE_COUPLE]
+        ? [SLIDE_APERCU, SLIDE_COUPLE, SLIDE_BUDGET, SLIDE_PLANNING]
         : SLIDES_PRESENTATION,
     [isGuest],
   );
@@ -258,9 +311,8 @@ export default function Onboarding() {
   const slide = slides[slideActuel];
   const estDernierSlide = slideActuel === slides.length - 1;
   // RÈGLE : le slide "couple" affiche toujours "Suivant", jamais
-  // "Commencer" — même s'il se trouve être le dernier du tableau (demande
-  // explicite) : c'est /onboarding/inscription, l'étape suivante, qui reste
-  // la véritable validation finale.
+  // "Commencer" — quelle que soit sa position dans le tableau (demande
+  // explicite) : ce n'est jamais lui la véritable validation finale.
   const texteBouton =
     slide.type === "couple" ? "Suivant" : estDernierSlide ? "Commencer" : "Suivant";
 
@@ -282,22 +334,41 @@ export default function Onboarding() {
       </TouchableOpacity>
 
       {slide.type === "standard" ? (
-        <View style={[styles.illustration, { backgroundColor: slide.bg }]}>
-          <Ionicons name={slide.icone} size={80} color="#1A1A1A" />
-        </View>
+        <>
+          <View style={[styles.illustration, { backgroundColor: slide.bg }]}>
+            <Ionicons name={slide.icone} size={80} color="#1A1A1A" />
+          </View>
+          <View style={styles.content}>
+            <Text style={[styles.titre, { color: slide.couleur }]}>
+              {slide.titre}
+            </Text>
+            <Text style={styles.description}>{slide.description}</Text>
+          </View>
+        </>
       ) : (
-        <View style={[styles.illustration, { backgroundColor: TEAL_LIGHT }]}>
-          <Ionicons name="people-outline" size={64} color={TEAL} />
+        // RÈGLE À NE JAMAIS CASSER — COMPOSITION DÉDIÉE AU SLIDE "COUPLE"
+        // (demande du 2026-09-13) : titre + texte d'introduction D'ABORD
+        // (contrairement aux slides standard, où l'illustration précède le
+        // texte) — ordre explicitement demandé : introduction, puis
+        // illustration Profil + légende, puis mini-carrousel. Ne jamais
+        // réutiliser `styles.illustration` (hauteur fixe 280, pensée pour
+        // une simple icône) pour ce bloc, qui a bien plus de contenu.
+        <View style={styles.coupleContenu}>
+          <View style={styles.contentCouple}>
+            <Text style={[styles.titre, { color: slide.couleur }]}>
+              {slide.titre}
+            </Text>
+            <Text style={styles.description}>{slide.description}</Text>
+          </View>
+
+          <View style={[styles.coupleProfilBloc, { backgroundColor: TEAL_LIGHT }]}>
+            <IllustrationProfilMockup />
+            <Text style={styles.coupleLegende}>{slide.legende}</Text>
+          </View>
+
           <CarrouselVistaADeux />
         </View>
       )}
-
-      <View style={styles.content}>
-        <Text style={[styles.titre, { color: slide.couleur }]}>
-          {slide.titre}
-        </Text>
-        <Text style={styles.description}>{slide.description}</Text>
-      </View>
 
       <View style={styles.dots}>
         {slides.map((_, i) => (
@@ -374,6 +445,74 @@ const styles = StyleSheet.create({
   },
   btnTexte: { fontSize: 16, fontWeight: "600", color: "#FFFFFF" },
   // --- Slide "Vista à deux" ------------------------------------------------
+  coupleContenu: { width: "100%", alignItems: "center", marginBottom: 24 },
+  // RÈGLE : marges/paddings resserrés en revue (2026-09-13) — risque de
+  // dépassement vertical sur petit écran signalé (empilement titre+intro
+  // + mockup Profil + carrousel + chrome partagé, sans ScrollView dans ce
+  // fichier). Toujours à confirmer sur device avant diffusion large.
+  contentCouple: { alignItems: "center", marginBottom: 12 },
+  coupleProfilBloc: {
+    width: "100%",
+    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
+  coupleLegende: {
+    fontSize: 13,
+    color: "#5C7268",
+    textAlign: "center",
+    lineHeight: 19,
+    paddingHorizontal: 6,
+  },
+  profilMockup: {
+    width: "100%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 8,
+    gap: 6,
+  },
+  profilMockupEntete: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 4,
+  },
+  profilMockupAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#E5E5EA",
+  },
+  profilMockupLignesEntete: { gap: 5 },
+  profilMockupLigneCourte: {
+    width: 70,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#E5E5EA",
+  },
+  profilMockupLigneTresCourte: {
+    width: 44,
+    height: 6,
+    borderRadius: 4,
+    backgroundColor: "#EFEFEF",
+  },
+  profilMockupSection: {
+    height: 18,
+    borderRadius: 8,
+    backgroundColor: "#F1F1F3",
+  },
+  profilMockupSectionEspacePartage: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 8,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 2,
+  },
+  profilMockupSectionTexte: { fontSize: 11, fontWeight: "700" },
   carrouselCouple: { alignItems: "center", gap: 10 },
   illustrationCoupleLigne: {
     flexDirection: "row",
@@ -398,6 +537,6 @@ const styles = StyleSheet.create({
   jaugeBadge: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },
   jaugeBadgeTexte: { fontSize: 11, fontWeight: "700" },
   balanceContenu: { alignItems: "center", gap: 10 },
-  balanceNomsRow: { flexDirection: "row", justifyContent: "space-between", width: 220 },
+  balanceNomsRow: { flexDirection: "row", justifyContent: "space-between", width: 200 },
   balanceNom: { fontSize: 12, fontWeight: "700" },
 });
