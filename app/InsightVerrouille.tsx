@@ -27,10 +27,14 @@ import { AdEventType, RewardedAd, RewardedAdEventType } from "../utils/adMobModu
 // écriture vit dans app/store.ts (cf. RÈGLE DE SÉCURITÉ en tête de ce
 // fichier).
 //
-// Couleur "navy" déjà utilisée ailleurs dans l'app (ex: widgets) — sobre,
-// pas de cercle ni de fond coloré autour, même esprit que l'icône ampoule
-// (Ionicons + couleur simple) utilisée dans budget.tsx.
-const COULEUR_CADENAS = "#2D3A4A";
+// RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-13 (bug trouvé en test,
+// texte illisible en mode sombre) : l'icône et le texte du cadenas
+// utilisaient auparavant une couleur "navy" fixe (#2D3A4A, cf. historique
+// git) — illisible en mode sombre (fond sombre, texte sombre). Utilise
+// désormais C.texte (ThemeContext), déjà theme-aware (clair en mode
+// sombre, sombre en mode clair), jamais une couleur fixe recodée en dur.
+// Même esprit que l'icône ampoule (Ionicons + couleur simple) utilisée
+// dans budget.tsx, juste theme-aware maintenant.
 
 // RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE POUR "COMMENT DÉCLENCHER UNE PUB
 // RÉCOMPENSÉE" DANS TOUTE L'APP (refonte monétisation du 2026-09-12) :
@@ -224,8 +228,10 @@ export function InsightVerrouille({
           { backgroundColor: theme === "sombre" ? C.fond : C.fondSecondaire },
         ]}
       >
-        <Ionicons name="lock-closed" size={24} color={COULEUR_CADENAS} />
-        <Text style={styles.texteDeverrouiller}>{texteCadenas}</Text>
+        <Ionicons name="lock-closed" size={24} color={C.texte} />
+        <Text style={[styles.texteDeverrouiller, { color: C.texte }]}>
+          {texteCadenas}
+        </Text>
       </View>
       <Pressable
         style={StyleSheet.absoluteFill}
@@ -240,9 +246,10 @@ export function InsightVerrouille({
 const styles = StyleSheet.create({
   conteneur: { position: "relative", overflow: "hidden", borderRadius: 12 },
   cache: { alignItems: "center", justifyContent: "center", gap: 6 },
+  // RÈGLE : pas de `color` ici — theme-aware, appliqué inline au site
+  // d'appel (C.texte), cf. RÈGLE plus haut.
   texteDeverrouiller: {
     fontSize: 13,
     fontWeight: "700",
-    color: COULEUR_CADENAS,
   },
 });

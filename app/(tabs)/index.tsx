@@ -892,28 +892,29 @@ export default function Dashboard() {
   // construction de "Ce qu'il faut retenir" (Stats), qui analyse la période
   // sélectionnée plutôt que le mois en cours. Voir utils/conseils.ts pour la
   // liste des règles et leur ordre de priorité.
-  const { conseils, etatsAJour, nouvellesResolutions } = genererConseils({
-    enveloppes: objStore.enveloppes,
-    objectifs: objStore.objectifs,
-    historiquesMois: objStore.historiquesMois,
-    transactions: objStore.transactions,
-    historiquePaiements: objStore.historiquePaiements,
-    epargneMois: objStore.epargneMois,
-    resteEstime,
-    resteEstimePrecedent,
-    disponibleEffectif,
-    moisActuel: maintenant.getMonth(),
-    anneeActuelle: maintenant.getFullYear(),
-    etatsPrecedents: etatsInsights,
-    // RÈGLE À NE JAMAIS CASSER — cf. utils/conseils.ts section "Maturité du
-    // compte" : le compte invité a un seed réaliste dès la création
-    // (setup_guest_account() côté Supabase), le filtre "nouveau compte" ne
-    // doit jamais s'y appliquer.
-    estCompteInvite: isGuest,
-    dateCreationCompte: objStore.dateCreationCompte,
-    seuilEpargneConstante: objStore.seuilEpargneConstante,
-    chargementInitialTermine: objStore.chargementInitialTermine,
-  });
+  const { conseils, etatsAJour, nouvellesResolutions, donneesInsuffisantes } =
+    genererConseils({
+      enveloppes: objStore.enveloppes,
+      objectifs: objStore.objectifs,
+      historiquesMois: objStore.historiquesMois,
+      transactions: objStore.transactions,
+      historiquePaiements: objStore.historiquePaiements,
+      epargneMois: objStore.epargneMois,
+      resteEstime,
+      resteEstimePrecedent,
+      disponibleEffectif,
+      moisActuel: maintenant.getMonth(),
+      anneeActuelle: maintenant.getFullYear(),
+      etatsPrecedents: etatsInsights,
+      // RÈGLE À NE JAMAIS CASSER — cf. utils/conseils.ts section "Maturité
+      // du compte" : le compte invité a un seed réaliste dès la création
+      // (setup_guest_account() côté Supabase), le filtre "nouveau compte"
+      // ne doit jamais s'y appliquer.
+      estCompteInvite: isGuest,
+      dateCreationCompte: objStore.dateCreationCompte,
+      seuilEpargneConstante: objStore.seuilEpargneConstante,
+      chargementInitialTermine: objStore.chargementInitialTermine,
+    });
   // RÈGLE À NE JAMAIS CASSER : "Nos conseils" est la source PRIORITAIRE —
   // il s'affiche toujours en entier, JAMAIS filtré par
   // situationsDejaAffichees (contrairement à "Vista" sur Stats, qui lui
@@ -1932,35 +1933,76 @@ export default function Dashboard() {
         </View>
         </CibleTutoriel>
 
-        {conseils.length > 0 && (
+        {/* RÈGLE À NE JAMAIS CASSER — CARTE "VOS INSIGHTS ARRIVENT BIENTÔT"
+            (demande du 2026-09-13) : remplace ENTIÈREMENT l'affichage normal
+            de "Nos conseils" (y compris le conseil de démarrage progressif
+            de genererConseilDemarrage, toujours calculé dans `conseils` pour
+            compatibilité mais ignoré ici) tant que donneesInsuffisantes est
+            vrai — jamais pour un compte invité (déjà exclu de ce
+            court-circuit côté genererConseils, cf. RÈGLE là-bas, mais
+            revérifié explicitement ici pour que ce soit visible au site de
+            rendu). Disparaît automatiquement dès que donneesInsuffisantes
+            repasse à false (aucun state local : dérivé à chaque rendu du
+            retour de genererConseils). */}
+        {donneesInsuffisantes && !isGuest ? (
           <View
             style={[
               styles.conseilsCard,
               { backgroundColor: C.carte, borderColor: C.carteBorder },
             ]}
           >
-            <Text style={[styles.conseilsLabel, { color: C.texteMuted }]}>
-              NOS CONSEILS
-            </Text>
-            {/* RÈGLE À NE JAMAIS CASSER : le tout premier conseil reste
-                toujours gratuit, quel que soit l'état de déblocage — c'est
-                ce qui donne un aperçu de valeur avant que les suivants ne
-                soient rassemblés derrière un seul cadenas commun (cf.
-                RÈGLE sur insightsDebloque plus haut). */}
-            {ligneConseil(conseils[0], 0, C)}
-            {conseils.length > 1 && (
-              <InsightVerrouille
-                deverrouille={premium || insightsDebloque}
-                onDeverrouille={() => setInsightsDebloque(true)}
-                texteCadenas="Regarder une pub pour voir tes insights"
-              >
-                {conseils.slice(1).map((conseil, i) => {
-                  const index = i + 1;
-                  return ligneConseil(conseil, index, C);
-                })}
-              </InsightVerrouille>
-            )}
+            <View style={styles.attenteInsightsRow}>
+              <Ionicons name="hourglass-outline" size={20} color="#1D9E75" />
+              <View style={styles.attenteInsightsTexte}>
+                <Text
+                  style={[styles.attenteInsightsTitre, { color: C.texte }]}
+                >
+                  Tes insights arrivent bientôt
+                </Text>
+                <Text
+                  style={[
+                    styles.attenteInsightsDescription,
+                    { color: C.texteMuted },
+                  ]}
+                >
+                  Continue à enregistrer tes dépenses. Dès que Vista aura
+                  suffisamment de données, il te donnera des conseils
+                  personnalisés sur tes habitudes.
+                </Text>
+              </View>
+            </View>
           </View>
+        ) : (
+          conseils.length > 0 && (
+            <View
+              style={[
+                styles.conseilsCard,
+                { backgroundColor: C.carte, borderColor: C.carteBorder },
+              ]}
+            >
+              <Text style={[styles.conseilsLabel, { color: C.texteMuted }]}>
+                NOS CONSEILS
+              </Text>
+              {/* RÈGLE À NE JAMAIS CASSER : le tout premier conseil reste
+                  toujours gratuit, quel que soit l'état de déblocage — c'est
+                  ce qui donne un aperçu de valeur avant que les suivants ne
+                  soient rassemblés derrière un seul cadenas commun (cf.
+                  RÈGLE sur insightsDebloque plus haut). */}
+              {ligneConseil(conseils[0], 0, C)}
+              {conseils.length > 1 && (
+                <InsightVerrouille
+                  deverrouille={premium || insightsDebloque}
+                  onDeverrouille={() => setInsightsDebloque(true)}
+                  texteCadenas="Regarder une pub pour voir tes insights"
+                >
+                  {conseils.slice(1).map((conseil, i) => {
+                    const index = i + 1;
+                    return ligneConseil(conseil, index, C);
+                  })}
+                </InsightVerrouille>
+              )}
+            </View>
+          )
         )}
 
         <View style={styles.statsRow}>
@@ -4173,6 +4215,10 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 6,
   },
+  attenteInsightsRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
+  attenteInsightsTexte: { flex: 1, gap: 4 },
+  attenteInsightsTitre: { fontSize: 14, fontWeight: "700" },
+  attenteInsightsDescription: { fontSize: 13, lineHeight: 19 },
   conseilItem: { flexDirection: "row", gap: 10, paddingVertical: 8 },
   conseilItemBorder: { borderTopWidth: 0.5 },
   conseilDot: {

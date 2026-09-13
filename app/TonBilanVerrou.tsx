@@ -5,8 +5,6 @@ import { useTheme } from "./ThemeContext";
 import { BoutonPrincipal } from "./BoutonPrincipal";
 import { useDeblocagePub } from "./InsightVerrouille";
 
-const COULEUR_CADENAS = "#2D3A4A";
-
 // RÈGLE À NE JAMAIS CASSER — REFONTE MONÉTISATION DU 2026-09-12 : remplace
 // PremiumVerrou (Premium uniquement, jamais de pub) pour les 4 anciens
 // verrous individuels de "Ton bilan" (onglets Vista/Santé/Trophées/
@@ -36,7 +34,10 @@ export function TonBilanVerrou({
         { height: hauteur, backgroundColor: C.fondSecondaire },
       ]}
     >
-      <Ionicons name="lock-closed" size={24} color={COULEUR_CADENAS} />
+      {/* RÈGLE : C.texte (theme-aware), pas une couleur navy fixe — cf.
+          RÈGLE détaillée dans InsightVerrouille.tsx (correctif du
+          2026-09-13, texte/icône illisibles en mode sombre). */}
+      <Ionicons name="lock-closed" size={24} color={C.texte} />
       <Text style={[styles.texte, { color: C.texteMuted }]}>
         Regarde une pub pour débloquer Ton bilan
       </Text>

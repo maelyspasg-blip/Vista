@@ -31,9 +31,10 @@
 // par définition constant et prévu : "X est ta catégorie la plus variable"
 // ou "X augmente depuis 3 mois" n'a pas de sens s'il s'agit d'une Fixe (bug
 // confirmé, cf. historique). Toutes les détections PAR CATÉGORIE ci-dessous
-// partent de `depensesParCategorieVariable` (filtré une seule fois en tête
-// de fonction), jamais de `depensesParCategorie` brut — cf. RÈGLE identique
-// dans utils/conseils.ts.
+// partent de `depensesParCategorieRecurrente` (Variable + récurrence
+// minimale de 2 mois avec dépense>0, filtrés une seule fois en tête de
+// fonction — cf. RÈGLE détaillée à sa définition), jamais de
+// `depensesParCategorie` brut — cf. RÈGLE identique dans utils/conseils.ts.
 //
 // RÈGLE À NE JAMAIS CASSER : anti-répétition — DEUX niveaux. (1) Le
 // dédoublonnage par `cle` en fin de genererInsightsPeriode reste la seule
@@ -191,6 +192,23 @@ export function genererInsightsPeriode(params: {
   // jamais candidate individuellement.
   const depensesParCategorieVariable = depensesParCategorie.filter((c) => c.type === "Variable");
 
+  // RÈGLE À NE JAMAIS CASSER — RÉCURRENCE MINIMALE (demande du 2026-09-13) :
+  // un insight de comparaison sur une catégorie n'a de sens que si elle
+  // revient réellement d'un mois à l'autre — une catégorie qui n'a eu de la
+  // dépense QU'UN SEUL mois sur la période affichée ne peut pas légitimement
+  // être qualifiée de "variable", "en hausse", "en corrélation" ou
+  // "explicative d'un pic" : un seul point ne permet aucune comparaison
+  // entre mois. Seuil : au moins 2 mois DISTINCTS avec depense>0 sur la
+  // fenêtre réellement analysée (`.slice(debut)`, même bornage que chaque
+  // `serieCat` ci-dessous) — un mois à 0€ ne compte pas comme "actif".
+  // S'ajoute à (ne remplace pas) le filtre Fixe/Variable ci-dessus ; toute
+  // détection PAR CATÉGORIE plus bas doit partir de
+  // depensesParCategorieRecurrente, jamais de depensesParCategorieVariable
+  // directement.
+  const depensesParCategorieRecurrente = depensesParCategorieVariable.filter(
+    (c) => c.parMois.slice(debut).filter((v) => v > 0).length >= 2,
+  );
+
   const categoriesDejaCitees = new Set<string>();
   const candidats: CandidatInsight[] = [];
 
@@ -275,7 +293,7 @@ export function genererInsightsPeriode(params: {
       // Profil annuel (12 mois et plus) : catégorie la plus dépensière en
       // moyenne mensuelle sur toute la période sélectionnée.
       let dominanteAnnuelle: { id: string; nom: string; moy: number } | null = null;
-      for (const cat of depensesParCategorieVariable) {
+      for (const cat of depensesParCategorieRecurrente) {
         const serieCat = cat.parMois.slice(debut);
         if (serieCat.length === 0) continue;
         const moy = moyenne(serieCat);
@@ -297,7 +315,7 @@ export function genererInsightsPeriode(params: {
 
   // === 2. Tendance dominante : catégorie la plus variable sur la période ======
   let dominante: { id: string; nom: string; min: number; max: number; cv: number } | null = null;
-  for (const cat of depensesParCategorieVariable) {
+  for (const cat of depensesParCategorieRecurrente) {
     const serieCat = cat.parMois.slice(debut);
     if (serieCat.length < SEUIL_MOIS_MIN_TENDANCE) continue;
     const moy = moyenne(serieCat);
@@ -322,7 +340,7 @@ export function genererInsightsPeriode(params: {
   // === 3. Corrélation entre catégories =========================================
   // Deux catégories en hausse consécutive simultanée, dont l'excès combiné
   // vs leur propre moyenne sur la période est significatif.
-  const candidatesHausse = depensesParCategorieVariable
+  const candidatesHausse = depensesParCategorieRecurrente
     .filter((cat) => !categoriesDejaCitees.has(cat.nom))
     .map((cat) => {
       const serieCat = cat.parMois.slice(debut);
@@ -437,7 +455,7 @@ export function genererInsightsPeriode(params: {
   // depuis au moins 3 mois, avec l'impact chiffré sur la capacité
   // d'épargne. Repli sur le mois le plus dépensier de la période si aucune
   // catégorie n'a une vraie dérive sur 3 mois.
-  const menaceHausse = depensesParCategorieVariable
+  const menaceHausse = depensesParCategorieRecurrente
     .filter((cat) => !categoriesDejaCitees.has(cat.nom))
     .map((cat) => {
       const serieCat = cat.parMois.slice(debut);
@@ -477,7 +495,7 @@ export function genererInsightsPeriode(params: {
     });
     if (indexPic >= 0) {
       let categorieExplicative: { id: string; nom: string; exces: number } | null = null;
-      for (const cat of depensesParCategorieVariable) {
+      for (const cat of depensesParCategorieRecurrente) {
         if (categoriesDejaCitees.has(cat.nom)) continue;
         const serieCat = cat.parMois.slice(debut);
         if (serieCat.length < 2) continue;

@@ -1795,7 +1795,21 @@ export function genererConseils(params: {
   // neutre existant "données insuffisantes"/"mois maîtrisé") — jamais
   // affirmer à tort à un compte établi qu'il n'a "pas encore de catégories".
   chargementInitialTermine: boolean;
-}): { conseils: Conseil[]; etatsAJour: EtatsInsightsMap; nouvellesResolutions: number } {
+}): {
+  conseils: Conseil[];
+  etatsAJour: EtatsInsightsMap;
+  nouvellesResolutions: number;
+  // RÈGLE À NE JAMAIS CASSER — CARTE "VOS INSIGHTS ARRIVENT BIENTÔT" (demande
+  // du 2026-09-13) : true UNIQUEMENT sur le court-circuit "maturité du
+  // compte" ci-dessous (jamais sur le repli neutre normal du moteur, ex.
+  // "données insuffisantes"/"tout va bien", qui reste un `conseils` normal
+  // à afficher tel quel) — l'appelant (Aperçu) remplace alors TOUT
+  // l'affichage de "Nos conseils" par une carte statique dédiée plutôt que
+  // par `conseils` (qui contient quand même le conseil de démarrage
+  // progressif ci-dessous, gardé pour compatibilité mais ignoré par
+  // l'appelant dans ce cas précis).
+  donneesInsuffisantes: boolean;
+} {
   const { maxConseils = 3, etatsPrecedents, situationsExclues } = params;
 
   if (!params.estCompteInvite && params.chargementInitialTermine) {
@@ -1820,6 +1834,7 @@ export function genererConseils(params: {
         ],
         etatsAJour: etatsPrecedents,
         nouvellesResolutions: 0,
+        donneesInsuffisantes: true,
       };
     }
   }
@@ -1875,5 +1890,5 @@ export function genererConseils(params: {
     };
   });
 
-  return { conseils, etatsAJour, nouvellesResolutions };
+  return { conseils, etatsAJour, nouvellesResolutions, donneesInsuffisantes: false };
 }

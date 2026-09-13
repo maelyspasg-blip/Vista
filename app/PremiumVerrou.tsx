@@ -4,8 +4,6 @@ import { useRouter } from "expo-router";
 import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
 
-const COULEUR_CADENAS = "#2D3A4A";
-
 // RÈGLE À NE JAMAIS CASSER — AUCUNE ÉCRITURE SUPABASE DANS CE FICHIER : ce
 // composant ne doit JAMAIS contenir d'appel .delete()/.update()/.insert()/
 // .upsert() vers Supabase — composant d'affichage pur, toute écriture vit
@@ -27,7 +25,10 @@ export function PremiumVerrou({ hauteur = 220 }: { hauteur?: number }) {
         { height: hauteur, backgroundColor: C.fondSecondaire },
       ]}
     >
-      <Ionicons name="lock-closed" size={24} color={COULEUR_CADENAS} />
+      {/* RÈGLE : C.texte (theme-aware), pas une couleur navy fixe — cf.
+          RÈGLE détaillée dans InsightVerrouille.tsx (correctif du
+          2026-09-13, texte/icône illisibles en mode sombre). */}
+      <Ionicons name="lock-closed" size={24} color={C.texte} />
       <Text style={[styles.texte, { color: C.texteMuted }]}>
         Disponible avec Premium
       </Text>
