@@ -1,7 +1,10 @@
 import { useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabaseClient";
-import { annulerToutesNotifications } from "./notifications";
+import {
+  annulerToutesNotifications,
+  envoyerNotificationEvenementCommun,
+} from "./notifications";
 import { determinerAlerteBudget, type AlerteBudget } from "./alertesBudget";
 import { purgerDonneesInsights } from "../utils/conseils";
 import {
@@ -3564,6 +3567,20 @@ export function useObjectifs() {
         const nouvel = evenementDepuisLigne(data);
         setEtat({ evenements: [...etat.evenements, nouvel] });
         synchroniserWidgetPlanning(etat.evenements, etat.transactions);
+
+        // RÈGLE À NE JAMAIS CASSER — NOTIFICATION PUSH SUR ÉVÉNEMENT COMMUN
+        // (demande du 2026-09-13) : jamais attendue (pas de `await`) — un
+        // échec réseau/permission/token manquant ne doit jamais ralentir ni
+        // faire échouer la création de l'événement elle-même, entièrement
+        // best-effort et silencieux (cf. RÈGLE détaillée dans
+        // app/notifications.ts::envoyerNotificationEvenementCommun).
+        // "commun" par défaut si visibilite absente — même convention que
+        // le défaut serveur documenté sur Evenement.visibilite ci-dessus.
+        if ((nouvel.visibilite ?? "commun") === "commun") {
+          envoyerNotificationEvenementCommun(nouvel, etat.prenom, user.id).catch(
+            () => {},
+          );
+        }
 
         if (
           nouvel.estFinancier &&

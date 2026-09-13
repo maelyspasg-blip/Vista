@@ -1,6 +1,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as ExpoSplashScreen from "expo-splash-screen";
+import * as Notifications from "expo-notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppState, Animated, StyleSheet } from "react-native";
 import "react-native-gesture-handler";
@@ -21,6 +22,7 @@ import { reinitialiserEtatUtilisateur } from "./store";
 import "./calendarLocale";
 import { ecouterOnboardingTermine } from "./onboardingCompletion";
 import { getOnboardingVu } from "./onboardingStorage";
+import { enregistrerPushToken } from "./notifications";
 import { SplashScreen } from "./SplashScreen";
 import { Theme, ThemeProvider } from "./ThemeContext";
 import { getThemeCache, setThemeCache } from "./themeStorage";
@@ -358,6 +360,43 @@ function RootLayoutInterne() {
       abonnement.subscription.unsubscribe();
     };
   }, []);
+
+  // RÈGLE À NE JAMAIS CASSER — ENREGISTREMENT DU TOKEN PUSH EXPO (demande du
+  // 2026-09-13) : déclenché à chaque session active (pas seulement "au tout
+  // premier lancement") — un token peut changer (réinstallation, nouvel
+  // appareil), donc on le rafraîchit à chaque démarrage plutôt que de ne le
+  // faire qu'une fois. Entièrement best-effort (cf. RÈGLE détaillée dans
+  // app/notifications.ts::enregistrerPushToken) : permission refusée ou
+  // token indisponible ne bloquent jamais l'app, jamais d'erreur visible.
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    enregistrerPushToken(session.user.id);
+  }, [session?.user?.id]);
+
+  // RÈGLE À NE JAMAIS CASSER — TAP SUR UNE NOTIFICATION PUSH → PLANNING
+  // (demande du 2026-09-13) : monté une seule fois ([] volontaire), pas
+  // conditionné à `session` — addNotificationResponseReceivedListener capte
+  // aussi bien un tap pendant que l'app est déjà ouverte qu'un tap qui vient
+  // de RELANCER l'app (auquel cas ce composant est de toute façon remonté
+  // avec un nouvel effet). `dateNotif` est consommé une seule fois côté
+  // Planning (cf. RÈGLE dans app/(tabs)/planning.tsx), jamais besoin de le
+  // nettoyer ici.
+  useEffect(() => {
+    const abonnement = Notifications.addNotificationResponseReceivedListener(
+      (reponse) => {
+        const donnees = reponse.notification.request.content.data as
+          | { type?: string; date?: string }
+          | undefined;
+        if (donnees?.type === "evenement_commun" && donnees.date) {
+          router.push({
+            pathname: "/(tabs)/planning",
+            params: { dateNotif: donnees.date },
+          });
+        }
+      },
+    );
+    return () => abonnement.remove();
+  }, [router]);
 
   // Recalcule le temps restant de l'essai régulièrement pendant que l'app
   // reste ouverte (sinon seul le montage initial le connaît, cf. bug où

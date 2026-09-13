@@ -309,7 +309,10 @@ export default function Planning() {
     }
   };
   const affichagePartage = estDansUnEspace && vueActive === "partage";
-  const params = useLocalSearchParams<{ editEventId?: string }>();
+  const params = useLocalSearchParams<{
+    editEventId?: string;
+    dateNotif?: string;
+  }>();
   const { planning: tutorielPlanningVu, marquerVu: marquerTutorielVu } =
     useTutoriel();
   const {
@@ -1186,6 +1189,20 @@ export default function Planning() {
       if (source) ouvrirEditionEvenement(source);
       router.setParams({ editEventId: undefined });
     }, [params.editEventId]),
+  );
+
+  // RÈGLE À NE JAMAIS CASSER — TAP SUR UNE NOTIFICATION PUSH D'ÉVÉNEMENT
+  // COMMUN (demande du 2026-09-13) : consommé une seule fois puis nettoyé
+  // (même geste que params.editEventId ci-dessus) — ouvre la vue Jour sur
+  // la date reçue via app/_layout.tsx (addNotificationResponseReceivedListener).
+  useFocusEffect(
+    useCallback(() => {
+      if (!params.dateNotif) return;
+      const date = new Date(params.dateNotif);
+      if (!Number.isNaN(date.getTime())) ouvrirJour(date);
+      router.setParams({ dateNotif: undefined });
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- même geste que l'effet params.editEventId juste au-dessus : ne réagir QU'au changement de dateNotif, jamais à router/ouvrirJour qui changeraient de référence sans rapport avec l'arrivée d'une notification.
+    }, [params.dateNotif]),
   );
 
   // RÈGLE : rechargement forcé depuis Supabase à CHAQUE focus de l'onglet
