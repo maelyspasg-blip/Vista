@@ -80,17 +80,25 @@ export function premiumUIVisible(isAdmin: boolean): boolean {
   return PREMIUM_ACTIF || isAdmin;
 }
 
-// RÈGLE À NE JAMAIS CASSER — AdMob PAS ENCORE RÉINTÉGRÉ (rebuild EAS natif
-// requis, cf. RÈGLE existante sur AD_UNIT_ID_REWARDED plus bas) : tant que
-// `false`, les 3 emplacements de pub de la V1 n'essaient JAMAIS d'appeler le
-// SDK AdMob réel — ils utilisent systématiquement la simulation (Alert
-// "Pub simulée" + bouton "Fermer" qui déverrouille, cf.
-// app/InsightVerrouille.tsx::useDeblocagePub). Repasser à `true` le jour où
-// AdMob est réintégré : useDeblocagePub retombera alors sur son
-// comportement déjà existant (tenter le SDK réel, se rabattre sur la
-// simulation seulement si le SDK échoue/n'est pas disponible) sans qu'aucun
-// site d'appel n'ait besoin d'être modifié.
-export const ADMOB_ACTIF = false;
+// RÈGLE À NE JAMAIS CASSER — AdMob RÉINTÉGRÉ LE 2026-09-13 (demande
+// explicite, malgré l'historique de crash du 2026-09-01 — cf. RÈGLE
+// détaillée dans utils/adMobModule.ts, confirmé par l'utilisateur qui gère
+// ce risque lui-même). Package + plugin natif + require() protégé
+// restaurés (utils/adMobModule.ts) — passé à `true` ici pour que
+// useDeblocagePub (app/InsightVerrouille.tsx) tente réellement le SDK.
+//
+// RÈGLE À NE JAMAIS CASSER — CE FLAG SEUL NE SUFFIT PAS À VOIR DE VRAIES
+// PUBS TANT QUE TESTFLIGHT_MODE=true : useDeblocagePub court-circuite sur
+// `TESTFLIGHT_MODE || !ADMOB_ACTIF || ...` — TESTFLIGHT_MODE est vérifié
+// EN PREMIER et prioritaire, donc tant qu'il reste `true` (bêta en cours),
+// la pub simulée (Alert) continue de s'afficher, EXACTEMENT comme avant ce
+// changement. C'est voulu : ADMOB_ACTIF=true prépare le terrain (build EAS
+// avec le SDK linké, prêt à être testé) sans changer le comportement
+// visible pendant la bêta — les vraies pubs ne se déclencheront qu'au jour
+// où TESTFLIGHT_MODE repassera à `false` pour la sortie publique. Ne
+// jamais interpréter "aucune pub réelle visible en bêta" comme un signe
+// que ce flag n'a pas d'effet ou que la réintégration a échoué.
+export const ADMOB_ACTIF = true;
 
 // RÈGLE À NE JAMAIS CASSER — SEUL POINT D'ENTRÉE POUR SAVOIR SI L'ESPACE
 // PARTAGÉ DOIT ÊTRE VISIBLE, JAMAIS ESPACE_PARTAGE_ACTIF DIRECTEMENT DANS UN
@@ -110,10 +118,27 @@ export function estEspacePartageActif(isAdmin: boolean): boolean {
 // RÈGLE : Ad Unit ID de la pub récompensée AdMob — sélectionné une seule
 // fois ici selon la plateforme (Platform.OS), jamais dupliqué ailleurs dans
 // le code (InsightVerrouille.tsx l'importe directement).
+//
+// RÈGLE À NE JAMAIS CASSER — BASCULÉ SUR LES ID DE TEST GOOGLE LE
+// 2026-09-13, DEMANDE EXPLICITE (réintégration AdMob après le crash du
+// 2026-09-01, cf. RÈGLE dans utils/adMobModule.ts) : les vrais ID de
+// production de ce projet (compte ca-app-pub-4645298475525932, cf.
+// historique git — commit 899a64a et les 2 valeurs juste en dessous en
+// commentaire) sont DIFFÉRENTS des ID donnés dans cette demande
+// (ca-app-pub-3940256099942544, les ID PUBLICS de test documentés par
+// Google eux-mêmes, communs à tous les développeurs, jamais liés à un
+// compte AdMob précis). Utiliser les ID de test ici est délibéré et plus
+// sûr le temps de valider que le crash de 2026-09-01 ne se reproduit pas —
+// aucune requête publicitaire réelle, aucun revenu, aucun risque de
+// violation de policy AdMob pendant cette phase de validation. Anciens ID
+// réels (production) à restaurer une fois la stabilité confirmée sur un
+// vrai build EAS :
+//   ios: "ca-app-pub-4645298475525932/3811187805"
+//   android: "ca-app-pub-4645298475525932/6067589553"
 export const AD_UNIT_ID_REWARDED =
   Platform.OS === "ios"
-    ? "ca-app-pub-4645298475525932/3811187805"
-    : "ca-app-pub-4645298475525932/6067589553";
+    ? "ca-app-pub-3940256099942544/1712485313"
+    : "ca-app-pub-3940256099942544/5224354917";
 // RÈGLE À NE JAMAIS CASSER : simulation locale en attendant l'intégration
 // RevenueCat — ce flag ne représente aucun abonnement réel, il ne doit
 // jamais être positionné à true ailleurs que via le toggle "Simuler
