@@ -248,8 +248,61 @@ Gabarit :
 ### 2.2 Questions pour Maëlys
 
 Questions de direction produit qui ne peuvent pas être tranchées seul —
-posées ici plutôt que de bloquer le loop en attendant une réponse. Rien pour
-l'instant.
+posées ici plutôt que de bloquer le loop en attendant une réponse.
+
+### 2026-09-13 — Pubs en vue partagée : contenu flouté "Ton bilan → Vista" (insights)
+
+- **Contexte** : demande "le contenu flouté derrière le cadenas doit
+  refléter les données partagées (pas les données individuelles)" pour les
+  3 emplacements de pub. Investigation : le cadenas lui-même (useDeblocagePub)
+  s'applique déjà IDENTIQUEMENT en vue perso et en vue partagée sur les 3
+  emplacements (aucun des 3 gates ne teste `vueActive`) — rien n'est
+  bypassé. L'écart réel est le contenu affiché une fois débloqué. Pour
+  l'onglet Vista de "Ton bilan" (`genererInsightsPeriode`,
+  `app/(tabs)/analytics.tsx`), une vraie consolidation couple demanderait
+  de fusionner aussi `series` (calculerSeries, `utils/series.ts`) — utilisé
+  aussi par `scoreSante`/`explicationsScore` — pas seulement les totaux
+  agrégés (`donneesReellesConsolidees` etc., déjà prêts). Consolider
+  seulement les totaux sans `series` produirait des insights incohérents
+  (mélange couple/individuel).
+- **Options envisagées** : (a) reporter et documenter ; (b) aller jusqu'au
+  bout maintenant (consolider `calculerSeries`, chantier plus large,
+  touche un utilitaire partagé avec Santé).
+- **Réponse de Maëlys (2026-09-13)** : reporter, documenter ici. Non traité
+  cette session — `genererInsightsPeriode`/`series` restent personnels
+  même en vue partagée pour l'onglet Vista de "Ton bilan".
+
+### 2026-09-13 — Pubs en vue partagée : "Nos conseils" (Aperçu)
+
+- **Contexte** : la section "Nos conseils" (`app/(tabs)/index.tsx`) a déjà
+  une RÈGLE explicite qui la garde DÉLIBÉRÉMENT personnelle même en vue
+  partagée — `genererConseils` fait correspondre ses situations à des
+  lignes réelles de `historiquesMois` PAR COMPTE ; une catégorie fusionnée
+  synthétique ne correspondrait à aucun snapshot réel. Le cadenas
+  (`InsightVerrouille`) s'applique déjà pareil des deux côtés.
+- **Options envisagées** : (a) laisser personnel (statu quo) ; (b) rendre
+  couple malgré la contrainte technique (dégraderait certaines des 5
+  règles d'insights).
+- **Réponse de Maëlys (2026-09-13)** : laisser personnel. Aucun changement
+  — RÈGLE existante confirmée, pas contredite.
+
+### 2026-09-13 — Pubs en vue partagée : Trophées / Simulateur ("Ton bilan")
+
+- **Contexte** : ces 2 des 4 onglets de "Ton bilan" n'ont AUCUNE logique
+  "vue partagée" aujourd'hui (contenu toujours personnel, quelle que soit
+  la vue) — le cadenas d'entrée est déjà identique des deux côtés, mais
+  rien à consolider n'existe encore derrière. Les rendre "couple" est une
+  vraie nouvelle fonctionnalité (trophées du couple ? simulateur sur une
+  catégorie fusionnée, avec quelle sémantique d'application côté
+  Supabase ?) plutôt qu'une correction.
+- **Options envisagées** : (a) reporter, documenter (pas de spec donnée) ;
+  (b) donner une spec précise pour ces 2 onglets et l'implémenter.
+- **Réponse de Maëlys (2026-09-13)** : reporter, documenter ici. Aucune
+  spec fournie pour l'instant — Trophées et Simulateur restent personnels
+  quelle que soit la vue, dans les deux onglets de "Ton bilan".
+- **À reconsidérer si** : une spec produit précise est donnée pour l'un ou
+  l'autre onglet (ex: définition d'un "trophée du couple", ou sémantique
+  d'un budget simulé partagé).
 
 Gabarit :
 

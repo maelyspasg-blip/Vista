@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import Slider from "@react-native-community/slider";
@@ -249,6 +250,35 @@ const PERIODE_MAX_MOIS = 120; // plafond fixe (10 ans), indépendant des donnée
 // statsPeriodeDebloque), plus derrière Premium. Un compte invité (isGuest)
 // reste exempté comme partout ailleurs.
 const LIMITE_MOIS_GRATUIT_STATS = 1;
+
+// RÈGLE : clé AsyncStorage namespacée par userId — même convention que
+// PREFIXE_CLE_ETATS_INSIGHTS (utils/conseils.ts) : jamais un slot global
+// partagé entre comptes sur le même appareil.
+const PREFIXE_CLE_PERIODE_STATS = "vista_periode_stats_";
+
+// RÈGLE À NE JAMAIS CASSER — PÉRIODE PAR DÉFAUT SELON L'ANCIENNETÉ DU
+// COMPTE (demande du 2026-09-13) : ne donne JAMAIS un accès gratuit
+// supplémentaire — la valeur retournée ici n'est qu'une PRÉ-SÉLECTION dans
+// le Picker, toujours reclampée par LIMITE_MOIS_GRATUIT_STATS/le même
+// verrou pub que n'importe quelle sélection manuelle (cf. `nbMois` plus
+// bas). Ancienneté calculée en mois calendaires pleins (année*12+mois) —
+// choix propre à cette règle (aAssezDeDonnees, utils/conseils.ts, calcule
+// une ancienneté du même ordre mais en jours, pas en mois calendaires ;
+// aucun utilitaire commun à réutiliser ici, juste une règle voisine).
+function periodeParDefautSelonAnciennete(
+  dateCreationCompte: string | null,
+): number {
+  if (!dateCreationCompte) return 1;
+  const creation = new Date(dateCreationCompte);
+  if (Number.isNaN(creation.getTime())) return 1;
+  const maintenant = new Date();
+  const moisEcoules =
+    (maintenant.getFullYear() - creation.getFullYear()) * 12 +
+    (maintenant.getMonth() - creation.getMonth());
+  if (moisEcoules >= 4) return 6;
+  if (moisEcoules >= 2) return 3;
+  return 1;
+}
 
 type OptionPeriode = {
   valeur: number;
@@ -1331,7 +1361,47 @@ export default function Analytics() {
   // RÈGLE : défaut passé de 3 à 1 le 2026-09-12 (refonte monétisation,
   // demande explicite "Stats affiche par défaut uniquement le mois en
   // cours") — cf. RÈGLE détaillée sur LIMITE_MOIS_GRATUIT_STATS plus haut.
+  // Valeur initiale 1 volontairement conservée ici (avant tout chargement
+  // AsyncStorage, cf. l'effet juste en dessous) — jamais un flash visible
+  // d'une autre période le temps du chargement.
   const [nbMoisSelectionne, setNbMoisSelectionne] = useState(1);
+  // RÈGLE À NE JAMAIS CASSER — DÉFAUT SELON L'ANCIENNETÉ DU COMPTE (demande
+  // du 2026-09-13) : au montage, restaure le choix déjà fait par
+  // l'utilisateur (AsyncStorage, cf. PREFIXE_CLE_PERIODE_STATS plus haut)
+  // s'il existe — sinon calcule un défaut qui grandit avec l'ancienneté du
+  // compte (periodeParDefautSelonAnciennete). Ne débloque RIEN par
+  // lui-même : `nbMois` (clamp plus bas) reste gardé par la même pub que
+  // toute sélection manuelle au-delà de LIMITE_MOIS_GRATUIT_STATS.
+  useEffect(() => {
+    if (!objStore.userId) return;
+    let annule = false;
+    (async () => {
+      try {
+        const sauvegarde = await AsyncStorage.getItem(
+          `${PREFIXE_CLE_PERIODE_STATS}${objStore.userId}`,
+        );
+        if (annule) return;
+        // RÈGLE : garde NaN — une valeur AsyncStorage corrompue/illisible ne
+        // doit jamais se propager jusqu'à construireMoisPeriode/
+        // formaterPeriode (même rigueur que periodeParDefautSelonAnciennete
+        // ci-dessus sur sa propre entrée).
+        const valeurSauvegardee = sauvegarde ? Number(sauvegarde) : NaN;
+        if (sauvegarde && !Number.isNaN(valeurSauvegardee)) {
+          setNbMoisSelectionne(valeurSauvegardee);
+        } else {
+          setNbMoisSelectionne(
+            periodeParDefautSelonAnciennete(objStore.dateCreationCompte),
+          );
+        }
+      } catch {
+        // best-effort — reste sur la valeur initiale (1 mois) en cas d'échec
+      }
+    })();
+    return () => {
+      annule = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [objStore.userId]);
   // RÈGLE : session-scoped (comme tonBilanDebloque plus bas) — une pub
   // débloque toutes les périodes du sélecteur pour la session, revient à
   // false à la prochaine ouverture de l'app.
@@ -1472,7 +1542,21 @@ export default function Analytics() {
   const [categorieSimulee, setCategorieSimulee] = useState<string | null>(
     null,
   );
-  const [budgetSimule, setBudgetSimule] = useState(0);
+  // RÈGLE À NE JAMAIS CASSER — CURSEUR BIDIRECTIONNEL EN POURCENTAGE
+  // (correctif du 2026-09-13) : le curseur manipule un pourcentage de
+  // variation (-100 à +100), TOUJOURS centré sur 0% = budget actuel —
+  // `budgetSimule` (plus bas, dérivé, plus un state) n'est jamais piloté
+  // directement par le curseur. L'ancienne version pilotait un montant
+  // absolu en € avec minimumValue:0/maximumValue:max(budgetActuel*2,100) :
+  // pour toute catégorie à moins de 50€ de budget, le maximum retombait
+  // sur le plancher fixe 100€ au lieu de 2×budgetActuel, désynchronisant
+  // le centre visuel du curseur de la valeur actuelle (ex: catégorie à
+  // 20€ → plage [0,100], "actuel" affiché à 20% du curseur, pas au
+  // centre) — perçu comme "le curseur part de 0 à gauche, plus moyen de
+  // diminuer". Ce state en pourcentage replace le curseur exactement au
+  // centre quel que soit le budget, et garantit toujours -100%/+100%
+  // symétriques.
+  const [pourcentageSimule, setPourcentageSimule] = useState(0);
   const [tiroirSimulateurOuvert, setTiroirSimulateurOuvert] = useState(false);
   // Sous-section A du Simulateur : période de projection choisie par
   // l'utilisateur (remplace l'ancien NB_MOIS_PROJECTION fixe à 6).
@@ -1498,8 +1582,11 @@ export default function Analytics() {
   const enveloppeSimulee =
     categoriesSimulables.find((e) => e.id === categorieSimulee) ?? null;
 
+  // RÈGLE : remet le curseur à 0% (= budget actuel, au centre) à chaque
+  // changement de catégorie simulée — jamais un pourcentage hérité de la
+  // catégorie précédente.
   useEffect(() => {
-    if (enveloppeSimulee) setBudgetSimule(enveloppeSimulee.budget);
+    setPourcentageSimule(0);
   }, [categorieSimulee]);
 
   const series = calculerSeries({
@@ -1960,6 +2047,12 @@ export default function Analytics() {
   // remplace l'ancien NB_MOIS_PROJECTION fixé à 6.
   const NB_MOIS_PROJECTION = periodeSimulationMois;
   const budgetActuelSimule = enveloppeSimulee?.budget ?? 0;
+  // RÈGLE : dérivé de pourcentageSimule (cf. RÈGLE sur ce state plus haut),
+  // jamais piloté directement — pourcentageSimule=0 donne toujours
+  // budgetSimule===budgetActuelSimule exactement (curseur au centre).
+  const budgetSimule = Math.round(
+    budgetActuelSimule * (1 + pourcentageSimule / 100),
+  );
   const ecartMensuelSimule = budgetActuelSimule - budgetSimule;
   const pointsRecentsEpargne = [
     ...objStore.historiquesMois.slice(-5).map((s) => s.epargne),
@@ -2963,7 +3056,16 @@ export default function Analytics() {
     donneesPrevisionnelles,
     labels,
     nbMoisAvecDonnees,
-    nbMoisSelectionne,
+    // RÈGLE : `nbMois` (clampé), pas `nbMoisSelectionne` (brut) — correctif
+    // du 2026-09-13, cf. RÈGLE sur periodeParDefautSelonAnciennete plus
+    // haut. `nbMoisSelectionne` peut désormais dépasser
+    // LIMITE_MOIS_GRATUIT_STATS pour un compte gratuit (défaut par
+    // ancienneté, ou restauration AsyncStorage d'un choix fait pendant une
+    // session débloquée par pub) sans que le contenu affiché suive — cette
+    // fonction ne doit piloter que le STYLE de formulation d'un bilan sur
+    // la fenêtre RÉELLEMENT montrée, jamais une fenêtre plus large que ce
+    // que l'utilisateur voit vraiment.
+    nbMoisSelectionne: nbMois,
     series,
     depensesParCategorie,
     objectifs: objectifsAvecDelta,
@@ -4214,7 +4316,7 @@ export default function Analytics() {
             PÉRIODE
           </Text>
           <Text style={[styles.periodeBoutonValeur, { color: C.texte }]}>
-            {formaterPeriode(nbMoisSelectionne)}
+            {formaterPeriode(nbMois)}
           </Text>
         </TouchableOpacity>
         </CibleTutoriel>
@@ -4266,6 +4368,17 @@ export default function Analytics() {
                     return;
                   }
                   setNbMoisSelectionne(Number(valeur));
+                  // RÈGLE : persisté UNIQUEMENT sur un choix explicite de
+                  // l'utilisateur (jamais la valeur calculée par
+                  // periodeParDefautSelonAnciennete) — cf. RÈGLE sur l'effet
+                  // de chargement plus haut, "si l'utilisateur a déjà
+                  // choisi une période, garder son choix".
+                  if (objStore.userId) {
+                    AsyncStorage.setItem(
+                      `${PREFIXE_CLE_PERIODE_STATS}${objStore.userId}`,
+                      String(Number(valeur)),
+                    ).catch(() => {});
+                  }
                 }}
                 itemStyle={{ color: C.texte }}
               >
@@ -6884,15 +6997,15 @@ export default function Analytics() {
                             </Text>
                           </View>
                           <SliderAnime
-                            value={budgetSimule}
-                            minimumValue={0}
-                            maximumValue={Math.max(budgetActuelSimule * 2, 100)}
+                            value={pourcentageSimule}
+                            minimumValue={-100}
+                            maximumValue={100}
                             step={5}
-                            onValueChange={setBudgetSimule}
+                            onValueChange={setPourcentageSimule}
                             minimumTrackTintColor={couleurSliderSimulation}
                             maximumTrackTintColor={C.separateur}
                             thumbTintColor={couleurSliderSimulation}
-                            accessibilityLabel={`Budget simulé pour ${enveloppeSimulee.nom}`}
+                            accessibilityLabel={`Budget simulé pour ${enveloppeSimulee.nom}, ${pourcentageSimule > 0 ? "+" : ""}${pourcentageSimule}% du budget actuel`}
                             style={styles.simulateurSlider}
                           />
 
