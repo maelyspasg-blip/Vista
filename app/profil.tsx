@@ -1344,7 +1344,11 @@ export default function Profil() {
               <View
                 style={[
                   styles.carte,
-                  { backgroundColor: C.carte, borderColor: C.carteBorder },
+                  // RÈGLE : marginTop:16 — sépare visuellement cette carte de
+                  // la carte verte "Espace partagé avec [Prénom]" juste
+                  // au-dessus (collées sans cet espacement, demande du
+                  // 2026-09-13).
+                  { backgroundColor: C.carte, borderColor: C.carteBorder, marginTop: 16 },
                   styleCarte(theme, C.purple, contrasteRenforce),
                 ]}
               >

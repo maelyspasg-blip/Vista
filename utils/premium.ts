@@ -19,21 +19,40 @@ import { Platform } from "react-native";
 // nécessaire.
 export const TESTFLIGHT_MODE = true;
 
-// RÈGLE À NE JAMAIS CASSER — FONDATIONS ESPACE PARTAGÉ, DÉSACTIVÉ POUR LA
-// BÊTA (renommé depuis MODE_COUPLE_ACTIF) : tant que `false`, aucun écran
-// de l'app ne doit rendre la section "Espace partagé" ni aucun élément
-// d'UI/modale qui en dépend — cf. site d'appel dans app/profil.tsx. Le
-// schéma Supabase (espaces_partages, membres_espace, enveloppes.attribue_a,
+// RÈGLE À NE JAMAIS CASSER — FONDATIONS ESPACE PARTAGÉ (renommé depuis
+// MODE_COUPLE_ACTIF) : tant que `false`, aucun écran de l'app ne doit
+// rendre la section "Espace partagé" ni aucun élément d'UI/modale qui en
+// dépend — cf. site d'appel dans app/profil.tsx. Le schéma Supabase
+// (espaces_partages, membres_espace, enveloppes.attribue_a,
 // transactions.attribue_a — cf.
 // supabase/migrations/20260830120000_mode_couple_fondations.sql) et
 // utils/espacePartage.ts existent déjà et sont désormais appelés depuis la
 // modale de app/profil.tsx, mais UNIQUEMENT depuis du JSX gardé par ce
-// flag : zéro effet sur la bêta TestFlight tant qu'il reste `false`.
-// Repasser à `false` avant toute build de production tant que la V1 n'est
-// pas prête (rejoindre un espace fonctionne déjà ; créer un espace
-// n'insère pas encore de ligne espaces_partages, cf. RÈGLE dans
-// app/profil.tsx).
-export const ESPACE_PARTAGE_ACTIF = false;
+// flag.
+//
+// RÈGLE : passé à `true` le 2026-09-13 — DEMANDE EXPLICITE, "pour les
+// tests" (diagnostic de l'écran onboarding "Vista à deux", qui ne peut
+// jamais s'afficher tant que ce flag est `false`). Active désormais TOUTE
+// la fonctionnalité Espace partagé dans l'app entière (pas seulement
+// l'onboarding) : section Profil, Planning/Budget/Stats/Aperçu en vue
+// partagée, etc. — jamais un flag à portée limitée à un seul écran.
+// REPASSER À `false` AVANT TOUTE BUILD DE PRODUCTION tant que la V1 n'est
+// pas prête.
+//
+// RÈGLE — CORRECTIF DU 2026-09-13 (revue sécurité) : l'ancien commentaire
+// ici affirmait que "créer un espace n'insère pas encore de ligne
+// espaces_partages" — FAUX au vu du code actuel : creerEspacePartage()
+// (utils/espacePartage.ts) appelle bien le RPC creer_espace_partage()
+// (security definer, supabase/migrations/
+// 20260831130000_creer_espace_partage_reutilise_en_attente.sql), qui
+// insère dans espaces_partages ET membres_espace. Soit ce commentaire
+// était déjà obsolète (jamais mis à jour après l'implémentation du RPC),
+// soit — cet environnement n'a pas d'accès CLI Supabase pour vérifier —
+// cette migration n'a jamais été appliquée manuellement dans le dashboard
+// de production et la base tourne encore sur une version antérieure du
+// RPC. À VÉRIFIER dans le dashboard Supabase (SQL Editor) avant de
+// considérer un test du parcours "créer un espace" comme concluant.
+export const ESPACE_PARTAGE_ACTIF = true;
 
 // RÈGLE À NE JAMAIS CASSER — REFONTE MONÉTISATION V1 (2026-09-12, demande
 // explicite) : Premium est retiré du modèle économique de la V1, remplacé
