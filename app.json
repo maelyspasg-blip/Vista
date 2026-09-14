@@ -64,6 +64,37 @@
           "iosAppId": "ca-app-pub-4645298475525932~8046710624",
           "userTrackingUsageDescription": "Cette information est utilisée pour vous proposer des publicités personnalisées."
         }
+      ],
+      [
+        "expo-widgets",
+        {
+          "groupIdentifier": "group.com.maelyspasgvista.vista",
+          "widgets": [
+            {
+              "name": "PlanningWidget",
+              "displayName": "Planning du jour",
+              "description": "Affiche les événements de ta journée.",
+              "ios": {
+                "supportedFamilies": [
+                  "systemSmall",
+                  "systemMedium",
+                  "systemLarge"
+                ]
+              }
+            },
+            {
+              "name": "AjoutRapideWidget",
+              "displayName": "Ajout rapide",
+              "description": "Ajoute une dépense en un tap depuis l'écran d'accueil.",
+              "ios": {
+                "supportedFamilies": [
+                  "systemSmall",
+                  "systemMedium"
+                ]
+              }
+            }
+          ]
+        }
       ]
     ],
     "experiments": {

@@ -351,6 +351,28 @@ posées ici plutôt que de bloquer le loop en attendant une réponse.
 - **À reconsidérer si** : les 2 points sont traités (RPC vérifié côté
   dashboard, log audit_operations ajouté).
 
+### 2026-09-14 — Widgets Home Screen : visibilité potentielle sur écran verrouillé (accès "Aujourd'hui")
+
+- **Contexte** : revue sécurité de la réactivation des widgets (ci-dessus)
+  — PlanningWidget/AjoutRapideWidget affichent des données financières
+  réelles (montants, noms de dépenses/événements). Les familles déclarées
+  dans app.json sont restreintes à systemSmall/Medium/Large (Home Screen),
+  jamais accessoryCircular/Rectangular/Inline (familles StandBy/écran
+  verrouillé) — rien dans le code ne force un affichage verrouillé. Mais
+  si l'utilisateur a activé Réglages > Face ID et code > "Autoriser
+  l'accès verrouillé" > Aujourd'hui, un widget Home Screen reste visible
+  sans déverrouiller l'appareil (comportement iOS standard, comparable à
+  n'importe quel widget d'app bancaire/finance).
+- **Évaluation** : pas un défaut de code — réglage côté utilisateur/OS,
+  cohérent avec l'intention même de la fonctionnalité ("ajout rapide"/
+  "planning" en un coup d'œil). Risque déjà implicite à ce type de widget,
+  pas spécifique à Vista.
+- **Statut** : signalé pour information/confirmation produit, non traité
+  (pas d'action code attendue). Aucune décision prise à ce stade.
+- **À reconsidérer si** : Maëlys souhaite explicitement masquer les
+  montants sur le widget (ex: mode "pudeur"/blur optionnel) — nouvelle
+  fonctionnalité, pas une correction.
+
 Gabarit :
 
 ### [Date/heure] Question courte
