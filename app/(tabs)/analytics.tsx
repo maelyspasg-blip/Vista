@@ -4889,14 +4889,16 @@ export default function Analytics() {
                           hitSlop={8}
                           activeOpacity={0.6}
                         >
+                          {/* RÈGLE : color: C.texteMuted (demande du
+                              2026-09-14) — jamais de couleur hardcodée
+                              teal/vert sur cette icône, même quand le chip
+                              est actif (fond violet) : la même couleur de
+                              texte secondaire standard partout, pas de
+                              variante blanche conditionnelle. */}
                           <Ionicons
                             name="information-circle-outline"
                             size={14}
-                            color={
-                              modeBalance === option.valeur
-                                ? "#FFFFFFB3"
-                                : "#1D9E75B3"
-                            }
+                            color={C.texteMuted}
                           />
                         </TouchableOpacity>
                       )}

@@ -304,6 +304,53 @@ posées ici plutôt que de bloquer le loop en attendant une réponse.
   l'autre onglet (ex: définition d'un "trophée du couple", ou sémantique
   d'un budget simulé partagé).
 
+### 2026-09-14 — Widgets iOS (expo-widgets/@expo/ui) : réactivation reportée après le crash natif du 2026-09-01
+
+- **Contexte** : demande de réactiver les widgets iOS (retirés le
+  2026-09-01, cf. RÈGLE dans utils/widgetsSync.ts) dans le cadre de la
+  préparation du build V1 production. Investigation : le commentaire RÈGLE
+  du fichier révèle que le crash natif silencieux au démarrage (celui qui
+  avait aussi motivé le retrait d'AdMob le même jour, cf. RÈGLE dans
+  utils/adMobModule.ts) **persistait après la désactivation d'AdMob
+  seule** — expo-widgets/@expo/ui (l'autre module à code natif réel du
+  projet) a été retiré ENSUITE, comme "prochaine piste". Rien dans
+  l'historique ne confirme que retirer les widgets a réellement résolu le
+  crash — les deux modules ont simplement été retirés par précaution, sans
+  qu'aucun des deux soit formellement innocenté ni confirmé coupable.
+  AdMob a été réintégré le 2026-09-13 (ID de test) puis basculé sur les
+  vrais ID de production le 2026-09-14, avec un build "preview" en cours
+  de validation au moment de cette demande (voir commit "AdMob réintégré"
+  et celui du build V1 production) — encore aucun résultat de validation
+  disponible.
+- **Options envisagées** : (a) attendre le résultat du build preview AdMob
+  avant de toucher aux widgets, puis les réactiver séparément avec leur
+  propre build preview dédié — isole clairement lequel des deux modules
+  (s'il y en a un) cause un éventuel crash ; (b) réactiver maintenant,
+  cumulé avec AdMob dans le même build en cours de validation.
+- **Réponse de Maëlys (2026-09-14)** : (a) — attendre la validation AdMob
+  d'abord. Widgets NON réactivés dans cette session, packages
+  expo-widgets/@expo/ui non réinstallés, widgets/PlanningWidget.tsx et
+  widgets/AjoutRapideWidget.tsx non restaurés.
+- **À reconsidérer si** : le build preview AdMob (cf. commits du
+  2026-09-14) est confirmé stable sur device réel par Maëlys — à ce
+  moment, réactiver les widgets dans un commit séparé, suivi d'un nouveau
+  build preview dédié aux widgets seuls (pas cumulé avec d'autres
+  changements natifs), avant tout profil "production".
+
+### 2026-09-14 — ESPACE_PARTAGE_ACTIF reconfirmé à `false` pour la production
+
+- **Contexte** : redemandé à `true` pour le build V1 production, un tour
+  après avoir été explicitement reverté à `false` (cf. commit "V1
+  production — TESTFLIGHT_MODE=false, ESPACE_PARTAGE_ACTIF=false, vrais ID
+  AdMob") suite au conflit avec sa propre RÈGLE et aux 2 points de sécurité
+  toujours ouverts (RPC creer_espace_partage() non confirmé côté dashboard
+  Supabase, absence de log audit_operations — cf. entrée du 2026-09-13
+  ci-dessus dans ce même journal, section audit sécurité §5.1).
+- **Réponse de Maëlys (2026-09-14)** : laisser à `false`. Les 2 points
+  n'ont pas changé depuis la veille.
+- **À reconsidérer si** : les 2 points sont traités (RPC vérifié côté
+  dashboard, log audit_operations ajouté).
+
 Gabarit :
 
 ### [Date/heure] Question courte
