@@ -288,17 +288,6 @@ export default function Onboarding() {
         : SLIDES_PRESENTATION,
     [isGuest],
   );
-  // RÈGLE : log de diagnostic temporaire (demande explicite du 2026-09-13,
-  // pour confirmer visuellement que SLIDE_COUPLE ("couple") est bien inclus
-  // au bon index dès que ESPACE_PARTAGE_ACTIF===true et isGuest===false) —
-  // à retirer une fois le diagnostic terminé, jamais destiné à rester en
-  // production.
-  console.log(
-    "[Onboarding] slides:",
-    slides.map((s) => s.id),
-    { ESPACE_PARTAGE_ACTIF, isGuest },
-  );
-
   const suivant = () => {
     if (slideActuel < slides.length - 1) {
       setSlideActuel(slideActuel + 1);

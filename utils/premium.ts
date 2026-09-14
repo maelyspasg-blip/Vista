@@ -17,7 +17,19 @@ import { Platform } from "react-native";
 // estComptePremium. Aucun mécanisme de rappel automatique ne repasse ce
 // flag à false : une vérification manuelle avant soumission App Store est
 // nécessaire.
-export const TESTFLIGHT_MODE = true;
+//
+// RÈGLE — PASSÉ À `false` LE 2026-09-14 (préparation build V1 production,
+// demande explicite) : première fois que ce flag repasse à false dans ce
+// projet. Conséquence directe : les 3 emplacements de pub (Ton bilan,
+// Insights Aperçu, période Stats) et le clamp de période gratuite
+// s'appliquent désormais RÉELLEMENT à tout compte non-admin — plus de
+// bypass automatique. Combiné à ADMOB_ACTIF=true et un build EAS avec le
+// SDK natif linké, de VRAIES pubs AdMob peuvent maintenant se déclencher
+// (cf. RÈGLE sur ADMOB_ACTIF plus bas) — d'où l'importance d'avoir aussi
+// restauré les vrais ID de production (AD_UNIT_ID_REWARDED, plus bas) avant
+// ce même commit : des ID de test servis à de vrais utilisateurs violent la
+// policy AdMob.
+export const TESTFLIGHT_MODE = false;
 
 // RÈGLE À NE JAMAIS CASSER — FONDATIONS ESPACE PARTAGÉ (renommé depuis
 // MODE_COUPLE_ACTIF) : tant que `false`, aucun écran de l'app ne doit
@@ -30,29 +42,24 @@ export const TESTFLIGHT_MODE = true;
 // modale de app/profil.tsx, mais UNIQUEMENT depuis du JSX gardé par ce
 // flag.
 //
-// RÈGLE : passé à `true` le 2026-09-13 — DEMANDE EXPLICITE, "pour les
-// tests" (diagnostic de l'écran onboarding "Vista à deux", qui ne peut
-// jamais s'afficher tant que ce flag est `false`). Active désormais TOUTE
-// la fonctionnalité Espace partagé dans l'app entière (pas seulement
-// l'onboarding) : section Profil, Planning/Budget/Stats/Aperçu en vue
-// partagée, etc. — jamais un flag à portée limitée à un seul écran.
-// REPASSER À `false` AVANT TOUTE BUILD DE PRODUCTION tant que la V1 n'est
-// pas prête.
+// RÈGLE : passé à `true` le 2026-09-13 pour les tests (diagnostic de
+// l'écran onboarding "Vista à deux"), REPASSÉ À `false` LE 2026-09-14 pour
+// le build V1 production, conformément à cette RÈGLE elle-même — demande
+// explicite, confirmée après qu'un conflit avec cette même règle a été
+// signalé. Espace partagé reste donc masqué pour tous les vrais
+// utilisateurs de ce build, y compris ceux qui l'ont testé la veille.
 //
-// RÈGLE — CORRECTIF DU 2026-09-13 (revue sécurité) : l'ancien commentaire
-// ici affirmait que "créer un espace n'insère pas encore de ligne
-// espaces_partages" — FAUX au vu du code actuel : creerEspacePartage()
-// (utils/espacePartage.ts) appelle bien le RPC creer_espace_partage()
-// (security definer, supabase/migrations/
-// 20260831130000_creer_espace_partage_reutilise_en_attente.sql), qui
-// insère dans espaces_partages ET membres_espace. Soit ce commentaire
-// était déjà obsolète (jamais mis à jour après l'implémentation du RPC),
-// soit — cet environnement n'a pas d'accès CLI Supabase pour vérifier —
-// cette migration n'a jamais été appliquée manuellement dans le dashboard
-// de production et la base tourne encore sur une version antérieure du
-// RPC. À VÉRIFIER dans le dashboard Supabase (SQL Editor) avant de
-// considérer un test du parcours "créer un espace" comme concluant.
-export const ESPACE_PARTAGE_ACTIF = true;
+// RÈGLE — 2 POINTS RESTÉS NON VÉRIFIÉS DEPUIS LA REVUE SÉCURITÉ DU
+// 2026-09-13, À TRAITER AVANT DE REPASSER CE FLAG À `true` POUR DE VRAI :
+// (1) confirmer dans le dashboard Supabase (SQL Editor) que le RPC
+// creer_espace_partage() déployé correspond bien à la version
+// 20260831130000_creer_espace_partage_reutilise_en_attente.sql (pas une
+// version antérieure ou absente — cet environnement n'a pas d'accès CLI
+// Supabase pour le vérifier directement) ; (2) ajouter un log
+// audit_operations autour de creerEspacePartage/rejoindreEspacePartage/
+// quitterEspacePartage (utils/espacePartage.ts), actuellement absent —
+// cf. AUDIT_V1.md §5.1 pour le détail complet des deux points.
+export const ESPACE_PARTAGE_ACTIF = false;
 
 // RÈGLE À NE JAMAIS CASSER — REFONTE MONÉTISATION V1 (2026-09-12, demande
 // explicite) : Premium est retiré du modèle économique de la V1, remplacé
@@ -87,17 +94,14 @@ export function premiumUIVisible(isAdmin: boolean): boolean {
 // restaurés (utils/adMobModule.ts) — passé à `true` ici pour que
 // useDeblocagePub (app/InsightVerrouille.tsx) tente réellement le SDK.
 //
-// RÈGLE À NE JAMAIS CASSER — CE FLAG SEUL NE SUFFIT PAS À VOIR DE VRAIES
-// PUBS TANT QUE TESTFLIGHT_MODE=true : useDeblocagePub court-circuite sur
-// `TESTFLIGHT_MODE || !ADMOB_ACTIF || ...` — TESTFLIGHT_MODE est vérifié
-// EN PREMIER et prioritaire, donc tant qu'il reste `true` (bêta en cours),
-// la pub simulée (Alert) continue de s'afficher, EXACTEMENT comme avant ce
-// changement. C'est voulu : ADMOB_ACTIF=true prépare le terrain (build EAS
-// avec le SDK linké, prêt à être testé) sans changer le comportement
-// visible pendant la bêta — les vraies pubs ne se déclencheront qu'au jour
-// où TESTFLIGHT_MODE repassera à `false` pour la sortie publique. Ne
-// jamais interpréter "aucune pub réelle visible en bêta" comme un signe
-// que ce flag n'a pas d'effet ou que la réintégration a échoué.
+// RÈGLE — TESTFLIGHT_MODE REPASSÉ À `false` LE 2026-09-14 (build V1
+// production) : le court-circuit `TESTFLIGHT_MODE || !ADMOB_ACTIF || ...`
+// dans useDeblocagePub ne bloque donc plus sur son premier terme — de
+// VRAIES requêtes AdMob peuvent désormais être tentées dès qu'un build EAS
+// a le SDK natif linké (cf. RÈGLE dans utils/adMobModule.ts sur le risque
+// de crash natif jamais définitivement diagnostiqué depuis le 2026-09-01 —
+// à valider sur un vrai device via un build "preview" AVANT tout profil
+// "production").
 export const ADMOB_ACTIF = true;
 
 // RÈGLE À NE JAMAIS CASSER — SEUL POINT D'ENTRÉE POUR SAVOIR SI L'ESPACE
@@ -119,26 +123,20 @@ export function estEspacePartageActif(isAdmin: boolean): boolean {
 // fois ici selon la plateforme (Platform.OS), jamais dupliqué ailleurs dans
 // le code (InsightVerrouille.tsx l'importe directement).
 //
-// RÈGLE À NE JAMAIS CASSER — BASCULÉ SUR LES ID DE TEST GOOGLE LE
-// 2026-09-13, DEMANDE EXPLICITE (réintégration AdMob après le crash du
-// 2026-09-01, cf. RÈGLE dans utils/adMobModule.ts) : les vrais ID de
-// production de ce projet (compte ca-app-pub-4645298475525932, cf.
-// historique git — commit 899a64a et les 2 valeurs juste en dessous en
-// commentaire) sont DIFFÉRENTS des ID donnés dans cette demande
-// (ca-app-pub-3940256099942544, les ID PUBLICS de test documentés par
-// Google eux-mêmes, communs à tous les développeurs, jamais liés à un
-// compte AdMob précis). Utiliser les ID de test ici est délibéré et plus
-// sûr le temps de valider que le crash de 2026-09-01 ne se reproduit pas —
-// aucune requête publicitaire réelle, aucun revenu, aucun risque de
-// violation de policy AdMob pendant cette phase de validation. Anciens ID
-// réels (production) à restaurer une fois la stabilité confirmée sur un
-// vrai build EAS :
-//   ios: "ca-app-pub-4645298475525932/3811187805"
-//   android: "ca-app-pub-4645298475525932/6067589553"
+// RÈGLE À NE JAMAIS CASSER — VRAIS ID DE PRODUCTION RESTAURÉS LE
+// 2026-09-14 (build V1 production, demande explicite) : les ID de test
+// Google (ca-app-pub-3940256099942544/..., utilisés du 2026-09-13 au
+// 2026-09-14 le temps de valider que le crash natif du 2026-09-01 ne se
+// reproduisait pas) sont volontairement retirés ici — servir des ID de
+// test à de vrais utilisateurs externes violerait la policy AdMob (aucun
+// revenu, risque de suspension du compte). Ne JAMAIS repasser sur les ID
+// de test `ca-app-pub-3940256099942544/...` dans ce fichier une fois
+// committé pour un build destiné à de vrais utilisateurs — uniquement
+// pour un test interne isolé, jamais laissé en l'état au commit.
 export const AD_UNIT_ID_REWARDED =
   Platform.OS === "ios"
-    ? "ca-app-pub-3940256099942544/1712485313"
-    : "ca-app-pub-3940256099942544/5224354917";
+    ? "ca-app-pub-4645298475525932/3811187805"
+    : "ca-app-pub-4645298475525932/6067589553";
 // RÈGLE À NE JAMAIS CASSER : simulation locale en attendant l'intégration
 // RevenueCat — ce flag ne représente aucun abonnement réel, il ne doit
 // jamais être positionné à true ailleurs que via le toggle "Simuler
