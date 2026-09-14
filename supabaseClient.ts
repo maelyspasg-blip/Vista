@@ -2,8 +2,35 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+// RÈGLE À NE JAMAIS CASSER — ÉCHEC EXPLICITE SI VARIABLE MANQUANTE (bug
+// trouvé le 2026-09-14) : createClient(undefined, undefined, ...) plus bas
+// throw déjà en interne si l'URL est invalide, mais SANS dire POURQUOI ni
+// QUELLE variable manque — et comme ce fichier est importé très tôt (avant
+// le montage de React, donc hors de portée de tout ErrorBoundary), ce
+// throw silencieux dans un bundle release (preview/production, sans
+// overlay d'erreur JS) est INDISCERNABLE d'un crash natif au démarrage.
+// C'est exactement ce qui s'est produit : l'environnement EAS "preview"
+// n'avait aucune variable configurée (seul "production" les avait), et le
+// crash qui en a résulté a été pris pendant des jours pour un crash natif
+// AdMob/widgets — aucun des deux n'était en cause. Ces 2 vérifications
+// explicites, AVANT tout appel à createClient, remplacent un échec muet
+// par un message qui nomme la variable manquante et le geste correctif
+// (vérifier les variables EAS pour l'environnement du build), quel que
+// soit l'environnement futur qui pourrait un jour se retrouver dans le
+// même état.
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl) {
+  throw new Error(
+    "[Vista] EXPO_PUBLIC_SUPABASE_URL manquante — vérifier les variables EAS pour cet environnement",
+  );
+}
+if (!supabaseAnonKey) {
+  throw new Error(
+    "[Vista] EXPO_PUBLIC_SUPABASE_ANON_KEY manquante — vérifier les variables EAS pour cet environnement",
+  );
+}
 
 // Sur le rendu web côté serveur (SSR d'Expo Router), `window` n'existe pas
 // encore : AsyncStorage (qui s'appuie sur window.localStorage sur web)
