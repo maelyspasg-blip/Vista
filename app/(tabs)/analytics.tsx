@@ -1430,7 +1430,10 @@ export default function Analytics() {
   // plus bas (jamais depuis un composant <InsightVerrouille>/
   // <TonBilanVerrou> : ces chips gèrent leur propre icône cadenas, pas
   // besoin de l'habillage overlay de InsightVerrouille).
-  const { declencherPub: declencherPubPeriodeStatsPerso } = useDeblocagePub(
+  const {
+    declencherPub: declencherPubPeriodeStatsPerso,
+    enCoursDeblocage: enCoursDeblocagePeriodeStatsPerso,
+  } = useDeblocagePub(
     () => setStatsPeriodeDebloquePerso(true),
     statsPeriodeDebloquePerso,
   );
@@ -1441,7 +1444,10 @@ export default function Analytics() {
   // declencherPub retombe de toute façon sur l'Alert simulée si jamais
   // appelé sans pub chargée, jamais un comportement cassé si estDansUnEspace
   // change en cours de session.
-  const { declencherPub: declencherPubPeriodeStatsPartage } = useDeblocagePub(
+  const {
+    declencherPub: declencherPubPeriodeStatsPartage,
+    enCoursDeblocage: enCoursDeblocagePeriodeStatsPartage,
+  } = useDeblocagePub(
     () => setStatsPeriodeDebloquePartage(true),
     statsPeriodeDebloquePartage || !estDansUnEspace,
   );
@@ -1453,6 +1459,16 @@ export default function Analytics() {
     vueActive === "partage"
       ? declencherPubPeriodeStatsPartage
       : declencherPubPeriodeStatsPerso;
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-16 (bug P019) :
+  // `enCoursDeblocage` n'était pas câblé sur le chip de période verrouillé
+  // (contrairement à InsightVerrouille/TonBilanVerrou, qui le font déjà) —
+  // un double-tap pouvait déclencher `declencherPubPeriodeStats` deux fois
+  // de suite, avec un risque de second appel `.show()` pendant que la pub
+  // réelle est déjà affichée. Même résolution perso/partagé que ci-dessus.
+  const enCoursDeblocagePeriodeStats =
+    vueActive === "partage"
+      ? enCoursDeblocagePeriodeStatsPartage
+      : enCoursDeblocagePeriodeStatsPerso;
   // RÈGLE À NE JAMAIS CASSER — VERROU UNIQUE POUR TOUT "TON BILAN" (refonte
   // monétisation du 2026-09-12, demande explicite — REVIENT sur l'ancienne
   // séparation en verrous individuels : 4 onglets PremiumVerrou distincts +
@@ -4365,7 +4381,10 @@ export default function Analytics() {
                     },
                     actif && { backgroundColor: C.purple, borderColor: C.purple },
                   ]}
-                  disabled={!o.disponible}
+                  disabled={
+                    !o.disponible ||
+                    (o.verrouillePub && enCoursDeblocagePeriodeStats)
+                  }
                   onPress={() => {
                     if (o.verrouillePub) {
                       declencherPubPeriodeStats();

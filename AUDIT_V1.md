@@ -624,7 +624,14 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   "Pub simulée" par-dessus la vraie pub, déblocage sans vue complète.
 - **Piste de correction** : `disabled={!o.disponible || enCoursDeblocage}`,
   même pattern que les 2 autres emplacements.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), correction non encore appliquée.
+- **Statut** : **CORRIGÉ (2026-09-16)** — `enCoursDeblocage` extrait des 2
+  hooks (perso/partagé), résolu selon `vueActive` (même pattern que
+  `declencherPubPeriodeStats`). Raffinement par rapport à la piste de
+  correction initiale : `disabled={!o.disponible || (o.verrouillePub &&
+  enCoursDeblocagePeriodeStats)}` — restreint la désactivation au SEUL chip
+  verrouillé, pour ne jamais bloquer un chip déjà débloqué pendant qu'une
+  pub charge pour un autre. Revu par code-reviewer (APPROUVÉ). tsc/lint
+  vérifiés propres (10 lignes / 49 problèmes, sous la baseline).
 
 ### P020 — Pubs récompensées : jusqu'à 4-5 `RewardedAd` chargées en parallèle sur le même ad unit sans geste utilisateur
 
