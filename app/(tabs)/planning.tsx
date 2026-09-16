@@ -1300,9 +1300,8 @@ export default function Planning() {
     };
     // RÈGLE À NE JAMAIS CASSER — CONFIRMATION SPÉCIFIQUE POUR UN COMMUN :
     // supprimer un événement 'commun' (le mien ou celui du partenaire,
-    // les deux passent par ici) le retire pour les DEUX comptes — jamais
-    // une suppression directe sans prévenir, contrairement à un événement
-    // personnel.
+    // les deux passent par ici) le retire pour les DEUX comptes — texte
+    // dédié qui prévient explicitement de cet impact partagé.
     if (visibiliteEvent === "commun" && estDansUnEspace) {
       Alert.alert(
         "Événement partagé",
@@ -1318,7 +1317,24 @@ export default function Planning() {
       );
       return;
     }
-    executerSuppression();
+    // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17 (bug P042) : un
+    // événement PERSONNEL (le cas de loin le plus fréquent, puisque
+    // ESPACE_PARTAGE_ACTIF=false en production) était supprimé directement
+    // au tap, sans confirmation — violation directe de la règle CLAUDE.md
+    // sur les suppressions visibles (catégorie, transaction, objectif,
+    // événement). Même geste que le cas "commun" ci-dessus, texte adapté.
+    Alert.alert(
+      "Supprimer cet événement ?",
+      "Cette action est définitive.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer",
+          style: "destructive",
+          onPress: executerSuppression,
+        },
+      ],
+    );
   };
 
   const dupliquerEvenement = () => {

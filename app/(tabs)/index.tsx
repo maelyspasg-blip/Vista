@@ -1059,6 +1059,36 @@ export default function Dashboard() {
     );
   };
 
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17 (bug P041) :
+  // `objStore.supprimerObjectif` était appelée directement au tap, sans
+  // confirmation, aux 3 endroits qui la déclenchent — violation directe de
+  // la règle CLAUDE.md ("confirmation utilisateur explicite avant
+  // déclenchement ... pour toute suppression visible de l'utilisateur —
+  // catégorie, transaction, objectif, événement"), déjà respectée pour
+  // `supprimerEnveloppe` juste au-dessus. Un objectif peut représenter des
+  // mois de contributions — jamais de suppression silencieuse.
+  const confirmerSuppressionObjectif = (
+    id: string,
+    nom: string,
+    apresSuppression?: () => void,
+  ) => {
+    Alert.alert(
+      `Supprimer "${nom}" ?`,
+      "Cette action est définitive — l'objectif et son historique de contributions seront supprimés.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer",
+          style: "destructive",
+          onPress: () => {
+            objStore.supprimerObjectif(id);
+            apresSuppression?.();
+          },
+        },
+      ],
+    );
+  };
+
   const ajouterEnveloppe = async () => {
     if (!nouveauNom || !nouveauBudget || creationEnveloppeEnCours) return;
     setCreationEnveloppeEnCours(true);
@@ -3602,7 +3632,10 @@ export default function Dashboard() {
                               )}
                             </View>
                             <TouchableOpacity
-                              onPress={() => objStore.supprimerObjectif(obj.id)}
+                              onPress={() =>
+                                confirmerSuppressionObjectif(obj.id, obj.nom)
+                              }
+                              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                               accessibilityRole="button"
                               accessibilityLabel={`Supprimer l'objectif ${obj.nom}`}
                             >
@@ -3700,7 +3733,10 @@ export default function Dashboard() {
                                     {obj.nom}
                                   </Text>
                                   <TouchableOpacity
-                                    onPress={() => objStore.supprimerObjectif(obj.id)}
+                                    onPress={() =>
+                                      confirmerSuppressionObjectif(obj.id, obj.nom)
+                                    }
+                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                                     accessibilityRole="button"
                                     accessibilityLabel={`Supprimer l'objectif ${obj.nom}`}
                                   >
@@ -4034,10 +4070,13 @@ export default function Dashboard() {
                     {objectifEnEdition && (
                       <TouchableOpacity
                         style={styles.btnSupprimerTexte}
-                        onPress={() => {
-                          objStore.supprimerObjectif(objectifEnEdition.id);
-                          setVueModal("liste");
-                        }}
+                        onPress={() =>
+                          confirmerSuppressionObjectif(
+                            objectifEnEdition.id,
+                            objectifEnEdition.nom,
+                            () => setVueModal("liste"),
+                          )
+                        }
                         activeOpacity={0.7}
                       >
                         <Text style={styles.btnSupprimerTexteLabel}>

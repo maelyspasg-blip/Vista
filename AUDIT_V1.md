@@ -922,6 +922,105 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Piste de correction** : même correctif (`parseDateFixeLocale` de `utils/dateOnly.ts`), à traiter dans un lot dédié plutôt que d'élargir davantage le commit en cours — ce report suit explicitement la recommandation du code-reviewer ("documenter et traiter dans un lot ultérieur, cohérent avec la philosophie du loop autonome").
 - **Statut** : NOUVEAU — VÉRIFIÉ (trouvé par grep en revue de code), correction non encore appliquée.
 
+### P041 — Aperçu : suppression d'un objectif d'épargne sans AUCUNE confirmation (3 sites)
+
+- **Gravité** : 🔴 CRITIQUE (violation directe de la règle CLAUDE.md sur les confirmations destructives)
+- **Trouvé par** : audit UX écran par écran (2026-09-17).
+- **Fichiers** : `app/(tabs)/index.tsx:3605-3609` (liste objectifs actifs), `:3700-3707` (liste "Objectifs clôturés"), `:4033-4041` (bouton "Supprimer l'objectif" en modale d'édition) ; `app/store.ts:3104-3146` (`supprimerObjectif`, aucun `Alert.alert` dans la fonction ni ses 3 appelants).
+- **Description** : CLAUDE.md est explicite — "confirmation utilisateur explicite avant déclenchement (`Alert.alert`...) pour toute suppression visible de l'utilisateur — catégorie, transaction, **objectif**, événement". Les 3 points d'entrée appellent `objStore.supprimerObjectif(obj.id)` directement au tap, sans Alert. Contraste net avec toutes les autres suppressions de l'app (catégorie `index.tsx:1045`, transaction `budget.tsx:973`, compte `profil.tsx:866`), qui respectent toutes cette règle.
+- **Aggravants** : (1) le premier site est un "X" de 16px imbriqué dans une carte dont le tap principal ouvre l'édition — cible minuscule collée à un comportement totalement différent, sur une carte financière ; (2) pour "Objectifs clôturés", l'`InfoBulle` juste au-dessus dit explicitement qu'il n'existe "aucun moyen de rouvrir" l'objectif — la suppression non confirmée est donc la SEULE sortie possible ; (3) `sauvegarderObjectifsSupprimes` fait bien un backup AsyncStorage, mais invisible pour l'utilisateur (pas de bouton "Annuler"/snackbar) — perçu comme une suppression instantanée et sans recours.
+- **Piste de correction** : envelopper les 3 sites dans un `Alert.alert` ("Supprimer l'objectif '{nom}' ? Cette action est définitive.", `style: "destructive"`), même gabarit que les autres suppressions de l'app. Agrandir aussi la cible tactile du "X" (`hitSlop`).
+- **Statut** : **CORRIGÉ (2026-09-17)** — nouvelle fonction
+  `confirmerSuppressionObjectif(id, nom, apresSuppression?)` (`index.tsx`,
+  juste avant `ajouterEnveloppe`), appelée aux 3 sites, `hitSlop` ajouté sur
+  les 2 boutons "X". Un round de revue a trouvé le fix initialement
+  INCOMPLET (le 3e site, "Objectifs clôturés", non touché — indentation JSX
+  différente du 1er site, un `replace_all` n'avait matché que 2 des 3
+  occurrences textuellement différentes) — corrigé avant commit, les 3
+  sites vérifiés par grep. tsc/lint vérifiés propres (10 lignes / 49
+  problèmes, sous la baseline).
+
+### P042 — Planning : suppression d'un événement PERSONNEL sans aucune confirmation
+
+- **Gravité** : 🔴 CRITIQUE (même violation que P041, touche 100% des événements en production actuelle)
+- **Trouvé par** : audit UX écran par écran (2026-09-17) — confirme et durcit un point qu'AUDIT_V1.md §5.1 (audit du 2026-09-12) avait laissé "🟡 non tracé avec certitude, à vérifier visuellement".
+- **Fichier** : `app/(tabs)/planning.tsx:1289-1320` (`supprimerEvenementEnEdition`), bouton "Supprimer l'événement" `:3331-3339`.
+- **Description** : le code ne demande une confirmation `Alert.alert` QUE si l'événement est `commun` ET que l'utilisateur est dans un espace partagé (`:1305-1319`). Pour tout événement PERSONNEL — donc la quasi-totalité des événements en production, puisque `ESPACE_PARTAGE_ACTIF=false` — `executerSuppression()` est appelé directement, sans Alert, sans "Annuler".
+- **Repro** : ouvrir un événement personnel, taper "Supprimer l'événement" → suppression instantanée, aucun message.
+- **Piste de correction** : appliquer le même `Alert.alert` que pour le cas "commun" (texte adapté : "Supprimer cet événement ?"), à toute suppression d'événement, pas seulement les "commun".
+- **Statut** : **CORRIGÉ (2026-09-17)** — `Alert.alert("Supprimer cet
+  événement ?", ...)` ajouté sur le chemin par défaut (événement personnel),
+  même gabarit que le cas "commun" existant. Confirmé par code-reviewer :
+  relecture complète de la fonction, aucun chemin de contournement restant
+  (un seul point d'appel dans tout le fichier). tsc/lint vérifiés propres.
+
+### P050 — Budget : suppression d'un événement (panneau "gestion événement") sans confirmation, même famille que P041/P042
+
+- **Gravité** : 🔴 CRITIQUE
+- **Trouvé par** : code-reviewer, en revue du correctif P042 (2026-09-17) — grep exhaustif d'autres suppressions non protégées.
+- **Fichier** : `app/(tabs)/budget.tsx:2489-2499` (bouton "Supprimer" du panneau de gestion d'un événement affiché sur Budget, ouvert depuis un tap sur une entrée "À venir"/"Autre dépense").
+- **Description** : `objStore.supprimerEvenement(gestionEvenement.id)` appelée directement au tap, sans `Alert.alert` — même violation que P042, sur un 3e point d'entrée vers la même fonction de suppression.
+- **Statut** : **CORRIGÉ (2026-09-17)** — même geste que P042 (`Alert.alert` Annuler/Supprimer destructive) avant l'appel à `objStore.supprimerEvenement`. tsc/lint vérifiés propres (10 lignes / 49 problèmes, sous la baseline).
+
+### P043 — Onboarding : 4 des 6 écrans ignorent totalement le thème sombre et l'accessibilité "contraste renforcé"
+
+- **Gravité** : 🟠 MAJEUR
+- **Trouvé par** : audit UX écran par écran (2026-09-17).
+- **Fichiers** : `onboarding/connexion.tsx`, `invite.tsx`, `inscription.tsx`, `essai-expire.tsx` — aucun n'importe `useTheme()`/`useAccessibilite()`, toutes leurs couleurs sont codées en dur (`#FFFFFF`, `#1A1A1A`, `#888`...). Contraste : `onboarding/preferences.tsx` + `components/OnboardingEtape.tsx` utilisent bien `useTheme()`.
+- **Conséquence concrète** : (a) un utilisateur en mode sombre qui se déconnecte (flux réel : `profil.tsx:766` → `router.replace("/onboarding/connexion")`) revoit un écran blanc forcé, rupture visuelle nette ; (b) le réglage "Contraste renforcé" (`AccessibiliteContext`) n'a AUCUN effet sur ces 4 écrans. **Contraste mesuré sous le seuil WCAG AA** : `#888888` sur `#FFFFFF` ≈ 3.5:1, `#AAAAAA` sur `#FFFFFF` ≈ 2.3:1 (seuil AA texte : 4.5:1) — problème de lisibilité réel sur les tout premiers écrans vus par un utilisateur, pas seulement esthétique.
+- **Piste de correction** : câbler `useTheme()`/`useAccessibilite()` sur ces 4 écrans, remplacer les gris hardcodés par `C.texteMuted`, cohérent avec `preferences.tsx`.
+- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + calcul de contraste). Correction plus large que P041/P042 (4 fichiers, plusieurs couleurs chacun) — à traiter dans un lot dédié.
+
+### P044 — Planning : navigation `‹`/`›` sans accessibilité, aucun raccourci "revenir à aujourd'hui"
+
+- **Gravité** : 🟡 MINEUR
+- **Trouvé par** : audit UX écran par écran (2026-09-17).
+- **Fichier** : `planning.tsx:1848-1862` (glyphes texte `‹`/`›` sans `accessibilityLabel`/`accessibilityRole`).
+- **Description** : un lecteur d'écran énonce le caractère brut plutôt qu'une action compréhensible. Par ailleurs, grep exhaustif sur "Aujourd'hui" comme libellé de bouton → aucune occurrence : un utilisateur qui navigue plusieurs semaines/mois doit retaper `‹` autant de fois pour revenir à aujourd'hui — trop de clics pour une action fréquente.
+- **Piste de correction** : `accessibilityLabel="Période précédente"/"Période suivante"` ; ajouter un tap sur le titre de période ou un bouton dédié "Aujourd'hui".
+- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+
+### P045 — Planning : bouton "+" du header sans accessibilité (contrairement au FAB équivalent)
+
+- **Gravité** : 🟡 MINEUR
+- **Trouvé par** : audit UX écran par écran (2026-09-17).
+- **Fichier** : `planning.tsx:1702-1707` (`btnPlus`, sans `accessibilityLabel`) vs `:2144-2151` (`fabPlanning`, vue Jour, avec `accessibilityLabel="Créer un événement"` correct) — même action (`ouvrirCreationComplete`), un seul étiqueté.
+- **Piste de correction** : ajouter `accessibilityRole="button"` + `accessibilityLabel="Créer un événement"` sur `btnPlus`.
+- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+
+### P046 — Profil : ordre navigation/confirmation inversé sur la suppression de compte, et boutons "Se déconnecter"/"Supprimer mon compte" peu différenciés
+
+- **Gravité** : 🟡 MINEUR
+- **Trouvé par** : audit UX écran par écran (2026-09-17).
+- **Fichiers** : `profil.tsx:836-849` (séquence `signOut()` → `reinitialiserEtatUtilisateur()` → `router.replace("/onboarding/connexion")` → **puis** `Alert.alert("Compte supprimé", ...)`) ; `profil.tsx:1687-1719` (les 2 boutons partagent le même style `btnSecondaire`, seule différence : couleur du texte `#E24B4A` sur "Supprimer mon compte").
+- **Description** : le message de confirmation finale s'affiche APRÈS avoir déjà navigué vers l'écran de connexion — récit utilisateur illogique (pas bloquant, l'Alert natif s'affiche quand même). Par ailleurs, les 2 boutons de fin de section (déconnexion vs suppression définitive) sont visuellement quasi identiques — seule la couleur de texte distingue une action réversible d'une action irréversible.
+- **Piste de correction** : afficher l'Alert de confirmation AVANT `router.replace(...)` (navigation déclenchée depuis le `onPress` du bouton "OK") ; ajouter un espacement/fond teinté plus marqué sur le bouton de suppression.
+- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code). Écran globalement le plus rigoureux de l'app sur les confirmations destructives (référence pour P041/P042) — ces 2 points sont mineurs en comparaison.
+
+### P047 — Onboarding : aucun bouton retour sur `invite.tsx`, incohérence de skippabilité entre les 4 premières étapes de `preferences.tsx`
+
+- **Gravité** : 🟡 MINEUR
+- **Trouvé par** : audit UX écran par écran (2026-09-17).
+- **Fichiers** : `onboarding/invite.tsx` (aucun bouton retour visible, contrairement à `components/OnboardingEtape.tsx:80-90` qui en a un avec `accessibilityLabel="Étape précédente"`) ; `onboarding/preferences.tsx:122-220` (étapes Salaire/Loyer/Courses skippables silencieusement — champ vide + "Continuer" = no-op — mais bouton toujours pleine opacité, sans mention "optionnel") vs `:504-522` (étape "Autres dépenses", SEULE à afficher un bouton secondaire explicite "Passer cette étape").
+- **Piste de correction** : bouton retour discret sur `invite.tsx` ; même `boutonSecondaireLabel="Passer cette étape"` (ou texte d'aide "Laisse vide si non applicable") sur les 3 premières étapes du questionnaire.
+- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+
+### P048 — Budget/Stats : 2 boutons icône sans `accessibilityLabel` (raccourci de dépense, info balance)
+
+- **Gravité** : 🔵 SUGGESTION
+- **Trouvé par** : audit UX écran par écran (2026-09-17).
+- **Fichiers** : `budget.tsx:1284-1301` (bouton "+ Raccourci" sans info-bulle expliquant le concept à un novice, alors que `InfoBulle` est déjà utilisée ailleurs dans le même fichier, ex. `:2099`) ; `analytics.tsx:4903-4909` (icône "i" des chips de mode de balance, sans `accessibilityRole`/`accessibilityLabel`, contraste avec le reste de l'écran globalement bien traité sur ce point — ex. boutons "Fermer" des modales de détail).
+- **Piste de correction** : `InfoBulle` sur le bouton "+ Raccourci" ; `accessibilityRole="button"` + `accessibilityLabel` sur l'icône "i".
+- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+
+### P049 — Onboarding : pas de retour explicite sur la contrainte de mot de passe (8 caractères)
+
+- **Gravité** : 🔵 SUGGESTION
+- **Trouvé par** : audit UX écran par écran (2026-09-17).
+- **Fichier** : `onboarding/inscription.tsx:171-179` (`disabled={!formulaireValide || chargement}`, `formulaireValide` exige `motDePasse.length >= 8`) — le bouton passe à opacité 0.5 sans texte explicatif (seul le placeholder "Au moins 8 caractères" le suggère indirectement). Moins grave que P037 (Budget, bouton silencieux ACTIF) car ici au moins visuellement désactivé — mais reste un frein potentiel sur l'écran le plus critique du funnel.
+- **Piste de correction** : afficher dynamiquement "Encore N caractères" ou une coche verte dès 8 caractères atteints.
+- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 
@@ -1421,7 +1520,7 @@ test 9/10 (section 1).
 - [x] Architecture statique (races, listeners, cycles, fuseaux horaires) — voir P004-P009, P015-P017 (§2, 2026-09-16)
 - [x] Pubs récompensées (early-close, backgrounding, perte réseau, double-tap) — voir P018-P020 (§2, 2026-09-16) ; scénario "arrière-plan pendant la pub" non vérifiable statiquement (dépend du SDK natif), à tester sur device
 - [x] Écrans Budget/Planning — voir P023-P039 (§2, 2026-09-16) et §3.2/§3.3
-- [ ] Ergonomie (questions UX de CLAUDE.md, à rejouer écran par écran)
+- [x] Ergonomie (questions UX de CLAUDE.md) — voir P041-P049 (§2, 2026-09-17) ; lecture de code écran par écran (Aperçu/Budget/Planning/Stats/Profil/Onboarding), pas encore rejoué sur device
 
 ### 5.1 Audit sécurité données (2026-09-12)
 

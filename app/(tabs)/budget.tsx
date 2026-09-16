@@ -2488,11 +2488,32 @@ export default function Budget() {
             </BoutonPrincipal>
             <BoutonPrincipal
               style={[styles.btnValider, { backgroundColor: "#E24B4A" }]}
+              // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17 (bug
+              // P050) : suppression d'événement sans confirmation, même
+              // famille que P041/P042 — violation de la règle CLAUDE.md sur
+              // les suppressions visibles (catégorie, transaction,
+              // objectif, événement).
               onPress={() => {
-                if (gestionEvenement) {
-                  objStore.supprimerEvenement(gestionEvenement.id);
+                if (!gestionEvenement) {
+                  setGestionEvenement(null);
+                  return;
                 }
-                setGestionEvenement(null);
+                const cible = gestionEvenement;
+                Alert.alert(
+                  "Supprimer cet événement ?",
+                  "Cette action est définitive.",
+                  [
+                    { text: "Annuler", style: "cancel" },
+                    {
+                      text: "Supprimer",
+                      style: "destructive",
+                      onPress: () => {
+                        objStore.supprimerEvenement(cible.id);
+                        setGestionEvenement(null);
+                      },
+                    },
+                  ],
+                );
               }}
             >
               <Text style={styles.btnValiderTexte}>Supprimer</Text>
