@@ -131,27 +131,43 @@ export function useDeblocagePub(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // RÈGLE : Alert simulée — "Pub simulée" + bouton "Fermer" qui déverrouille
-  // directement (demande explicite du 2026-09-12, refonte monétisation) :
-  // pas d'étape de confirmation intermédiaire ni de délai artificiel,
-  // remplacée le jour où AdMob est réintégré par le vrai SDK (ci-dessus),
-  // jamais l'inverse.
-  const demanderDeblocageSimule = () => {
-    Alert.alert("Pub simulée", "AdMob n'est pas encore réintégré — ceci simule le visionnage d'une publicité récompensée.", [
-      {
-        text: "Fermer",
-        onPress: () => {
-          onDeverrouille();
-        },
-      },
-    ]);
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-16 (bug P018, revue
+  // sécurité/monétisation) : cette Alert "Pub simulée" débloquait
+  // GRATUITEMENT dès QUE `demanderDeblocageFallback` était appelée — or
+  // c'est le cas sur TOUT échec AdMob (réseau coupé pendant le chargement,
+  // fill rate < 100%, annonce expirée, double-tap, `.show()` qui plante),
+  // pas seulement quand AdMob n'est pas encore intégré au build. En
+  // production (ADMOB_ACTIF=true depuis le 2026-09-14), ce chemin annulait
+  // entièrement l'intérêt économique des emplacements de pub récompensée —
+  // trivialement déclenchable sans utilisateur malveillant (mode avion
+  // pendant le chargement suffit). Gardé désormais derrière `__DEV__` :
+  // en dev local (build sans le rebuild natif EAS), le déblocage simulé
+  // reste utile pour développer sans dépendre d'un vrai inventaire AdMob ;
+  // en production/TestFlight, toute indisponibilité de pub affiche un
+  // message honnête, SANS jamais débloquer.
+  const demanderDeblocageFallback = () => {
+    if (__DEV__) {
+      Alert.alert(
+        "Pub simulée",
+        "AdMob n'est pas chargé dans ce build de développement — ceci simule le visionnage d'une publicité récompensée.",
+        [{ text: "Fermer", onPress: () => onDeverrouille() }],
+      );
+      return;
+    }
+    Alert.alert(
+      "Publicité indisponible",
+      "Aucune publicité n'est disponible pour le moment. Réessaie dans quelques instants.",
+      [{ text: "OK" }],
+    );
   };
 
   // RÈGLE À NE JAMAIS CASSER — FALLBACK SI PUB NON DISPONIBLE : si
   // ADMOB_ACTIF est faux, ou si la pub AdMob n'a pas fini de charger (ou a
   // échoué — device sans le rebuild natif EAS, pas de réseau, aucun
-  // inventaire disponible...), on retombe sur l'Alert simulé plutôt que de
-  // laisser le déclencheur sans effet.
+  // inventaire disponible...), on retombe sur `demanderDeblocageFallback`
+  // (déblocage simulé UNIQUEMENT en __DEV__, sinon message d'erreur honnête
+  // sans déblocage — cf. RÈGLE ci-dessus) plutôt que de laisser le
+  // déclencheur sans effet.
   const declencherPub = () => {
     if (ADMOB_ACTIF && RewardedAd && pubChargee && rewardedRef.current) {
       setEnCoursDeblocage(true);
@@ -162,15 +178,15 @@ export function useDeblocagePub(
       try {
         rewardedRef.current.show().catch(() => {
           setEnCoursDeblocage(false);
-          demanderDeblocageSimule();
+          demanderDeblocageFallback();
         });
       } catch {
         setEnCoursDeblocage(false);
-        demanderDeblocageSimule();
+        demanderDeblocageFallback();
       }
       return;
     }
-    demanderDeblocageSimule();
+    demanderDeblocageFallback();
   };
 
   return { declencherPub, enCoursDeblocage };

@@ -598,9 +598,15 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   disponible, réessaie plus tard"), sans bouton qui débloque. Garder le
   fallback "Pub simulée" uniquement derrière `__DEV__` (ou un flag dev dédié,
   distinct de `ADMOB_ACTIF`/`TESTFLIGHT_MODE`) — jamais atteignable en prod.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code). **Bug le plus critique
-  trouvé sur la logique publicitaire** — priorité de correction élevée avant
-  toute mise en avant du modèle "regarder une pub" auprès de vrais utilisateurs.
+- **Statut** : **CORRIGÉ (2026-09-16)** — `demanderDeblocageSimule` renommée
+  `demanderDeblocageFallback`, branche maintenant sur `__DEV__` : en dev
+  local, comportement inchangé (Alert "Pub simulée" qui débloque, utile sans
+  rebuild EAS) ; en production, nouvelle Alert "Publicité indisponible" avec
+  un seul bouton "OK" sans `onPress` — `onDeverrouille()` n'est plus jamais
+  atteignable via ce chemin en production, vérifié ligne par ligne par
+  code-reviewer sur les 3 sites d'appel. `RewardedAdEventType.EARNED_REWARD`
+  (le seul déclencheur légitime) non touché. tsc/lint vérifiés propres (10
+  lignes / 49 problèmes, sous la baseline).
 
 ### P019 — Pubs récompensées : double-tap non protégé sur le chip de période Stats
 
