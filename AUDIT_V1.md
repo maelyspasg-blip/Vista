@@ -408,11 +408,19 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   nombre de chiffres après chaque séparateur, ou n'accepter que le DERNIER
   séparateur comme décimal s'il est suivi d'exactement 1-2 chiffres), et/ou
   avertir si le résultat semble aberrant.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + repro isolée), correction non
-  encore appliquée. Impact direct sur `utils/montant.ts`, fichier central utilisé
-  par tous les champs de saisie de montant de l'app — correction à traiter avec
-  soin (tester activement les formats `1234,56` / `1234.56` / `1 234,56` /
-  `1,234.56` après correctif, pas seulement les cas cassés ci-dessus).
+- **Statut** : **CORRIGÉ (2026-09-16)** — `sanitizeMontantInput` distingue
+  maintenant la frappe normale (0 ou 1 séparateur, comportement strictement
+  inchangé) d'un montant collé au format à milliers (2+ séparateurs) : dans
+  ce second cas, le DERNIER séparateur est traité comme décimal s'il est
+  suivi d'au plus 2 chiffres, sinon tous les séparateurs sont des milliers.
+  Testé sur 10+ cas (`2,500.00`→2500, `1.234,56`→1234.56, `12.345.678`→12345678,
+  `1,234,567.89`→1234567.89, saisie normale `12,50`→12.5 inchangée) et
+  confirmé par code-reviewer (comparaison ancien/nouveau code byte-pour-byte
+  sur ~28 entrées pour la branche ≤1 séparateur, aucune divergence). Limite
+  assumée et documentée : un montant collé à 3+ décimales (`2,500.005`) est
+  traité comme purement milliers plutôt que 2500.005 — cohérent avec
+  l'hypothèse "devise = max 2 décimales", hors périmètre de ce correctif.
+  tsc/lint vérifiés propres (10 lignes / 49 problèmes, sous la baseline).
 
 ### P011 — `pct = depense/budget` produit `NaN` si `budget === 0` (non protégé, dupliqué dans 2 écrans)
 
