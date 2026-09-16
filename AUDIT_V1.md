@@ -434,11 +434,13 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Piste de correction** : `env.budget > 0 ? Math.min((env.depense/env.budget)*100, 100) : 0` —
   exactement le pattern déjà utilisé ailleurs dans le même fichier, à appliquer
   aux 2 occurrences non protégées.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code). **Candidat à correction directe**
-  au sens de CLAUDE.md ("erreur de calcul dont la correction est certaine") — fix
-  d'une ligne, pattern déjà validé ailleurs dans le même fichier, zéro changement
-  de comportement pour `budget > 0`. Sera corrigé avec P004/timezone dans le
-  prochain lot de corrections (après complément du diagnostic Budget/Planning/Stats).
+- **Statut** : **CORRIGÉ (2026-09-16)** — `env.budget > 0 ? Math.min(...) : 0`
+  appliqué aux 2 sites (`budget.tsx:1027`, `index.tsx:1329`), exactement le
+  pattern déjà utilisé ailleurs dans les mêmes fichiers. Confirmé par
+  code-reviewer qu'il n'existe aucun autre site non protégé (grep sur
+  l'intégralité du repo : les 4 autres occurrences de `depense/budget`
+  étaient déjà protégées). tsc/lint vérifiés propres (10 lignes / 49
+  problèmes, sous la baseline).
 
 ### P012 — `getDisponibleMoisPartenaire` sous-compte les entrées non reçues du partenaire (formule différente de celle utilisée pour "moi")
 

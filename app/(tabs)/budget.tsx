@@ -1024,7 +1024,11 @@ export default function Budget() {
   };
 
   const renderCarteCategorie = (env: Enveloppe) => {
-    const pct = Math.min((env.depense / env.budget) * 100, 100);
+    // RÈGLE À NE JAMAIS CASSER — garde `budget > 0` (bug P011, 2026-09-16) :
+    // budget=0 est atteignable en pratique (catégorie créée/éditée sans
+    // montant saisi, cf. `parseMontant(...) || 0` plus haut) — sans cette
+    // garde, `0/0*100 = NaN` se propageait jusqu'à `<BarreProgression>`.
+    const pct = env.budget > 0 ? Math.min((env.depense / env.budget) * 100, 100) : 0;
     const estOuverte = enveloppeOuverte === env.id;
     // Seule la toute première carte affichée sert de cible au tutoriel de
     // premier lancement (id fixe "categorie") ; les autres reçoivent un id

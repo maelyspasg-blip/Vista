@@ -1326,7 +1326,11 @@ export default function Dashboard() {
   // tappable pour basculerPartageCategorie, et une barre de contribution
   // bleu/violet s'ajoute sous la jauge pour les catégories fusionnées.
   const renderCarteEnveloppe = (env: EnveloppeAvecFusion) => {
-    const pct = Math.min((env.depense / env.budget) * 100, 100);
+    // RÈGLE À NE JAMAIS CASSER — garde `budget > 0` (bug P011, 2026-09-16) :
+    // budget=0 est atteignable en pratique (catégorie créée/éditée sans
+    // montant saisi) — sans cette garde, `0/0*100 = NaN` se propageait
+    // jusqu'à `<BarreProgression>`.
+    const pct = env.budget > 0 ? Math.min((env.depense / env.budget) * 100, 100) : 0;
     // RÈGLE À NE JAMAIS CASSER — CATÉGORIES "PLUS LÉGÈRES" (vue partagée) :
     // demande explicite de simplification — plus de grosse jauge bleu/violet
     // systématique ni de tap pour bascule %/€ (l'ancien contributionEnPourcentage
