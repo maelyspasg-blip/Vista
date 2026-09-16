@@ -2012,8 +2012,25 @@ function verifierEvenementsFinanciersInterne() {
 
   if (aAppliquer.length === 0) return;
 
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-16 (bug P024) :
+  // `montantApplique: true` ne doit être posé QUE pour un événement qui a
+  // RÉELLEMENT trouvé une enveloppe à créditer (`env.nom === e.categorieLiee`).
+  // Avant ce correctif, TOUS les événements sélectionnés étaient marqués
+  // appliqués, même ceux dont `categorieLiee` ne correspondait à aucune
+  // enveloppe vivante (catégorie renommée entre-temps, cf. P024 —
+  // `renommerCategoriePartout` corrigé pour garder `categorie_liee` à jour,
+  // mais ce garde-fou reste nécessaire en défense en profondeur pour toute
+  // autre cause future d'un `categorieLiee` orphelin) : le montant
+  // disparaissait silencieusement et définitivement (aucune nouvelle
+  // tentative possible, la garde `if (e.montantApplique) return false;`
+  // plus haut l'excluait pour toujours). Désormais, un événement sans match
+  // reste `montantApplique: false` et sera retenté au prochain passage.
   let enveloppesMaj = etat.enveloppes;
+  const idsReellementAppliques = new Set<string>();
   aAppliquer.forEach((e) => {
+    const matchExiste = enveloppesMaj.some((env) => env.nom === e.categorieLiee);
+    if (!matchExiste) return;
+    idsReellementAppliques.add(e.id);
     enveloppesMaj = enveloppesMaj.map((env) =>
       env.nom === e.categorieLiee
         ? { ...env, depense: env.depense + (e.montant ?? 0) }
@@ -2021,16 +2038,19 @@ function verifierEvenementsFinanciersInterne() {
     );
   });
 
-  const idsAAppliquer = new Set(aAppliquer.map((e) => e.id));
+  if (idsReellementAppliques.size === 0) return;
+
   setEtat({
     evenements: etat.evenements.map((e) =>
-      idsAAppliquer.has(e.id) ? { ...e, montantApplique: true } : e,
+      idsReellementAppliques.has(e.id) ? { ...e, montantApplique: true } : e,
     ),
   });
   appliquerEnveloppes(enveloppesMaj);
 
   aAppliquer.forEach((e) => {
-    majEvenementSupabase(e.id, { montant_applique: true });
+    if (idsReellementAppliques.has(e.id)) {
+      majEvenementSupabase(e.id, { montant_applique: true });
+    }
   });
 }
 
@@ -3215,6 +3235,36 @@ export function useObjectifs() {
           }
         }
 
+        // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-16 (bug P024) :
+        // `categorieLiee` (Planning) lie un événement à une catégorie PAR
+        // NOM, pas par id — sans cette mise à jour, un événement financier
+        // lié à `ancienNom` continuait de référencer un nom qui n'existe
+        // plus après renommage, `verifierEvenementsFinanciersInterne`
+        // (plus haut dans ce fichier) ne trouvait alors plus jamais
+        // d'enveloppe à créditer pour lui, et le forecast disparaissait
+        // silencieusement et définitivement (marqué "appliqué" sans avoir
+        // réellement crédité quoi que ce soit). Même geste que pour
+        // `enveloppes`/`snapshot_enveloppes` ci-dessus : la donnée
+        // "ancienNom" doit être remplacée PARTOUT, pas seulement côté
+        // catégorie. Pas de filtre `.eq("user_id", ...)` ici — RÈGLE de
+        // CLAUDE.md : `evenements` est la seule table à écriture cross-
+        // compte RLS volontaire (événements "commun"), un tel filtre
+        // exclurait silencieusement ces lignes sans erreur.
+        const { error: erreurEvenements } = await supabase
+          .from("evenements")
+          .update({ categorie_liee: nom })
+          .eq("categorie_liee", ancienNom);
+        if (erreurEvenements) {
+          console.error(
+            "Supabase update evenements.categorie_liee (renommage global) a échoué :",
+            erreurEvenements,
+          );
+          signalerErreurSync(
+            `Impossible de mettre à jour les événements liés à cette catégorie : ${erreurEvenements.message}`,
+          );
+          return false;
+        }
+
         setEtat({
           enveloppes: etat.enveloppes.map((e) =>
             e.nom === ancienNom ? { ...e, nom } : e,
@@ -3225,6 +3275,9 @@ export function useObjectifs() {
               e.nom === ancienNom ? { ...e, nom } : e,
             ),
           })),
+          evenements: etat.evenements.map((e) =>
+            e.categorieLiee === ancienNom ? { ...e, categorieLiee: nom } : e,
+          ),
         });
         return true;
       } catch (e) {

@@ -730,7 +730,22 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Repro concrète** : catégorie "Loisirs", événement financier 50€ lié, planifié le 20. Renommage "Loisirs"→"Sorties" dans Budget. Dans la minute qui suit : événement sélectionné, aucune enveloppe "Loisirs" ne matche, `depense` de "Sorties" jamais incrémentée, `montantApplique=true` posé quand même → **perte silencieuse et définitive du forecast**. Le formulaire d'édition continue en plus d'afficher "sera ajouté à ta dépense 'Loisirs'" (texte mensonger), sans jamais forcer une correction.
 - **Cause racine** : (1) `renommerCategoriePartout` incomplet, (2) `verifierEvenementsFinanciersInterne` marque `montantApplique=true` même sans match réel — défaut de robustesse indépendant qui aggrave toute autre cause de `categorieLiee` orphelin.
 - **Piste de correction** : ajouter la mise à jour `evenements.categorie_liee` dans `renommerCategoriePartout` (même geste que pour `enveloppes`) ; ne marquer `montantApplique=true` que si le match a réellement eu lieu.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + traçage manuel ligne par ligne). **Suppression de catégorie** vérifiée saine sur ce point précis (confirmé, pas de régression) — seul le RENOMMAGE est cassé.
+- **Statut** : **CORRIGÉ (2026-09-16)** — les deux causes racines traitées :
+  (1) `renommerCategoriePartout` fait désormais aussi `UPDATE evenements SET
+  categorie_liee = nom WHERE categorie_liee = ancienNom` (sans filtre
+  `user_id`, volontaire — même doctrine RLS-only que le reste de la table),
+  + état local synchronisé ; (2) `verifierEvenementsFinanciersInterne` ne
+  marque plus `montantApplique: true` que pour les événements ayant
+  réellement trouvé une enveloppe à créditer — un événement orphelin reste
+  retentable au lieu d'être abandonné pour toujours. Revu par code-reviewer
+  (APPROUVÉ, cas nominal et cas sans match tracés à la main) ET
+  security-auditor (APPROUVÉ — confirmé sur le SQL réel des policies RLS
+  `evenements_update_own`/`evenements_update_espace_partage` qu'un
+  utilisateur non lié ne peut pas être affecté par ce nouvel UPDATE, quel
+  que soit le WHERE côté client ; confirmé non destructif, un seul champ
+  texte modifié). **Suppression de catégorie** vérifiée saine sur ce point
+  précis dès le diagnostic initial (pas de régression). tsc/lint vérifiés
+  propres (10 lignes / 49 problèmes, sous la baseline).
 
 ### P025 — Planning partagé : fusion automatique sans confirmation, signal de détection faible (nom+date+heure grossière)
 
