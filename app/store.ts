@@ -7,6 +7,7 @@ import {
 } from "./notifications";
 import { determinerAlerteBudget, type AlerteBudget } from "./alertesBudget";
 import { purgerDonneesInsights } from "../utils/conseils";
+import { parseDateFixeLocale } from "../utils/dateOnly";
 import {
   synchroniserWidgetAjoutRapide,
   synchroniserWidgetPlanning,
@@ -121,13 +122,21 @@ function premierJourMoisISO(annee: number, mois: number): string {
   return dateVersISOInterne(new Date(annee, mois, 1));
 }
 
+// Ré-exportée pour les écrans qui l'importent depuis "./store"/"../store"
+// (moins de churn que de faire pointer chaque site vers "utils/dateOnly"
+// directement) — définie dans utils/dateOnly.ts, SANS dépendance vers ce
+// fichier, précisément pour éviter un cycle d'imports avec
+// app/notifications.ts (qui importe des choses depuis store.ts ET a besoin
+// de cette fonction) — cf. commentaire complet dans utils/dateOnly.ts.
+export { parseDateFixeLocale };
+
 // Mois auquel une enveloppe "Entrée" est comptée : moisComptage si défini,
 // sinon le mois calendaire de dateFixe (compat des lignes créées avant
 // l'introduction de ce champ).
 function moisComptageEffectif(env: Enveloppe): string | undefined {
   if (env.moisComptage) return env.moisComptage;
   if (env.dateFixe) {
-    const d = new Date(env.dateFixe);
+    const d = parseDateFixeLocale(env.dateFixe);
     return premierJourMoisISO(d.getFullYear(), d.getMonth());
   }
   return undefined;
@@ -1644,7 +1653,7 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     .forEach((e) => {
       let dateFixeSuivante = moisComptageSuivant;
       if (e.dateFixe) {
-        const d = new Date(e.dateFixe);
+        const d = parseDateFixeLocale(e.dateFixe);
         d.setMonth(d.getMonth() + 1);
         dateFixeSuivante = dateVersISOInterne(d);
       }
@@ -1996,7 +2005,7 @@ function verifierEvenementsFinanciersInterne() {
     if (!e.estFinancier || !e.montant) return false;
     if (!e.categorieLiee || e.categorieLiee === "Aucune") return false;
     if (e.montantApplique) return false;
-    const dateEvenement = new Date(e.date);
+    const dateEvenement = parseDateFixeLocale(e.date);
     dateEvenement.setHours(0, 0, 0, 0);
     return dateEvenement <= aujourdhui;
   });
@@ -2065,7 +2074,7 @@ function ajusterForecastEvenementsFinanciers(nomCategorie: string) {
     .filter((e) => {
       if (!e.estFinancier || !e.montant || e.montant <= 0) return false;
       if (e.categorieLiee !== nomCategorie) return false;
-      const dateEvenement = new Date(e.date);
+      const dateEvenement = parseDateFixeLocale(e.date);
       return (
         dateEvenement.getMonth() === maintenant.getMonth() &&
         dateEvenement.getFullYear() === maintenant.getFullYear()
@@ -2103,7 +2112,7 @@ async function verifierEcheancesFixesInterne() {
   const dejaPayeeCeMois = (enveloppeId: string, dateEcheance: Date) =>
     etat.historiquePaiements.some((p) => {
       if (p.enveloppeId !== enveloppeId) return false;
-      const d = new Date(p.date);
+      const d = parseDateFixeLocale(p.date);
       return (
         d.getMonth() === dateEcheance.getMonth() &&
         d.getFullYear() === dateEcheance.getFullYear()
@@ -2114,7 +2123,7 @@ async function verifierEcheancesFixesInterne() {
 
   const enveloppesMaj = etat.enveloppes.map((env) => {
     if (env.type === "Fixe" && env.dateFixe && !env.payee) {
-      const dateEcheance = new Date(env.dateFixe);
+      const dateEcheance = parseDateFixeLocale(env.dateFixe);
       dateEcheance.setHours(0, 0, 0, 0);
       if (dateEcheance <= aujourdhui) {
         const dejaEnregistree = dejaPayeeCeMois(env.id, dateEcheance);
@@ -2163,7 +2172,7 @@ async function verifierEcheancesFixesInterne() {
     }
 
     if (env.type === "Entrée" && env.dateFixe && !env.payee) {
-      const dateEcheance = new Date(env.dateFixe);
+      const dateEcheance = parseDateFixeLocale(env.dateFixe);
       dateEcheance.setHours(0, 0, 0, 0);
       if (dateEcheance <= aujourdhui) {
         return { ...env, depense: env.budget, payee: true };

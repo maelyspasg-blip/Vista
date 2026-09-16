@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { supabase } from "../supabaseClient";
 import { getMembreEspace } from "../utils/espacePartage";
+import { parseDateFixeLocale } from "../utils/dateOnly";
 import type { Evenement } from "./store";
 
 Notifications.setNotificationHandler({
@@ -67,10 +68,10 @@ export async function enregistrerPushToken(userId: string): Promise<void> {
 function formaterDateNotifPush(
   evenement: Pick<Evenement, "date" | "heure" | "touteLaJournee">,
 ): string {
-  const dateFormatee = new Date(evenement.date).toLocaleDateString("fr-FR", {
-    day: "numeric",
-    month: "long",
-  });
+  const dateFormatee = parseDateFixeLocale(evenement.date).toLocaleDateString(
+    "fr-FR",
+    { day: "numeric", month: "long" },
+  );
   return evenement.touteLaJournee
     ? dateFormatee
     : `${dateFormatee} à ${evenement.heure}`;

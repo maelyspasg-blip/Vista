@@ -36,7 +36,12 @@ import {
   demanderPermissionNotifications,
   programmerNotificationsEvenement,
 } from "../notifications";
-import { Enveloppe, Evenement, useObjectifs } from "../store";
+import {
+  Enveloppe,
+  Evenement,
+  parseDateFixeLocale,
+  useObjectifs,
+} from "../store";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { useTheme } from "../ThemeContext";
 import { useAccessibilite } from "../AccessibiliteContext";
@@ -391,7 +396,7 @@ export default function Planning() {
     );
     if (nouveaux.length === 0) return;
     const ev = nouveaux[0];
-    const dateFormatee = new Date(ev.date).toLocaleDateString("fr-FR", {
+    const dateFormatee = parseDateFixeLocale(ev.date).toLocaleDateString("fr-FR", {
       day: "numeric",
       month: "long",
     });
@@ -536,9 +541,9 @@ export default function Planning() {
 
   evenementsSource.forEach(({ evenement: e, proprietaire }) => {
     const estFerie = e.id.startsWith("ferie_");
-    const dateDebut = new Date(e.date);
+    const dateDebut = parseDateFixeLocale(e.date);
     dateDebut.setHours(0, 0, 0, 0);
-    const dateFinBase = e.dateFin ? new Date(e.dateFin) : null;
+    const dateFinBase = e.dateFin ? parseDateFixeLocale(e.dateFin) : null;
     if (dateFinBase) dateFinBase.setHours(0, 0, 0, 0);
     const nbJoursSupplementaires = dateFinBase
       ? Math.round((dateFinBase.getTime() - dateDebut.getTime()) / 86400000)
@@ -604,7 +609,7 @@ export default function Planning() {
     });
   [...enveloppesFixesUniques.values()]
     .forEach((e) => {
-      const dateOrigine = new Date(e.dateFixe!);
+      const dateOrigine = parseDateFixeLocale(e.dateFixe!);
       if (e.repeteChaqueMois) {
         const jour = dateOrigine.getDate();
         for (let offset = -2; offset <= 2; offset++) {
@@ -612,8 +617,8 @@ export default function Planning() {
           const dejaPayeeCeMois = objStore.historiquePaiements.some(
             (p) =>
               p.enveloppeId === e.id &&
-              new Date(p.date).getMonth() === d.getMonth() &&
-              new Date(p.date).getFullYear() === d.getFullYear(),
+              parseDateFixeLocale(p.date).getMonth() === d.getMonth() &&
+              parseDateFixeLocale(p.date).getFullYear() === d.getFullYear(),
           );
           if (dejaPayeeCeMois) continue;
           tousLesEvenements.push({
@@ -669,7 +674,7 @@ export default function Planning() {
     });
   [...enveloppesEntreesUniques.values()]
     .forEach((e) => {
-      const dateOrigine = new Date(e.dateFixe!);
+      const dateOrigine = parseDateFixeLocale(e.dateFixe!);
       if (e.repeteChaqueMois) {
         const jour = dateOrigine.getDate();
         for (let offset = -2; offset <= 2; offset++) {
@@ -677,8 +682,8 @@ export default function Planning() {
           const dejaPayeeCeMois = objStore.historiquePaiements.some(
             (p) =>
               p.enveloppeId === e.id &&
-              new Date(p.date).getMonth() === d.getMonth() &&
-              new Date(p.date).getFullYear() === d.getFullYear(),
+              parseDateFixeLocale(p.date).getMonth() === d.getMonth() &&
+              parseDateFixeLocale(p.date).getFullYear() === d.getFullYear(),
           );
           if (dejaPayeeCeMois) continue;
           tousLesEvenements.push({
@@ -770,7 +775,7 @@ export default function Planning() {
   objStore.historiquePaiements
     .filter((p) => idsEnveloppesVivantes.has(p.enveloppeId))
     .forEach((p) => {
-    const d = new Date(p.date);
+    const d = parseDateFixeLocale(p.date);
     const cle = `${p.enveloppeId}-${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
     if (clesHistoDejaAffichees.has(cle)) return;
     clesHistoDejaAffichees.add(cle);
@@ -1156,9 +1161,9 @@ export default function Planning() {
     setEvenementEnEditionId(ev.id);
     setEvenementEnEditionEstPartenaire(estPartenaire);
     setNomEvent(ev.nom);
-    setDateEvent(new Date(ev.date));
+    setDateEvent(parseDateFixeLocale(ev.date));
     setMultiJoursEvent(!!ev.dateFin);
-    setDateFinEvent(new Date(ev.dateFin ?? ev.date));
+    setDateFinEvent(parseDateFixeLocale(ev.dateFin ?? ev.date));
     setCalendrierOuvert("aucun");
     setHeureEvent(ev.heure || "9h00");
     setDureeEvent(String(ev.duree || 1));
@@ -2643,7 +2648,7 @@ export default function Planning() {
                             <Calendar
                               current={dateVersISO(dateEvent)}
                               onDayPress={(day) => {
-                                setDateEvent(new Date(day.dateString));
+                                setDateEvent(parseDateFixeLocale(day.dateString));
                                 setCalendrierOuvert("aucun");
                               }}
                               markedDates={{
@@ -2760,7 +2765,7 @@ export default function Planning() {
                             <Calendar
                               current={dateVersISO(dateEvent)}
                               onDayPress={(day) => {
-                                const d = new Date(day.dateString);
+                                const d = parseDateFixeLocale(day.dateString);
                                 setDateEvent(d);
                                 if (dateFinEvent < d) setDateFinEvent(d);
                                 setCalendrierOuvert("aucun");
@@ -2796,7 +2801,7 @@ export default function Planning() {
                               current={dateVersISO(dateFinEvent)}
                               minDate={dateVersISO(dateEvent)}
                               onDayPress={(day) => {
-                                const d = new Date(day.dateString);
+                                const d = parseDateFixeLocale(day.dateString);
                                 if (d < dateEvent) return;
                                 setDateFinEvent(d);
                                 setCalendrierOuvert("aucun");

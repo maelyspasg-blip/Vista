@@ -1,4 +1,5 @@
 import { Enveloppe, SnapshotMois } from "../app/store";
+import { parseDateFixeLocale } from "./dateOnly";
 
 // Forme minimale nécessaire pour résoudre le mois de comptage et calculer le
 // total "Entrées" d'un mois — satisfaite structurellement à la fois par
@@ -22,7 +23,7 @@ export type EnveloppeComptable = {
 export function moisComptageEffectif(env: EnveloppeComptable): string | undefined {
   if (env.moisComptage) return env.moisComptage;
   if (env.dateFixe) {
-    const d = new Date(env.dateFixe);
+    const d = parseDateFixeLocale(env.dateFixe);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
   }
   return undefined;

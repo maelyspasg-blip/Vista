@@ -543,8 +543,16 @@ type SituationDetectee = {
   pourcentagesAffiches?: number[];
 };
 
+// RÈGLE À NE JAMAIS CASSER — accesseurs LOCAUX obligatoires ici (bug trouvé
+// le 2026-09-16, P005) : `.toISOString()` convertit en UTC — pour un
+// utilisateur au fuseau du projet (Frankfurt/Paris, UTC+1/+2), l'heure
+// locale est EN AVANCE sur UTC, donc entre minuit local et ~1h-2h du matin
+// la date UTC est encore celle de la veille. Avec `toISOString()`, ouvrir
+// l'app à 0h15 renvoyait la date d'hier, chaque jour, faussant les streaks
+// de `detecterSituations`. Mêmes accesseurs locaux que `dateVersISOInterne`
+// (app/store.ts) — copie volontaire, utils/ ne doit pas dépendre de store.ts.
 function journeeISO(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function libelleEtape(

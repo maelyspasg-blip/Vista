@@ -28,7 +28,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { calculerScrollAutoTutoriel } from "../../utils/tutorielScroll";
 import { useTheme } from "../ThemeContext";
 import { dureeAnimation, useAccessibilite } from "../AccessibiliteContext";
-import { Enveloppe, ModeleDepense, useObjectifs } from "../store";
+import {
+  Enveloppe,
+  ModeleDepense,
+  parseDateFixeLocale,
+  useObjectifs,
+} from "../store";
 import { useGuest } from "../GuestContext";
 import { useEspacePartage } from "../EspacePartageContext";
 import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
@@ -157,13 +162,13 @@ function premierJourMoisISO(date: Date): string {
 
 
 function formaterDateCourte(dateISO: string): string {
-  const d = new Date(dateISO);
+  const d = parseDateFixeLocale(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
   return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
 }
 
 function formaterDateLongue(dateISO: string): string {
-  const d = new Date(dateISO);
+  const d = parseDateFixeLocale(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
   return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
 }
@@ -459,7 +464,7 @@ export default function Budget() {
   const paiementsDuMois = objStore.historiquePaiements.filter((p) => {
     const enveloppe = enveloppesParId.get(p.enveloppeId);
     if (!enveloppe || enveloppe.type !== "Fixe") return false;
-    const d = new Date(p.date);
+    const d = parseDateFixeLocale(p.date);
     return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
   });
 
@@ -621,7 +626,7 @@ export default function Budget() {
 
   const enveloppesAVenir = objStore.enveloppes.filter((e) => {
     if (e.type !== "Fixe" || e.payee || !e.dateFixe) return false;
-    const d = new Date(e.dateFixe);
+    const d = parseDateFixeLocale(e.dateFixe);
     return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
   });
 
@@ -682,7 +687,7 @@ export default function Budget() {
 
   const autresDepensesPayees = autresDepenses
     .filter((e) => {
-      const d = new Date(e.date);
+      const d = parseDateFixeLocale(e.date);
       d.setHours(0, 0, 0, 0);
       return (
         d <= aujourdhui &&
@@ -693,7 +698,7 @@ export default function Budget() {
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const autresDepensesAVenir = autresDepenses.filter((e) => {
-    const d = new Date(e.date);
+    const d = parseDateFixeLocale(e.date);
     d.setHours(0, 0, 0, 0);
     return d > aujourdhui;
   });
@@ -2034,10 +2039,9 @@ export default function Budget() {
                 ? Math.round((ligne.montant / budgetTotal) * 100)
                 : 0;
             const estLourd = !ligne.estEntree && pctBudget >= 30;
-            const dateAffichee = new Date(ligne.date).toLocaleDateString(
-              "fr-FR",
-              { day: "numeric", month: "long" },
-            );
+            const dateAffichee = parseDateFixeLocale(
+              ligne.date,
+            ).toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
             const contenu = (
               <>
                 <View

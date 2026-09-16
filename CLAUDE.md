@@ -80,7 +80,10 @@ App mobile de gestion de budget personnel et partagé.
 ### GraphiqueFlux
 - `ESPACEMENT_MIN = 14` — validé sur device physique
 - `totalReference = sum(entrées)` — partagé entre les 3 colonnes
-- Hauteur max : `Dimensions.get('window').height * 0.45`
+- Hauteur : `Dimensions.get('window').height * 0.45` — c'est un **plancher**
+  (`hauteurSvg = Math.max(hauteurNaturelle, hauteurMinDisponible)`), jamais un
+  plafond qui écraserait le graphique — précision apportée le 2026-09-16 après
+  audit (la formulation "max" prêtait à confondre avec un plafond)
 - Police uniforme 11px, word wrap si trop long, jamais de troncature '...'
 
 ### Modale Ton bilan
@@ -90,8 +93,9 @@ App mobile de gestion de budget personnel et partagé.
 ## Flags de feature
 ```typescript
 // utils/premium.ts
-TESTFLIGHT_MODE = true        // bêta : bypass premium
-ESPACE_PARTAGE_ACTIF = false  // désactivé en bêta, activer pour V1
+TESTFLIGHT_MODE = false       // V1 production (depuis le 2026-09-14) : plus de bypass premium/pub global
+ADMOB_ACTIF = true            // V1 production : vraies pubs récompensées actives
+ESPACE_PARTAGE_ACTIF = false  // désactivé pour la V1 (2 points de sécurité non résolus, cf. AUDIT_V1.md §2.2)
 ```
 
 ## Palette de couleurs Vista
