@@ -304,7 +304,17 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   clés en cours de traitement) au tout début de `archiverMoisActuelInterne`,
   libéré en `finally` ; et/ou contrainte unique côté `enveloppes` sur les
   reconductions avec upsert `onConflict`.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), correction non encore appliquée.
+- **Statut** : **CORRIGÉ (2026-09-17)** — exactement la piste ci-dessus :
+  `archiverMoisActuelInterne` (nom d'origine) devient un thin wrapper qui
+  pose un verrou synchrone (`Set<string>` module-level, clé `${annee}-${mois}`)
+  AVANT le premier `await`, appelle le corps original (renommé
+  `archiverMoisActuelInterneCoeur`) dans un `try`, libère le verrou en
+  `finally`. Ferme la fenêtre de course entièrement (JS mono-thread — aucune
+  ré-entrance possible entre le test et la pose). Revu par code-reviewer sur
+  2 rounds (voir P008 pour le détail — les 2 bugs ont été corrigés et revus
+  ensemble dans le même changement) : APPROUVÉ, les 2 appelants existants
+  (`verifierArchivageMoisInterne`, l'action publique `archiverMoisActuel`)
+  passent par ce wrapper sans aucune modification nécessaire de leur côté.
 
 ### P007 — Duplication de `historique_paiements` par la même race que P006
 
@@ -356,11 +366,65 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   au prochain lancement tant que le curseur n'a pas avancé même si un snapshot
   existe déjà (l'upsert du snapshot est déjà idempotent, donc rejouer la suite
   ne recrée pas de doublon).
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), correction non encore appliquée.
-  **Bug le plus grave de cette vague d'audit** : contrairement à P006/P007 (qui
-  nécessitent une vraie concurrence), celui-ci se déclenche sur un simple
-  crash/fermeture forcée au mauvais moment — scénario nettement plus probable en
-  usage réel, et sans aucune façon pour l'utilisateur de s'en rendre compte.
+- **Statut** : **CORRIGÉ (2026-09-17)**, en 2 rounds de revue (voir historique
+  détaillé ci-dessous — ce fut le correctif le plus délicat de toute la
+  session, exactement à la hauteur de la gravité de ce bug). Trois
+  changements liés :
+  1. `dejaArchive` teste maintenant `etat.dernierMoisArchive` (le curseur,
+     déjà la source de vérité lue par `verifierArchivageMoisInterne`) au
+     lieu de la seule présence d'un snapshot dans `etat.historiquesMois` —
+     permet une vraie reprise après interruption.
+  2. **Round 1 de revue (BLOQUANT)** : le code-reviewer a trouvé qu'un
+     retry naïf recalculant/réécrivant le snapshot depuis l'état live
+     pouvait ÉCRASER un snapshot déjà validé par une version DÉGRADÉE (des
+     0 au lieu des vraies valeurs Entrée/Fixe déjà archivées, si l'état
+     live avait déjà été partiellement remis à zéro par la tentative
+     interrompue) — violation directe de la règle CLAUDE.md "jamais
+     écraser un snapshot existant avec des données moins complètes". Le
+     garde-fou anti-régression d'`enregistrerSnapshotMoisSupabase` ne
+     compare que le NOMBRE de lignes, jamais leur valeur — ne protégeait
+     pas contre ce cas. **Corrigé par une restructuration** : la fonction
+     détecte maintenant explicitement `snapshotExistant` (reprise) vs.
+     première tentative — en reprise, le snapshot n'est JAMAIS recalculé
+     ni renvoyé à `enregistrerSnapshotMoisSupabase`, réutilisé tel quel
+     (`resteReel` dérivé algébriquement de `disponible - totalDepense` du
+     snapshot existant, jamais recalculé depuis l'état live) ; seules la
+     remise à zéro (idempotente par nature) et la reconduction (rendue
+     idempotente, voir ci-dessous) sont rejouées.
+  3. La reconduction des revenus récurrents est rendue idempotente : avant
+     insertion, exclut celles dont le nom existe déjà parmi les enveloppes
+     `Entrée` du mois suivant dans `etat.enveloppes` — nécessaire pour
+     qu'une reprise ne duplique pas ce que P006 corrige déjà pour le cas
+     concurrent (ici garanti à chaque reprise, pas seulement en cas de
+     vraie concurrence).
+  4. `majDernierMoisArchiveSupabase` (le curseur) retourne maintenant sa
+     promesse et est explicitement `await`-ée en dernier — réduit (sans
+     l'éliminer, un kill dur reste possible) la fenêtre de risque.
+  En me relisant après le round 1, j'ai moi-même trouvé et corrigé un bug
+  supplémentaire avant le round 2 : le `setEtat` final dupliquait le
+  snapshot dans `etat.historiquesMois` en reprise (`snapshot === snapshotExistant`,
+  déjà présent) — corrigé (`historiquesMois: snapshotExistant ? etat.historiquesMois : [...etat.historiquesMois, snapshot]`).
+  **Round 2 de revue : APPROUVÉ** — le point bloquant du round 1 confirmé
+  résolu (aucun autre chemin ne réécrit le snapshot en reprise), le fix de
+  duplication confirmé correct, le scénario normal (sans interruption)
+  confirmé strictement inchangé, un second scénario de reprise plus subtil
+  (interruption AVANT toute création de snapshot) confirmé sans risque.
+  tsc/lint vérifiés propres (10 lignes / 49 problèmes, sous la baseline)
+  après chacun des 2 rounds. **Bug le plus grave de cette vague d'audit** :
+  contrairement à P006/P007 (qui nécessitent une vraie concurrence),
+  celui-ci se déclenche sur un simple crash/fermeture forcée au mauvais
+  moment — scénario nettement plus probable en usage réel, et sans aucune
+  façon pour l'utilisateur de s'en rendre compte.
+  **Point résiduel trouvé au round 2, non bloquant** : voir P051 — une
+  fenêtre plus étroite existe encore si l'interruption survient DANS
+  `enregistrerSnapshotMoisSupabase` elle-même, entre l'upsert du parent
+  `snapshots_mois` et l'insertion des lignes `snapshot_enveloppes` : le
+  snapshot repris serait alors trouvé "existant" mais avec un détail par
+  catégorie vide, définitivement (pas de réparation automatique). Ce n'est
+  pas un écrasement au sens de la règle CLAUDE.md (rien n'est dégradé,
+  juste jamais complété), et strictement moins grave que l'ancien bug
+  (pas de gel du curseur pour tout le compte) — documenté pour un futur
+  correctif plutôt que traité dans ce lot.
 
 ### P009 — Race entre le fetch initial de session et `onAuthStateChange('INITIAL_SESSION')`
 
@@ -860,7 +924,58 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Mitigation partielle déjà existante, vérifiée insuffisante pour le cas général** : `chargerEnveloppes` restaure depuis un cache AsyncStorage récent, mais uniquement pour `type==="Variable"` ET uniquement quand la base indique `depense===0` exactement (le commentaire du code le dit explicitement : une valeur non nulle reste toujours la source de vérité) — ne couvre pas l'incrément partiel du quotidien, le cas d'usage le plus fréquent.
 - **Manifestation UI concrète de P007** (échéances Fixe) : sur cet écran précis, deux lignes `historique_paiements` dupliquées par P007 s'affichent comme deux cartes "payée" identiques empilées.
 - **Piste de correction** : soit `await` réellement l'écriture de l'enveloppe avant de considérer l'opération terminée (retry au prochain lancement si échec), soit — plus robuste — recalculer `enveloppes.depense` comme `SUM(transactions.montant)` à chaque chargement plutôt que de faire confiance à un compteur incrémental non atomique.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + traçage manuel), correction non appliquée.
+- **Statut** : **CORRIGÉ (2026-09-17)** — découverte importante en creusant
+  le correctif : le fichier a DÉJÀ une fonction de réconciliation
+  `verifierIntegriteDepensesInterne` (existante avant cette session,
+  commentaire daté du 2026-09-01, "chantier espace partagé"), qui recalcule
+  exactement `depense = SUM(transactions du mois)` pour les catégories
+  Variable et corrige toute dérive détectée — **mais seulement pour "le
+  mois actuel" au moment où elle tourne** (câblée dans
+  `verifierEtat()`/`app/(tabs)/_layout.tsx`, après chargement complet
+  enveloppes+transactions, à chaque montage/retour au premier plan/60s).
+  Cette fonction n'avait pas été repérée par l'audit initial (Budget,
+  2026-09-16) qui avait donc caractérisé P034 comme largement non mitigé —
+  en réalité déjà bien mitigé pour le cas courant. Le seul vrai résiduel :
+  si l'app n'est jamais rouverte entre l'écriture interrompue et le
+  changement de mois suivant, l'archivage capturerait la valeur encore
+  dérivée dans le snapshot de façon permanente. Fermé en étendant la MÊME
+  formule (vérifiée identique bit-à-bit par code-reviewer) à
+  `archiverMoisActuelInterneCoeur`, juste avant le calcul du snapshot —
+  voir le détail complet du correctif combiné dans P008 (les 2 bugs ont été
+  corrigés et revus ensemble, sur le même fichier, la même fonction).
+  Revu par code-reviewer sur 2 rounds : APPROUVÉ, formule confirmée
+  identique à `verifierIntegriteDepensesInterne`, couverture des catégories
+  inchangée (mapping 1:1, aucun filtre), commentaire sur la persistance de
+  la correction pour une catégorie Variable ponctuelle vérifié exact après
+  réécriture (round 1 avait noté un commentaire trompeur sur ce point,
+  corrigé et reconfirmé exact au round 2). tsc/lint vérifiés propres.
+
+### P051 — Archivage mensuel : détail par catégorie du snapshot peut rester vide si l'interruption survient DANS enregistrerSnapshotMoisSupabase
+
+- **Gravité** : 🟡 MINEUR (strictement moins grave que P008 : pas de gel du
+  curseur pour tout le compte, pas d'écrasement d'une donnée déjà bonne —
+  juste une incomplétude jamais réparée automatiquement)
+- **Trouvé par** : code-reviewer, en revue (round 2) du correctif P008 (2026-09-17).
+- **Fichier** : `app/store.ts` (`enregistrerSnapshotMoisSupabase`) : l'upsert
+  du parent `snapshots_mois` (totaux : épargne/disponible/total_depense) et
+  l'insertion des lignes `snapshot_enveloppes` (détail par catégorie) sont
+  2 écritures séquentielles, pas une transaction unique.
+- **Description** : si l'app est tuée précisément entre ces 2 écritures, le
+  snapshot existe déjà (totaux corrects) mais sans aucune ligne de détail.
+  Au relancement, la nouvelle branche "reprise" de `archiverMoisActuelInterneCoeur`
+  (correctif P008) trouve ce snapshot et le considère "déjà validé" —
+  elle ne rappelle jamais `enregistrerSnapshotMoisSupabase` pour compléter
+  le détail manquant. Le mois reste archivé avec un détail par catégorie
+  vide, de façon permanente (visible dans `VueMoisArchive`), sans
+  réparation automatique — `sauvegarderBackupArchivage` est un filet
+  AsyncStorage manuel, pas un mécanisme de réparation auto.
+- **Piste de correction** (à valider, pas appliquée) : dans la branche
+  reprise, si `snapshotExistant.enveloppes.length === 0` alors qu'il
+  devrait y avoir des catégories, retomber sur le recalcul/renvoi normal
+  plutôt que de faire confiance aveuglément au stub.
+- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), correction non
+  appliquée (fenêtre de course étroite, jugée non bloquante pour committer
+  le correctif P008 qui reste, dans l'ensemble, une amélioration nette).
 
 ### P035 — Budget : aucun état "vide" pour "Tes catégories" (aggrave P016)
 

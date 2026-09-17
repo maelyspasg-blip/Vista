@@ -1079,10 +1079,14 @@ function transactionVersColonnes(t: Omit<Transaction, "id">) {
   };
 }
 
+// RÈGLE : retourne la promesse (au lieu d'un fire-and-forget pur) pour que
+// archiverMoisActuelInterneCoeur puisse l'`await` (cf. RÈGLE P008 plus bas)
+// — comportement inchangé pour ses autres appelants, qui continuent de ne
+// pas l'attendre.
 function majDernierMoisArchiveSupabase(mois: number, annee: number) {
-  supabase.auth.getUser().then(({ data: { user } }) => {
+  return supabase.auth.getUser().then(({ data: { user } }) => {
     if (!user) return;
-    supabase
+    return supabase
       .from("profils")
       .update({
         dernier_mois_archive_mois: mois,
@@ -1447,11 +1451,39 @@ async function sauvegarderBackupArchivage(
   }
 }
 
+// RÈGLE À NE JAMAIS CASSER — VERROU ANTI-CONCURRENCE (bug P006 corrigé le
+// 2026-09-17) : verifierEtat() est appelée depuis 3 sources indépendantes
+// (montage, setInterval 60s, retour au premier plan AppState), sans
+// exclusion mutuelle. Le garde-fou interne à archiverMoisActuelInterneCoeur
+// (dejaArchive) teste etat.historiquesMois/dernierMoisArchive, qui ne sont
+// mis à jour qu'à la TOUTE FIN de la fonction, après plusieurs `await`
+// réseau — deux exécutions concurrentes pour le même mois passaient donc
+// toutes les deux ce garde-fou, chacune insérant sa propre copie des
+// revenus récurrents reconduits (double comptage silencieux et permanent).
+// Ce Set, vérifié et rempli de façon SYNCHRONE avant le premier `await`,
+// ferme cette fenêtre de course entièrement : JS étant mono-thread, aucune
+// autre invocation ne peut s'intercaler entre le test et la pose du verrou.
+// Module-level (pas etat.*) volontairement : ce n'est pas une donnée
+// métier, juste un verrou d'exécution en mémoire, jamais persisté.
+const moisEnCoursDArchivage = new Set<string>();
+
+async function archiverMoisActuelInterne(mois: number, annee: number) {
+  if (!etat.userId) return;
+  const cleVerrou = `${annee}-${mois}`;
+  if (moisEnCoursDArchivage.has(cleVerrou)) return;
+  moisEnCoursDArchivage.add(cleVerrou);
+  try {
+    await archiverMoisActuelInterneCoeur(mois, annee);
+  } finally {
+    moisEnCoursDArchivage.delete(cleVerrou);
+  }
+}
+
 // RÈGLE À NE JAMAIS CASSER — CETTE FONCTION EST LA SEULE AUTORISÉE À
 // REMETTRE depense À 0 SUR LES ENVELOPPES. ELLE DOIT TOUJOURS CRÉER ET
 // VALIDER LE SNAPSHOT AVANT TOUTE REMISE À ZÉRO. TOUTE MODIFICATION DE CET
 // ORDRE EST UNE RÉGRESSION CRITIQUE.
-async function archiverMoisActuelInterne(mois: number, annee: number) {
+async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
   // RÈGLE À NE JAMAIS CASSER — GARDE CONTRE LA RACE AU DÉMARRAGE : voir la
   // même RÈGLE dans verifierArchivageMoisInterne — répétée ici car cette
   // fonction est AUSSI atteignable directement via l'action publique
@@ -1460,24 +1492,57 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
   // (enregistrerSnapshotMoisSupabase) sans un userId déjà résolu.
   if (!etat.userId) return;
 
-  const dejaArchive = etat.historiquesMois.some(
-    (s) => s.mois === mois && s.annee === annee,
-  );
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17 (bug P008, le plus
+  // grave trouvé dans l'audit du 2026-09-16) : ce garde-fou testait
+  // auparavant la seule présence d'un snapshot (`etat.historiquesMois`)
+  // pour décider si ce mois était "déjà archivé" — mais le snapshot est
+  // confirmé AVANT la remise à zéro/l'avancement du curseur, qui restent en
+  // fire-and-forget plus bas. Une interruption (crash, fermeture forcée)
+  // entre les deux laissait un snapshot existant SANS que la suite n'ait
+  // jamais eu lieu : ce garde-fou bloquait alors tout nouvel essai pour de
+  // bon, le curseur `dernierMoisArchive` restant figé indéfiniment — plus
+  // aucun mois suivant n'était plus jamais archivé pour ce compte, sans
+  // erreur visible. Le curseur est la vraie source de vérité de "jusqu'où
+  // l'archivage est allé" (c'est lui que lit verifierArchivageMoisInterne
+  // pour décider quel mois traiter) — un mois est donc considéré déjà
+  // archivé seulement si le curseur le couvre déjà, jamais sur la seule
+  // présence du snapshot. Ceci permet une vraie reprise après interruption
+  // (le snapshot étant upsert, le recréer avec les mêmes valeurs est sans
+  // risque) — voir RÈGLE sur l'idempotence de la reconduction plus bas,
+  // nécessaire pour qu'une reprise ne duplique pas les revenus récurrents
+  // (P006).
+  const dejaArchive =
+    !!etat.dernierMoisArchive &&
+    (etat.dernierMoisArchive.annee > annee ||
+      (etat.dernierMoisArchive.annee === annee &&
+        etat.dernierMoisArchive.mois >= mois));
   if (dejaArchive) return;
 
-  // Point 1 de la RÈGLE "Sécurité maximale" — cf. RÈGLE détaillée sur
-  // sauvegarderBackupArchivage plus haut : filet de secours manuel, awaité
-  // pour garantir qu'il est écrit avant toute suite, mais son échec
-  // éventuel (déjà catché à l'intérieur) ne doit jamais empêcher
-  // l'archivage réel de continuer.
-  await sauvegarderBackupArchivage(etat.userId, {
-    mois,
-    annee,
-    enveloppes: etat.enveloppes,
-    objectifs: etat.objectifs,
-    epargneMois: etat.epargneMois,
-    dernierMoisArchive: etat.dernierMoisArchive,
-  });
+  // RÈGLE À NE JAMAIS CASSER — REPRISE SANS JAMAIS RETOUCHER UN SNAPSHOT
+  // DÉJÀ VALIDÉ (correctif du 2026-09-17, trouvé en revue du 1er jet du
+  // correctif P008) : dejaArchive ci-dessus autorise maintenant une reprise
+  // après interruption — mais un snapshot déjà créé avec succès lors d'une
+  // tentative précédente ne doit JAMAIS être recalculé/réécrit à partir de
+  // l'état live, qui peut déjà avoir été PARTIELLEMENT remis à zéro par
+  // cette même tentative interrompue (enveloppesMaj/appliquerEnveloppes
+  // sont fire-and-forget, une catégorie Fixe/Entrée peut donc déjà afficher
+  // depense=0 en base sans que le curseur n'ait jamais avancé). Recalculer
+  // le snapshot dans ce cas écraserait un snapshot CORRECT par un snapshot
+  // DÉGRADÉ (des 0 au lieu des vraies valeurs déjà archivées) — violation
+  // directe de la RÈGLE CLAUDE.md "jamais écraser un snapshot existant avec
+  // des données moins complètes". Le garde-fou anti-régression
+  // d'enregistrerSnapshotMoisSupabase (plus bas dans ce fichier) ne compare
+  // que le NOMBRE de lignes, jamais leur valeur — il ne protège pas contre
+  // ce cas précis. La seule protection sûre est donc de ne JAMAIS repasser
+  // par enregistrerSnapshotMoisSupabase quand un snapshot existe déjà pour
+  // ce mois : on réutilise tel quel le snapshot existant (déjà validé lors
+  // de sa création, cf. garde-fou !snapshotId plus bas) et on reprend
+  // uniquement la suite (remise à zéro/reconduction/curseur), qui elle est
+  // sans risque à rejouer (remettre depense à 0 une seconde fois est un
+  // no-op, et la reconduction est rendue idempotente plus bas).
+  const snapshotExistant = etat.historiquesMois.find(
+    (s) => s.mois === mois && s.annee === annee,
+  );
 
   const moisArchiveISO = premierJourMoisISO(annee, mois);
   // Une entrée "Entrée" ne fait partie de ce mois que si son mois de
@@ -1486,157 +1551,255 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
   const estDuMoisArchive = (e: Enveloppe) =>
     e.type === "Entrée" && moisComptageEffectif(e) === moisArchiveISO;
 
-  // Exclut du snapshot les "Entrée" comptées d'avance pour un mois futur :
-  // comme elles restent intactes dans etat.enveloppes (cf. estDuMoisArchive
-  // ci-dessus) jusqu'à ce que leur propre mois soit archivé, les inclure ici
-  // les ferait apparaître — avec leur depense/budget — dans CE snapshot ET
-  // dans tous les snapshots suivants tant qu'elles patientent, gonflant à
-  // tort les "Entrées totales" de chaque mois traversé entre-temps (catégories
-  // Fixe/Variable non concernées : leur `depense` est de toute façon remise à
-  // 0 chaque mois, cf. enveloppesMaj plus bas).
-  const enveloppesSnapshot: SnapshotEnveloppe[] = etat.enveloppes
-    .filter((e) => e.type !== "Entrée" || estDuMoisArchive(e))
-    .map((e) => ({
-      id: e.id,
-      nom: e.nom,
-      depense: e.depense,
-      budget: e.budget,
-      couleur: e.couleur,
-      type: e.type,
-    }));
-  const objectifsSnapshot: SnapshotObjectif[] = etat.objectifs.map((o) => ({
-    id: o.id,
-    nom: o.nom,
-    actuel: o.actuel,
-    cible: o.cible,
-  }));
-  const epargne = etat.epargneMois;
-
-  // Point 3 de la demande du 2026-09-01 (diagnostic sans intervention SQL) :
-  // journalise le point de départ de l'archivage AVANT tout appel réseau,
-  // pour pouvoir situer un échec éventuel (les console.error existants plus
-  // bas complètent ce log, jamais ne le remplacent).
-  console.log(
-    `[archivage] Début ${mois + 1}/${annee} : ${enveloppesSnapshot.length} enveloppe(s) à snapshoter, ${objectifsSnapshot.length} objectif(s).`,
-  );
-
-  const enveloppesSansEntree = etat.enveloppes.filter(
-    (e) => e.type !== "Entrée",
-  );
-  const entreesDuMois = etat.enveloppes.filter(estDuMoisArchive);
-
-  const depenseReelle = enveloppesSansEntree.reduce(
-    (acc, e) => acc + e.depense,
-    0,
-  );
-  // Budget du mois = entrées déjà reçues (depense) + entrées encore
-  // attendues (budget), mêmes semantics que le total affiché pour le mois
-  // en cours ailleurs dans l'app.
-  const budgetDuMois = entreesDuMois.reduce(
-    (acc, e) => acc + (e.payee ? e.depense : e.budget),
-    0,
-  );
-  const totalDepense = depenseReelle + etat.epargneMois;
-
-  // RÈGLE À NE JAMAIS CASSER — REMISE À ZÉRO UNIQUEMENT POUR LES CATÉGORIES
-  // PERMANENTES (Fixe repeteChaqueMois OU Variable recurrente), JAMAIS LES
-  // PONCTUELLES : demande du 2026-09-01, même notion de "permanente" que
-  // utils/budget.ts:estCategorieActiveCeMois (dupliquée ici, pas importée —
-  // même convention que moisComptageEffectif, cf. RÈGLE là-bas : utils/ ne
-  // doit pas dépendre de store.ts et l'inverse non plus). Une catégorie
-  // ponctuelle est déjà entièrement capturée dans enveloppesSnapshot
-  // ci-dessus AVANT ce point — sa ligne live devient vestigiale après
-  // archivage (invisible ensuite via estCategorieActiveCeMois, son
-  // moisComptage/dateFixe n'étant jamais avancés) : la laisser intacte
-  // plutôt que de la remettre à zéro évite qu'un éventuel bug de filtrage
-  // ailleurs ne l'affiche avec un depense=0 trompeur (elle afficherait alors
-  // sa vraie dernière valeur, plus honnête qu'un faux 0). Ancien bug
-  // corrigé au passage, contenu dans ce même changement : réinitialiser
-  // payee=false pour TOUTE catégorie Fixe (y compris une facture ponctuelle
-  // déjà payée) produisait un flip-flop — verifierEcheancesFixesInterne
-  // (qui n'avance dateFixe QUE dans son branchement repeteChaqueMois, cf.
-  // RÈGLE là-bas) revoyait alors un dateFixe resté dans le passé sur une
-  // catégorie "non payée" et la re-marquait payée avec cette ancienne date.
-  // Une Fixe récurrente repart "non payée" ICI, AU VRAI CHANGEMENT DE MOIS
-  // (son dateFixe a déjà avancé plus tôt, cf. RÈGLE mise à jour le
-  // 2026-09-06 dans verifierEcheancesFixesInterne : payee passe à true dès
-  // que l'échéance est franchie, PUIS repasse à false seulement ici) ; une
-  // catégorie ponctuelle (Fixe ou Variable) n'est plus du tout touchée par
-  // cette map désormais, payee compris.
+  let snapshotId: string;
+  let snapshot: SnapshotMois;
+  let enveloppesMaj: Enveloppe[];
+  let entreesDuMois: Enveloppe[];
+  let resteReel: number;
   let nbEnveloppesRemisesAZero = 0;
-  const enveloppesMaj = etat.enveloppes.map((e) => {
-    if (e.type === "Entrée") {
-      if (!estDuMoisArchive(e)) return e;
+
+  if (snapshotExistant) {
+    console.log(
+      `[archivage] Reprise ${mois + 1}/${annee} après interruption précédente : snapshot déjà validé (${snapshotExistant.id}), snapshot réutilisé tel quel, reprise de la remise à zéro/reconduction uniquement.`,
+    );
+    snapshotId = snapshotExistant.id;
+    snapshot = snapshotExistant;
+    // Dérivable directement des totaux déjà stockés dans le snapshot
+    // existant (disponible = budgetDuMois, totalDepense = depenseReelle +
+    // epargne à l'époque de la 1ère tentative) — jamais recalculé depuis
+    // l'état live potentiellement déjà partiellement remis à zéro :
+    // resteReel = budgetDuMois - depenseReelle - epargne
+    //           = disponible - (totalDepense - epargne) - epargne
+    //           = disponible - totalDepense.
+    resteReel = snapshotExistant.disponible - snapshotExistant.totalDepense;
+    entreesDuMois = etat.enveloppes.filter(estDuMoisArchive);
+    enveloppesMaj = etat.enveloppes.map((e) => {
+      if (e.type === "Entrée") {
+        if (!estDuMoisArchive(e)) return e;
+        nbEnveloppesRemisesAZero += 1;
+        return { ...e, depense: 0 };
+      }
+      const estPermanente =
+        e.type === "Fixe" ? !!e.repeteChaqueMois : !!e.recurrente;
+      if (!estPermanente) return e;
       nbEnveloppesRemisesAZero += 1;
-      return { ...e, depense: 0 };
-    }
-    const estPermanente =
-      e.type === "Fixe" ? !!e.repeteChaqueMois : !!e.recurrente;
-    if (!estPermanente) return e;
-    nbEnveloppesRemisesAZero += 1;
-    return {
-      ...e,
-      depense: 0,
-      payee: e.type === "Fixe" ? false : e.payee,
-    };
-  });
-
-  const snapshotId = await enregistrerSnapshotMoisSupabase({
-    mois,
-    annee,
-    epargne,
-    disponible: budgetDuMois,
-    totalDepense,
-    enveloppes: enveloppesSnapshot,
-    objectifs: objectifsSnapshot,
-  });
-
-  // RÈGLE À NE JAMAIS CASSER — ABANDON SANS AUCUNE MUTATION LOCALE SI LE
-  // SNAPSHOT N'EST PAS VALIDÉ : point 2 de la RÈGLE "Sécurité maximale" du
-  // 2026-09-01. Avant cette garde, un échec Supabase (snapshotId null)
-  // retombait sur un id `local-${Date.now()}` et l'archivage continuait
-  // quand même — remise à zéro de depense sur etat.enveloppes ET avancement
-  // de dernierMoisArchive alors qu'AUCUN snapshot n'existait côté serveur.
-  // Conséquence, confirmée en relisant verifierArchivageMoisInterne : le
-  // mois suivant, dernierMoisArchive étant déjà avancé, la boucle de
-  // rattrapage ne retentait plus JAMAIS d'archiver ce mois — perte de
-  // données silencieuse et définitive. Ici, tant qu'on n'a pas retourné
-  // avant ce point, aucun setEtat/appliquerEnveloppes n'a encore eu lieu :
-  // un abandon laisse etat strictement intact, prêt pour un nouvel essai au
-  // prochain verifierArchivageMois() (intervalle, retour au premier plan,
-  // prochain lancement).
-  if (!snapshotId) {
-    console.error(
-      `[store] Archivage de ${mois + 1}/${annee} ANNULÉ : le snapshot n'a pas pu être créé/validé côté Supabase — aucune remise à zéro effectuée.`,
-    );
-    signalerErreurSync(
-      "Impossible d'archiver le mois : rien n'a été modifié, un nouvel essai sera fait automatiquement.",
-    );
-    journaliserOperationAudit("archivage_mois_echec", {
+      return {
+        ...e,
+        depense: 0,
+        payee: e.type === "Fixe" ? false : e.payee,
+      };
+    });
+  } else {
+    // Point 1 de la RÈGLE "Sécurité maximale" — cf. RÈGLE détaillée sur
+    // sauvegarderBackupArchivage plus haut : filet de secours manuel, awaité
+    // pour garantir qu'il est écrit avant toute suite, mais son échec
+    // éventuel (déjà catché à l'intérieur) ne doit jamais empêcher
+    // l'archivage réel de continuer.
+    await sauvegarderBackupArchivage(etat.userId, {
       mois,
       annee,
-      raison: "snapshot_non_valide",
+      enveloppes: etat.enveloppes,
+      objectifs: etat.objectifs,
+      epargneMois: etat.epargneMois,
+      dernierMoisArchive: etat.dernierMoisArchive,
     });
-    return;
-  }
 
-  const snapshot: SnapshotMois = {
-    id: snapshotId,
-    mois,
-    annee,
-    enveloppes: enveloppesSnapshot,
-    objectifs: objectifsSnapshot,
-    epargne,
-    disponible: budgetDuMois,
-    totalDepense,
-  };
+    // RÈGLE À NE JAMAIS CASSER — RÉCONCILIATION AVANT SNAPSHOT (bug P034,
+    // corrigé le 2026-09-17) : `depense` d'une catégorie Variable est un
+    // compteur incrémental écrit séparément de `transactions` (cf. RÈGLE sur
+    // ajouterTransaction/modifierTransaction/supprimerTransaction) — une
+    // interruption entre les deux peut le désynchroniser silencieusement de
+    // la somme réelle des transactions du mois. verifierIntegriteDepensesInterne()
+    // (plus haut dans ce fichier) corrige déjà cette dérive pour LE MOIS EN
+    // COURS à chaque lancement/retour au premier plan — mais elle ne porte
+    // que sur "le mois actuel" au moment où elle tourne : si l'app n'est
+    // jamais rouverte entre l'écriture interrompue et le changement de mois
+    // suivant, l'archivage capturerait la valeur encore dérivée dans le
+    // snapshot, DE FAÇON PERMANENTE (et la LAISSERAIT vivante indéfiniment
+    // sur une catégorie Variable non récurrente, jamais remise à zéro
+    // ci-dessous, cf. RÈGLE "vestigiale" plus bas). Cette reconciliation
+    // locale, même formule que verifierIntegriteDepensesInterne, ferme ce
+    // cas résiduel — utilisée à la place de etat.enveloppes pour TOUT le
+    // reste de cette branche (snapshot, totaux, remise à zéro). N'a lieu
+    // QUE lors de la première tentative (jamais en reprise, cf. branche
+    // snapshotExistant ci-dessus). ATTENTION, point vérifié en revue : pour
+    // une catégorie Variable PONCTUELLE (non récurrente), enveloppesMaj
+    // plus bas la laisse "vestigiale" (return e SANS remise à zéro) — mais
+    // ce "e" est déjà la version reconciliée ici, donc la correction
+    // ATTEINT bien appliquerEnveloppes()/Supabase via le diff normal de
+    // cette fonction (enveloppesEgales), pas seulement le snapshot. C'est
+    // voulu et sans risque (la valeur corrigée est la bonne), mais ce n'est
+    // PAS une exception à la RÈGLE "SEULE archiverMoisActuelInterneCoeur
+    // remet depense à 0" : on ne fait ici que corriger une valeur déjà
+    // fausse vers sa vraie valeur, jamais une remise à 0 supplémentaire.
+    const enveloppesReconciliees = etat.enveloppes.map((e) => {
+      if (e.type !== "Variable") return e;
+      const sommeTransactions = etat.transactions
+        .filter(
+          (t) =>
+            t.enveloppeId === e.id &&
+            t.date.startsWith(moisArchiveISO.slice(0, 7)),
+        )
+        .reduce((acc, t) => acc + t.montant, 0);
+      const sommeArrondie = Math.round(sommeTransactions * 100) / 100;
+      if (Math.abs(sommeArrondie - e.depense) <= 0.01) return e;
+      console.warn(
+        `[archivage] Incohérence corrigée avant snapshot sur "${e.nom}" : depense=${e.depense}, somme réelle des transactions du mois=${sommeArrondie}.`,
+      );
+      return { ...e, depense: sommeArrondie };
+    });
+
+    // Exclut du snapshot les "Entrée" comptées d'avance pour un mois futur :
+    // comme elles restent intactes dans etat.enveloppes (cf. estDuMoisArchive
+    // ci-dessus) jusqu'à ce que leur propre mois soit archivé, les inclure ici
+    // les ferait apparaître — avec leur depense/budget — dans CE snapshot ET
+    // dans tous les snapshots suivants tant qu'elles patientent, gonflant à
+    // tort les "Entrées totales" de chaque mois traversé entre-temps (catégories
+    // Fixe/Variable non concernées : leur `depense` est de toute façon remise à
+    // 0 chaque mois, cf. enveloppesMaj plus bas).
+    const enveloppesSnapshot: SnapshotEnveloppe[] = enveloppesReconciliees
+      .filter((e) => e.type !== "Entrée" || estDuMoisArchive(e))
+      .map((e) => ({
+        id: e.id,
+        nom: e.nom,
+        depense: e.depense,
+        budget: e.budget,
+        couleur: e.couleur,
+        type: e.type,
+      }));
+    const objectifsSnapshot: SnapshotObjectif[] = etat.objectifs.map((o) => ({
+      id: o.id,
+      nom: o.nom,
+      actuel: o.actuel,
+      cible: o.cible,
+    }));
+    const epargne = etat.epargneMois;
+
+    // Point 3 de la demande du 2026-09-01 (diagnostic sans intervention SQL) :
+    // journalise le point de départ de l'archivage AVANT tout appel réseau,
+    // pour pouvoir situer un échec éventuel (les console.error existants plus
+    // bas complètent ce log, jamais ne le remplacent).
+    console.log(
+      `[archivage] Début ${mois + 1}/${annee} : ${enveloppesSnapshot.length} enveloppe(s) à snapshoter, ${objectifsSnapshot.length} objectif(s).`,
+    );
+
+    const enveloppesSansEntree = enveloppesReconciliees.filter(
+      (e) => e.type !== "Entrée",
+    );
+    entreesDuMois = enveloppesReconciliees.filter(estDuMoisArchive);
+
+    const depenseReelle = enveloppesSansEntree.reduce(
+      (acc, e) => acc + e.depense,
+      0,
+    );
+    // Budget du mois = entrées déjà reçues (depense) + entrées encore
+    // attendues (budget), mêmes semantics que le total affiché pour le mois
+    // en cours ailleurs dans l'app.
+    const budgetDuMois = entreesDuMois.reduce(
+      (acc, e) => acc + (e.payee ? e.depense : e.budget),
+      0,
+    );
+    const totalDepense = depenseReelle + etat.epargneMois;
+
+    // RÈGLE À NE JAMAIS CASSER — REMISE À ZÉRO UNIQUEMENT POUR LES CATÉGORIES
+    // PERMANENTES (Fixe repeteChaqueMois OU Variable recurrente), JAMAIS LES
+    // PONCTUELLES : demande du 2026-09-01, même notion de "permanente" que
+    // utils/budget.ts:estCategorieActiveCeMois (dupliquée ici, pas importée —
+    // même convention que moisComptageEffectif, cf. RÈGLE là-bas : utils/ ne
+    // doit pas dépendre de store.ts et l'inverse non plus). Une catégorie
+    // ponctuelle est déjà entièrement capturée dans enveloppesSnapshot
+    // ci-dessus AVANT ce point — sa ligne live devient vestigiale après
+    // archivage (invisible ensuite via estCategorieActiveCeMois, son
+    // moisComptage/dateFixe n'étant jamais avancés) : la laisser intacte
+    // plutôt que de la remettre à zéro évite qu'un éventuel bug de filtrage
+    // ailleurs ne l'affiche avec un depense=0 trompeur (elle afficherait alors
+    // sa vraie dernière valeur, plus honnête qu'un faux 0). Ancien bug
+    // corrigé au passage, contenu dans ce même changement : réinitialiser
+    // payee=false pour TOUTE catégorie Fixe (y compris une facture ponctuelle
+    // déjà payée) produisait un flip-flop — verifierEcheancesFixesInterne
+    // (qui n'avance dateFixe QUE dans son branchement repeteChaqueMois, cf.
+    // RÈGLE là-bas) revoyait alors un dateFixe resté dans le passé sur une
+    // catégorie "non payée" et la re-marquait payée avec cette ancienne date.
+    // Une Fixe récurrente repart "non payée" ICI, AU VRAI CHANGEMENT DE MOIS
+    // (son dateFixe a déjà avancé plus tôt, cf. RÈGLE mise à jour le
+    // 2026-09-06 dans verifierEcheancesFixesInterne : payee passe à true dès
+    // que l'échéance est franchie, PUIS repasse à false seulement ici) ; une
+    // catégorie ponctuelle (Fixe ou Variable) n'est plus du tout touchée par
+    // cette map désormais, payee compris.
+    enveloppesMaj = enveloppesReconciliees.map((e) => {
+      if (e.type === "Entrée") {
+        if (!estDuMoisArchive(e)) return e;
+        nbEnveloppesRemisesAZero += 1;
+        return { ...e, depense: 0 };
+      }
+      const estPermanente =
+        e.type === "Fixe" ? !!e.repeteChaqueMois : !!e.recurrente;
+      if (!estPermanente) return e;
+      nbEnveloppesRemisesAZero += 1;
+      return {
+        ...e,
+        depense: 0,
+        payee: e.type === "Fixe" ? false : e.payee,
+      };
+    });
+
+    const idSnapshotCree = await enregistrerSnapshotMoisSupabase({
+      mois,
+      annee,
+      epargne,
+      disponible: budgetDuMois,
+      totalDepense,
+      enveloppes: enveloppesSnapshot,
+      objectifs: objectifsSnapshot,
+    });
+
+    // RÈGLE À NE JAMAIS CASSER — ABANDON SANS AUCUNE MUTATION LOCALE SI LE
+    // SNAPSHOT N'EST PAS VALIDÉ : point 2 de la RÈGLE "Sécurité maximale" du
+    // 2026-09-01. Avant cette garde, un échec Supabase (snapshotId null)
+    // retombait sur un id `local-${Date.now()}` et l'archivage continuait
+    // quand même — remise à zéro de depense sur etat.enveloppes ET avancement
+    // de dernierMoisArchive alors qu'AUCUN snapshot n'existait côté serveur.
+    // Conséquence, confirmée en relisant verifierArchivageMoisInterne : le
+    // mois suivant, dernierMoisArchive étant déjà avancé, la boucle de
+    // rattrapage ne retentait plus JAMAIS d'archiver ce mois — perte de
+    // données silencieuse et définitive. Ici, tant qu'on n'a pas retourné
+    // avant ce point, aucun setEtat/appliquerEnveloppes n'a encore eu lieu :
+    // un abandon laisse etat strictement intact, prêt pour un nouvel essai au
+    // prochain verifierArchivageMois() (intervalle, retour au premier plan,
+    // prochain lancement).
+    if (!idSnapshotCree) {
+      console.error(
+        `[store] Archivage de ${mois + 1}/${annee} ANNULÉ : le snapshot n'a pas pu être créé/validé côté Supabase — aucune remise à zéro effectuée.`,
+      );
+      signalerErreurSync(
+        "Impossible d'archiver le mois : rien n'a été modifié, un nouvel essai sera fait automatiquement.",
+      );
+      journaliserOperationAudit("archivage_mois_echec", {
+        mois,
+        annee,
+        raison: "snapshot_non_valide",
+      });
+      return;
+    }
+
+    snapshotId = idSnapshotCree;
+    snapshot = {
+      id: snapshotId,
+      mois,
+      annee,
+      enveloppes: enveloppesSnapshot,
+      objectifs: objectifsSnapshot,
+      epargne,
+      disponible: budgetDuMois,
+      totalDepense,
+    };
+    resteReel = budgetDuMois - depenseReelle - epargne;
+  }
 
   const objectifsMaj = etat.objectifs.map((o) => ({
     ...o,
     contributionMois: 0,
   }));
-
-  const resteReel = budgetDuMois - depenseReelle - epargne;
 
   const moisSuivantDate = new Date(annee, mois + 1, 1);
   const moisComptageSuivant = dateVersISOInterne(moisSuivantDate);
@@ -1687,8 +1850,32 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     });
   }
 
+  // RÈGLE À NE JAMAIS CASSER — REPRISE IDEMPOTENTE (bug P008, corrigé le
+  // 2026-09-17) : nécessaire maintenant que dejaArchive (plus haut) peut
+  // laisser cette fonction REPRENDRE après une interruption précédente —
+  // sans ce filtre, une reprise réinsérerait une seconde fois chaque revenu
+  // déjà reconduit avec succès lors de la tentative interrompue (P006, mais
+  // garanti à chaque reprise plutôt que dépendant d'une vraie concurrence).
+  // etat.enveloppes est rechargé depuis Supabase à chaque démarrage de
+  // l'app (chargerEnveloppes) — au moment où une reprise a lieu (toujours
+  // après un relancement, cf. verifierArchivageMoisInterne), il reflète
+  // fidèlement ce qui a déjà été inséré lors de la tentative précédente.
+  // Identification par nom — même convention que categorieLiee/
+  // renommerCategoriePartout ailleurs dans ce fichier, ces lignes n'ont pas
+  // d'autre identifiant stable avant leur propre insertion.
+  const nomsDejaReconduitsPourMoisSuivant = new Set(
+    etat.enveloppes
+      .filter(
+        (e) => e.type === "Entrée" && e.moisComptage === moisComptageSuivant,
+      )
+      .map((e) => e.nom),
+  );
+  const nouvellesEntreesAInserer = nouvellesEntrees.filter(
+    (e) => !nomsDejaReconduitsPourMoisSuivant.has(e.nom),
+  );
+
   let entreesInserees: Enveloppe[] = [];
-  if (nouvellesEntrees.length > 0) {
+  if (nouvellesEntreesAInserer.length > 0) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -1696,7 +1883,7 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
       const { data, error } = await supabase
         .from("enveloppes")
         .insert(
-          nouvellesEntrees.map((c) => ({
+          nouvellesEntreesAInserer.map((c) => ({
             ...enveloppeVersColonnes(c),
             user_id: user.id,
           })),
@@ -1724,8 +1911,15 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
   // reconstruction "au même jour le mois dernier" une fois ce mois archivé
   // (depenseCumuleeAuJour, calculerPaceCategorie, le détail par catégorie de
   // VueMoisArchive) puisque ces calculs comptent sur l'historique complet.
+  // RÈGLE : en reprise (snapshotExistant non null), snapshot EST déjà
+  // l'élément trouvé dans etat.historiquesMois — l'y rajouter dupliquerait
+  // cette entrée en mémoire (aucune écriture Supabase en double, mais un
+  // doublon visible localement, ex. dans VueMoisArchive). Seule la première
+  // tentative ajoute réellement un nouveau snapshot à la liste.
   setEtat({
-    historiquesMois: [...etat.historiquesMois, snapshot],
+    historiquesMois: snapshotExistant
+      ? etat.historiquesMois
+      : [...etat.historiquesMois, snapshot],
     dernierMoisArchive: { mois, annee },
     epargneMois: 0,
     objectifs: objectifsMaj,
@@ -1740,26 +1934,44 @@ async function archiverMoisActuelInterne(mois: number, annee: number) {
     remiseAZeroAutorisee: true,
   });
   majEpargneMoisSupabase(0);
-  majDernierMoisArchiveSupabase(mois, annee);
   objectifsMaj.forEach((o) => {
     majObjectifSupabase(o.id, { contribution_mois: 0 });
   });
+  // RÈGLE À NE JAMAIS CASSER — AWAIT DU CURSEUR (bug P008, corrigé le
+  // 2026-09-17) : les autres écritures ci-dessus restent fire-and-forget
+  // (cohérent avec le reste du fichier, cf. RÈGLE en tête de fichier), mais
+  // celle-ci — le curseur `dernier_mois_archive`, la source de vérité lue
+  // par dejaArchive ci-dessus et par verifierArchivageMoisInterne pour
+  // décider quel mois archiver — est explicitement attendue en dernier :
+  // ça ne rend pas l'ensemble atomique (un kill dur du process peut encore
+  // interrompre cette promesse elle-même), mais ça réduit la fenêtre de
+  // risque et laisse le temps aux écritures précédentes de partir avant que
+  // la fonction ne "termine". Si cette écriture échoue malgré tout (kill,
+  // erreur réseau), le garde-fou dejaArchive ci-dessus permet désormais une
+  // vraie reprise au prochain lancement (voir RÈGLE plus haut), plutôt que
+  // de rester figé indéfiniment comme avant ce correctif.
+  await majDernierMoisArchiveSupabase(mois, annee);
+  // RÈGLE : snapshot.enveloppes/epargne/totalDepense/disponible (plutôt que
+  // les variables locales enveloppesSnapshot/epargne/totalDepense/
+  // budgetDuMois, qui n'existent que dans la branche "première tentative")
+  // pour rester correct dans les 2 branches — snapshot les porte déjà dans
+  // les 2 cas (calculées ici ou reprises telles quelles de l'existant).
   journaliserOperationAudit("archivage_mois", {
     mois,
     annee,
     snapshotId,
-    nbEnveloppesArchivees: enveloppesSnapshot.length,
+    nbEnveloppesArchivees: snapshot.enveloppes.length,
     nbEnveloppesRemisesAZero,
     nbEntreesReconduites: entreesInserees.length,
-    epargneArchivee: epargne,
-    totalDepenseArchivee: totalDepense,
-    budgetDuMoisArchive: budgetDuMois,
+    epargneArchivee: snapshot.epargne,
+    totalDepenseArchivee: snapshot.totalDepense,
+    budgetDuMoisArchive: snapshot.disponible,
   });
   // Point 3 de la demande du 2026-09-01 : mois archivé, nombre d'enveloppes
   // snapshotées et nombre effectivement remises à zéro, pour diagnostiquer
   // un archivage sans jamais avoir besoin d'ouvrir Supabase.
   console.log(
-    `[archivage] Terminé ${mois + 1}/${annee} : snapshot=${snapshotId}, snapshotées=${enveloppesSnapshot.length}, remises à zéro=${nbEnveloppesRemisesAZero}, entrées reconduites=${entreesInserees.length}.`,
+    `[archivage] Terminé ${mois + 1}/${annee} : snapshot=${snapshotId}, snapshotées=${snapshot.enveloppes.length}, remises à zéro=${nbEnveloppesRemisesAZero}, entrées reconduites=${entreesInserees.length}.`,
   );
 }
 
