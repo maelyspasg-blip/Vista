@@ -2337,7 +2337,32 @@ function verifierAlerteBudget(enveloppes: Enveloppe[]) {
   );
 }
 
+// RÈGLE À NE JAMAIS CASSER — VERROU ANTI-CONCURRENCE (bug P007, corrigé le
+// 2026-09-17, même famille que P006) : verifierEtat() est appelée depuis 3
+// sources indépendantes (montage, setInterval 60s, retour au premier plan
+// AppState) — verifierEcheancesFixesInterne() n'a aucun `await` avant son
+// premier `appliquerEnveloppes(enveloppesMaj)`, mais EN A un juste après
+// (`await ajouterPaiementHistoriqueInterne(champs)` dans la boucle finale).
+// Une 2e invocation qui démarre pendant cette fenêtre relit encore
+// `etat.historiquePaiements` sans le paiement en cours d'insertion par la
+// 1ère — `dejaPayeeCeMois` ne le voit pas, la 2e invocation insère alors
+// une ligne `historique_paiements` en double pour la même échéance. Ce
+// verrou (booléen module-level, pas etat.* — un verrou d'exécution, pas une
+// donnée métier) ferme cette fenêtre : la 2e invocation retourne
+// immédiatement tant que la 1ère n'est pas terminée.
+let verificationEcheancesEnCours = false;
+
 async function verifierEcheancesFixesInterne() {
+  if (verificationEcheancesEnCours) return;
+  verificationEcheancesEnCours = true;
+  try {
+    await verifierEcheancesFixesInterneCoeur();
+  } finally {
+    verificationEcheancesEnCours = false;
+  }
+}
+
+async function verifierEcheancesFixesInterneCoeur() {
   const aujourdhui = new Date();
   aujourdhui.setHours(0, 0, 0, 0);
 

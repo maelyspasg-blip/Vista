@@ -328,7 +328,17 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   échéance Fixe en retard (ex. loyer) ajoutent chacune une ligne identique.
 - **Piste de correction** : même verrou que P006 appliqué à `verifierEtat()`, ou
   contrainte unique `(user_id, enveloppe_id, mois, annee)` sur `historique_paiements`.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), correction non encore appliquée.
+- **Statut** : **CORRIGÉ (2026-09-17)** — même pattern que P006 : la fonction
+  (nom d'origine `verifierEcheancesFixesInterne`) devient un thin wrapper
+  avec un booléen module-level `verificationEcheancesEnCours` (pas un `Set`
+  comme P006 — cette fonction traite toutes les échéances en un seul appel,
+  pas une entité scopée par clé), posé avant le premier `await`, corps
+  original renommé `verifierEcheancesFixesInterneCoeur`. Revu par
+  code-reviewer (APPROUVÉ) : scénario de course tracé à la main (2e
+  invocation bloquée avant toute lecture de `etat.historiquePaiements`),
+  unique appelant confirmé passer par le wrapper, cas normal strictement
+  inchangé. tsc/lint vérifiés propres (10 lignes / 49 problèmes, sous la
+  baseline).
 
 ### P008 — Archivage mensuel interrompu après validation du snapshot : curseur figé définitivement, sans retry possible
 
