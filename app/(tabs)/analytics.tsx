@@ -4907,6 +4907,12 @@ export default function Analytics() {
                           }
                           hitSlop={8}
                           activeOpacity={0.6}
+                          // RÈGLE : ajoutés le 2026-09-17 (bug P048) —
+                          // icône "i" sans accessibilité, contrairement au
+                          // reste de cet écran (ex. boutons "Fermer" des
+                          // modales de détail).
+                          accessibilityRole="button"
+                          accessibilityLabel={`En savoir plus sur ${option.label}`}
                         >
                           {/* RÈGLE : color: C.texteMuted (demande du
                               2026-09-14) — jamais de couleur hardcodée

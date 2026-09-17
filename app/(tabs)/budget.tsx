@@ -1299,6 +1299,14 @@ export default function Budget() {
                       </Text>
                     </TouchableOpacity>
                   )}
+                  {/* RÈGLE : ajoutée le 2026-09-17 (bug P048) — aucune
+                      indication pour un novice sur ce que fait un "modèle
+                      de dépense rapide" avant de l'avoir testé une fois. */}
+                  <InfoBulle
+                    titre="Modèle de dépense rapide"
+                    texte="Un raccourci pour ajouter en un tap une dépense que tu fais souvent (montant et nom déjà pré-remplis)."
+                    couleur={C.texteMuted}
+                  />
                 </View>
 
                 {creationModeleOuvertPour === env.id && (
@@ -2752,6 +2760,7 @@ const styles = StyleSheet.create({
   modelesRow: {
     flexDirection: "row",
     flexWrap: "wrap",
+    alignItems: "center",
     gap: 8,
     marginBottom: 10,
   },

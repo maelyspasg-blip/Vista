@@ -1029,7 +1029,15 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Trouvé par** : audit UX écran par écran (2026-09-17).
 - **Fichiers** : `budget.tsx:1284-1301` (bouton "+ Raccourci" sans info-bulle expliquant le concept à un novice, alors que `InfoBulle` est déjà utilisée ailleurs dans le même fichier, ex. `:2099`) ; `analytics.tsx:4903-4909` (icône "i" des chips de mode de balance, sans `accessibilityRole`/`accessibilityLabel`, contraste avec le reste de l'écran globalement bien traité sur ce point — ex. boutons "Fermer" des modales de détail).
 - **Piste de correction** : `InfoBulle` sur le bouton "+ Raccourci" ; `accessibilityRole="button"` + `accessibilityLabel` sur l'icône "i".
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+- **Statut** : **CORRIGÉ (2026-09-17)** — `InfoBulle` (composant existant)
+  ajoutée dans `modelesRow` ; `accessibilityRole`/`accessibilityLabel`
+  ajoutés sur l'icône "i" des chips de balance. Revu par code-reviewer
+  (APPROUVÉ, 2 points mineurs relevés et corrigés avant commit :
+  `alignItems: "center"` manquant sur `modelesRow` — ajouté, cohérent avec
+  les autres rows du fichier utilisant `InfoBulle` ; commentaires
+  initialement marqués "RÈGLE À NE JAMAIS CASSER" repassés en "RÈGLE :"
+  simple, cohérent avec la convention du fichier pour un ajout additif
+  mineur sans piège de régression). tsc/lint vérifiés propres.
 
 ### P049 — Onboarding : pas de retour explicite sur la contrainte de mot de passe (8 caractères)
 
