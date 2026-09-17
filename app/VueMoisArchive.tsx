@@ -4,7 +4,7 @@ import { Alert, Modal, StyleSheet, TouchableOpacity, View } from "react-native";
 import { BarreProgression } from "./BarreProgression";
 import { BoutonPrincipal } from "./BoutonPrincipal";
 import { PALETTE_COULEURS } from "./ColorPicker";
-import { useObjectifs } from "./store";
+import { parseDateFixeLocale, useObjectifs } from "./store";
 import { formaterMontant } from "../utils/montant";
 import { Text } from "./Texte";
 import { TextInput } from "./TexteInput";
@@ -23,7 +23,7 @@ import {
 } from "../utils/exportExcel";
 
 function formaterDateCourte(dateISO: string): string {
-  const d = new Date(dateISO);
+  const d = parseDateFixeLocale(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
   return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
 }

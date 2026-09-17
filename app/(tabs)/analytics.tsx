@@ -15,7 +15,13 @@ import {
   View,
 } from "react-native";
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from "react-native-svg";
-import { Enveloppe, SnapshotMois, Transaction, useObjectifs } from "../store";
+import {
+  Enveloppe,
+  parseDateFixeLocale,
+  SnapshotMois,
+  Transaction,
+  useObjectifs,
+} from "../store";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { calculerSeries, Serie, TypeSerie } from "../../utils/series";
 import {
@@ -3496,7 +3502,7 @@ export default function Analytics() {
     transactionsSource
       .filter((t) => ids.has(t.enveloppeId))
       .filter((t) => {
-        const d = new Date(t.date);
+        const d = parseDateFixeLocale(t.date);
         return d >= debutPeriodeFlux && d <= finPeriodeFlux;
       })
       .forEach((t) => {

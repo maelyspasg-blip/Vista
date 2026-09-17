@@ -41,7 +41,12 @@ import { NombreAnime } from "../NombreAnime";
 import { CocheAnimee } from "../CocheAnimee";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { couleurLaPlusDistincte } from "../../utils/couleurs";
-import { Enveloppe, Objectif, useObjectifs } from "../store";
+import {
+  Enveloppe,
+  Objectif,
+  parseDateFixeLocale,
+  useObjectifs,
+} from "../store";
 import {
   chargerEtatsInsights,
   chargerNbAmeliorations,
@@ -90,7 +95,7 @@ function premierJourMoisISO(date: Date): string {
 }
 
 function formaterDateLongue(dateISO: string): string {
-  const d = new Date(dateISO);
+  const d = parseDateFixeLocale(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
   return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
 }
@@ -719,7 +724,7 @@ export default function Dashboard() {
     .filter((e) => e.estFinancier && e.montant)
     .filter((e) => !e.categorieLiee || e.categorieLiee === "Aucune")
     .filter((e) => {
-      const d = new Date(e.date);
+      const d = parseDateFixeLocale(e.date);
       d.setHours(0, 0, 0, 0);
       const aujourdhui = new Date();
       aujourdhui.setHours(0, 0, 0, 0);
@@ -2547,7 +2552,7 @@ export default function Dashboard() {
                     onDayPress={(day) => {
                       setDateEntreeBudget(day.dateString);
                       setMoisComptageEntreeBudget(
-                        premierJourMoisISO(new Date(day.dateString)),
+                        premierJourMoisISO(parseDateFixeLocale(day.dateString)),
                       );
                     }}
                     markedDates={{

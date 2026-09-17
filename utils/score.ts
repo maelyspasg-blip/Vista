@@ -3,6 +3,7 @@
 // .upsert() vers Supabase — calcul pur à partir de données déjà chargées,
 // toute écriture vit dans app/store.ts (cf. RÈGLE DE SÉCURITÉ en tête de
 // ce fichier).
+import { parseDateFixeLocale } from "./dateOnly";
 import { DonneesSeries } from "./series";
 
 type EnveloppeAvecNom = {
@@ -233,7 +234,7 @@ function scoreRegularite(
 
   const joursActifs = new Set<string>();
   [...transactions, ...historiquePaiements].forEach((e) => {
-    const d = new Date(e.date);
+    const d = parseDateFixeLocale(e.date);
     if (Number.isNaN(d.getTime())) return;
     if (d >= dateDebut && d <= dateFin) {
       joursActifs.add(

@@ -2,6 +2,7 @@ import { Asset } from "expo-asset";
 import { Directory, File } from "expo-file-system";
 import { widgetsDirectory } from "expo-widgets";
 import type { Evenement, Transaction } from "../app/store";
+import { parseDateFixeLocale } from "./dateOnly";
 import { genererOccurrencesEvenement } from "./evenements";
 import {
   PlanningWidget,
@@ -119,8 +120,12 @@ function evenementRecurrentTombeCeJourLa(e: Evenement, reference: Date): boolean
   const finFenetre = new Date(reference);
   finFenetre.setHours(23, 59, 59, 999);
   return (
-    genererOccurrencesEvenement(new Date(e.date), e.frequence, debutFenetre, finFenetre)
-      .length > 0
+    genererOccurrencesEvenement(
+      parseDateFixeLocale(e.date),
+      e.frequence,
+      debutFenetre,
+      finFenetre,
+    ).length > 0
   );
 }
 

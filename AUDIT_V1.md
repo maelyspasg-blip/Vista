@@ -1059,7 +1059,16 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   - `utils/widgetsSync.ts:122` (`genererOccurrencesEvenement(new Date(e.date), ...)`) puis `.setHours(0,0,0,0)` interne (`utils/evenements.ts:25`) — décale le jour effectif affiché sur le widget Planning pour un fuseau négatif.
 - **Description** : même cause racine que P004/P005/P023/P032 — `new Date(dateOnlyString)` (UTC) mélangé à des accesseurs locaux. `utils/score.ts`/`utils/trophees.ts`/`utils/widgetsSync.ts` sont des fichiers `utils/`, donc à corriger via `utils/dateOnly.ts` (déjà créé, zéro dépendance, importable directement) plutôt qu'une nouvelle copie locale.
 - **Piste de correction** : même correctif (`parseDateFixeLocale` de `utils/dateOnly.ts`), à traiter dans un lot dédié plutôt que d'élargir davantage le commit en cours — ce report suit explicitement la recommandation du code-reviewer ("documenter et traiter dans un lot ultérieur, cohérent avec la philosophie du loop autonome").
-- **Statut** : NOUVEAU — VÉRIFIÉ (trouvé par grep en revue de code), correction non encore appliquée.
+- **Statut** : **CORRIGÉ (2026-09-17)** — les 8 sites (7 emplacements distincts,
+  `index.tsx` en comptant 3) corrigés avec `parseDateFixeLocale`, importée
+  depuis `"../store"` pour les fichiers `app/*.tsx` (déjà ré-exportée) et
+  depuis `"./dateOnly"` pour les fichiers `utils/*.ts` (jamais depuis
+  `store.ts`, règle d'architecture respectée). Revu par code-reviewer
+  (APPROUVÉ) : grep exhaustif confirmant zéro site résiduel du même motif
+  sur tout le repo, `debutPeriodeFlux`/`finPeriodeFlux` (analytics.tsx)
+  confirmées non touchées par erreur (déjà correctes), comportement Europe
+  vérifié inchangé (simulation `TZ=Europe/Paris`). tsc/lint vérifiés propres
+  (10 lignes / 49 problèmes, sous la baseline).
 
 ### P041 — Aperçu : suppression d'un objectif d'épargne sans AUCUNE confirmation (3 sites)
 

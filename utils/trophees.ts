@@ -5,6 +5,7 @@
 // ce fichier).
 import { Enveloppe, Objectif, PaiementHistorique, SnapshotMois, Transaction } from "../app/store";
 import { calculerRythmeObjectif } from "./conseils";
+import { parseDateFixeLocale } from "./dateOnly";
 
 export type Trophee = {
   id: string;
@@ -34,7 +35,7 @@ function calculerStreaksJoursActifs(
 ): { meilleur: number; actuel: number } {
   const joursActifs = new Set<string>();
   [...transactions, ...historiquePaiements].forEach((e) => {
-    const d = new Date(e.date);
+    const d = parseDateFixeLocale(e.date);
     if (!Number.isNaN(d.getTime())) {
       joursActifs.add(dateVersCle(new Date(d.getFullYear(), d.getMonth(), d.getDate())));
     }
