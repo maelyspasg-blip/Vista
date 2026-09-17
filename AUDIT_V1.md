@@ -868,7 +868,20 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Repro tracée à la main** : événement récurrent mensuel créé le 31 janvier 2026 → février n'a que 28 jours en 2026 → `setMonth` normalise en **3 mars** (pas "fin de mois") → itération suivante pousse encore d'un mois depuis le 3 → la récurrence glisse définitivement du 31 au 3, sans jamais se stabiliser. Même mécanisme pour un événement annuel créé un 29 février : l'année suivante (non bissextile) déborde sur le 1er mars, décalage qui reste ensuite figé.
 - **Impact** : loyer/abonnement/anniversaire planifié le 31 (ou 29/30) d'un mois, ou événement annuel un 29 février, voit sa date effective dériver silencieusement au fil des occurrences.
 - **Piste de correction** : calculer explicitement le dernier jour du mois cible (`new Date(year, month+1, 0).getDate()`) et clamper, plutôt que laisser `setMonth`/`setFullYear` déborder ; décider explicitement d'une règle produit pour le 29 février.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + traçage des itérations). Fichier partagé avec le widget Planning (actuellement désactivé) — la correction bénéficiera aussi au widget.
+- **Statut** : **CORRIGÉ (2026-09-17)** — chaque occurrence reconstruite
+  depuis `jourAncrage` (le jour-du-mois original, capturé une fois) clampé
+  au nombre de jours réels du mois cible, jamais depuis le jour
+  potentiellement déjà dérivé d'une itération précédente. Règle de
+  clamping uniforme pour mensuel ET annuel (décision autonome documentée
+  en §2.1 pour le cas du 29 février — retombe sur le 28, revient au 29
+  l'année bissextile suivante). Revu par code-reviewer (APPROUVÉ) : a
+  rejoué l'ANCIEN code sur le cas "31 janvier" pour confirmer formellement
+  le bug (`31/01 → 03/03 → 03/04...`), puis le nouveau (`31/01 → 28/02 →
+  31/03 → 30/04...`) ; cas du 29 février bissextile tracé sur 6 ans ; cas
+  normal (jour 15) confirmé strictement inchangé ; les 2 appelants
+  (`planning.tsx`, `utils/widgetsSync.ts` — le widget) confirmés
+  bénéficier du correctif sans modification de leur côté (signature
+  inchangée). tsc/lint vérifiés propres.
 
 ### P027 — Deux catégories Fixe/Entrée vivantes homonymes : la déduplication par nom masque silencieusement l'échéance de l'une des deux dans Planning (extension de P021)
 
@@ -1280,6 +1293,30 @@ la boucle.
   `git stash` dans les prompts donnés aux agents de revue (leur demander
   `git diff`/`git show` en lecture seule suffit pour comparer, sans jamais
   modifier l'état du working tree).
+
+### 2026-09-17 — P026 : règle de clamping pour un événement annuel créé un 29 février
+
+- **Doute rencontré** : en corrigeant la dérive de récurrence (31 janvier
+  mensuel qui glissait indéfiniment, jamais stable sur "fin de mois"), le
+  même mécanisme de clamping s'applique naturellement à un événement ANNUEL
+  créé un 29 février — mais son comportement dans une année non bissextile
+  est un choix produit, pas juste un bug : retomber sur le 28 février, ou
+  reporter au 1er mars ?
+- **Décision prise** (la plus conservative) : retombe sur le 28 février —
+  même règle de clamping ("dernier jour valide du mois cible") appliquée
+  uniformément au cas mensuel et au cas annuel, sans traitement spécial
+  pour le 29 février. Revient naturellement au 29 février l'année
+  bissextile suivante (vérifié : 2024→2025→2026→2027→28 fév, 2028→29 fév).
+- **Pourquoi** : c'est le comportement le plus prévisible et le plus
+  standard (aligné sur Google Calendar/la plupart des calendriers grand
+  public) ; un report au 1er mars aurait été tout aussi défendable mais
+  introduisait un cas spécial dans le code pour une seule occurrence sur
+  365, alors que le clamping uniforme couvre les deux cas (mensuel/annuel)
+  avec une seule règle simple à auditer.
+- **Fichiers concernés** : `utils/evenements.ts` (`genererOccurrencesEvenement`).
+- **À reconsidérer si** : Maëlys préfère explicitement un report au 1er mars
+  pour un anniversaire/événement annuel du 29 février — changement d'une
+  ligne (cas spécial dans `avancerDe` pour `nbMois === 12` uniquement).
 
 Gabarit :
 

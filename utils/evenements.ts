@@ -33,13 +33,52 @@ export function genererOccurrencesEvenement(
     return occurrences;
   }
 
-  const cursor = new Date(debut);
+  // RÈGLE À NE JAMAIS CASSER — CLAMPING AU DERNIER JOUR DU MOIS (bug P026,
+  // corrigé le 2026-09-17) : `jourAncrage` retient le jour-du-mois ORIGINAL
+  // (celui de `dateDebut`), jamais celui du cursor déjà avancé. Sans ça,
+  // `setMonth`/`setFullYear` sur un cursor dont le jour n'existe pas dans
+  // le mois cible (ex. le 31 en février) débordait silencieusement sur le
+  // mois suivant (JS normalise plutôt que de rejeter, ex. 31 janvier + 1
+  // mois -> 3 mars), et l'itération suivante repartait de ce jour déjà
+  // dérivé — la récurrence glissait définitivement (31 janvier -> 3 mars
+  // -> 3 avril -> ...) au lieu de se stabiliser sur "fin de mois". Chaque
+  // occurrence est désormais reconstruite depuis `jourAncrage` clampé au
+  // nombre de jours réels du mois cible (31 janvier -> 28/29 février -> 31
+  // mars -> 30 avril -> 31 mai...), jamais depuis le jour potentiellement
+  // déjà dérivé d'une itération précédente.
+  //
+  // Décision autonome (2026-09-17, cf. AUDIT_V1.md §2.1) : un événement
+  // ANNUEL créé un 29 février retombe sur le 28 février les années non
+  // bissextiles — même règle de clamping que le cas mensuel, pas de
+  // traitement spécial. À reconsidérer si Maëlys préfère un report au 1er
+  // mars pour ce cas précis.
+  const jourAncrage = debut.getDate();
+  const dernierJourDuMois = (annee: number, moisIndex0: number) =>
+    new Date(annee, moisIndex0 + 1, 0).getDate();
+  const avancerDe = (base: Date, nbMois: number): Date => {
+    const moisCible = base.getMonth() + nbMois;
+    const anneeCible = base.getFullYear() + Math.floor(moisCible / 12);
+    const moisIndex0 = ((moisCible % 12) + 12) % 12;
+    const jourClampe = Math.min(
+      jourAncrage,
+      dernierJourDuMois(anneeCible, moisIndex0),
+    );
+    return new Date(anneeCible, moisIndex0, jourClampe);
+  };
+
+  let cursor = new Date(debut);
   let iterations = 0;
   while (cursor <= finFenetre && iterations < 1000) {
     if (cursor >= debutFenetre) occurrences.push(new Date(cursor));
-    if (frequence === "semaine") cursor.setDate(cursor.getDate() + 7);
-    else if (frequence === "mois") cursor.setMonth(cursor.getMonth() + 1);
-    else cursor.setFullYear(cursor.getFullYear() + 1);
+    if (frequence === "semaine") {
+      const suivant = new Date(cursor);
+      suivant.setDate(suivant.getDate() + 7);
+      cursor = suivant;
+    } else if (frequence === "mois") {
+      cursor = avancerDe(cursor, 1);
+    } else {
+      cursor = avancerDe(cursor, 12);
+    }
     iterations++;
   }
   return occurrences;
