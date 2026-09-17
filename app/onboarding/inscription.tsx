@@ -15,10 +15,8 @@ import { supabase } from "../../supabaseClient";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
+import { useTheme } from "../ThemeContext";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
-
-const PURPLE = "#8B6FE8";
-const PURPLE_LIGHT = "#F0EEFF";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -26,6 +24,12 @@ export default function Inscription() {
   const router = useRouter();
   const estTablette = useEstTablette();
   const insets = useSafeAreaInsets();
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17 (bug P043) : cet
+  // écran ignorait totalement le thème sombre et le réglage "contraste
+  // renforcé" (couleurs codées en dur) — même geste que
+  // components/OnboardingEtape.tsx, seul écran d'onboarding déjà correct.
+  const { theme, couleurs: C } = useTheme();
+  const fond = theme === "sombre" ? C.fond : C.fondPage;
   const [email, setEmail] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
   const [chargement, setChargement] = useState(false);
@@ -88,7 +92,7 @@ export default function Inscription() {
     <KeyboardAvoidingView
       style={[
         styles.container,
-        { paddingBottom: Math.max(24, insets.bottom + 12) },
+        { backgroundColor: fond, paddingBottom: Math.max(24, insets.bottom + 12) },
       ]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
@@ -101,10 +105,10 @@ export default function Inscription() {
         resizeMode="contain"
       />
       <View style={styles.header}>
-        <Text style={styles.titre}>
+        <Text style={[styles.titre, { color: C.texte }]}>
           {conversionEssai ? "Garder mes données" : "Créer mon compte"}
         </Text>
-        <Text style={styles.sousTitre}>
+        <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
           {conversionEssai
             ? "Ajoute un email et un mot de passe pour transformer ton essai en vrai compte."
             : "Rejoins Vista et prends le contrôle de tes finances"}
@@ -113,17 +117,17 @@ export default function Inscription() {
 
       <View style={styles.form}>
         {confirmationRequise ? (
-          <View style={styles.confirmationBox}>
-            <Text style={styles.confirmationTitre}>
+          <View style={[styles.confirmationBox, { backgroundColor: C.purpleLight }]}>
+            <Text style={[styles.confirmationTitre, { color: C.texte }]}>
               {conversionEssai ? "Presque terminé !" : "Compte créé !"}
             </Text>
-            <Text style={styles.confirmationTexte}>
+            <Text style={[styles.confirmationTexte, { color: C.texte }]}>
               {conversionEssai
                 ? `Vérifie ta boîte mail (${email.trim()}) et confirme ton adresse pour finaliser la conversion de ton essai. Tes données sont conservées.`
                 : `Vérifie ta boîte mail (${email.trim()}) et confirme ton adresse avant de te connecter.`}
             </Text>
             <BoutonPrincipal
-              style={styles.btnPrincipal}
+              style={[styles.btnPrincipal, { backgroundColor: C.purple }]}
               onPress={() =>
                 router.push(conversionEssai ? "/(tabs)" : "/onboarding/connexion")
               }
@@ -136,11 +140,11 @@ export default function Inscription() {
           </View>
         ) : (
           <>
-            <Text style={styles.label}>Email</Text>
+            <Text style={[styles.label, { color: C.texte }]}>Email</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: C.carte, color: C.texte }]}
               placeholder="ton@email.com"
-              placeholderTextColor="#CCC"
+              placeholderTextColor={C.texteMuted}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -152,11 +156,11 @@ export default function Inscription() {
               editable={!chargement}
             />
 
-            <Text style={styles.label}>Mot de passe</Text>
+            <Text style={[styles.label, { color: C.texte }]}>Mot de passe</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: C.carte, color: C.texte }]}
               placeholder="Au moins 8 caractères"
-              placeholderTextColor="#CCC"
+              placeholderTextColor={C.texteMuted}
               secureTextEntry
               value={motDePasse}
               onChangeText={(v) => {
@@ -166,12 +170,19 @@ export default function Inscription() {
               editable={!chargement}
             />
 
-            {!!erreur && <Text style={styles.erreurTexte}>{erreur}</Text>}
+            {!!erreur && (
+              <Text style={[styles.erreurTexte, { color: C.rougeText }]}>
+                {erreur}
+              </Text>
+            )}
 
             <BoutonPrincipal
               style={[
                 styles.btnPrincipal,
-                { opacity: formulaireValide && !chargement ? 1 : 0.5 },
+                {
+                  backgroundColor: C.purple,
+                  opacity: formulaireValide && !chargement ? 1 : 0.5,
+                },
               ]}
               onPress={creerCompte}
               activeOpacity={0.8}
@@ -191,12 +202,14 @@ export default function Inscription() {
 
       {!confirmationRequise && !conversionEssai && (
         <View style={styles.footer}>
-          <Text style={styles.footerTexte}>Déjà un compte ? </Text>
+          <Text style={[styles.footerTexte, { color: C.texteMuted }]}>
+            Déjà un compte ?{" "}
+          </Text>
           <TouchableOpacity
             onPress={() => router.push("/onboarding/connexion")}
             activeOpacity={0.7}
           >
-            <Text style={[styles.footerLien, { color: PURPLE }]}>
+            <Text style={[styles.footerLien, { color: C.purple }]}>
               Se connecter
             </Text>
           </TouchableOpacity>
@@ -210,7 +223,6 @@ export default function Inscription() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
     paddingHorizontal: 28,
     paddingTop: 64,
   },
@@ -221,12 +233,10 @@ const styles = StyleSheet.create({
   titre: {
     fontSize: 28,
     fontWeight: "700",
-    color: "#1A1A1A",
     marginBottom: 10,
   },
   sousTitre: {
     fontSize: 15,
-    color: "#888",
     lineHeight: 22,
   },
   form: {},
@@ -237,26 +247,21 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#1A1A1A",
     marginBottom: 8,
     letterSpacing: 0.3,
   },
   input: {
-    backgroundColor: "#F7F7F7",
     borderRadius: 14,
     padding: 16,
     fontSize: 15,
-    color: "#1A1A1A",
     marginBottom: 16,
   },
   erreurTexte: {
     fontSize: 13,
-    color: "#E24B4A",
     marginTop: -10,
     marginBottom: 16,
   },
   btnPrincipal: {
-    backgroundColor: PURPLE,
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: "center",
@@ -274,26 +279,22 @@ const styles = StyleSheet.create({
   },
   footerTexte: {
     fontSize: 14,
-    color: "#888",
   },
   footerLien: {
     fontSize: 14,
     fontWeight: "600",
   },
   confirmationBox: {
-    backgroundColor: PURPLE_LIGHT,
     borderRadius: 16,
     padding: 20,
   },
   confirmationTitre: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#1A1A1A",
     marginBottom: 8,
   },
   confirmationTexte: {
     fontSize: 14,
-    color: "#4A4A4A",
     lineHeight: 20,
     marginBottom: 20,
   },

@@ -3,8 +3,7 @@ import { Image, KeyboardAvoidingView, Platform, StyleSheet, TouchableOpacity, Vi
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "../Texte";
 import { BoutonPrincipal } from "../BoutonPrincipal";
-
-const PURPLE = "#8B6FE8";
+import { useTheme } from "../ThemeContext";
 
 // Écran terminal atteint uniquement via la redirection forcée de
 // app/_layout.tsx quand un essai invité a expiré (estGuestExpire) — pas de
@@ -13,12 +12,19 @@ const PURPLE = "#8B6FE8";
 export default function EssaiExpire() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17 (bug P043) : cet
+  // écran ignorait totalement le thème sombre et le réglage "contraste
+  // renforcé" (couleurs codées en dur) — même geste que
+  // components/OnboardingEtape.tsx (`fond` = C.fond en sombre, C.fondPage
+  // en clair), seul écran d'onboarding déjà correct sur ce point.
+  const { theme, couleurs: C } = useTheme();
+  const fond = theme === "sombre" ? C.fond : C.fondPage;
 
   return (
     <KeyboardAvoidingView
       style={[
         styles.container,
-        { paddingBottom: Math.max(24, insets.bottom + 12) },
+        { backgroundColor: fond, paddingBottom: Math.max(24, insets.bottom + 12) },
       ]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
@@ -29,13 +35,15 @@ export default function EssaiExpire() {
       />
 
       <View style={styles.contenu}>
-        <Text style={styles.titre}>Ta période d&apos;essai est terminée.</Text>
-        <Text style={styles.sousTitre}>
+        <Text style={[styles.titre, { color: C.texte }]}>
+          Ta période d&apos;essai est terminée.
+        </Text>
+        <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
           Crée un compte pour continuer à profiter de Vista.
         </Text>
 
         <BoutonPrincipal
-          style={styles.btnPrincipal}
+          style={[styles.btnPrincipal, { backgroundColor: C.purple }]}
           onPress={() => router.replace("/onboarding/inscription")}
           activeOpacity={0.8}
         >
@@ -47,7 +55,9 @@ export default function EssaiExpire() {
           onPress={() => router.replace("/onboarding/connexion")}
           activeOpacity={0.7}
         >
-          <Text style={styles.lienSecondaireTexte}>Se connecter</Text>
+          <Text style={[styles.lienSecondaireTexte, { color: C.texteMuted }]}>
+            Se connecter
+          </Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -57,7 +67,6 @@ export default function EssaiExpire() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
     paddingHorizontal: 28,
     paddingTop: 64,
   },
@@ -69,17 +78,14 @@ const styles = StyleSheet.create({
   titre: {
     fontSize: 26,
     fontWeight: "700",
-    color: "#1A1A1A",
     marginBottom: 10,
   },
   sousTitre: {
     fontSize: 15,
-    color: "#888",
     lineHeight: 22,
     marginBottom: 32,
   },
   btnPrincipal: {
-    backgroundColor: PURPLE,
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: "center",
@@ -96,7 +102,6 @@ const styles = StyleSheet.create({
   lienSecondaireTexte: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#888",
     textDecorationLine: "underline",
   },
 });

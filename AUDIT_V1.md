@@ -969,7 +969,16 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Fichiers** : `onboarding/connexion.tsx`, `invite.tsx`, `inscription.tsx`, `essai-expire.tsx` — aucun n'importe `useTheme()`/`useAccessibilite()`, toutes leurs couleurs sont codées en dur (`#FFFFFF`, `#1A1A1A`, `#888`...). Contraste : `onboarding/preferences.tsx` + `components/OnboardingEtape.tsx` utilisent bien `useTheme()`.
 - **Conséquence concrète** : (a) un utilisateur en mode sombre qui se déconnecte (flux réel : `profil.tsx:766` → `router.replace("/onboarding/connexion")`) revoit un écran blanc forcé, rupture visuelle nette ; (b) le réglage "Contraste renforcé" (`AccessibiliteContext`) n'a AUCUN effet sur ces 4 écrans. **Contraste mesuré sous le seuil WCAG AA** : `#888888` sur `#FFFFFF` ≈ 3.5:1, `#AAAAAA` sur `#FFFFFF` ≈ 2.3:1 (seuil AA texte : 4.5:1) — problème de lisibilité réel sur les tout premiers écrans vus par un utilisateur, pas seulement esthétique.
 - **Piste de correction** : câbler `useTheme()`/`useAccessibilite()` sur ces 4 écrans, remplacer les gris hardcodés par `C.texteMuted`, cohérent avec `preferences.tsx`.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + calcul de contraste). Correction plus large que P041/P042 (4 fichiers, plusieurs couleurs chacun) — à traiter dans un lot dédié.
+- **Statut** : **CORRIGÉ (2026-09-17)** — les 4 écrans importent `useTheme()`,
+  `const fond = theme === "sombre" ? C.fond : C.fondPage;` (même pattern que
+  `OnboardingEtape.tsx`), toutes les couleurs codées en dur remplacées par
+  les tokens `C.*` correspondants (`texte`/`texteMuted`/`carte`/`purple`/
+  `purpleLight`/`purpleText`/`rougeText`). Les `#FFFFFF` restants (texte/
+  spinner sur bouton violet) volontairement laissés fixes — confirmé par
+  code-reviewer que `C.purple` a la même valeur hex en clair et en sombre.
+  Revu par code-reviewer (APPROUVÉ) : tokens vérifiés existants et bien
+  choisis, aucune logique métier touchée (diff filtré confirmé). tsc/lint
+  vérifiés propres (10 lignes / 49 problèmes, sous la baseline).
 
 ### P044 — Planning : navigation `‹`/`›` sans accessibilité, aucun raccourci "revenir à aujourd'hui"
 
