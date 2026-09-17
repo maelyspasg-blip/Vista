@@ -3974,6 +3974,31 @@ export function useObjectifs() {
       });
       synchroniserWidgetPlanning(etat.evenements, etat.transactions);
 
+      // RÈGLE À NE JAMAIS CASSER — NOTIFICATION PUSH SUR BASCULE VERS
+      // "COMMUN" (bug P030, corrigé le 2026-09-17) : ajouterEvenement
+      // notifie déjà le partenaire à la création d'un événement commun
+      // (cf. RÈGLE plus haut) — ici, le même geste pour la bascule
+      // personnel -> commun via édition, jusqu'ici totalement silencieuse
+      // (le partenaire ne le découvrait qu'en rouvrant Planning, où la
+      // bannière in-app fonctionne déjà correctement — seule la
+      // notification push manquait). Jamais attendue (pas de `await`),
+      // best-effort et silencieuse en cas d'échec, comme à la création.
+      if (
+        "visibilite" in champs &&
+        champs.visibilite === "commun" &&
+        ancien?.visibilite !== "commun" &&
+        etat.userId
+      ) {
+        const nouveau = etat.evenements.find((e) => e.id === id);
+        if (nouveau) {
+          envoyerNotificationEvenementCommun(
+            nouveau,
+            etat.prenom,
+            etat.userId,
+          ).catch(() => {});
+        }
+      }
+
       const colonnes: Record<string, unknown> = {};
       if ("nom" in champs) colonnes.nom = champs.nom;
       if ("date" in champs) colonnes.date = champs.date;

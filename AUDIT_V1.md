@@ -927,7 +927,14 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Fichier** : `app/store.ts:3579-3583` (`ajouterEvenement`, seul site d'appel de `envoyerNotificationEvenementCommun`) vs `modifierEvenement` (aucun appel).
 - **Description** : basculer un événement de "personnel" à "commun" via édition ne notifie jamais le partenaire (seule la création le fait) — il ne le découvre qu'en rouvrant Planning (la bannière in-app, elle, fonctionne dans ce cas).
 - **Piste de correction** : appeler `envoyerNotificationEvenementCommun` aussi dans `modifierEvenement` quand `visibilite` passe de `personnel` à `commun`.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+- **Statut** : **CORRIGÉ (2026-09-17)** — exactement la piste ci-dessus,
+  même geste best-effort (pas de `await`) que `ajouterEvenement`. Revu par
+  code-reviewer (APPROUVÉ) : `ancien` confirmé capturé avant le `setEtat`
+  (comparaison correcte), les 4 cas d'exclusion tracés à la main (déjà
+  commun, redevient personnel, `visibilite` non touché, `userId` absent),
+  signature de `envoyerNotificationEvenementCommun` vérifiée, isolation du
+  chemin partenaire (`modifierEvenementPartenaire`, jamais affecté)
+  confirmée. tsc/lint vérifiés propres.
 
 ### P031 — Le switch "Événement commun" reste interactif sur un événement du partenaire, mais son changement n'est jamais persisté
 
