@@ -1719,6 +1719,8 @@ export default function Planning() {
           style={[styles.btnPlus, { backgroundColor: C.purple }]}
           activeOpacity={0.7}
           onPress={ouvrirCreationComplete}
+          accessibilityRole="button"
+          accessibilityLabel="Créer un événement"
         >
           <Text style={styles.btnPlusTexte}>+</Text>
         </TouchableOpacity>
@@ -1852,20 +1854,34 @@ export default function Planning() {
       </CibleTutoriel>
 
       <View style={styles.dayHeader}>
-        <Text
-          style={[
-            styles.dayTitle,
-            { color: C.texte },
-            vue === "mois" && { textTransform: "capitalize" },
-          ]}
+        {/* RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17 (bug P044) :
+            tap sur le titre de période = retour direct à aujourd'hui, pour
+            éviter de devoir retaper "‹" autant de fois qu'on a avancé/reculé
+            — aucun nouveau bouton visible ajouté, juste une affordance sur
+            un élément déjà là. */}
+        <TouchableOpacity
+          onPress={() => setDateActuelle(new Date())}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Revenir à aujourd'hui"
         >
-          {libelleEnTete()}
-        </Text>
+          <Text
+            style={[
+              styles.dayTitle,
+              { color: C.texte },
+              vue === "mois" && { textTransform: "capitalize" },
+            ]}
+          >
+            {libelleEnTete()}
+          </Text>
+        </TouchableOpacity>
         <View style={styles.dayNav}>
           <TouchableOpacity
             style={[styles.navArrow, { backgroundColor: C.fondSecondaire }]}
             onPress={allerPrecedent}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Période précédente"
           >
             <Text style={[styles.navArrowTexte, { color: C.purple }]}>‹</Text>
           </TouchableOpacity>
@@ -1873,6 +1889,8 @@ export default function Planning() {
             style={[styles.navArrow, { backgroundColor: C.fondSecondaire }]}
             onPress={allerSuivant}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Période suivante"
           >
             <Text style={[styles.navArrowTexte, { color: C.purple }]}>›</Text>
           </TouchableOpacity>

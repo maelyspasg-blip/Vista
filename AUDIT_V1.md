@@ -987,7 +987,13 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Fichier** : `planning.tsx:1848-1862` (glyphes texte `‹`/`›` sans `accessibilityLabel`/`accessibilityRole`).
 - **Description** : un lecteur d'écran énonce le caractère brut plutôt qu'une action compréhensible. Par ailleurs, grep exhaustif sur "Aujourd'hui" comme libellé de bouton → aucune occurrence : un utilisateur qui navigue plusieurs semaines/mois doit retaper `‹` autant de fois pour revenir à aujourd'hui — trop de clics pour une action fréquente.
 - **Piste de correction** : `accessibilityLabel="Période précédente"/"Période suivante"` ; ajouter un tap sur le titre de période ou un bouton dédié "Aujourd'hui".
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+- **Statut** : **CORRIGÉ (2026-09-17)** — labels ajoutés sur les 2 flèches ;
+  titre de période enveloppé dans un `TouchableOpacity` (`setDateActuelle(new
+  Date())`, `accessibilityLabel="Revenir à aujourd'hui"`), sans nouveau
+  bouton visuel. Revu par code-reviewer (APPROUVÉ) : layout `dayHeader`
+  inchangé, `dateActuelle` confirmée être la seule source dérivant
+  Jour/Semaine/Mois, aucun conflit de geste avec `gesteSwipeVue` (zone
+  différente). tsc/lint vérifiés propres.
 
 ### P045 — Planning : bouton "+" du header sans accessibilité (contrairement au FAB équivalent)
 
@@ -995,7 +1001,10 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Trouvé par** : audit UX écran par écran (2026-09-17).
 - **Fichier** : `planning.tsx:1702-1707` (`btnPlus`, sans `accessibilityLabel`) vs `:2144-2151` (`fabPlanning`, vue Jour, avec `accessibilityLabel="Créer un événement"` correct) — même action (`ouvrirCreationComplete`), un seul étiqueté.
 - **Piste de correction** : ajouter `accessibilityRole="button"` + `accessibilityLabel="Créer un événement"` sur `btnPlus`.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+- **Statut** : **CORRIGÉ (2026-09-17)** — `accessibilityRole="button"` +
+  `accessibilityLabel="Créer un événement"` ajoutés (identique au libellé
+  déjà présent sur le FAB équivalent de la vue Jour). Revu par
+  code-reviewer (APPROUVÉ). tsc/lint vérifiés propres.
 
 ### P046 — Profil : ordre navigation/confirmation inversé sur la suppression de compte, et boutons "Se déconnecter"/"Supprimer mon compte" peu différenciés
 
