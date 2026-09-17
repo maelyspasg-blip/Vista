@@ -600,7 +600,13 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   aurait dû l'être).
 - **Piste de correction** : comparer des valeurs passées par `formaterMontant`
   (arrondi centimes) avant tout `<=`/`<`/`===`, ou tolérance epsilon explicite.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), correction non encore appliquée.
+- **Statut** : **CORRIGÉ (2026-09-17)** — tolérance epsilon appliquée sur le
+  site identifié (`utils/series.ts`, série "Budget respecté") :
+  `p.depenseTotal <= p.budgetTotal + 0.005` (demi-centime, aligné sur le
+  seuil d'arrondi d'affichage). Revu par code-reviewer (APPROUVÉ) : marge
+  vérifiée confortable (dérive flottante réelle ≈ 1e-13, tolérance 0.005 —
+  plusieurs ordres de grandeur d'écart), aucun vrai dépassement significatif
+  masqué (retracé à la main). tsc/lint vérifiés propres.
 
 ### P015 — Violation de la règle d'architecture "`utils/` ne doit pas dépendre de `store.ts`, et l'inverse non plus"
 

@@ -121,8 +121,17 @@ export function calculerSeries(donnees: DonneesSeries): Serie[] {
     (p, i) => i > 0 && p.epargne > points[i - 1].epargne,
   );
 
+  // RÈGLE À NE JAMAIS CASSER — TOLÉRANCE EPSILON (bug P014, corrigé le
+  // 2026-09-17) : `depense` s'accumule transaction par transaction sans
+  // jamais être ré-arrondi (ex. 19.99+15.50+7.33+42.10+3.33+8.88+12.34 =
+  // 109.46999999999998, pas 109.47, dérive flottante JS classique). Sans
+  // cette tolérance, un total "logiquement" égal au budget pouvait tomber
+  // juste au-dessus par un epsilon invisible à l'affichage, faisant
+  // basculer à tort ce trophée à "non respecté". 0.005 = un demi-centime,
+  // largement sous le seuil de toute vraie dépassement, jamais assez pour
+  // masquer un dépassement réel (arrondi à 2 décimales à l'affichage).
   const budgetRespecteParMois = points.map(
-    (p) => p.budgetTotal > 0 && p.depenseTotal <= p.budgetTotal,
+    (p) => p.budgetTotal > 0 && p.depenseTotal <= p.budgetTotal + 0.005,
   );
 
   const seuil = donnees.seuilEpargneConstante;
