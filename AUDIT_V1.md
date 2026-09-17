@@ -943,7 +943,14 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Fichier** : `utils/espacePartage.ts:885-918` (`modifierEvenementPartenaire`, n'inclut jamais `visibilite` dans l'`.update()`), `app/(tabs)/planning.tsx:3251-3274`.
 - **Description** : en éditant un événement commun du partenaire, le switch bascule visuellement mais le changement n'est jamais envoyé à Supabase — no-op silencieux. Rouvrir l'événement montre à nouveau "commun" sans explication (le commentaire RÈGLE du code invoque la RLS, mais en pratique le champ n'est même pas envoyé — l'effet perçu est correct, juste sans retour explicite).
 - **Piste de correction** : masquer/désactiver ce switch quand l'événement en édition appartient au partenaire, avec un texte explicatif.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+- **Statut** : **CORRIGÉ (2026-09-17)** — `disabled={evenementEnEditionEstPartenaire}`
+  + texte explicatif ("Seul·e {prénom} peut rendre cet événement personnel").
+  Revu par code-reviewer (APPROUVÉ) : a tracé tout le chemin d'édition pour
+  confirmer qu'un événement `personnel` du partenaire n'est jamais
+  atteignable en édition (garde `if (ev.visibilite !== "commun") return;`
+  dans `gererClicEvenement`) — l'hypothèse implicite du nouveau texte
+  ("l'événement EST actuellement commun") tient toujours ; cas normal (mon
+  propre événement) confirmé strictement inchangé. tsc/lint vérifiés propres.
 
 ### P032 — Budget : parsing UTC/local incorrect répliqué 3 fois de plus (variante de P004/P023, non catalogué jusqu'ici)
 

@@ -3303,12 +3303,25 @@ export default function Planning() {
                           <Text style={[styles.switchLabel, { color: C.texte }]}>
                             Événement commun
                           </Text>
+                          {/* RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17
+                              (bug P031) : sur un événement du PARTENAIRE,
+                              modifierEvenementPartenaire (utils/espacePartage.ts)
+                              n'envoie jamais visibilite à Supabase — la RLS
+                              rejetterait de toute façon tout passage vers
+                              'personnel' (WITH CHECK exige 'commun'), donc ce
+                              switch restait interactif mais son changement
+                              n'était jamais persisté (no-op silencieux,
+                              aucune explication à l'utilisateur). Désactivé
+                              + texte explicite sur un événement du
+                              partenaire plutôt qu'un silence trompeur. */}
                           <Text
                             style={[styles.switchSub, { color: C.texteMuted }]}
                           >
-                            {visibiliteEvent === "commun"
-                              ? `Visible par ${membrePartenaire?.prenom || "ton/ta partenaire"}`
-                              : "Visible par toi seulement"}
+                            {evenementEnEditionEstPartenaire
+                              ? `Seul·e ${membrePartenaire?.prenom || "ton/ta partenaire"} peut rendre cet événement personnel`
+                              : visibiliteEvent === "commun"
+                                ? `Visible par ${membrePartenaire?.prenom || "ton/ta partenaire"}`
+                                : "Visible par toi seulement"}
                           </Text>
                         </View>
                         <Switch
@@ -3316,6 +3329,7 @@ export default function Planning() {
                           onValueChange={(val) =>
                             setVisibiliteEvent(val ? "commun" : "personnel")
                           }
+                          disabled={evenementEnEditionEstPartenaire}
                           trackColor={{ false: C.separateur, true: C.purpleLight }}
                           thumbColor={visibiliteEvent === "commun" ? C.purple : "#FFF"}
                         />
