@@ -1167,7 +1167,15 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Fichiers** : `profil.tsx:836-849` (séquence `signOut()` → `reinitialiserEtatUtilisateur()` → `router.replace("/onboarding/connexion")` → **puis** `Alert.alert("Compte supprimé", ...)`) ; `profil.tsx:1687-1719` (les 2 boutons partagent le même style `btnSecondaire`, seule différence : couleur du texte `#E24B4A` sur "Supprimer mon compte").
 - **Description** : le message de confirmation finale s'affiche APRÈS avoir déjà navigué vers l'écran de connexion — récit utilisateur illogique (pas bloquant, l'Alert natif s'affiche quand même). Par ailleurs, les 2 boutons de fin de section (déconnexion vs suppression définitive) sont visuellement quasi identiques — seule la couleur de texte distingue une action réversible d'une action irréversible.
 - **Piste de correction** : afficher l'Alert de confirmation AVANT `router.replace(...)` (navigation déclenchée depuis le `onPress` du bouton "OK") ; ajouter un espacement/fond teinté plus marqué sur le bouton de suppression.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code). Écran globalement le plus rigoureux de l'app sur les confirmations destructives (référence pour P041/P042) — ces 2 points sont mineurs en comparaison.
+- **Statut** : **CORRIGÉ (2026-09-17)** — Alert affichée avant la navigation
+  (`router.replace` déplacé dans le `onPress` du bouton "OK") ; bouton
+  "Supprimer mon compte" avec fond teinté `C.rougeLight` + `marginTop: 24`
+  (au lieu de 12) pour le distinguer de "Se déconnecter" au-dessus. Revu
+  par code-reviewer (APPROUVÉ) : ordre métier `signOut`/
+  `reinitialiserEtatUtilisateur` confirmé inchangé, `C.rougeLight` vérifié
+  pour les 2 thèmes, aucun conflit de style. Point mineur noté hors scope
+  (texte du bouton en `#E24B4A` codé en dur plutôt que `C.rougeText` —
+  préexistant, pas introduit par ce correctif). tsc/lint vérifiés propres.
 
 ### P047 — Onboarding : aucun bouton retour sur `invite.tsx`, incohérence de skippabilité entre les 4 premières étapes de `preferences.tsx`
 

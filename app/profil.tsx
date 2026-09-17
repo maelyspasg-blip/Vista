@@ -855,10 +855,16 @@ export default function Profil() {
     // — d'autant plus importante ici, un compte supprimé ne doit à aucun
     // prix laisser sa photo/son nom visibles pour la prochaine connexion.
     reinitialiserEtatUtilisateur();
-    router.replace("/onboarding/connexion");
+    // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17 (bug P046) : l'Alert
+    // de confirmation s'affiche AVANT la navigation (jamais l'inverse) — le
+    // récit utilisateur doit être "confirmation du succès, puis retour à
+    // l'écran de connexion", pas l'inverse (qui faisait apparaître "Compte
+    // supprimé" par-dessus l'écran de login, sans lien visuel avec l'action
+    // qui vient d'avoir lieu). La navigation part du onPress du bouton "OK".
     Alert.alert(
       "Compte supprimé",
       "Ton compte et toutes tes données ont bien été supprimés.",
+      [{ text: "OK", onPress: () => router.replace("/onboarding/connexion") }],
     );
   };
 
@@ -1698,10 +1704,19 @@ export default function Profil() {
             </Text>
           </TouchableOpacity>
 
+          {/* RÈGLE : correctif du 2026-09-17 (bug P046) — fond légèrement
+              teinté + espacement plus marqué que "Se déconnecter" (action
+              réversible juste au-dessus) : la seule différence visuelle
+              auparavant était la couleur du texte, trop discrète pour une
+              action irréversible et définitive. */}
           <TouchableOpacity
             style={[
               styles.btnSecondaire,
-              { borderColor: C.separateur, marginTop: 12 },
+              {
+                borderColor: C.rougeLight,
+                backgroundColor: C.rougeLight,
+                marginTop: 24,
+              },
             ]}
             onPress={supprimerCompte}
             activeOpacity={0.7}
