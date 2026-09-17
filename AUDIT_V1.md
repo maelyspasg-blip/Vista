@@ -897,7 +897,15 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Fichier** : `app/(tabs)/planning.tsx:1222-1282` (`sauvegarderModificationEvenement`, aucun garde-fou), `3285-3306` (bouton toujours actif).
 - **Description** : la création est bien protégée (`creationEvenementEnCours`), l'édition non. Impact limité : `modifierEvenement`/`modifierEvenementPartenaire` sont des `UPDATE` idempotents (jamais de doublon d'événement) — le seul risque réel est un entrelacement de `annulerNotificationsEvenement`/`programmerNotificationsEvenement` (notification incohérente/absente, jamais un événement dupliqué).
 - **Piste de correction** : réutiliser `creationEvenementEnCours` (ou un état dédié) autour de la sauvegarde d'édition.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+- **Statut** : **CORRIGÉ (2026-09-17)** — même pattern que
+  `finaliserCreationEvenement` : `creationEvenementEnCours` réutilisé (pas
+  un nouveau flag), posé/relâché sur les 2 points de sortie de
+  `sauvegarderModificationEvenement`. Revu par code-reviewer (APPROUVÉ) :
+  aucun chemin (appels internes tous protégés par try/catch ou retour
+  d'erreur, sauf un risque latent préexistant déjà présent côté création)
+  ne peut laisser le flag bloqué à `true` — vérifié appel par appel.
+  Confirmé que le bouton "Enregistrer" est bien partagé entre les 2 modes
+  et que la création n'est pas affectée. tsc/lint vérifiés propres.
 
 ### P030 — Notification push "événement commun" jamais envoyée si un événement personnel devient commun via édition
 

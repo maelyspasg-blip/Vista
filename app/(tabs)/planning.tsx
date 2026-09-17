@@ -1224,8 +1224,16 @@ export default function Planning() {
     }, []),
   );
 
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17 (bug P029) : même
+  // garde que finaliserCreationEvenement (creationEvenementEnCours), qui
+  // n'était jusqu'ici jamais posée sur ce chemin d'édition — un double-tap
+  // ne peut pas dupliquer l'événement (UPDATE idempotent), mais pouvait
+  // entrelacer 2 passages de annulerNotificationsEvenement/
+  // programmerNotificationsEvenement (notification incohérente ou absente).
   const sauvegarderModificationEvenement = async () => {
     if (!nomEvent || evenementEnEditionId === null) return;
+    if (creationEvenementEnCours) return;
+    setCreationEvenementEnCours(true);
     const montant = estFinancierEvent ? parseMontant(montantEvent) || 0 : undefined;
     const champs = {
       nom: nomEvent,
@@ -1258,6 +1266,7 @@ export default function Planning() {
         champs as Omit<Evenement, "id">,
       );
       if (ok) await rafraichirEvenementsPartenaire();
+      setCreationEvenementEnCours(false);
       setModalCreationVisible(false);
       return;
     }
@@ -1283,6 +1292,7 @@ export default function Planning() {
         );
       }
     }
+    setCreationEvenementEnCours(false);
     setModalCreationVisible(false);
   };
 
