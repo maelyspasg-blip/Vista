@@ -290,6 +290,26 @@ function RootLayoutInterne() {
 
     const { data: abonnement } = supabase.auth.onAuthStateChange(
       (event, nouvelleSession) => {
+        // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-17 (bug P009) :
+        // ignore INITIAL_SESSION — l'IIFE de montage juste au-dessus gère
+        // déjà entièrement le chargement initial (session ET absence de
+        // session, profil, thème, accessibilité, invité expiré...). Avant ce
+        // correctif, ce listener recevait AUSSI son propre INITIAL_SESSION
+        // (émis par le SDK dès l'abonnement — supabase-js v2,
+        // GoTrueClient._emitInitialSession — indépendamment de l'IIFE), et
+        // pouvait démarrer SON PROPRE fetch `profils` en parallèle si
+        // dernierUserIdRef.current n'était pas encore posé (fenêtre
+        // plausible : l'IIFE attend 2 lectures AsyncStorage avant même
+        // d'avoir la session, cf. Promise.all plus haut) — requête
+        // dupliquée, écritures d'état non coordonnées entre les 2 chemins
+        // (dernier arrivé écrase l'autre), et dans le pire cas ce listener,
+        // toujours en vol, pouvait raccrocher l'UI à une session déjà
+        // invalidée entre-temps par l'IIFE (invité expiré -> signOut()).
+        // Sans risque de régression : l'IIFE appelle déjà
+        // setSession(data.session) inconditionnellement à sa toute fin (que
+        // data.session soit null ou non) — ce cas est donc déjà couvert,
+        // ignorer INITIAL_SESSION ici ne fait que retirer un doublon.
+        if (event === "INITIAL_SESSION") return;
         setSession(nouvelleSession);
         if (!nouvelleSession) {
           setIsGuest(false);

@@ -460,8 +460,22 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   ailleurs dans le projet (`EspacePartageContext.tsx:216,345`) à cette IIFE, ou
   fusionner en un seul point d'entrée (laisser `onAuthStateChange` être la SEULE
   source, y compris pour `INITIAL_SESSION`, sans `getSession()` séparé).
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + code source `@supabase/auth-js`
-  installé), correction non encore appliquée.
+- **Statut** : **CORRIGÉ (2026-09-17)** — `if (event === "INITIAL_SESSION")
+  return;` ajouté en toute première ligne du callback `onAuthStateChange`,
+  avant `setSession`. Sûr car l'IIFE de montage appelle déjà
+  `setSession(data.session)` inconditionnellement à sa fin (session null ou
+  non) — le cas couvert par `INITIAL_SESSION` est donc déjà entièrement
+  traité côté IIFE. Revu par code-reviewer (APPROUVÉ), qui a tracé le SDK
+  jusqu'au bout : `getSession()` (IIFE) et `_emitInitialSession()` (source
+  de l'événement `INITIAL_SESSION`) appellent tous deux la MÊME méthode
+  interne `_useSession()`/`__loadSession()` — ce ne sont pas deux sources
+  indépendantes, littéralement le même appel dédoublé, donc aucun scénario
+  où `INITIAL_SESSION` porterait une information que l'IIFE n'aurait pas
+  déjà. Confirmé aussi que les vrais logins (`signUp`/`signInWithPassword`/
+  `signInAnonymously`, grep des 3 call sites du projet) émettent tous
+  `SIGNED_IN`, jamais `INITIAL_SESSION` — le guard ne bloque donc jamais un
+  vrai login/logout/refresh après le montage. tsc/lint vérifiés propres (10
+  lignes / 49 problèmes, sous la baseline).
 
 ### P010 — `sanitizeMontantInput`/`parseMontant` mal-interprètent un montant collé avec séparateur de milliers
 
