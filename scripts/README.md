@@ -56,3 +56,10 @@ relecture.
   lancé manuellement, mais rien n'empêche de le faire pour un point de
   contrôle ponctuel.
 - `loop_log.txt` — journal en texte brut, généré par les scripts ci-dessus.
+- `generate_apple_jwt.js` — génère le `client_secret` JWT Sign in with Apple
+  à coller dans Supabase (Authentication → Providers → Apple → Secret Key).
+  À lancer manuellement (`node scripts/generate_apple_jwt.js --keyId ... --p8 ...`)
+  — jamais automatisé, ce JWT expire au bout de 180 jours max et doit être
+  régénéré/recollé à la main avant expiration. Le fichier `.p8` et le JWT
+  généré ne doivent jamais être commités (`*.p8`/`*.pem` déjà dans
+  `.gitignore`).

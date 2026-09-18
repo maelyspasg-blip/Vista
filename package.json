@@ -59,9 +59,11 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/react": "~19.2.10",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~56.0.4",
+    "jsonwebtoken": "^9.0.3",
     "typescript": "~6.0.3"
   },
   "private": true
