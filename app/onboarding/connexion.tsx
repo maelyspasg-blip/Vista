@@ -4,6 +4,7 @@ import {
   AppleAuthenticationButtonType,
   isAvailableAsync as appleSignInDisponible,
 } from "expo-apple-authentication";
+import { GoogleSigninButton } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -24,6 +25,7 @@ import {
 } from "../../utils/documentsLegaux";
 import { connecterAvecApple } from "../appleSignIn";
 import { messageErreurAuth } from "../authErrors";
+import { connecterAvecGoogle } from "../googleSignIn";
 import { ModaleDocumentLegal } from "../ModaleDocumentLegal";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
@@ -80,6 +82,28 @@ export default function Connexion() {
       // RÈGLE : une annulation (l'utilisateur ferme la feuille Apple) ne
       // doit jamais afficher de message rouge, cf. RÈGLE dans
       // app/appleSignIn.ts — comportement normal, pas une erreur.
+      if (!resultat.annule) setErreur(resultat.message ?? "");
+      return;
+    }
+    router.replace("/(tabs)");
+  };
+
+  // RÈGLE À NE JAMAIS CASSER — GOOGLE SIGN-IN (ajouté le 2026-09-18) : iOS
+  // uniquement pour l'instant, cf. RÈGLE dans app/googleSignIn.ts (aucun
+  // Client ID Android/Web fourni) — pas de vérification de disponibilité
+  // asynchrone nécessaire ici contrairement à Apple (pas de contrainte de
+  // version iOS pour Google Sign-In), `Platform.OS === "ios"` suffit.
+  const [chargementGoogle, setChargementGoogle] = useState(false);
+
+  const seConnecterAvecGoogle = async () => {
+    if (chargementGoogle) return;
+    setErreur("");
+    setChargementGoogle(true);
+    const resultat = await connecterAvecGoogle();
+    setChargementGoogle(false);
+
+    if (!resultat.succes) {
+      // RÈGLE : annulation silencieuse, cf. RÈGLE dans app/googleSignIn.ts.
       if (!resultat.annule) setErreur(resultat.message ?? "");
       return;
     }
@@ -205,28 +229,43 @@ export default function Connexion() {
           )}
         </BoutonPrincipal>
 
-        {/* RÈGLE À NE JAMAIS CASSER — SIGN IN WITH APPLE (2026-09-18) :
-            AppleAuthenticationButton est le composant OFFICIEL Apple (design
-            et libellé imposés par les Human Interface Guidelines) — ne
-            jamais le remplacer par un bouton custom même visuellement
-            identique. Gated par appleDisponible (toujours false hors iOS,
-            cf. useEffect plus haut) : jamais affiché s'il ne peut pas
-            fonctionner. */}
-        {appleDisponible && (
+        {/* RÈGLE À NE JAMAIS CASSER — CONNEXION ALTERNATIVE (Apple/Google,
+            2026-09-18) : chaque bouton est le composant OFFICIEL du
+            fournisseur (design/libellé imposés), jamais un bouton custom
+            même visuellement identique. Séparateur "ou" partagé, affiché
+            dès qu'AU MOINS un des deux boutons peut apparaître — jamais
+            affiché seul sans bouton en dessous. */}
+        {(appleDisponible || Platform.OS === "ios") && (
           <>
             <View style={styles.separateurConteneur}>
               <View style={[styles.separateurLigne, { backgroundColor: C.separateur }]} />
               <Text style={[styles.separateurTexte, { color: C.texteMuted }]}>ou</Text>
               <View style={[styles.separateurLigne, { backgroundColor: C.separateur }]} />
             </View>
-            <AppleAuthenticationButton
-              buttonType={AppleAuthenticationButtonType.CONTINUE}
-              buttonStyle={AppleAuthenticationButtonStyle.BLACK}
-              cornerRadius={16}
-              style={[styles.boutonApple, { opacity: chargementApple ? 0.6 : 1 }]}
-              pointerEvents={chargementApple ? "none" : "auto"}
-              onPress={seConnecterAvecApple}
-            />
+            {/* Gated par appleDisponible (toujours false hors iOS, cf.
+                useEffect plus haut) : jamais affiché s'il ne peut pas
+                fonctionner. */}
+            {appleDisponible && (
+              <AppleAuthenticationButton
+                buttonType={AppleAuthenticationButtonType.CONTINUE}
+                buttonStyle={AppleAuthenticationButtonStyle.BLACK}
+                cornerRadius={16}
+                style={[styles.boutonApple, { opacity: chargementApple ? 0.6 : 1 }]}
+                pointerEvents={chargementApple ? "none" : "auto"}
+                onPress={seConnecterAvecApple}
+              />
+            )}
+            {/* Gated par Platform.OS === "ios" — cf. RÈGLE dans
+                app/googleSignIn.ts (aucun Client ID Android fourni). */}
+            {Platform.OS === "ios" && (
+              <GoogleSigninButton
+                size={GoogleSigninButton.Size.Wide}
+                color={GoogleSigninButton.Color.Light}
+                style={[styles.boutonGoogle, { opacity: chargementGoogle ? 0.6 : 1 }]}
+                disabled={chargementGoogle}
+                onPress={seConnecterAvecGoogle}
+              />
+            )}
           </>
         )}
       </View>
@@ -348,6 +387,15 @@ const styles = StyleSheet.create({
   boutonApple: {
     height: 50,
     marginTop: 16,
+  },
+  // RÈGLE : width "100%" écrase volontairement la taille "Wide" (312x48)
+  // recommandée par GoogleSigninButton — choix délibéré pour aligner sa
+  // largeur sur boutonApple/BoutonPrincipal (pleine largeur du conteneur),
+  // jamais une taille par défaut oubliée.
+  boutonGoogle: {
+    width: "100%",
+    height: 50,
+    marginTop: 12,
   },
   btnTexte: {
     fontSize: 16,

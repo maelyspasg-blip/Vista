@@ -4,6 +4,7 @@ import {
   AppleAuthenticationButtonType,
   isAvailableAsync as appleSignInDisponible,
 } from "expo-apple-authentication";
+import { GoogleSigninButton } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -19,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { messageErreurAuth } from "../authErrors";
 import { supabase } from "../../supabaseClient";
 import { connecterAvecApple } from "../appleSignIn";
+import { connecterAvecGoogle } from "../googleSignIn";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
@@ -77,6 +79,26 @@ export default function Inscription() {
     setChargementApple(true);
     const resultat = await connecterAvecApple();
     setChargementApple(false);
+
+    if (!resultat.succes) {
+      if (!resultat.annule) setErreur(resultat.message ?? "");
+      return;
+    }
+    router.replace("/(tabs)");
+  };
+
+  // RÈGLE À NE JAMAIS CASSER — GOOGLE SIGN-IN (ajouté le 2026-09-18) : même
+  // garde qu'app/onboarding/connexion.tsx (iOS uniquement, cf. RÈGLE dans
+  // app/googleSignIn.ts) ET même exclusion en conversion d'essai
+  // qu'Apple ci-dessus (nouvel auth.uid() incompatible avec updateUser).
+  const [chargementGoogle, setChargementGoogle] = useState(false);
+
+  const seConnecterAvecGoogle = async () => {
+    if (chargementGoogle || conversionEssai) return;
+    setErreur("");
+    setChargementGoogle(true);
+    const resultat = await connecterAvecGoogle();
+    setChargementGoogle(false);
 
     if (!resultat.succes) {
       if (!resultat.annule) setErreur(resultat.message ?? "");
@@ -254,25 +276,38 @@ export default function Inscription() {
               )}
             </BoutonPrincipal>
 
-            {/* RÈGLE À NE JAMAIS CASSER — SIGN IN WITH APPLE (2026-09-18) :
-                masqué en conversion d'essai, cf. RÈGLE sur
-                seConnecterAvecApple plus haut — jamais retiré pour une
-                inscription normale. */}
-            {appleDisponible && !conversionEssai && (
+            {/* RÈGLE À NE JAMAIS CASSER — CONNEXION ALTERNATIVE (Apple/Google,
+                2026-09-18) : toutes deux masquées en conversion d'essai, cf.
+                RÈGLE sur seConnecterAvecApple/seConnecterAvecGoogle plus
+                haut — jamais retirées pour une inscription normale.
+                Séparateur "ou" partagé, affiché dès qu'au moins un bouton
+                peut apparaître. */}
+            {!conversionEssai && (appleDisponible || Platform.OS === "ios") && (
               <>
                 <View style={styles.separateurConteneur}>
                   <View style={[styles.separateurLigne, { backgroundColor: C.separateur }]} />
                   <Text style={[styles.separateurTexte, { color: C.texteMuted }]}>ou</Text>
                   <View style={[styles.separateurLigne, { backgroundColor: C.separateur }]} />
                 </View>
-                <AppleAuthenticationButton
-                  buttonType={AppleAuthenticationButtonType.SIGN_UP}
-                  buttonStyle={AppleAuthenticationButtonStyle.BLACK}
-                  cornerRadius={16}
-                  style={[styles.boutonApple, { opacity: chargementApple ? 0.6 : 1 }]}
-                  pointerEvents={chargementApple ? "none" : "auto"}
-                  onPress={seConnecterAvecApple}
-                />
+                {appleDisponible && (
+                  <AppleAuthenticationButton
+                    buttonType={AppleAuthenticationButtonType.SIGN_UP}
+                    buttonStyle={AppleAuthenticationButtonStyle.BLACK}
+                    cornerRadius={16}
+                    style={[styles.boutonApple, { opacity: chargementApple ? 0.6 : 1 }]}
+                    pointerEvents={chargementApple ? "none" : "auto"}
+                    onPress={seConnecterAvecApple}
+                  />
+                )}
+                {Platform.OS === "ios" && (
+                  <GoogleSigninButton
+                    size={GoogleSigninButton.Size.Wide}
+                    color={GoogleSigninButton.Color.Light}
+                    style={[styles.boutonGoogle, { opacity: chargementGoogle ? 0.6 : 1 }]}
+                    disabled={chargementGoogle}
+                    onPress={seConnecterAvecGoogle}
+                  />
+                )}
               </>
             )}
           </>
@@ -371,6 +406,15 @@ const styles = StyleSheet.create({
   boutonApple: {
     height: 50,
     marginTop: 16,
+  },
+  // RÈGLE : width "100%" écrase volontairement la taille "Wide" (312x48)
+  // recommandée par GoogleSigninButton — choix délibéré pour aligner sa
+  // largeur sur boutonApple/BoutonPrincipal (pleine largeur du conteneur),
+  // jamais une taille par défaut oubliée.
+  boutonGoogle: {
+    width: "100%",
+    height: 50,
+    marginTop: 12,
   },
   btnTexte: {
     fontSize: 16,

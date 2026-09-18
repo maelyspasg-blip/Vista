@@ -2267,6 +2267,69 @@ documenté en RÈGLE dans `app/appleSignIn.ts`.
 
 tsc/lint vérifiés propres (10 lignes / 49 problèmes).
 
+### 2026-09-18 — Ajout de Google Sign-In (connexion + inscription)
+
+**Contexte** : demande explicite, même geste que Sign in with Apple, avec
+un fichier `GoogleService-Info.plist` annoncé comme fourni par Maëlys et
+un Client ID iOS Google (`834270415111-...apps.googleusercontent.com`).
+
+**Écart volontaire par rapport à la demande littérale, documenté avant
+d'agir** :
+- Le fichier réellement présent (`~/Downloads/client_834270415111-....plist`,
+  confirmé identique au Client ID donné et au Bundle ID du projet) n'est
+  **pas** un vrai `GoogleService-Info.plist` Firebase (il ne contient que
+  `CLIENT_ID`/`REVERSED_CLIENT_ID`/`BUNDLE_ID`, pas `API_KEY`/
+  `GCM_SENDER_ID`/`PROJECT_ID`) — c'est l'export minimal de Google Cloud
+  Console pour un client OAuth iOS "hors Firebase".
+- Le plugin Expo de `@react-native-google-signin/google-signin`
+  (`plugin/build/withGoogleSignIn.js`) a deux modes : avec un vrai fichier
+  Firebase (`googleServicesFile`), ou sans Firebase via l'option
+  `iosUrlScheme` seule (injecte juste le schéma de redirection OAuth dans
+  Info.plist). Copier le fichier trouvé comme `GoogleService-Info.plist`
+  et activer le mode Firebase aurait échoué (clés manquantes) ou pire,
+  réussi silencieusement avec un fichier incomplet. Utilisé le mode
+  `iosUrlScheme` à la place — **aucun fichier `.plist` copié dans le
+  repo**, `iosClientId` seul (passé à `GoogleSignin.configure()`) suffit à
+  produire un idToken valide pour ce flux.
+
+**Fait** :
+- Nouveau fichier `app/googleSignIn.ts` — source unique
+  (`connecterAvecGoogle()`), même pattern qu'`app/appleSignIn.ts`. Utilise
+  `GoogleSignin.signIn()` puis `data.idToken` avec
+  `supabase.auth.signInWithIdToken({provider: "google", ...})`.
+  Annulation traitée via le type `{type: "cancelled"}` renvoyé nativement
+  par le package (pas un `throw`, contrairement à Apple) — jamais un
+  message d'erreur sur un simple abandon de la feuille Google.
+- `app.json` : plugin `@react-native-google-signin/google-signin` avec
+  `iosUrlScheme: "com.googleusercontent.apps.834270415111-..."` (dérivé du
+  `REVERSED_CLIENT_ID` du fichier trouvé). Validé sans erreur via
+  `npx expo config --type prebuild`.
+- `app/onboarding/connexion.tsx` et `inscription.tsx` : bouton officiel
+  `GoogleSigninButton` (`color: Light` = blanc avec logo Google,
+  `size: Wide`), gated par `Platform.OS === "ios"` (aucun Client ID
+  Android/Web fourni — cf. RÈGLE dans `app/googleSignIn.ts`). Dans
+  `inscription.tsx`, masqué en conversion d'essai pour la même raison
+  qu'Apple (nouvel `auth.uid()` incompatible avec `updateUser`). Le
+  séparateur "ou" est désormais partagé entre Apple et Google (affiché dès
+  qu'au moins un des deux boutons peut apparaître), les deux boutons
+  s'empilent verticalement s'ils sont tous les deux disponibles.
+
+**Point bloquant externe, hors de portée de cet environnement** — même
+nature que pour Apple : `supabase.auth.signInWithIdToken({provider:
+"google", ...})` échouera tant que Google n'est pas activé comme
+fournisseur OAuth dans Authentication → Providers du dashboard Supabase,
+avec ce Client ID iOS ajouté à la liste "Authorized Client IDs". Documenté
+en RÈGLE dans `app/googleSignIn.ts`.
+
+`npm audit` : 1 nouvelle entrée moderate pour
+`@react-native-google-signin/google-signin` — vérifiée, elle remonte
+entièrement à la même chaîne `expo`/`@expo/*` déjà présente avant ce
+changement (même cause que l'entrée pré-existante sur
+`react-native-google-mobile-ads`), rien de spécifique à ce nouveau
+paquet.
+
+tsc/lint vérifiés propres (10 lignes / 49 problèmes).
+
 ### 2026-09-13 — Pubs en vue partagée : contenu flouté "Ton bilan → Vista" (insights)
 
 - **Contexte** : demande "le contenu flouté derrière le cadenas doit
