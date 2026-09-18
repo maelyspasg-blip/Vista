@@ -351,10 +351,18 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
         animationType="fade"
         onRequestClose={() => setRenommageAncienNom(null)}
       >
+        {/* RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-18 (décision
+            produit) : tap en dehors = tente d'enregistrer (comme partout
+            ailleurs dans l'app — cf. les fonctions "fermerModal*AvecSauvegarde"
+            dans index.tsx/budget.tsx/planning.tsx/profil.tsx), jamais une
+            annulation silencieuse — seul le bouton "Annuler" explicite
+            annule. confirmerRenommage gère déjà proprement le cas "champ
+            vide/inchangé" (ferme sans rien envoyer) et le cas d'échec
+            (Alert, modale reste ouverte) — appelée ici telle quelle. */}
         <TouchableOpacity
           style={[styles.modalOverlay, estTablette && { alignItems: "center" }]}
           activeOpacity={1}
-          onPress={() => setRenommageAncienNom(null)}
+          onPress={confirmerRenommage}
         >
           <TouchableOpacity
             style={[

@@ -97,9 +97,22 @@ export function calculerTrophees(params: {
   );
 
   const enveloppesSansEntree = enveloppes.filter((e) => e.type !== "Entrée");
+  // RÈGLE À NE JAMAIS CASSER — décision produit du 2026-09-18 (même RÈGLE
+  // que utils/score.ts::scoreBudget) — une catégorie à budget=0€ ne
+  // représente rien de réel, exclue du critère "budget respecté" (sa
+  // moindre dépense réelle vérifiait trivialement depense > budget, faisant
+  // échouer ce trophée pour tout le mois). BUG CORRIGÉ EN REVUE
+  // (code-reviewer, 2026-09-18) : le garde `.length > 0` doit porter sur la
+  // liste FILTRÉE (`enveloppesBudgetees`), pas sur `enveloppesSansEntree` —
+  // `[].every(...)` renvoie `true` par vacuité, donc avec le garde sur la
+  // liste non filtrée, un compte dont TOUTES les catégories sont à
+  // budget=0€ obtenait `moisMaitrise=true` (aucune catégorie réellement
+  // évaluée), exactement le faux positif que ce commentaire prétendait déjà
+  // empêcher.
+  const enveloppesBudgetees = enveloppesSansEntree.filter((e) => e.budget > 0);
   const moisMaitrise =
-    enveloppesSansEntree.length > 0 &&
-    enveloppesSansEntree.every((e) => e.depense <= e.budget);
+    enveloppesBudgetees.length > 0 &&
+    enveloppesBudgetees.every((e) => e.depense <= e.budget);
 
   const margeSnapshot = (s: SnapshotMois) => s.disponible - s.totalDepense - s.epargne;
   const derniersMoisArchives = historiquesMois.slice(-2);

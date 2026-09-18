@@ -782,9 +782,11 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   aussi tout autre endroit du code qui agrège par nom, ex. `bilanVista.ts`),
   ou faire grouper `construireRepartitionSurPeriode`/`classificationsFlux`/
   `idsPourNomCategorieFlux` par `(nom, type)` plutôt que par nom seul.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + traçage manuel), précondition
-  (absence de contrôle de doublon) confirmée par grep. Pas rejoué en conditions
-  réelles (nécessite un compte de test).
+- **Statut** : **CORRIGÉ (2026-09-18)** — décision produit reçue (voir §2.2) :
+  un utilisateur ne peut plus créer/renommer une catégorie sur un nom déjà
+  pris (comparaison trim+lowercase, `ajouterEnveloppe`/
+  `renommerCategoriePartout`, `app/store.ts`) — élimine la précondition à
+  la racine des 3 findings P021/P027/P033. tsc/lint vérifiés propres.
 
 ### P022 — GraphiqueFlux : le MONTANT (pas le nom) peut être tronqué avec "…" en colonne étroite
 
@@ -891,7 +893,9 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Description** : déduplication volontaire par nom (pour gérer "catégorie supprimée puis recréée sous un nouvel id, même nom"). Comme établi par P021, rien n'empêche 2 catégories réellement différentes de partager le même nom — dans ce cas, seule la PREMIÈRE rencontrée dans `objStore.enveloppes` génère son échéance dans Planning, la seconde est silencieusement absente en permanence.
 - **Différence avec P021** : P021 documentait une fusion visuelle trompeuse (Stats) — ici c'est une omission pure, un vrai rendez-vous financier qui devrait apparaître et n'apparaît jamais.
 - **Piste de correction** : même cause commune que P021 (interdire les doublons de nom parmi les catégories actives) — résoudrait les deux symptômes d'un coup.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), précondition déjà confirmée par P021/P033.
+- **Statut** : **CORRIGÉ (2026-09-18)** — même correctif que P021 (contrôle
+  de doublon de nom à la création/au renommage, voir §2.2) : la précondition
+  (2 catégories vivantes homonymes) ne peut plus se produire.
 
 ### P028 — Tap en dehors de la modale d'événement = enregistrement silencieux, contrairement au "X" qui annule
 
@@ -901,7 +905,15 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Description** : deux comportements de fermeture incohérents, sans commentaire documentant un choix intentionnel — tap sur le fond appelle `validerInfos()` (crée/enregistre si `nomEvent` renseigné) puis ferme ; le "X" ferme sans rien enregistrer.
 - **Impact** : un utilisateur qui tape un nom par erreur/pour essayer puis referme en tapant à côté (geste réflexe pour "annuler") se retrouve avec un événement créé sans l'avoir voulu, silencieusement.
 - **Piste de correction** : uniformiser (les deux annulent, ou bouton "Enregistrer" explicite distinct) — à confirmer côté produit si l'auto-save était voulu.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code). Question de direction produit possible, voir §2.2.
+- **Statut** : **COMPORTEMENT CONFIRMÉ VOULU (2026-09-18)** — décision
+  produit reçue (§2.2) : "tap en dehors = sauvegarde, l'annulation explicite
+  se fait uniquement via le bouton de fermeture". Revérifié sur le code
+  actuel (`planning.tsx:2597-2634`) : c'est exactement le comportement déjà
+  en place ici (tap sur le fond → `fermerModalCreationAvecSauvegarde` ;
+  icône "X" du header → ferme sans enregistrer, rôle du bouton "Annuler" de
+  la décision). Aucun changement de code nécessaire — le finding décrivait
+  une incohérence qui s'avère être le design voulu, maintenant documenté
+  explicitement au lieu d'être un choix implicite non commenté.
 
 ### P029 — Double-tap non protégé sur "Enregistrer les modifications" (édition), contrairement à la création
 
@@ -977,7 +989,15 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Description** : confirme explicitement la précondition de P021/P027 sur le chemin de création RÉEL de Budget — "Nouvelle dépense → Créer une nouvelle catégorie" avec un nom déjà utilisé crée une seconde ligne `enveloppes` identique sans avertissement.
 - **Conséquence supplémentaire, non documentée jusqu'ici** : en vue partagée, `construireCategoriesFusionnees` (`utils/espacePartage.ts:625-627`) fusionne par nom trimmé (le commentaire d'origine des développeurs anticipait déjà ce cas : *"plusieurs [ids] seulement si j'ai par erreur deux catégories du même nom"*), et `basculerPartageCategorie` bascule alors le flag `partage` des DEUX catégories homonymes d'un seul tap sur une carte fusionnée — impossible de les régler indépendamment. Masqué en prod (`ESPACE_PARTAGE_ACTIF=false`).
 - **Piste de correction** : identique à P021/P027 — interdire les noms dupliqués parmi les catégories actives, à la création (Budget) et au renommage (`index.tsx`) — corrige P021/P027/P033 d'un seul coup.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + repro manuelle), actif dès maintenant pour la vue perso (pas seulement masqué comme le volet partagé).
+- **Statut** : **CORRIGÉ (2026-09-18)** — même correctif que P021/P027 :
+  contrôle de doublon de nom (trim+lowercase) ajouté à `ajouterEnveloppe`
+  ET `renommerCategoriePartout` (`app/store.ts`), donc au chemin de création
+  réel de Budget (`creerNouvelleCategorieInline` passe par
+  `ajouterEnveloppe`). Message d'erreur : "Ce nom de catégorie existe déjà."
+  La conséquence espace partagé documentée ci-dessus reste théoriquement
+  vraie pour un compte déjà en doublon AVANT ce correctif, mais ne peut
+  plus se (re)produire pour un nouveau doublon. tsc/lint vérifiés propres
+  (10 lignes / 49 problèmes).
 
 ### P034 — `enveloppes.depense` et `transactions` écrits de façon non-atomique : dérive silencieuse permanente possible sur interruption
 
@@ -1058,7 +1078,16 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Fichier** : `app/(tabs)/budget.tsx:962-965` (`fermerModalAjoutAvecSauvegarde`) vs `2160-2164` (`onRequestClose`, retour matériel).
 - **Description** : même famille que P028 (Planning) — tap en dehors tente d'enregistrer si le formulaire est valide, le bouton retour Android ferme sans jamais tenter d'enregistrer. Pattern `AvecSauvegarde` volontaire et cohérent dans tout le projet, mais son incohérence spécifique avec `onRequestClose` (qui, lui, n'a jamais ce comportement) peut surprendre sur Android.
 - **Piste de correction** : question de direction produit (le pattern "tap-outside = sauvegarde" est déjà établi partout) plutôt qu'un bug certain — à trancher explicitement plutôt qu'à corriger unilatéralement sur ce seul écran.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), pattern partagé avec `index.tsx`/`planning.tsx`/`profil.tsx`.
+- **Statut** : **CORRIGÉ (2026-09-18)** — décision produit reçue (§2.2) :
+  "tap en dehors = sauvegarde, appliqué de manière cohérente sur toutes les
+  modales" tranche explicitement en faveur du pattern déjà établi. Le retour
+  matériel Android (`onRequestClose`, `budget.tsx:2182`) est maintenant
+  câblé sur la MÊME fonction que le tap en dehors
+  (`fermerModalAjoutAvecSauvegarde`) au lieu d'un reset silencieux distinct
+  — élimine l'incohérence exacte décrite par ce finding. Reste, à l'audit,
+  un exemplaire d'un survol plus large des modales du projet (VueMoisArchive
+  "Renommer la catégorie" corrigé de la même façon le même jour, seul autre
+  vrai gap trouvé) — tsc/lint vérifiés propres.
 
 ### P037 — Budget : bouton "Ajouter la dépense" silencieux sur formulaire incomplet
 
@@ -1085,7 +1114,14 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Fichier** : `app/(tabs)/budget.tsx:476-482,1058-1072,1076-1087`.
 - **Description** : coût O(catégories × transactions/événements), recalculé à chaque rendu de l'écran entier (pas de `useMemo`) — même pattern déjà noté pour `analytics.tsx` en §3.4. Potentiellement perceptible pour un profil "très actif" + "beaucoup de catégories" (profils de test #2/#3/#7).
 - **Piste de correction** : mémoïser par catégorie, ou indexer `transactions` par `enveloppeId` une seule fois au niveau de l'écran.
-- **Statut** : NOUVEAU — point de vigilance non mesuré.
+- **Statut** : **DÉCISION PRODUIT REÇUE (2026-09-18, §2.2), DOCUMENTÉ, NON
+  CORRIGÉ** — pas de limite imposée au nombre de catégories par compte.
+  Le point de vigilance perf décrit par ce finding reste réel et non
+  mémoïsé : documenté explicitement en commentaire juste avant
+  `categoriesAffichees` (`app/(tabs)/budget.tsx`) comme dégradation
+  possible au-delà d'environ 50 catégories actives, sans rien bloquer côté
+  produit. Reste ouvert comme point de vigilance perf pur (pas de correctif
+  de mémoïsation appliqué dans ce lot).
 
 ### P040 — Parsing UTC/local (P004/P005/P023/P032) : 6 sites supplémentaires trouvés en revue de code, non encore corrigés
 
@@ -1244,6 +1280,73 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Piste de correction** : afficher dynamiquement "Encore N caractères" ou une coche verte dès 8 caractères atteints.
 - **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
 
+### P052 — Aucune UI pour consulter/gérer les transactions orphelines après suppression d'une catégorie
+
+- **Gravité** : 🔵 SUGGESTION (aucune perte de donnée : les transactions
+  restent en base — c'est leur consultation qui manque)
+- **Trouvé par** : implémentation de la décision produit du 2026-09-18 sur
+  P028 (voir §2.2) — "les transactions restent visibles dans l'archivage
+  mensuel, consultables/modifiables/supprimables définitivement depuis
+  l'historique".
+- **Fichiers** : `app/store.ts` (`supprimerEnveloppe`, ne supprime plus les
+  transactions liées côté Supabase depuis ce correctif), `app/VueMoisArchive.tsx`
+  (seul écran "historique" existant, n'affiche que des agrégats
+  `SnapshotEnveloppe` par catégorie, jamais de transactions individuelles).
+- **Description** : une transaction dont la catégorie a été supprimée (donc
+  jamais archivée — une catégorie déjà présente dans un snapshot ne peut de
+  toute façon plus être supprimée, `ON DELETE NO ACTION` sur
+  `snapshot_enveloppes.enveloppe_id`) reste désormais en base, orpheline,
+  mais **n'apparaît plus nulle part dans l'app** : invisible dans l'état
+  local (retirée volontairement pour éviter tout affichage incohérent, cf.
+  RÈGLE dans `supprimerEnveloppe`), et `VueMoisArchive.tsx` ne sait de toute
+  façon afficher que des totaux par catégorie archivée, jamais une liste de
+  transactions individuelles ni une catégorie qui n'a jamais existé dans un
+  snapshot.
+- **Impact** : la donnée n'est plus perdue (améliore l'ancien comportement),
+  mais la promesse "consultable/modifiable/supprimable depuis l'historique"
+  de la décision produit n'est pas encore honorée à 100% — un utilisateur
+  ne peut aujourd'hui ni voir ni supprimer définitivement ces transactions
+  orphelines lui-même.
+- **Piste de correction** : nouvel écran (ou section dédiée dans
+  `VueMoisArchive.tsx`/`profil.tsx`) listant les transactions dont
+  `enveloppeId` ne correspond à aucune catégorie actuelle, avec actions
+  consulter/modifier la catégorie de rattachement/supprimer définitivement
+  — chantier UI à part entière, pas un simple correctif.
+- **Statut** : NOUVEAU — décision produit déjà appliquée pour la partie
+  "ne plus supprimer" (conservateur), cette UI de consultation reste à
+  construire.
+
+### P053 — `depenseCumuleeAuJour` (insight "meilleur mois") peut inclure une transaction orpheline datée dans un mois déjà archivé
+
+- **Gravité** : 🔵 SUGGESTION (edge case rare, message positif non financier)
+- **Trouvé par** : code-reviewer, en revue du correctif P028 "transactions
+  après suppression de catégorie" (2026-09-18).
+- **Fichiers** : `utils/exportExcel.ts:89-110` (`depenseCumuleeAuJour`,
+  somme `transactions` sans jamais vérifier que `enveloppeId` correspond à
+  une catégorie encore existante), appelée sans `enveloppeId` par
+  `utils/conseils.ts:1559` ("Meilleur mois depuis X mois").
+- **Description** : une transaction dont la catégorie a été supprimée reste
+  en base (cf. P028) avec sa `date` d'origine — normalement toujours dans
+  le mois courant non archivé (une catégorie déjà archivée ne peut plus être
+  supprimée, `ON DELETE NO ACTION`). Mais rien n'empêche une transaction
+  d'être créée avec une date ANTIDATÉE vers un mois déjà archivé (le
+  sélecteur de date de "Nouvelle dépense" n'a pas de borne minimale connue)
+  pour une catégorie elle-même créée et supprimée dans le mois courant —
+  cette transaction orpheline, datée dans le passé, est alors comptée par
+  `depenseCumuleeAuJour` lors d'une comparaison "au même jour" avec un mois
+  archivé, alors que le total du mois courant (`totalDepenses`, basé sur
+  `enveloppe.depense`) ne peut structurellement pas l'inclure — comparaison
+  légèrement faussée.
+- **Piste de correction** : filtrer `transactions` sur les `enveloppeId`
+  actuellement connus avant de les passer à `depenseCumuleeAuJour` pour les
+  usages "somme toutes catégories" (sans `enveloppeId` explicite), ou faire
+  porter le filtre dans la fonction elle-même via un paramètre optionnel
+  d'ids valides.
+- **Statut** : NOUVEAU — non corrigé (nécessite de faire circuler la liste
+  des enveloppes valides jusqu'à `depenseCumuleeAuJour`/`utils/conseils.ts`,
+  hors périmètre du lot de décisions produit du 2026-09-18 ; impact limité
+  à un message positif d'insight, jamais un calcul financier affiché).
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 
@@ -1346,6 +1449,231 @@ Gabarit :
 
 Questions de direction produit qui ne peuvent pas être tranchées seul —
 posées ici plutôt que de bloquer le loop en attendant une réponse.
+
+### 2026-09-18 — Réponses reçues sur 6 décisions produit — précision sur la numérotation
+
+**Note de clarification (à lire avant le reste de cette entrée)** : les
+décisions reçues référençaient des identifiants (P021/P025/P027/P028/P033/P036)
+qui ne correspondent PAS aux mêmes sujets que ces mêmes identifiants dans
+ce fichier (ex. le "P021" de ce fichier est un bug d'affichage GraphiqueFlux,
+pas la création de catégorie). Mappage fait par CONTENU plutôt que par
+numéro, documenté explicitement ci-dessous pour chaque décision — aucun
+finding existant n'a été renuméroté ni son contenu modifié.
+
+**1. Doublons de noms de catégorie** (correspond à **P021/P027/P033** de ce
+fichier, tous liés à l'absence de contrainte d'unicité sur `enveloppes.nom`) :
+- **Décision** : un utilisateur ne peut pas créer deux catégories avec le
+  même nom sur son propre compte — erreur "Ce nom de catégorie existe
+  déjà" si le nom est déjà pris. En vue partagée, la fusion par nom reste
+  le comportement voulu (pas de doublon possible par construction).
+- **Implémenté** : vérification côté client (nom trimmé, insensible à la
+  casse — même convention que `fusionnerCategoriesParNom`) ajoutée à
+  `ajouterEnveloppe` ET à `renommerCategoriePartout` (`app/store.ts`) — la
+  décision dit "à la création", étendue au renommage par cohérence (un
+  renommage vers un nom déjà pris recréerait exactement le même problème).
+  Vérification CLIENT uniquement — pas de contrainte SQL unique côté
+  Supabase (couvre le cas réel : un utilisateur, un appareil ; n'élimine
+  pas une vraie course entre 2 appareils simultanés). SQL disponible en
+  option si une garantie serveur est souhaitée plus tard :
+  `create unique index if not exists enveloppes_user_nom_actif_idx on enveloppes (user_id, lower(trim(nom))) where <condition d'activité à définir>;`
+  — non fourni précisément ni exécuté, la définition de "catégorie active"
+  nécessiterait une réflexion dédiée (catégories archivées/vestigiales à
+  exclure ou non de la contrainte).
+
+**2. Tap en dehors d'une modale** (correspond à **P028/P036** de ce
+fichier, et à l'entrée "2026-09-16" plus bas dans cette section) :
+- **Décision** : tap en dehors = sauvegarde (déjà le comportement établi
+  dans la majorité des modales via le pattern `fermerModal*AvecSauvegarde`
+  — cf. `index.tsx`/`budget.tsx`/`planning.tsx`/`profil.tsx`) ; annulation
+  explicite uniquement via le bouton "Annuler". Appliqué de façon cohérente
+  partout.
+- **Implémenté** : audit de TOUTES les modales de l'app (`grep` exhaustif
+  des `onRequestClose`/overlays tap-to-close) — un seul écart trouvé :
+  `app/VueMoisArchive.tsx` (modale "Renommer la catégorie"), dont le tap
+  en dehors annulait sans sauvegarder. Corrigé (`onPress={confirmerRenommage}`
+  au lieu de `onPress={() => setRenommageAncienNom(null)}`). Les autres
+  modales sans ce pattern ont été vérifiées une par une et sont
+  **volontairement exemptées**, chacune pour une raison distincte déjà
+  correcte : sélection à application immédiate sans étape de sauvegarde
+  séparée (`modalCouleurEspacePartageVisible`, `modalMoisVisible` —
+  "Fermeture automatique après sélection", RÈGLE déjà documentée), panneau
+  d'actions sans champ de formulaire (`gestionEvenement`), modale
+  informative/actions déjà effectuées côté serveur au moment du tap
+  (`modalEspacePartageVisible`, RÈGLE déjà documentée : "un rejoint/une
+  création déjà effectuée reste effectuée"), ou vues de détail en lecture
+  seule sans tap-outside du tout pour une raison technique documentée
+  (`modalSeriesVisible` — conflit de geste avec un `ScrollView`, RÈGLE
+  existante, surtout ne pas y toucher).
+- **Complément du 2026-09-18 (suite)** : re-vérification du code réel de
+  P028/P036 (au-delà de l'audit tap-outside-vs-overlay ci-dessus) a
+  confirmé un écart distinct sur chacun — traité séparément :
+  - **P028** (Planning, modale événement) : tap en dehors = sauvegarde,
+    icône "X" du header = annule sans enregistrer. C'est EXACTEMENT le
+    comportement que la décision demande (l'icône "X" joue le rôle du
+    bouton "Annuler"). Aucun changement de code — finding refermé comme
+    comportement confirmé voulu, pas comme bug corrigé.
+  - **P036** (Budget, modale d'ajout de dépense) : le retour matériel
+    Android (`onRequestClose`) fermait la modale via un reset direct, SANS
+    jamais tenter d'enregistrer — contrairement au tap en dehors juste à
+    côté, qui appelle déjà `fermerModalAjoutAvecSauvegarde`. Corrigé :
+    `onRequestClose` appelle désormais la même fonction que le tap en
+    dehors (`app/(tabs)/budget.tsx:2182`), pour que les deux gestes de
+    fermeture "non explicites" restent identiques, conformément à "appliqué
+    de façon cohérente sur toutes les modales".
+
+**3. Espace partagé dissous pendant qu'un utilisateur est actif** — ne
+correspond à AUCUN finding existant de ce fichier, sujet neuf.
+- **Décision** : retour automatique en vue individuelle, le switcher Moi/
+  Partagé disparaît, aucun message d'erreur agressif — juste une transition
+  douce avec une notification in-app discrète : "L'espace partagé a été
+  dissous".
+- **Investigation** : aucun listener Supabase Realtime n'existe dans ce
+  projet — `EspacePartageContext.tsx` ne se rafraîchit qu'à 3 moments
+  (montage/changement d'utilisateur, retour `AppState` "background→active",
+  actions locales explicites join/create/leave). Un utilisateur resté actif
+  en premier plan sans jamais mettre l'app en arrière-plan ne détectait donc
+  JAMAIS une dissolution déclenchée par l'autre membre — il continuait de
+  voir un partenaire/des données figés indéfiniment (RLS renvoie
+  silencieusement `data: []`, pas une erreur, donc aucun symptôme visible
+  autre qu'un solde qui ne bouge plus).
+- **Implémenté** : `rafraichirEspace` (`EspacePartageContext.tsx`) détecte
+  désormais la transition "était dans un espace → n'y est plus" et bascule
+  `vueActive` sur "personnel" + pose `espaceVientDEtreDissous=true` (état
+  neuf, exposé par le contexte avec `acquitterDissolutionEspace`). Ce
+  rafraîchissement est maintenant aussi appelé depuis
+  `app/(tabs)/_layout.tsx::verifierEtat` (déjà exécuté au montage, toutes
+  les 60s, et à chaque retour au premier plan) — comble le délai de
+  détection pour une session restée active en continu. Nouveau composant
+  `EspaceDissousBanner.tsx` (même gabarit que `SyncErrorBanner.tsx` :
+  bannière discrète, auto-effacée après 5s), couleur teal neutre (#1D9E75)
+  plutôt que le rouge d'alerte des erreurs de sync, monté juste après
+  `<SyncErrorBanner />` dans `_layout.tsx`. tsc/lint vérifiés propres.
+
+**4. Catégorie supprimée avec transactions existantes** — ne correspond à
+AUCUN finding existant. **Point important** : ceci change un comportement
+DÉJÀ EN PLACE, déjà audité et documenté comme volontaire — `supprimerEnveloppe`
+supprimait jusqu'ici les transactions liées (cf. §5.1 plus bas, tableau
+"Inventaire des opérations destructives", et P001 qui documente la
+suppression en cascade des modèles de dépense liés au même geste).
+- **Décision** : ne jamais supprimer automatiquement les transactions
+  liées. Elles restent visibles dans l'archivage mensuel, consultables/
+  modifiables/supprimables définitivement depuis l'historique.
+- **Portée réelle, vérifiée sur le schéma** : `snapshot_enveloppes.enveloppe_id`
+  est en `ON DELETE NO ACTION` (migration `20260723090000_snapshot_fk_no_action.sql`)
+  — Postgres refuse déjà la suppression d'une catégorie tant qu'un snapshot
+  archivé y fait référence (message existant : "cette catégorie a été
+  archivée dans un mois passé et ne peut plus être supprimée"). Cette
+  décision ne peut donc concrètement s'appliquer qu'à une catégorie créée
+  ET supprimée dans le MÊME mois, jamais encore archivée — le cas "vieille
+  catégorie avec un historique de plusieurs mois" était déjà, avant même
+  cette décision, protégé contre la suppression par ce garde-fou distinct.
+- **Implémenté** : le `DELETE` Supabase sur `transactions` a été retiré de
+  `supprimerEnveloppe` (`app/store.ts`) — les transactions restent en base,
+  orphelines (`enveloppe_id` continue de pointer vers l'id de la catégorie
+  supprimée, jamais mis à null, pour préserver l'info "à quelle catégorie ça
+  appartenait" en vue d'une future UI de récupération). Elles sont en
+  revanche bien retirées de l'état local en mémoire au même moment que la
+  catégorie, car AUCUN écran actuel ne sait afficher une transaction dont
+  l'`enveloppeId` ne correspond à aucune catégorie existante (vérifié par
+  audit de code : tous les filtres du projet partent d'une catégorie connue
+  vers ses transactions, jamais l'inverse — donc pas de risque de crash/
+  plantage, la transaction orpheline devient simplement invisible plutôt que
+  perdue). `chargerTransactions` les recharge telles quelles (orphelines)
+  à chaque rafraîchissement, sans conséquence : `enveloppe.depense` reste la
+  seule source de vérité des totaux affichés dans toute l'app (jamais une
+  re-somme de `transactions` brute), donc une transaction orpheline n'est
+  comptée nulle part par erreur.
+- **Limite assumée, à traiter comme un chantier séparé** : "consulter,
+  modifier ou supprimer définitivement depuis l'historique" décrit une UI
+  de consultation qui **n'existe pas encore** — `VueMoisArchive.tsx`
+  n'affiche que des agrégats `SnapshotEnveloppe` par catégorie, jamais de
+  transactions individuelles, et une transaction orpheline (catégorie
+  supprimée dans le mois courant, jamais archivée) n'apparaît de toute
+  façon dans AUCUN snapshot. Nouveau finding **P052** ouvert ci-dessous
+  pour cette UI manquante — solution conservative appliquée ici en
+  attendant (ne plus perdre la donnée, sans encore construire l'écran pour
+  la consulter), conforme à la règle du loop autonome ("en cas de doute,
+  solution la plus conservative"). tsc/lint vérifiés propres.
+
+**5. Limite de catégories par compte** (ferme **P039** de ce fichier,
+perf non mémoïsée) :
+- **Décision** : pas de limite imposée. Documenter dans le code qu'une
+  performance dégradée est possible au-delà de 50 catégories actives.
+- **Implémenté** : commentaire ajouté dans `app/(tabs)/budget.tsx`, juste
+  avant `categoriesAffichees`.
+
+**6. Simulateur avec catégorie à budget 0€** — ne correspond à AUCUN
+finding existant.
+- **Décision** : dans les analyses/insights → ignorer les catégories à
+  budget 0€. Dans le simulateur/forecast → les inclure quand même. Protéger
+  contre la division par zéro dans tous les calculs de ratio/pourcentage.
+- **Investigation** : une catégorie à `budget=0€` avec une dépense réelle
+  non nulle vérifiait trivialement `depense > budget` — sans filtre, elle
+  gonflait artificiellement les totaux d'analyse (score de santé, "catégorie
+  la plus dépassée"), pouvait à elle seule faire échouer le trophée "Mois
+  maîtrisé"/la série "Budget respecté" pour tout le compte, sans qu'aucune
+  division par zéro ne soit jamais atteinte dans le code existant (calculs
+  déjà protégés ou non applicables à ce cas précis).
+- **Implémenté** — côté analyses/insights, catégories à budget=0€ exclues :
+  `utils/score.ts` (`scoreBudget`, `trouverCategorieDepassee` — ajout
+  `&& e.budget > 0` au filtre `pertinentes`), `utils/series.ts`
+  (`totauxDuMois`, alimente le score de santé ET la série "Budget
+  respecté"), `utils/trophees.ts` (`moisMaitrise` — filtre appliqué
+  seulement à la liste passée à `.every(...)`, JAMAIS à celle utilisée pour
+  le garde-fou `enveloppesSansEntree.length > 0`, pour ne pas transformer
+  "aucune catégorie" en faux "mois maîtrisé" si toutes les catégories du
+  compte sont, par coïncidence, à budget=0€).
+- **Simulateur** : non modifié — vérifié qu'il n'applique déjà AUCUN filtre
+  de ce type (les catégories à budget=0€ y sont déjà incluses par défaut,
+  conforme tel quel à la décision "les inclure quand même").
+- **Division par zéro** : recherche des calculs de ratio/pourcentage
+  n'ayant pas déjà de garde — aucune division par zéro non protégée trouvée
+  dans les fichiers concernés au moment de cette revue (les usages existants
+  de `depense/budget` sont soit déjà gardés par un `budget > 0` explicite,
+  soit hors du périmètre de ces 3 fichiers). Point de vigilance à
+  revérifier si un nouveau calcul de ratio est ajouté plus tard dans
+  `utils/score.ts`/`utils/series.ts`/`utils/trophees.ts`. tsc/lint vérifiés
+  propres.
+
+**Revue code-reviewer (2026-09-18)** : APPROUVÉ AVEC RÉSERVES sur la
+première passe du lot ci-dessus, 3 points réels corrigés avant commit —
+- 🔴 **Bug logique confirmé dans `utils/trophees.ts::moisMaitrise`** :
+  le garde `.length > 0` portait sur la liste NON filtrée
+  (`enveloppesSansEntree`) alors que `.every(...)` s'appliquait à la liste
+  filtrée (`budget > 0`) — `[].every(...)` renvoie `true` par vacuité en
+  JS, donc un compte dont TOUTES les catégories étaient à budget=0€
+  obtenait quand même `moisMaitrise=true` (faux positif), exactement le
+  bug que le commentaire d'origine prétendait déjà empêcher. Corrigé :
+  garde déplacé sur la liste filtrée elle-même.
+- 🔴 **Gap réel dans le contrôle de doublon de nom** : `renommerCategoriePartout`
+  (contrôle ajouté côté §1 ci-dessus) est appelé en fire-and-forget
+  (jamais attendu) par `sauvegarderEnveloppe` (`app/(tabs)/index.tsx`,
+  modale principale "Modifier une catégorie") — EN PARALLÈLE de
+  `modifierEnveloppes`/`appliquerEnveloppes`, qui écrit la ligne éditée
+  directement sur Supabase SANS aucun contrôle de doublon. Un renommage
+  vers un nom déjà pris pouvait donc échouer côté `renommerCategoriePartout`
+  (aucun événement/snapshot mis à jour) tout en réussissant quand même côté
+  `modifierEnveloppes` (la ligne `enveloppes` elle-même renommée en
+  doublon) — réintroduisant P021/P027/P033 par ce chemin précis, le
+  parcours de renommage le plus emprunté de l'app. Corrigé : même contrôle
+  de doublon ajouté en amont, synchrone, dans `sauvegarderEnveloppe`
+  elle-même (bloque avant tout appel si collision).
+- ⚠️ **Faux positif possible sur la dissolution d'espace** (item 3
+  ci-dessus) : `getMembreEspace()` retournait `null` aussi bien pour "pas
+  d'espace" que pour une erreur Supabase/réseau transitoire — un simple
+  hoquet réseau pendant qu'un espace est réellement actif aurait donc pu
+  déclencher à tort "L'espace partagé a été dissous" + bascule forcée en
+  vue personnelle. Corrigé : nouveau statut `{statut:"erreur"}` distinct
+  dans `EtatEspacePartage` (`utils/espacePartage.ts`), explicitement exclu
+  de la logique de détection de dissolution dans `EspacePartageContext.tsx`
+  (`rafraichirEspace` et l'effet de montage) — sur erreur, on ne touche à
+  rien, on réessaiera au prochain appel.
+- Note secondaire non bloquante sur `utils/conseils.ts::depenseCumuleeAuJour`
+  (edge case transactions orphelines datées dans un mois déjà archivé) —
+  documentée comme nouveau finding **P053**, non corrigée (impact limité à
+  un message positif d'insight).
+tsc/lint revérifiés propres après ces 3 corrections (10 lignes / 49
+problèmes, 39 erreurs / 10 warnings — sous la baseline).
 
 ### 2026-09-13 — Pubs en vue partagée : contenu flouté "Ton bilan → Vista" (insights)
 
@@ -1488,11 +1816,12 @@ posées ici plutôt que de bloquer le loop en attendant une réponse.
   documente cette intention, et le geste "tap à côté pour annuler" est un
   réflexe UI très courant, potentiellement surprenant ici pour une saisie
   financière (Budget) ou un événement (Planning).
-- **Statut** : signalé pour décision produit, non corrigé (pas de correction
-  "certaine" au sens de CLAUDE.md tant que l'intention n'est pas confirmée).
-  Aucune décision prise à ce stade.
-- **À reconsidérer si** : Maëlys confirme l'un ou l'autre comportement —
-  correction alors directe et uniforme sur les 7+ sites concernés.
+- **Statut** : **RÉPONDUE (2026-09-18)** — décision produit reçue, voir
+  l'entrée "2026-09-18 — Réponses reçues sur 6 décisions produit" plus haut
+  dans cette section : "tap en dehors = sauvegarde" est bien le choix
+  produit assumé, appliqué de façon cohérente. P036 (Budget) avait un
+  écart réel (retour Android) corrigé le même jour ; P028 (Planning)
+  s'avère déjà conforme tel quel, aucun changement de code nécessaire.
 
 Gabarit :
 

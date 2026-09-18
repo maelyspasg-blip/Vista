@@ -45,6 +45,7 @@ import {
   Enveloppe,
   Objectif,
   parseDateFixeLocale,
+  signalerErreurSync,
   useObjectifs,
 } from "../store";
 import {
@@ -979,6 +980,31 @@ export default function Dashboard() {
     // plus, jamais à la place (les autres champs modifiés ici — budget,
     // couleur, type... — restent propres à cette seule enveloppe).
     const nouveauNom = nomTemp.trim();
+    // RÈGLE À NE JAMAIS CASSER — PAS DE DOUBLON DE NOM (décision produit du
+    // 2026-09-18, corrige P021/P027/P033, cf. app/store.ts::ajouterEnveloppe/
+    // renommerCategoriePartout) : BUG CORRIGÉ EN REVUE (code-reviewer,
+    // 2026-09-18) — `renommerCategoriePartout` a bien le même contrôle de
+    // doublon, mais il est appelé en fire-and-forget (jamais attendu) juste
+    // en dessous, EN PARALLÈLE de `setEnveloppes`/`modifierEnveloppes` qui,
+    // lui, écrit la ligne éditée directement sur Supabase sans jamais
+    // vérifier de doublon. Sans ce garde ICI, un renommage vers un nom déjà
+    // pris pouvait donc échouer côté `renommerCategoriePartout` (aucun
+    // événement/snapshot mis à jour) tout en réussissant quand même côté
+    // `modifierEnveloppes` (la ligne `enveloppes` elle-même renommée en
+    // doublon) — réintroduisant exactement P021/P027/P033 par ce chemin.
+    // Vérifié AVANT tout appel, synchrone, jamais de course possible.
+    if (nouveauNom && nouveauNom !== enveloppeEnEdition.nom) {
+      const nomNormalise = nouveauNom.toLowerCase();
+      const collision = enveloppes.some(
+        (e) =>
+          e.id !== enveloppeEnEdition.id &&
+          e.nom.trim().toLowerCase() === nomNormalise,
+      );
+      if (collision) {
+        signalerErreurSync("Ce nom de catégorie existe déjà.");
+        return;
+      }
+    }
     if (nouveauNom && nouveauNom !== enveloppeEnEdition.nom) {
       objStore.renommerCategoriePartout(enveloppeEnEdition.nom, nouveauNom);
     }

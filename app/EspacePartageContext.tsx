@@ -134,6 +134,16 @@ type EspacePartageContextType = {
   // jamais avant (pour ne pas afficher un mode qui pourrait échouer à
   // s'enregistrer côté serveur).
   changerModeBalance: (mode: ModeBalance, ratio: number) => Promise<boolean>;
+  // RÈGLE À NE JAMAIS CASSER — DISSOLUTION D'ESPACE PENDANT UNE SESSION
+  // ACTIVE (décision produit du 2026-09-18) : passe à `true` UNIQUEMENT sur
+  // la transition estDansUnEspace true → false détectée par rafraichirEspace
+  // (jamais au premier chargement, où il n'y a simplement jamais eu
+  // d'espace — cf. RÈGLE détaillée dans rafraichirEspace). Consommé par
+  // EspaceDissousBanner.tsx pour afficher une notification in-app discrète,
+  // puis acquitté (jamais remis à `false` automatiquement après un délai —
+  // le composant qui l'affiche décide de son propre timing).
+  espaceVientDEtreDissous: boolean;
+  acquitterDissolutionEspace: () => void;
 };
 
 const EspacePartageContext = createContext<EspacePartageContextType>({
@@ -156,6 +166,8 @@ const EspacePartageContext = createContext<EspacePartageContextType>({
   modeBalance: "50_50",
   ratioPersonnalise: 0.5,
   changerModeBalance: async () => false,
+  espaceVientDEtreDissous: false,
+  acquitterDissolutionEspace: () => {},
 });
 
 function cleVueActive(userId: string): string {
@@ -191,6 +203,19 @@ export function EspacePartageProvider({
   const [chargementPartenaire, setChargementPartenaire] = useState(false);
   const [modeBalance, setModeBalance] = useState<ModeBalance>("50_50");
   const [ratioPersonnalise, setRatioPersonnalise] = useState(0.5);
+  const [espaceVientDEtreDissous, setEspaceVientDEtreDissous] = useState(false);
+  const acquitterDissolutionEspace = useCallback(() => {
+    setEspaceVientDEtreDissous(false);
+  }, []);
+  // RÈGLE : ref plutôt qu'une dépendance directe de rafraichirEspace sur
+  // estDansUnEspace — rafraichirEspace doit garder une identité stable
+  // (useCallback([userId]) uniquement) pour ne pas redéclencher l'effet
+  // AppState ci-dessous à chaque bascule d'espace ; la ref donne accès à la
+  // valeur COURANTE sans figurer dans les dépendances du callback.
+  const estDansUnEspaceRef = useRef(estDansUnEspace);
+  useEffect(() => {
+    estDansUnEspaceRef.current = estDansUnEspace;
+  }, [estDansUnEspace]);
   const objStore = useObjectifs();
 
   // RÈGLE À NE JAMAIS CASSER — TOUT RÉINITIALISER SI userId CHANGE (jamais
@@ -230,6 +255,12 @@ export function EspacePartageProvider({
     getMembreEspace()
       .then((etat) => {
         if (annule) return;
+        // RÈGLE À NE JAMAIS CASSER — "erreur" (réseau/Supabase, cf. RÈGLE
+        // dans utils/espacePartage.ts) : ne rien faire, on garde les valeurs
+        // par défaut déjà posées (état initial du Provider) plutôt que de
+        // les écraser sur un statut inconnu — jamais conclure "pas
+        // d'espace" à partir d'une simple erreur transitoire.
+        if (etat?.statut === "erreur") return;
         // RÈGLE À NE JAMAIS CASSER : "en_attente" (créateur seul, personne
         // n'a encore rejoint) compte comme PAS ENCORE dans un espace pour
         // le reste de l'app — le switcher "Partagé" et toute la logique de
@@ -279,7 +310,36 @@ export function EspacePartageProvider({
     if (!userId) return;
     try {
       const etat = await getMembreEspace();
+      // RÈGLE À NE JAMAIS CASSER — "erreur" NE DOIT JAMAIS DÉCLENCHER LA
+      // DISSOLUTION (revue code-reviewer du 2026-09-18, cf. RÈGLE détaillée
+      // dans utils/espacePartage.ts::EtatEspacePartage) : un hoquet réseau
+      // pendant que l'espace est réellement toujours actif ne doit ni
+      // afficher "L'espace partagé a été dissous", ni basculer la vue en
+      // personnel — on ne touche à rien et on réessaiera au prochain appel
+      // (60s/retour au premier plan/pull-to-refresh).
+      if (etat?.statut === "erreur") return;
       if (!etat || etat.statut === "en_attente") {
+        // RÈGLE À NE JAMAIS CASSER — DISSOLUTION D'ESPACE PENDANT UNE
+        // SESSION ACTIVE (décision produit du 2026-09-18) : rafraichirEspace
+        // est le seul point d'entrée appelé APRÈS un montage initial déjà
+        // résolu (retour au premier plan, pull-to-refresh, vérification
+        // périodique) — si estDansUnEspaceRef.current était `true` juste
+        // avant cet appel, ça signifie que l'espace existait à l'instant
+        // d'avant et vient de disparaître (dissous par le partenaire, ou
+        // par moi depuis un autre appareil) : bascule automatique en vue
+        // "personnel" (persistée, comme un choix explicite de
+        // l'utilisateur) + notification in-app discrète (consommée par
+        // EspaceDissousBanner.tsx). Ne se déclenche JAMAIS au premier
+        // chargement (effet de montage plus haut, pas cette fonction) : un
+        // compte qui n'a simplement jamais eu d'espace ne doit jamais voir
+        // ce message.
+        if (estDansUnEspaceRef.current) {
+          setVueActiveState("personnel");
+          AsyncStorage.setItem(cleVueActive(userId), "personnel").catch(
+            () => {},
+          );
+          setEspaceVientDEtreDissous(true);
+        }
         setEstDansUnEspace(false);
         setEspaceId(null);
         setMembrePartenaire(null);
@@ -476,6 +536,8 @@ export function EspacePartageProvider({
         modeBalance,
         ratioPersonnalise,
         changerModeBalance,
+        espaceVientDEtreDissous,
+        acquitterDissolutionEspace,
       }}
     >
       {children}

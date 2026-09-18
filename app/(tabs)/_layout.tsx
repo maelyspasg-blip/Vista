@@ -10,6 +10,8 @@ import { useEffect } from "react";
 import { AppState, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAccessibilite } from "../AccessibiliteContext";
+import { EspaceDissousBanner } from "../EspaceDissousBanner";
+import { useEspacePartage } from "../EspacePartageContext";
 import { GuestBanner } from "../GuestBanner";
 import { PagerSwipeProvider, usePagerSwipe } from "../PagerSwipeContext";
 import { RecurrenceSuggestionBanner } from "../RecurrenceSuggestionBanner";
@@ -102,6 +104,7 @@ function TabsNavigator() {
 
 export default function TabLayout() {
   const objStore = useObjectifs();
+  const { rafraichirEspace } = useEspacePartage();
 
   useEffect(() => {
     // RÈGLE À NE JAMAIS CASSER — ARCHIVAGE TOUJOURS EN PREMIER, ATTENDU
@@ -127,6 +130,14 @@ export default function TabLayout() {
       objStore.verifierVersementsObjectifs();
       objStore.verifierEvenementsFinanciers();
       objStore.verifierMotifsRecurrents();
+      // RÈGLE : décision produit du 2026-09-18 — comble le délai de
+      // détection d'une dissolution d'espace partagé pendant une session
+      // active (pas de Realtime Supabase dans ce projet, cf. RÈGLE détaillée
+      // dans EspacePartageContext.tsx::rafraichirEspace). Fire-and-forget,
+      // indépendant des autres vérifications ci-dessus (pas de lien avec
+      // l'archivage/les échéances). No-op silencieux si le Provider n'est
+      // pas monté (rafraichirEspace retombe sur son défaut async () => {}).
+      rafraichirEspace();
     };
 
     (async () => {
@@ -164,6 +175,7 @@ export default function TabLayout() {
       <View style={{ flex: 1 }}>
         <GuestBanner topSafeArea />
         <SyncErrorBanner />
+        <EspaceDissousBanner />
         <RecurrenceSuggestionBanner />
         <TabsNavigator />
       </View>

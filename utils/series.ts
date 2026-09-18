@@ -41,7 +41,12 @@ type PointMois = {
 };
 
 function totauxDuMois(envs: EnveloppeSerie[]) {
-  const pertinentes = envs.filter((e) => e.type !== "Entrée");
+  // RÈGLE : décision produit du 2026-09-18 (même RÈGLE que utils/score.ts::
+  // scoreBudget) — une catégorie à budget=0€ ne représente rien de réel,
+  // exclue des analyses (alimente le score de santé et le trophée "Série
+  // Budget respecté"). Sans ce filtre, sa dépense réelle éventuelle
+  // gonflait depenseTotal sans jamais contribuer à budgetTotal.
+  const pertinentes = envs.filter((e) => e.type !== "Entrée" && e.budget > 0);
   return {
     depenseTotal: pertinentes.reduce((acc, e) => acc + e.depense, 0),
     budgetTotal: pertinentes.reduce((acc, e) => acc + e.budget, 0),

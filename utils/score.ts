@@ -155,7 +155,14 @@ function calculerScoreDepuisSignaux(signaux: SignauxScore): ScoreSante {
 // critère "budget" du score individuel, appliquée aux catégories fusionnées
 // des deux comptes plutôt qu'aux miennes seules. Jamais dupliquée.
 export function scoreBudget(enveloppes: EnveloppeMontants[]): number | null {
-  const pertinentes = enveloppes.filter((e) => e.type !== "Entrée");
+  // RÈGLE : décision produit du 2026-09-18 — une catégorie à budget=0€ ne
+  // représente rien de réel, exclue des analyses/insights (contrairement au
+  // Simulateur, qui les inclut volontairement — cf. AUDIT_V1.md §2.2). Sans
+  // ce filtre, sa dépense réelle éventuelle gonflait depenseTotal sans
+  // jamais contribuer à budgetTotal, dégradant artificiellement ce score.
+  const pertinentes = enveloppes.filter(
+    (e) => e.type !== "Entrée" && e.budget > 0,
+  );
   const budgetTotal = pertinentes.reduce((acc, e) => acc + e.budget, 0);
   const depenseTotal = pertinentes.reduce((acc, e) => acc + e.depense, 0);
   if (budgetTotal <= 0) return null;
@@ -338,8 +345,12 @@ export type ExplicationScore = { texte: string; positif: boolean };
 function trouverCategorieDepassee(
   enveloppes: EnveloppeAvecNom[],
 ): EnveloppeAvecNom | undefined {
+  // RÈGLE : décision produit du 2026-09-18 (même RÈGLE que scoreBudget
+  // ci-dessus) — sans budget > 0, une catégorie jamais budgétée mais avec
+  // la moindre dépense vérifie trivialement depense > budget et pouvait
+  // être désignée à tort "la catégorie la plus dépassée".
   return enveloppes
-    .filter((e) => e.type !== "Entrée" && e.depense > e.budget)
+    .filter((e) => e.type !== "Entrée" && e.budget > 0 && e.depense > e.budget)
     .sort((a, b) => b.depense - b.budget - (a.depense - a.budget))[0];
 }
 

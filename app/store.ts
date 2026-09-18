@@ -2771,6 +2771,28 @@ export function useObjectifs() {
       champs: Omit<Enveloppe, "id">,
     ): Promise<Enveloppe | null> => {
       try {
+        // RÈGLE À NE JAMAIS CASSER — PAS DE DOUBLON DE NOM (décision produit
+        // du 2026-09-18, corrige P021/P027/P033) : deux catégories avec le
+        // même nom (trimmé, insensible à la casse — même convention que
+        // fusionnerCategoriesParNom, utils/espacePartage.ts) fusionnaient à
+        // tort dans GraphiqueFlux (P021), masquaient silencieusement l'une
+        // des deux échéances dans Planning (P027), et empêchaient de les
+        // distinguer sur une carte fusionnée en vue partagée (P033).
+        // Vérification client uniquement (pas de contrainte SQL unique
+        // côté Supabase pour l'instant — cf. AUDIT_V1.md pour le SQL
+        // fourni en option, jamais exécuté depuis cet environnement) :
+        // n'élimine pas une vraie course entre 2 appareils simultanés,
+        // mais couvre le cas réel (un seul utilisateur, un seul appareil,
+        // qui tape deux fois le même nom).
+        const nomNormalise = champs.nom.trim().toLowerCase();
+        const collision = etat.enveloppes.some(
+          (e) => e.nom.trim().toLowerCase() === nomNormalise,
+        );
+        if (collision) {
+          signalerErreurSync("Ce nom de catégorie existe déjà.");
+          return null;
+        }
+
         const {
           data: { user },
         } = await supabase.auth.getUser();
@@ -3420,6 +3442,20 @@ export function useObjectifs() {
     ): Promise<boolean> => {
       const nom = texteSecurise(nouveauNom);
       if (!nom || nom === ancienNom) return false;
+      // RÈGLE À NE JAMAIS CASSER — PAS DE DOUBLON DE NOM (décision produit
+      // du 2026-09-18, cf. RÈGLE identique sur ajouterEnveloppe) : renommer
+      // vers un nom déjà utilisé par une AUTRE catégorie recréerait le même
+      // problème de fusion/masquage (P021/P027/P033) que la création — même
+      // garde-fou, exclut les enveloppes déjà nommées `ancienNom` (celles
+      // qu'on est justement en train de renommer, pas une collision).
+      const nomNormalise = nom.trim().toLowerCase();
+      const collision = etat.enveloppes.some(
+        (e) => e.nom !== ancienNom && e.nom.trim().toLowerCase() === nomNormalise,
+      );
+      if (collision) {
+        signalerErreurSync("Ce nom de catégorie existe déjà.");
+        return false;
+      }
       try {
         const {
           data: { user },
@@ -3534,10 +3570,7 @@ export function useObjectifs() {
       // cette fonction manquait de 3 protections déjà présentes sur sa
       // fonction sœur supprimerObjectif (voir juste au-dessus) — filtre
       // user_id explicite côté client, backup AsyncStorage avant
-      // suppression, log audit_operations après. Corrigé ici pour aligner
-      // les deux : une catégorie entraîne en plus la perte de TOUTES ses
-      // transactions liées (cf. plus bas), donc au moins aussi sensible
-      // qu'un objectif.
+      // suppression, log audit_operations après.
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -3582,6 +3615,27 @@ export function useObjectifs() {
         (e) => e.categorieLiee === enveloppe.nom,
       );
 
+      // RÈGLE À NE JAMAIS CASSER — DÉCISION PRODUIT DU 2026-09-18 (clôt
+      // P028/AUDIT_V1.md §2.2) : une catégorie supprimée n'entraîne PLUS la
+      // suppression de ses transactions liées côté Supabase (comportement
+      // antérieur, corrigé ici sur demande explicite — "ne jamais supprimer
+      // automatiquement les transactions liées"). Elles restent en base,
+      // orphelines (enveloppe_id pointe désormais vers une catégorie qui
+      // n'existe plus), pour une consultation/suppression manuelle future
+      // depuis l'historique — cette UI de consultation reste à construire
+      // (AUDIT_V1.md, nouveau finding, cf. cette date). Elles sont en
+      // revanche bien retirées de l'état local ci-dessous (`transactions:
+      // etat.transactions.filter(...)`) : aucun écran actuel ne sait
+      // afficher une transaction dont l'enveloppeId ne correspond à aucune
+      // catégorie existante (tous les filtres du projet partent d'une
+      // enveloppe connue vers ses transactions, jamais l'inverse — vérifié
+      // par audit de code le 2026-09-18), les laisser dans l'état local
+      // créerait une incohérence visuelle sans les rendre consultables pour
+      // autant. Elles seront rechargées telles quelles (orphelines) au
+      // prochain chargerTransactions() — sans conséquence : `depense` sur
+      // les autres catégories reste la seule source de vérité des totaux
+      // affichés (jamais une re-somme de `transactions` brute, cf. RÈGLE
+      // CLAUDE.md), donc une transaction orpheline n'est comptée nulle part.
       setEtat({
         enveloppes: etat.enveloppes.filter((e) => e.id !== id),
         transactions: etat.transactions.filter((t) => t.enveloppeId !== id),
@@ -3591,8 +3645,10 @@ export function useObjectifs() {
         // jamais visible (budget.tsx ne montre que les modèles dont
         // enveloppeId correspond à une enveloppe encore existante, donc
         // aucun symptôme utilisateur), mais orphelin en base pour toujours.
-        // Même mécanique que la suppression des transactions liées
-        // juste au-dessus.
+        // Contrairement aux transactions (cf. RÈGLE juste au-dessus), un
+        // modèle de dépense n'est qu'un raccourci UI, jamais une donnée
+        // financière réelle (cf. P001) — rien n'empêche de le supprimer
+        // aussi côté Supabase, ce qui reste fait juste en dessous.
         modelesDepenses: etat.modelesDepenses.filter(
           (m) => m.enveloppeId !== id,
         ),
@@ -3602,21 +3658,6 @@ export function useObjectifs() {
             : e,
         ),
       });
-
-      const { error: erreurTransactions } = await supabase
-        .from("transactions")
-        .delete()
-        .eq("enveloppe_id", id)
-        .eq("user_id", user.id);
-      if (erreurTransactions) {
-        console.error(
-          "Supabase delete transactions liées a échoué :",
-          erreurTransactions,
-        );
-        signalerErreurSync(
-          `Impossible de supprimer les transactions liées : ${erreurTransactions.message}`,
-        );
-      }
 
       const { error: erreurModeles } = await supabase
         .from("modeles_depenses")

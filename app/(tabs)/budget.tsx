@@ -478,6 +478,12 @@ export default function Budget() {
       estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
   );
 
+  // RÈGLE : décision produit du 2026-09-18 (clôt P033/P039) — aucune limite
+  // imposée au nombre de catégories par compte. `renderCarteCategorie`
+  // (plus bas) refiltre `transactions`/`historiquesMois` en entier par
+  // catégorie affichée à chaque rendu (non mémoïsé, cf. AUDIT_V1.md P039) —
+  // une dégradation de performance est possible au-delà d'environ 50
+  // catégories actives simultanées, mais rien n'est bloqué côté produit.
   const categoriesAffichees = objStore.enveloppes.filter(
     (e) =>
       estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL) &&
@@ -2173,11 +2179,16 @@ export default function Budget() {
         visible={modalAjoutVisible}
         animationType={reduireAnimations ? "none" : "slide"}
         transparent
-        onRequestClose={() => {
-          setModalAjoutVisible(false);
-          setTransactionEnEdition(null);
-          setDateTransactionEnEdition(null);
-        }}
+        // RÈGLE À NE JAMAIS CASSER — DÉCISION PRODUIT DU 2026-09-18 (clôt
+        // P036, AUDIT_V1.md §2.2) : "tap en dehors = sauvegarde, l'annulation
+        // explicite se fait uniquement via le bouton Annuler, appliqué de
+        // façon cohérente sur toutes les modales" — le retour matériel
+        // Android (onRequestClose) fermait jusqu'ici sans jamais tenter
+        // d'enregistrer, contrairement au tap en dehors juste en dessous
+        // (même incohérence déjà documentée par P036). Réutilise la MÊME
+        // fonction que le tap en dehors, pas une copie : les deux gestes de
+        // fermeture "non explicites" doivent rester strictement identiques.
+        onRequestClose={fermerModalAjoutAvecSauvegarde}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}

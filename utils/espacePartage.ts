@@ -98,7 +98,20 @@ export type EtatEspacePartage =
       prenomPartenaire: string | null;
       modeBalance: ModeBalance;
       ratioPersonnalise: number;
-    };
+    }
+  // RÈGLE À NE JAMAIS CASSER — "ERREUR" DISTINCT DE `null` (revue
+  // code-reviewer du 2026-09-18, ferme un bug trouvé lors de l'implémentation
+  // de la détection de dissolution d'espace) : avant ce statut, TOUTE erreur
+  // Supabase (réseau transitoire compris) dans getMembreEspace() retournait
+  // `null`, indiscernable d'un compte qui n'a réellement jamais eu d'espace.
+  // rafraichirEspace() (EspacePartageContext.tsx) s'appuyait sur ce `null`
+  // pour détecter une dissolution — un simple hoquet réseau pendant qu'un
+  // espace est bien actif aurait donc pu déclencher à tort "L'espace
+  // partagé a été dissous" + bascule forcée en vue personnelle. `"erreur"`
+  // permet aux appelants de distinguer "confirmé : pas d'espace" (`null`)
+  // de "statut inconnu, réessayer plus tard" (`{statut:"erreur"}`) — ce
+  // dernier ne doit JAMAIS être traité comme une dissolution confirmée.
+  | { statut: "erreur" };
 
 // RÈGLE : types volontairement DISTINCTS des Enveloppe/Transaction de
 // app/store.ts — ce sont des données EN LECTURE SEULE d'un AUTRE
@@ -286,7 +299,7 @@ export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
         "Supabase select membres_espace (own) a échoué :",
         erreurMesMembres,
       );
-      return null;
+      return { statut: "erreur" };
     }
     if (!mesMembres || mesMembres.length === 0) return null;
 
@@ -330,7 +343,7 @@ export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
         "Supabase select membres_espace (espace) a échoué :",
         erreurTousLesMembres,
       );
-      return null;
+      return { statut: "erreur" };
     }
 
     const membres = tousLesMembres ?? [];
@@ -342,13 +355,16 @@ export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
         .eq("id", espaceId)
         .maybeSingle();
 
-      if (erreurEspace || !espaceRow) {
+      if (erreurEspace) {
         console.error(
           "Supabase select espaces_partages (getMembreEspace, en_attente) a échoué :",
           erreurEspace,
         );
-        return null;
+        return { statut: "erreur" };
       }
+      // Pas d'erreur mais aucune ligne trouvée : l'espace a bien été
+      // supprimé (dissous), pas un problème réseau — `null` est correct ici.
+      if (!espaceRow) return null;
 
       return {
         statut: "en_attente",
@@ -405,7 +421,7 @@ export async function getMembreEspace(): Promise<EtatEspacePartage | null> {
     };
   } catch (e) {
     console.error("getMembreEspace a échoué :", e);
-    return null;
+    return { statut: "erreur" };
   }
 }
 
