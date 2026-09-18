@@ -177,6 +177,37 @@ export type DonneesPartenaire = {
   couleurEspacePartage: string | null;
 };
 
+// RÈGLE À NE JAMAIS CASSER — LOG D'AUDIT SUR LES 3 OPÉRATIONS DE CYCLE DE
+// VIE DE L'ESPACE PARTAGÉ (créer/rejoindre/quitter), ajouté le 2026-09-18
+// avant de repasser ESPACE_PARTAGE_ACTIF à `true` pour de vrai — clôt le
+// point (2) de la RÈGLE "2 POINTS RESTÉS NON VÉRIFIÉS" dans
+// utils/premium.ts, cf. AUDIT_V1.md §5.1. Même sémantique que
+// journaliserOperationAudit (app/store.ts) — délibérément DUPLIQUÉE ici,
+// jamais importée : `journaliserOperationAudit` n'est pas exportée par
+// store.ts, et utils/ ne doit jamais dépendre de store.ts (RÈGLE
+// d'architecture existante, cf. P015/AUDIT_V1.md — même convention déjà
+// suivie pour moisComptageEffectif). Best-effort, fire-and-forget, jamais
+// awaited par l'appelant, jamais bloquant sur l'opération qu'elle décrit.
+function journaliserOperationAuditEspace(
+  operation: string,
+  details: Record<string, unknown>,
+): void {
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    supabase
+      .from("audit_operations")
+      .insert({ user_id: user.id, operation, details })
+      .then(({ error }) => {
+        if (error) {
+          console.error(
+            `[espacePartage] Journalisation d'audit "${operation}" a échoué :`,
+            error,
+          );
+        }
+      });
+  });
+}
+
 // RÈGLE À NE JAMAIS CASSER — CRÉATION ENTIÈREMENT SERVEUR, VIA RPC : la
 // génération du code ET son insertion se font maintenant DANS la fonction
 // Postgres `creer_espace_partage()` (security definer, cf. migration
@@ -207,6 +238,9 @@ export async function creerEspacePartage(): Promise<EspacePartage | null> {
     }
 
     const espace = data[0];
+    journaliserOperationAuditEspace("creation_espace_partage", {
+      espaceId: espace.id,
+    });
     return {
       id: espace.id,
       code: espace.code,
@@ -269,6 +303,9 @@ export async function rejoindreEspacePartage(
       return { succes: false, raison: "erreur_reseau" };
     }
 
+    journaliserOperationAuditEspace("jonction_espace_partage", {
+      espaceId: ligne.espace_id,
+    });
     return {
       succes: true,
       espace: {
@@ -462,6 +499,7 @@ export async function quitterEspacePartage(): Promise<boolean> {
       );
       return false;
     }
+    journaliserOperationAuditEspace("depart_espace_partage", {});
     return true;
   } catch (e) {
     console.error("quitterEspacePartage a échoué :", e);

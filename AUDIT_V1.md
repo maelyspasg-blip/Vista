@@ -578,9 +578,12 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   requête Supabase et l'utiliser directement, comme `budgetDuMoisArchive`, plutôt
   que de re-dériver depuis des champs qui n'ont plus cette sémantique une fois
   archivés.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code). Concerne uniquement la vue
-  partagée (masquée en prod tant que `ESPACE_PARTAGE_ACTIF=false`) — pas
-  bloquant pour le build V1 en cours, mais à corriger avant réactivation.
+- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code). **Mise à jour du
+  2026-09-18** : `ESPACE_PARTAGE_ACTIF` est passé à `true` pour tous les
+  comptes (demande explicite, cf. `utils/premium.ts`) — ce finding a
+  désormais un impact utilisateur RÉEL, ce n'est plus un problème
+  théorique masqué en prod. Non corrigé à ce jour — à traiter en
+  priorité, pas juste "avant réactivation" (déjà réactivé).
 
 ### P013 — Sous-poste "Objectifs" peut afficher plus que son total parent "Argent immobilisé" (dupliqué dans 2 écrans)
 
@@ -930,7 +933,14 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Nuance vérifiée, pas un bug** : la RPC elle-même est robuste contre une vraie course entre les 2 comptes (revalidation de propriété à chaque appel, un second appel concurrent échoue proprement sans créer de doublon) — le problème est l'agressivité du critère de déclenchement client, pas la protection serveur.
 - **Nuance additionnelle** : `pairesFusionIgnorees` ("Garder séparé") n'est vérifiée que sur la branche "suggestion", jamais sur la branche auto-fusion — une paire mise en "Garder séparé" peut quand même fusionner de force si une heure change plus tard pour coïncider exactement.
 - **Piste de correction** : ne jamais fusionner sans confirmation explicite (même pour le signal "fort"), ou ajouter un signal supplémentaire (montant identique) + faire respecter `pairesFusionIgnorees` sur les deux branches.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + traçage de la RPC). Masqué en prod (`ESPACE_PARTAGE_ACTIF=false`), actif pour les comptes admin dès aujourd'hui.
+- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + traçage de la RPC).
+  **Mise à jour du 2026-09-18** : `ESPACE_PARTAGE_ACTIF` est passé à
+  `true` pour tous les comptes (demande explicite) — ce finding touche
+  désormais potentiellement n'importe quel couple utilisateur réel du
+  Planning partagé, pas seulement les comptes admin. Gravité à
+  reconsidérer à la hausse compte tenu de la perte silencieuse de données
+  décrite ci-dessus (montant/catégorie/couleur/durée) — non corrigé à ce
+  jour, à traiter en priorité.
 
 ### P026 — Récurrence mensuelle/annuelle : dérive silencieuse et permanente sur les jours 29/30/31 et le 29 février
 
@@ -2115,6 +2125,59 @@ fonction de mise à jour additive du snapshot sur le modèle de
 `renommerCategoriePartout`, RLS déjà suffisante) — reporté à une session
 suivante plutôt que bâclé dans celle-ci.
 
+### 2026-09-18 — `ESPACE_PARTAGE_ACTIF` repassé à `true` pour tous les comptes (demande explicite)
+
+**Contexte** : demande explicite — rendre la section "Espace partagé" de
+Profil visible pour tous les comptes connectés, pas seulement les admin,
+avec vérification que `app/profil.tsx` ne filtre pas les non-admin.
+
+**Vérifié avant tout changement** : `app/profil.tsx:1226`
+(`estEspacePartageActif(objStore.isAdmin) &&`) est déjà le SEUL gardien de
+toute la section — aucun gardien secondaire `isAdmin` niché à l'intérieur
+(vérifié sur les 196 lignes du bloc). `estEspacePartageActif(isAdmin) =
+ESPACE_PARTAGE_ACTIF || isAdmin` (`utils/premium.ts`) — passer le flag à
+`true` suffit donc, par construction, à rendre la section visible pour
+tout le monde ; aucune modification de `profil.tsx` n'était nécessaire.
+
+**Fait** :
+- `ESPACE_PARTAGE_ACTIF` passé de `false` à `true` (`utils/premium.ts`).
+- **Portée réelle, plus large que Profil seul** — signalée explicitement
+  car non mentionnée dans la demande : ce flag est le SEUL point d'entrée
+  utilisé dans 8 fichiers (`profil.tsx`, `EspacePartageContext.tsx`,
+  `_layout.tsx`, `store.ts`, `onboarding/index.tsx`, `planning.tsx`,
+  `espacePartage.ts`, `premium.ts`) — le switcher Moi/Partagé d'Aperçu/
+  Budget/Planning/Stats, le Planning partagé, et la consolidation
+  GraphiqueFlux deviennent TOUS visibles pour tous les comptes en même
+  temps, pas seulement la carte de Profil demandée.
+- **Point (2) de la RÈGLE "2 points restés non vérifiés"** (`utils/premium.ts`,
+  posée le 2026-09-13/14, jamais traitée depuis) **corrigé à cette
+  occasion** : nouvelle fonction `journaliserOperationAuditEspace`
+  (`utils/espacePartage.ts`, dupliquée localement depuis
+  `journaliserOperationAudit`/`app/store.ts` — jamais importée, RÈGLE
+  d'architecture utils/↔store.ts) — journalise désormais
+  `creerEspacePartage`/`rejoindreEspacePartage`/`quitterEspacePartage`
+  dans `audit_operations`.
+- **Point (1) de cette même RÈGLE reste NON vérifié** (version exacte du
+  RPC `creer_espace_partage()` déployée en base, non confirmable sans
+  accès CLI Supabase) — un test en direct du 2026-09-18 (§6.11) s'est
+  comporté exactement comme la version attendue, un signal favorable mais
+  pas une confirmation formelle.
+- **P012 et P025 (§2, tous deux 🟠 MAJEUR, toujours ouverts) passent d'un
+  impact théorique ("masqué en prod") à un impact utilisateur réel** —
+  statuts mis à jour dans leurs entrées respectives. **P025 en
+  particulier mérite une attention rapide** : décrit une perte silencieuse
+  de données (montant/catégorie/couleur/durée d'un événement Planning)
+  sur une fusion automatique trop agressive, désormais atteignable par
+  n'importe quel couple utilisateur réel du Planning partagé.
+- Commentaires RÈGLE mis à jour dans `utils/premium.ts`, `app/profil.tsx`,
+  `CLAUDE.md` (flags de feature) pour refléter l'état actuel — plus aucune
+  mention active de "désactivé pour la V1" restée périmée dans ces
+  fichiers précis (les 18 occurrences historiques ailleurs dans ce
+  document, décrivant l'état AU MOMENT où chaque finding a été écrit, ne
+  sont volontairement pas réécrites rétroactivement).
+
+tsc/lint vérifiés propres (10 lignes / 49 problèmes).
+
 ### 2026-09-13 — Pubs en vue partagée : contenu flouté "Ton bilan → Vista" (insights)
 
 - **Contexte** : demande "le contenu flouté derrière le cadenas doit
@@ -2215,6 +2278,12 @@ suivante plutôt que bâclé dans celle-ci.
   n'ont pas changé depuis la veille.
 - **À reconsidérer si** : les 2 points sont traités (RPC vérifié côté
   dashboard, log audit_operations ajouté).
+- **Superseded le 2026-09-18** : demande explicite de repasser le flag à
+  `true` pour de vrai, sans attendre que les 2 points soient traités —
+  voir l'entrée "2026-09-18 — ESPACE_PARTAGE_ACTIF repassé à `true`..."
+  plus haut dans cette section pour l'état réel à jour (point (2) traité
+  à cette occasion, point (1) toujours non vérifiable depuis cet
+  environnement).
 
 ### 2026-09-14 — Widgets Home Screen : visibilité potentielle sur écran verrouillé (accès "Aujourd'hui")
 

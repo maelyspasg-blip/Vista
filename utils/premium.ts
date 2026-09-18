@@ -44,22 +44,38 @@ export const TESTFLIGHT_MODE = false;
 //
 // RÈGLE : passé à `true` le 2026-09-13 pour les tests (diagnostic de
 // l'écran onboarding "Vista à deux"), REPASSÉ À `false` LE 2026-09-14 pour
-// le build V1 production, conformément à cette RÈGLE elle-même — demande
-// explicite, confirmée après qu'un conflit avec cette même règle a été
-// signalé. Espace partagé reste donc masqué pour tous les vrais
-// utilisateurs de ce build, y compris ceux qui l'ont testé la veille.
+// le build V1 production, puis REPASSÉ À `true` LE 2026-09-18 (demande
+// explicite, pour de vrai cette fois — visible désormais par TOUS les
+// comptes connectés via estEspacePartageActif(isAdmin), plus seulement
+// les admin, cf. RÈGLE sur cette fonction plus bas). Espace partagé est
+// donc désormais visible pour tous les vrais utilisateurs de ce build —
+// pas seulement dans Profil (le seul écran explicitement demandé) :
+// TOUT le code gardé par ce flag/estEspacePartageActif (le switcher
+// Moi/Partagé d'Aperçu/Budget/Planning/Stats, le Planning partagé, la
+// fusion GraphiqueFlux consolidée) devient également visible d'un coup,
+// c'est le même flag partout, jamais un sous-ensemble.
 //
-// RÈGLE — 2 POINTS RESTÉS NON VÉRIFIÉS DEPUIS LA REVUE SÉCURITÉ DU
-// 2026-09-13, À TRAITER AVANT DE REPASSER CE FLAG À `true` POUR DE VRAI :
-// (1) confirmer dans le dashboard Supabase (SQL Editor) que le RPC
-// creer_espace_partage() déployé correspond bien à la version
-// 20260831130000_creer_espace_partage_reutilise_en_attente.sql (pas une
-// version antérieure ou absente — cet environnement n'a pas d'accès CLI
-// Supabase pour le vérifier directement) ; (2) ajouter un log
-// audit_operations autour de creerEspacePartage/rejoindreEspacePartage/
-// quitterEspacePartage (utils/espacePartage.ts), actuellement absent —
-// cf. AUDIT_V1.md §5.1 pour le détail complet des deux points.
-export const ESPACE_PARTAGE_ACTIF = false;
+// RÈGLE — DES 2 POINTS RESTÉS NON VÉRIFIÉS DEPUIS LA REVUE SÉCURITÉ DU
+// 2026-09-13, SEUL LE (2) EST TRAITÉ À CE JOUR :
+// (1) NON VÉRIFIÉ — confirmer dans le dashboard Supabase (SQL Editor) que
+// le RPC creer_espace_partage() déployé correspond bien à la version
+// 20260831130000_creer_espace_partage_reutilise_en_attente.sql — toujours
+// impossible à vérifier directement depuis cet environnement (pas d'accès
+// CLI Supabase). Élément de preuve indirect en faveur du (1), à défaut
+// d'une vérification directe : un test en direct du 2026-09-18 (2 vrais
+// comptes, création réelle d'espace + jonction par code + lecture mutuelle
+// + dissolution, cf. AUDIT_V1.md §6.11) s'est comporté exactement comme
+// cette version l'attend (code généré côté serveur, expire_at bascule sur
+// 2099-12-31 à la jonction) — un signal fort, pas une confirmation
+// formelle du numéro de version déployé.
+// (2) CORRIGÉ LE 2026-09-18 — journaliserOperationAuditEspace
+// (utils/espacePartage.ts) journalise désormais creerEspacePartage/
+// rejoindreEspacePartage/quitterEspacePartage dans audit_operations,
+// best-effort, même pattern que journaliserOperationAudit (app/store.ts).
+// Cf. AUDIT_V1.md §5.1/§2 (P012/P025, toujours ouverts, désormais avec un
+// impact utilisateur réel — plus seulement théorique) pour le reste du
+// périmètre espace partagé encore imparfait à ce jour.
+export const ESPACE_PARTAGE_ACTIF = true;
 
 // RÈGLE À NE JAMAIS CASSER — REFONTE MONÉTISATION V1 (2026-09-12, demande
 // explicite) : Premium est retiré du modèle économique de la V1, remplacé

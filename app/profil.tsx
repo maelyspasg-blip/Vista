@@ -1215,14 +1215,17 @@ export default function Profil() {
           </View>
         </View>
 
-        {/* RÈGLE À NE JAMAIS CASSER — FONDATIONS ESPACE PARTAGÉ, RIEN
-            N'APPARAÎT POUR UN COMPTE NON-ADMIN TANT QUE
-            ESPACE_PARTAGE_ACTIF EST false : cf. utils/premium.ts —
-            estEspacePartageActif(isAdmin) laisse un admin voir cette
-            section même bêta, jamais un compte non-admin. Ne jamais
-            retirer cette garde même en développant le contenu de cette
-            section — elle protège la bêta TestFlight actuelle d'une
-            fonctionnalité pas encore prête pour le grand public. */}
+        {/* RÈGLE À NE JAMAIS CASSER — FONDATIONS ESPACE PARTAGÉ : cf.
+            utils/premium.ts::ESPACE_PARTAGE_ACTIF (passé à `true` le
+            2026-09-18, demande explicite — visible désormais pour TOUS
+            les comptes connectés, plus seulement les admin) et
+            estEspacePartageActif(isAdmin) = ESPACE_PARTAGE_ACTIF || isAdmin
+            — un admin garde toujours accès même si le flag redevenait
+            `false` un jour (ex. avant une resoumission App Store). Ne
+            jamais retirer cette garde ni la remplacer par un simple
+            `objStore.isAdmin` ou un `true` en dur — c'est le SEUL point
+            d'entrée qui doit décider si cette section est visible,
+            jamais un second gardien local à ce fichier. */}
         {estEspacePartageActif(objStore.isAdmin) && (
           <>
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>

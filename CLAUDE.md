@@ -95,7 +95,7 @@ App mobile de gestion de budget personnel et partagé.
 // utils/premium.ts
 TESTFLIGHT_MODE = false       // V1 production (depuis le 2026-09-14) : plus de bypass premium/pub global
 ADMOB_ACTIF = true            // V1 production : vraies pubs récompensées actives
-ESPACE_PARTAGE_ACTIF = false  // désactivé pour la V1 (2 points de sécurité non résolus, cf. AUDIT_V1.md §2.2)
+ESPACE_PARTAGE_ACTIF = true   // activé pour tous depuis le 2026-09-18 (demande explicite) — P012/P025 (AUDIT_V1.md) restent ouverts, impact désormais réel
 ```
 
 ## Palette de couleurs Vista
