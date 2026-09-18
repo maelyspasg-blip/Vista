@@ -481,14 +481,6 @@ export default function Planning() {
   const [pairesFusionIgnorees, setPairesFusionIgnorees] = useState<
     Set<string>
   >(new Set());
-  // RÈGLE À NE JAMAIS CASSER — UNE SEULE TENTATIVE DE FUSION AUTO PAR PAIRE
-  // PAR SESSION : sans ce ref, chaque re-render déclenché par la fusion
-  // elle-même (chargerObjectifs()/rafraichirEvenementsPartenaire() font
-  // changer les tableaux sources) relancerait fusionnerEvenements sur la
-  // même paire avant que les lignes d'origine aient disparu des listes
-  // locales — la RPC est idempotente (cf. migration) donc ce n'est jamais
-  // dangereux, seulement redondant.
-  const pairesFusionTentees = useRef<Set<string>>(new Set());
 
   const tousLesEvenements: EvenementUnifie[] = [];
 
@@ -848,14 +840,37 @@ export default function Planning() {
     };
   }, [affichagePartage, objStore.userId]);
 
+  // RÈGLE À NE JAMAIS CASSER — CLÔT P025 (AUDIT_V1.md, 2026-09-18,
+  // correction de sécurité des données, priorité maximale) : cette
+  // fonction fusionnait auparavant AUTOMATIQUEMENT, sans confirmation, les
+  // paires "signal fort" (même nom/date + même heure ou l'un des deux
+  // "toute la journée") — jugé à tort "sans ambiguïté". En réalité, deux
+  // événements RÉELLEMENT distincts partageant juste le même nom+date
+  // (ex: deux "Anniversaire" le même jour, un par personne) fusionnaient
+  // de force : la RPC fusionner_evenements() ne garde QUE les champs de
+  // l'appelant (v_mon_event) — quel que soit celui des 2 comptes dont
+  // l'appareil détecte la paire en premier (pure course, aucun ordre
+  // garanti) — et supprime les 2 lignes d'origine. Toute divergence entre
+  // les deux (couleur/durée/volet financier — montant/categorieLiee/
+  // montantApplique/notifierActif/recurrence/toute_la_journee) était donc
+  // perdue silencieusement, sans confirmation ni trace, dès que l'un des 2
+  // appareils exécutait le check — ce que ce correctif interdit
+  // désormais : PLUS AUCUNE fusion n'a lieu sans un tap explicite d'un des
+  // 2 comptes. Toute paire correspondante (nom/date exacts, ET même heure
+  // OU l'un des deux "toute la journée", ET écart < 60 min) tombe
+  // désormais dans la MÊME carte de confirmation "Fusionner"/"Garder
+  // séparé" (confirmerSuggestionFusion/ignorerSuggestionFusion plus bas),
+  // avec la même logique pairesFusionIgnorees — un seul chemin de fusion
+  // dans tout le fichier, jamais deux. La RPC fusionner_evenements()
+  // elle-même reste inchangée (sa protection serveur contre une vraie
+  // course entre 2 confirmations quasi simultanées était déjà saine,
+  // cf. AUDIT_V1.md §5.1 — le problème était entièrement côté
+  // déclenchement client, jamais la protection serveur).
+  //
   // RÈGLE À NE JAMAIS CASSER — COMPARAISON SUR LES LISTES BRUTES, JAMAIS
   // tousLesEvenements (qui déplie les récurrences) : cf. RÈGLE sur
   // SuggestionFusion plus haut. Nom insensible casse/espaces + même date
-  // exacte (champ `date`, jamais dateFin) ; écart d'heure nul (ou l'un des
-  // deux "toute la journée") → fusion automatique via la RPC idempotente,
-  // jamais laissée au choix (signal jugé sans ambiguïté) ; écart < 60
-  // minutes → suggestion affichée, fusion laissée au choix de l'utilisateur
-  // (respecte pairesFusionIgnorees, "Garder séparé").
+  // exacte (champ `date`, jamais dateFin).
   useEffect(() => {
     if (!affichagePartage) return;
 
@@ -879,34 +894,23 @@ export default function Planning() {
             heureEnMinutes(evenementPartenaire.heure),
         );
 
-        if (uneDesDeuxTouteLaJournee || ecartMinutes === 0) {
-          // RÈGLE À NE JAMAIS CASSER — UNE SEULE TENTATIVE PAR PAIRE : cf.
-          // RÈGLE sur pairesFusionTentees à sa déclaration — sans ce garde,
-          // le re-render déclenché par chargerEvenements()/
-          // rafraichirEvenementsPartenaire() juste en dessous relancerait
-          // la RPC en boucle tant que les lignes d'origine n'ont pas
-          // disparu des listes locales.
-          if (pairesFusionTentees.current.has(cle)) return;
-          pairesFusionTentees.current.add(cle);
-          fusionnerEvenements(monEvenement.id, evenementPartenaire.id).then(
-            (statut) => {
-              if (statut === "succes") {
-                objStore.chargerEvenements();
-                rafraichirEvenementsPartenaire();
-              }
-            },
-          );
-          return;
-        }
-
-        if (ecartMinutes < 60 && !pairesFusionIgnorees.has(cle)) {
+        if (
+          (uneDesDeuxTouteLaJournee || ecartMinutes < 60) &&
+          !pairesFusionIgnorees.has(cle)
+        ) {
           suggestions.push({ monEvenement, evenementPartenaire });
         }
       });
     });
 
+    // Dérive suggestionsFusion depuis objStore.evenements/evenementsPartenaire,
+    // qui changent en dehors du contrôle de ce composant (chargement local +
+    // partenaire) — exactement le rôle d'un effet de synchronisation, pas un
+    // calcul évitable au rendu. Retiré du chemin d'écriture (fusionnerEvenements)
+    // depuis le correctif P025 (2026-09-18) : ne fait plus que dériver un
+    // état d'affichage en lecture seule, jamais un déclenchement d'action.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSuggestionsFusion(suggestions);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     affichagePartage,
     objStore.evenements,
@@ -915,13 +919,11 @@ export default function Planning() {
   ]);
 
   const confirmerSuggestionFusion = async (suggestion: SuggestionFusion) => {
-    const cle = `${suggestion.monEvenement.id}:${suggestion.evenementPartenaire.id}`;
     const statut = await fusionnerEvenements(
       suggestion.monEvenement.id,
       suggestion.evenementPartenaire.id,
     );
     if (statut === "succes" || statut === "deja_fusionne") {
-      pairesFusionTentees.current.add(cle);
       setSuggestionsFusion((liste) =>
         liste.filter(
           (s) =>

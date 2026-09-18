@@ -933,14 +933,38 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Nuance vérifiée, pas un bug** : la RPC elle-même est robuste contre une vraie course entre les 2 comptes (revalidation de propriété à chaque appel, un second appel concurrent échoue proprement sans créer de doublon) — le problème est l'agressivité du critère de déclenchement client, pas la protection serveur.
 - **Nuance additionnelle** : `pairesFusionIgnorees` ("Garder séparé") n'est vérifiée que sur la branche "suggestion", jamais sur la branche auto-fusion — une paire mise en "Garder séparé" peut quand même fusionner de force si une heure change plus tard pour coïncider exactement.
 - **Piste de correction** : ne jamais fusionner sans confirmation explicite (même pour le signal "fort"), ou ajouter un signal supplémentaire (montant identique) + faire respecter `pairesFusionIgnorees` sur les deux branches.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code + traçage de la RPC).
-  **Mise à jour du 2026-09-18** : `ESPACE_PARTAGE_ACTIF` est passé à
-  `true` pour tous les comptes (demande explicite) — ce finding touche
-  désormais potentiellement n'importe quel couple utilisateur réel du
-  Planning partagé, pas seulement les comptes admin. Gravité à
-  reconsidérer à la hausse compte tenu de la perte silencieuse de données
-  décrite ci-dessus (montant/catégorie/couleur/durée) — non corrigé à ce
-  jour, à traiter en priorité.
+- **Statut** : **CORRIGÉ (2026-09-18)** — priorité maximale suite à
+  l'activation d'`ESPACE_PARTAGE_ACTIF` pour tous les comptes (ce finding
+  touchait désormais potentiellement n'importe quel couple utilisateur
+  réel). Diagnostic détaillé confirmé avant correction (mécanisme exact :
+  la RPC `fusionner_evenements` ne garde que les champs de `v_mon_event`
+  — celui des 2 comptes dont l'appareil exécute la RPC en premier, pure
+  course de timing sans ordre garanti — et supprime les 2 lignes
+  d'origine ; tout champ divergent du perdant est perdu sans confirmation
+  ni trace : couleur, durée, volet financier complet — montant,
+  categorieLiee, **montantApplique** en particulier, risque de
+  double-application ou perte d'application au budget —, récurrence,
+  notification, et même `touteLaJournee` selon lequel des deux gagne).
+  **Correctif** : la branche de fusion automatique (`app/(tabs)/planning.tsx`,
+  ancien bloc `uneDesDeuxTouteLaJournee || ecartMinutes === 0` → appel
+  direct à `fusionnerEvenements`) est supprimée — toute paire
+  correspondante (y compris l'ancien signal "fort") tombe désormais dans
+  la même carte de confirmation "Fusionner"/"Garder séparé" que le cas
+  "écart &lt;60min", avec la même logique `pairesFusionIgnorees` — ferme
+  du même coup la "Nuance additionnelle" ci-dessus (`pairesFusionIgnorees`
+  non respectée sur l'ancienne branche auto : n'existe plus, un seul
+  chemin de fusion reste dans le fichier). Le ref `pairesFusionTentees`
+  (devenu inutile, ne servait qu'à éviter des appels RPC redondants de
+  l'ancienne branche automatique) retiré entièrement, ainsi que son usage
+  résiduel dans `confirmerSuggestionFusion`. RPC `fusionner_evenements`
+  volontairement inchangée (sa protection serveur contre une vraie course
+  entre 2 confirmations était déjà saine — le problème était entièrement
+  côté déclenchement client). Revu par code-reviewer (APPROUVÉ : condition
+  unifiée confirmée superset strict de l'ancienne logique auto, aucun
+  chemin de fusion non confirmé résiduel, nettoyage complet). Régression
+  lint corrigée au passage (`react-hooks/set-state-in-effect`, déclenchée
+  par la simplification de l'effet). tsc/lint vérifiés propres (10 lignes
+  / 49 problèmes, identique à l'état avant ce correctif).
 
 ### P026 — Récurrence mensuelle/annuelle : dérive silencieuse et permanente sur les jours 29/30/31 et le 29 février
 
