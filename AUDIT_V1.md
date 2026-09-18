@@ -2202,6 +2202,71 @@ tout le monde ; aucune modification de `profil.tsx` n'était nécessaire.
 
 tsc/lint vérifiés propres (10 lignes / 49 problèmes).
 
+### 2026-09-18 — Ajout de Sign in with Apple (connexion + inscription)
+
+**Contexte** : demande explicite, 3 ajouts avant le build de production
+final. Ce sous-chantier : bouton "Continuer avec Apple" (design officiel
+Apple, `AppleAuthenticationButton`) sur les écrans de connexion et
+d'inscription, `expo-apple-authentication` installé et son plugin ajouté à
+`app.json`.
+
+**Recherche d'architecture faite avant tout code** (pour éviter de
+dupliquer une logique déjà en place) :
+- La création de la ligne `profils` à la première connexion est déjà
+  gérée par un trigger existant sur `auth.users` (non versionné dans ce
+  repo, créé hors bande dans le dashboard Supabase — cf. RÈGLE dans
+  `supabase/migrations/20260722100100_guest_mode_triggers.sql`), qui se
+  déclenche pour TOUTE nouvelle ligne `auth.users` quel que soit le
+  fournisseur — aucun insert manuel nécessaire dans le nouveau code.
+- Le routage post-connexion (onboarding si `profils.onboarding_complete`
+  est faux, sinon `(tabs)`) est déjà géré globalement par
+  `app/_layout.tsx` — chaque écran n'a donc qu'à faire
+  `router.replace("/(tabs)")` après succès, exactement comme le flux
+  email existant.
+
+**Fait** :
+- Nouveau fichier `app/appleSignIn.ts` — source unique
+  (`connecterAvecApple()`), utilisée par `app/onboarding/connexion.tsx`
+  ET `app/onboarding/inscription.tsx`, jamais dupliquée. Utilise
+  `credential.identityToken` (seule valeur vérifiable côté serveur) avec
+  `supabase.auth.signInWithIdToken({provider: "apple", ...})`. Annulation
+  utilisateur (`ERR_REQUEST_CANCELED`) traitée en silence, jamais comme
+  une erreur. Prénom Apple (fourni uniquement à la toute première
+  autorisation) capturé en best-effort, jamais bloquant.
+- `app/onboarding/connexion.tsx` : bouton `AppleAuthenticationButton`
+  (`CONTINUE`/`BLACK`, design imposé par Apple), gated par
+  `isAvailableAsync()` (toujours masqué hors iOS/si indisponible).
+- `app/onboarding/inscription.tsx` : même bouton (`SIGN_UP`/`BLACK`),
+  **masqué en conversion d'essai** (`conversionEssai`) — Apple créerait
+  une nouvelle identité auth (`auth.uid()` différent), incompatible avec
+  la conversion d'essai qui dépend de `supabase.auth.updateUser` pour
+  PRÉSERVER le même `auth.uid()` (donc les données créées pendant
+  l'essai anonyme). Garde doublée dans le handler
+  (`if (chargementApple || conversionEssai) return;`), pas seulement
+  dans le JSX.
+- `app.json` : plugin `"expo-apple-authentication"` ajouté (simple
+  string, aucune config requise pour ce plugin).
+- Revues : code-reviewer et security-auditor dispatchés en parallèle sur
+  le diff complet — aucun problème bloquant trouvé par l'un ou l'autre.
+  security-auditor a confirmé : token vérifiable utilisé (jamais
+  `authorizationCode`/`user`), aucun secret exposé, update du prénom
+  protégée par RLS (`profils_update_own`, `auth.uid() = user_id`
+  symétrique) en plus de la cible légitime côté client, aucun log de
+  donnée sensible, aucune migration SQL nécessaire/contournée, échec
+  géré proprement (jamais de fallback non authentifié) si le provider
+  Apple n'est pas encore configuré côté dashboard.
+
+**Point bloquant externe, hors de portée de cet environnement** :
+`supabase.auth.signInWithIdToken({provider: "apple", ...})` échouera
+tant qu'Apple n'est pas activé manuellement comme fournisseur OAuth dans
+Authentication → Providers du dashboard Supabase (Bundle ID iOS
+`com.maelyspasgvista.vista` comme Client ID du flux natif). Le code est
+donc complet mais **inerte** (bouton visible, tentative échoue proprement
+avec un message d'erreur) jusqu'à cette configuration manuelle —
+documenté en RÈGLE dans `app/appleSignIn.ts`.
+
+tsc/lint vérifiés propres (10 lignes / 49 problèmes).
+
 ### 2026-09-13 — Pubs en vue partagée : contenu flouté "Ton bilan → Vista" (insights)
 
 - **Contexte** : demande "le contenu flouté derrière le cadenas doit

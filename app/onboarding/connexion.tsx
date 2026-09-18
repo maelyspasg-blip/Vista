@@ -1,5 +1,11 @@
+import {
+  AppleAuthenticationButton,
+  AppleAuthenticationButtonStyle,
+  AppleAuthenticationButtonType,
+  isAvailableAsync as appleSignInDisponible,
+} from "expo-apple-authentication";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -16,6 +22,7 @@ import {
   CONDITIONS_GENERALES_UTILISATION,
   POLITIQUE_CONFIDENTIALITE,
 } from "../../utils/documentsLegaux";
+import { connecterAvecApple } from "../appleSignIn";
 import { messageErreurAuth } from "../authErrors";
 import { ModaleDocumentLegal } from "../ModaleDocumentLegal";
 import { Text } from "../Texte";
@@ -44,6 +51,40 @@ export default function Connexion() {
   const [documentLegalOuvert, setDocumentLegalOuvert] = useState<
     "confidentialite" | "cgu" | null
   >(null);
+  // RÈGLE À NE JAMAIS CASSER — SIGN IN WITH APPLE (ajouté le 2026-09-18) :
+  // `false` par défaut (jamais `true` avant confirmation) — le bouton
+  // officiel Apple (AppleAuthenticationButton, design/texte imposés par
+  // Apple, jamais un bouton custom) ne doit JAMAIS être visible tant que
+  // isAvailableAsync() n'a pas répondu `true` (toujours `false` sur
+  // Android, et peut l'être sur un vieil iOS/simulateur mal configuré) —
+  // afficher un bouton Apple non fonctionnel violerait les Human
+  // Interface Guidelines d'Apple autant qu'un bouton absent à tort.
+  const [appleDisponible, setAppleDisponible] = useState(false);
+  const [chargementApple, setChargementApple] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    appleSignInDisponible()
+      .then(setAppleDisponible)
+      .catch(() => setAppleDisponible(false));
+  }, []);
+
+  const seConnecterAvecApple = async () => {
+    if (chargementApple) return;
+    setErreur("");
+    setChargementApple(true);
+    const resultat = await connecterAvecApple();
+    setChargementApple(false);
+
+    if (!resultat.succes) {
+      // RÈGLE : une annulation (l'utilisateur ferme la feuille Apple) ne
+      // doit jamais afficher de message rouge, cf. RÈGLE dans
+      // app/appleSignIn.ts — comportement normal, pas une erreur.
+      if (!resultat.annule) setErreur(resultat.message ?? "");
+      return;
+    }
+    router.replace("/(tabs)");
+  };
 
   const ouvrirMentionsLegales = () => {
     Alert.alert("Mentions légales", "Quel document veux-tu consulter ?", [
@@ -163,6 +204,31 @@ export default function Connexion() {
             <Text style={styles.btnTexte}>Se connecter</Text>
           )}
         </BoutonPrincipal>
+
+        {/* RÈGLE À NE JAMAIS CASSER — SIGN IN WITH APPLE (2026-09-18) :
+            AppleAuthenticationButton est le composant OFFICIEL Apple (design
+            et libellé imposés par les Human Interface Guidelines) — ne
+            jamais le remplacer par un bouton custom même visuellement
+            identique. Gated par appleDisponible (toujours false hors iOS,
+            cf. useEffect plus haut) : jamais affiché s'il ne peut pas
+            fonctionner. */}
+        {appleDisponible && (
+          <>
+            <View style={styles.separateurConteneur}>
+              <View style={[styles.separateurLigne, { backgroundColor: C.separateur }]} />
+              <Text style={[styles.separateurTexte, { color: C.texteMuted }]}>ou</Text>
+              <View style={[styles.separateurLigne, { backgroundColor: C.separateur }]} />
+            </View>
+            <AppleAuthenticationButton
+              buttonType={AppleAuthenticationButtonType.CONTINUE}
+              buttonStyle={AppleAuthenticationButtonStyle.BLACK}
+              cornerRadius={16}
+              style={[styles.boutonApple, { opacity: chargementApple ? 0.6 : 1 }]}
+              pointerEvents={chargementApple ? "none" : "auto"}
+              onPress={seConnecterAvecApple}
+            />
+          </>
+        )}
       </View>
 
       <View style={styles.espaceur} />
@@ -264,6 +330,24 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: "center",
     marginTop: 8,
+  },
+  separateurConteneur: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 20,
+    marginBottom: 4,
+  },
+  separateurLigne: {
+    flex: 1,
+    height: 1,
+  },
+  separateurTexte: {
+    fontSize: 13,
+    marginHorizontal: 12,
+  },
+  boutonApple: {
+    height: 50,
+    marginTop: 16,
   },
   btnTexte: {
     fontSize: 16,

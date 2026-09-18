@@ -1,3 +1,9 @@
+import {
+  AppleAuthenticationButton,
+  AppleAuthenticationButtonStyle,
+  AppleAuthenticationButtonType,
+  isAvailableAsync as appleSignInDisponible,
+} from "expo-apple-authentication";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -12,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { messageErreurAuth } from "../authErrors";
 import { supabase } from "../../supabaseClient";
+import { connecterAvecApple } from "../appleSignIn";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
@@ -36,12 +43,47 @@ export default function Inscription() {
   const [erreur, setErreur] = useState("");
   const [confirmationRequise, setConfirmationRequise] = useState(false);
   const [conversionEssai, setConversionEssai] = useState(false);
+  // RÈGLE À NE JAMAIS CASSER — SIGN IN WITH APPLE (ajouté le 2026-09-18) :
+  // même garde qu'app/onboarding/connexion.tsx — jamais affiché tant que
+  // isAvailableAsync() n'a pas répondu true (toujours false hors iOS).
+  const [appleDisponible, setAppleDisponible] = useState(false);
+  const [chargementApple, setChargementApple] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user?.is_anonymous) setConversionEssai(true);
     });
   }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    appleSignInDisponible()
+      .then(setAppleDisponible)
+      .catch(() => setAppleDisponible(false));
+  }, []);
+
+  // RÈGLE À NE JAMAIS CASSER — Sign in with Apple crée/authentifie une
+  // identité Apple distincte (nouveau auth.uid() côté Supabase la première
+  // fois), ce qui est incompatible avec la conversion d'essai : celle-ci
+  // dépend justement de `supabase.auth.updateUser` pour GARDER le même
+  // auth.uid() (donc toutes les données créées pendant l'essai anonyme,
+  // cf. creerCompte ci-dessus). Utiliser Apple ici abandonnerait
+  // silencieusement les données de l'essai au profit d'un compte Apple
+  // vide — le bouton est donc masqué en conversion d'essai (jamais retiré
+  // pour une inscription normale).
+  const seConnecterAvecApple = async () => {
+    if (chargementApple || conversionEssai) return;
+    setErreur("");
+    setChargementApple(true);
+    const resultat = await connecterAvecApple();
+    setChargementApple(false);
+
+    if (!resultat.succes) {
+      if (!resultat.annule) setErreur(resultat.message ?? "");
+      return;
+    }
+    router.replace("/(tabs)");
+  };
 
   const emailValide = EMAIL_REGEX.test(email.trim());
   const formulaireValide = emailValide && motDePasse.length >= 8;
@@ -211,6 +253,28 @@ export default function Inscription() {
                 <Text style={styles.btnTexte}>Continuer</Text>
               )}
             </BoutonPrincipal>
+
+            {/* RÈGLE À NE JAMAIS CASSER — SIGN IN WITH APPLE (2026-09-18) :
+                masqué en conversion d'essai, cf. RÈGLE sur
+                seConnecterAvecApple plus haut — jamais retiré pour une
+                inscription normale. */}
+            {appleDisponible && !conversionEssai && (
+              <>
+                <View style={styles.separateurConteneur}>
+                  <View style={[styles.separateurLigne, { backgroundColor: C.separateur }]} />
+                  <Text style={[styles.separateurTexte, { color: C.texteMuted }]}>ou</Text>
+                  <View style={[styles.separateurLigne, { backgroundColor: C.separateur }]} />
+                </View>
+                <AppleAuthenticationButton
+                  buttonType={AppleAuthenticationButtonType.SIGN_UP}
+                  buttonStyle={AppleAuthenticationButtonStyle.BLACK}
+                  cornerRadius={16}
+                  style={[styles.boutonApple, { opacity: chargementApple ? 0.6 : 1 }]}
+                  pointerEvents={chargementApple ? "none" : "auto"}
+                  onPress={seConnecterAvecApple}
+                />
+              </>
+            )}
           </>
         )}
       </View>
@@ -289,6 +353,24 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: "center",
     marginTop: 8,
+  },
+  separateurConteneur: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 20,
+    marginBottom: 4,
+  },
+  separateurLigne: {
+    flex: 1,
+    height: 1,
+  },
+  separateurTexte: {
+    fontSize: 13,
+    marginHorizontal: 12,
+  },
+  boutonApple: {
+    height: 50,
+    marginTop: 16,
   },
   btnTexte: {
     fontSize: 16,
