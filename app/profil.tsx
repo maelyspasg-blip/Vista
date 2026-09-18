@@ -395,14 +395,17 @@ export default function Profil() {
   // directement ouvrirModalEspacePartage, pour qu'un tap accidentel sur la
   // carte ne mène jamais à une création d'espace sans qu'aucune intention
   // n'ait été confirmée. La 2e confirmation est le bouton "Générer mon
-  // code" à l'intérieur de la modale (onglet "Créer un espace").
+  // code" à l'intérieur de la modale (onglet "Créer un espace"). Bouton
+  // "Continuer" plutôt que "Créer" (ajustement du 2026-09-18) : ce tap
+  // n'ouvre que la modale, il ne crée encore rien — "Créer" aurait laissé
+  // croire à tort que l'espace existe déjà en base à ce stade.
   const confirmerOuvertureEspacePartage = () => {
     Alert.alert(
-      "Créer un espace partagé ?",
-      "Vous pourrez inviter votre partenaire avec un code unique.",
+      "Espace partagé",
+      "Créez ou rejoignez un espace pour gérer votre budget à deux.",
       [
         { text: "Annuler", style: "cancel" },
-        { text: "Créer", onPress: () => ouvrirModalEspacePartage() },
+        { text: "Continuer", onPress: () => ouvrirModalEspacePartage() },
       ],
     );
   };
