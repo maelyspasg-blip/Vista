@@ -169,6 +169,23 @@ export default function Inscription() {
               }}
               editable={!chargement}
             />
+            {/* RÈGLE : clôt P049 (AUDIT_V1.md, 2026-09-18) — le bouton
+                "Continuer" restait désactivé sans texte explicatif tant que
+                les 8 caractères minimum n'étaient pas atteints (seul le
+                placeholder le suggérait indirectement). Affiché seulement
+                une fois la saisie commencée (jamais au premier rendu, champ
+                vide). */}
+            {motDePasse.length > 0 && motDePasse.length < 8 && (
+              <Text style={[styles.aideMotDePasse, { color: C.texteMuted }]}>
+                Encore {8 - motDePasse.length} caractère
+                {8 - motDePasse.length > 1 ? "s" : ""}
+              </Text>
+            )}
+            {motDePasse.length >= 8 && (
+              <Text style={[styles.aideMotDePasse, { color: C.vertText }]}>
+                ✓ Mot de passe valide
+              </Text>
+            )}
 
             {!!erreur && (
               <Text style={[styles.erreurTexte, { color: C.rougeText }]}>
@@ -258,6 +275,12 @@ const styles = StyleSheet.create({
   },
   erreurTexte: {
     fontSize: 13,
+    marginTop: -10,
+    marginBottom: 16,
+  },
+  aideMotDePasse: {
+    fontSize: 12,
+    fontWeight: "500",
     marginTop: -10,
     marginBottom: 16,
   },

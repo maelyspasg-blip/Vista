@@ -859,6 +859,21 @@ export default function Dashboard() {
     (acc, o) => acc + o.contributionMois,
     0,
   );
+  // RÈGLE À NE JAMAIS CASSER — CLÔT P013 (AUDIT_V1.md, 2026-09-18) :
+  // `epargneMois` peut être fixée manuellement (modifierEpargneMois) à une
+  // valeur déconnectée de la somme des contributions objectifs — sans ce
+  // clamp, le sous-poste "Objectifs" pouvait afficher un montant SUPÉRIEUR
+  // à son total parent "Argent immobilisé" (ex: contributions 200€,
+  // épargne du mois corrigée à 50€ → "Argent immobilisé 50€" puis,
+  // dépliée, "Objectifs 200€"). Utilisé pour le % de la barre ET le texte
+  // € affiché ci-dessous — jamais la valeur brute `contributionObjectifsTotal`
+  // pour l'affichage (elle reste utilisée telle quelle uniquement pour la
+  // condition "y a-t-il une contribution à afficher", indépendante du
+  // clamp).
+  const contributionObjectifsAffichee = Math.max(
+    0,
+    Math.min(contributionObjectifsTotal, epargneMoisAffiche),
+  );
   const epargneGenerique = Math.max(
     0,
     epargneMoisAffiche - contributionObjectifsTotal,
@@ -872,7 +887,7 @@ export default function Dashboard() {
       : 0;
   const pctObjectifsEstime =
     epargneMoisAffiche > 0
-      ? (contributionObjectifsTotal / epargneMoisAffiche) * pctEpargneEstime
+      ? (contributionObjectifsAffichee / epargneMoisAffiche) * pctEpargneEstime
       : 0;
   const largeurEpargneGeneriqueAnimee = useLargeurAnimee(pctEpargneGeneriqueEstime);
   const largeurObjectifsAnimee = useLargeurAnimee(pctObjectifsEstime);
@@ -1957,7 +1972,7 @@ export default function Dashboard() {
                     },
                   ]}
                 >
-                  Objectifs {formaterMontant(contributionObjectifsTotal)}€
+                  Objectifs {formaterMontant(contributionObjectifsAffichee)}€
                 </Text>
               </View>
             )}

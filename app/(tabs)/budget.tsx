@@ -863,6 +863,18 @@ export default function Budget() {
     (acc, o) => acc + o.contributionMois,
     0,
   );
+  // RÈGLE À NE JAMAIS CASSER — CLÔT P013 (AUDIT_V1.md, 2026-09-18), même
+  // RÈGLE que app/(tabs)/index.tsx — `epargneMois` peut être fixée
+  // manuellement à une valeur déconnectée de la somme des contributions
+  // objectifs : sans ce clamp, le sous-poste "Objectifs" pouvait afficher
+  // un montant SUPÉRIEUR à son total parent "Argent immobilisé". Jamais
+  // `contributionObjectifsTotal` brute pour l'affichage (% ou €) — elle
+  // reste utilisée telle quelle uniquement pour "y a-t-il une contribution
+  // à afficher", indépendant du clamp.
+  const contributionObjectifsAffichee = Math.max(
+    0,
+    Math.min(contributionObjectifsTotal, totalEpargne),
+  );
   const epargneGenerique = Math.max(0, totalEpargne - contributionObjectifsTotal);
   // Répartit pctEpargne (déjà le total épargne+objectifs) entre les deux
   // sous-segments affichés quand la légende "Argent immobilisé" est
@@ -870,7 +882,9 @@ export default function Budget() {
   const pctEpargneGenerique =
     totalEpargne > 0 ? (epargneGenerique / totalEpargne) * pctEpargne : 0;
   const pctObjectifs =
-    totalEpargne > 0 ? (contributionObjectifsTotal / totalEpargne) * pctEpargne : 0;
+    totalEpargne > 0
+      ? (contributionObjectifsAffichee / totalEpargne) * pctEpargne
+      : 0;
   // Segments de la barre "Dépenses et argent immobilisé" : largeur ET
   // position (left, les segments sont juxtaposés en absolute) animées pour
   // qu'un changement de répartition glisse au lieu de sauter.
@@ -1846,7 +1860,7 @@ export default function Budget() {
                     { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
                   ]}
                 >
-                  Objectifs {formaterMontant(contributionObjectifsTotal)} €
+                  Objectifs {formaterMontant(contributionObjectifsAffichee)} €
                 </Text>
               </View>
             )}

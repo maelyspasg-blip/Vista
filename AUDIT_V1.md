@@ -582,7 +582,14 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Piste de correction** : clamper `contributionObjectifsTotal` à
   `epargneMoisAffiche` avant calcul des pourcentages, ou afficher un état
   distinct si `contributionObjectifsTotal > epargneMoisAffiche`.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), correction non encore appliquée.
+- **Statut** : **CORRIGÉ (2026-09-18)** — nouvelle variable
+  `contributionObjectifsAffichee` (`app/(tabs)/index.tsx`/`budget.tsx`),
+  clampée à `Math.max(0, Math.min(contributionObjectifsTotal,
+  epargneMoisAffiche))` — utilisée pour le % de la barre ET le texte € du
+  sous-poste "Objectifs", jamais la valeur brute. `contributionObjectifsTotal`
+  reste utilisée telle quelle uniquement pour la condition d'affichage
+  ("y a-t-il une contribution"), indépendante du clamp. tsc/lint vérifiés
+  propres.
 
 ### P014 — Dérive flottante non ré-arrondie avant comparaisons internes (`<=`, `<0`, `===`)
 
@@ -1291,7 +1298,11 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Trouvé par** : audit UX écran par écran (2026-09-17).
 - **Fichier** : `onboarding/inscription.tsx:171-179` (`disabled={!formulaireValide || chargement}`, `formulaireValide` exige `motDePasse.length >= 8`) — le bouton passe à opacité 0.5 sans texte explicatif (seul le placeholder "Au moins 8 caractères" le suggère indirectement). Moins grave que P037 (Budget, bouton silencieux ACTIF) car ici au moins visuellement désactivé — mais reste un frein potentiel sur l'écran le plus critique du funnel.
 - **Piste de correction** : afficher dynamiquement "Encore N caractères" ou une coche verte dès 8 caractères atteints.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+- **Statut** : **CORRIGÉ (2026-09-18)** — texte dynamique ajouté sous le
+  champ mot de passe (`app/onboarding/inscription.tsx`) : "Encore N
+  caractère(s)" tant que la saisie est entre 1 et 7 caractères, "✓ Mot de
+  passe valide" (vert) dès 8 — jamais affiché au premier rendu (champ
+  vide). tsc/lint vérifiés propres.
 
 ### P052 — Aucune UI pour consulter/gérer les transactions orphelines après suppression d'une catégorie
 
