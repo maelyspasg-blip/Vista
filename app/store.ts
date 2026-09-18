@@ -180,6 +180,19 @@ export type Enveloppe = {
   // 20260831150000_espace_partage_partage_par_categorie.sql). `false` par
   // défaut (colonne DB par défaut à false).
   partage?: boolean;
+  // RÈGLE À NE JAMAIS CASSER — SUPPRESSION DOUCE (décision produit du
+  // 2026-09-18, P052, migration 20260918090000_enveloppes_soft_delete.sql) :
+  // `undefined`/`null` = catégorie active. Non-null = "supprimée" par
+  // l'utilisateur — supprimerEnveloppe (app/store.ts) ne fait plus de
+  // DELETE Supabase, seulement cette UPDATE. La ligne reste en base
+  // exprès : ses transactions restent valablement liées (plus jamais
+  // "orphelines") et sa dépense réelle continue de compter dans tous les
+  // totaux qui somment enveloppe.depense — seule
+  // utils/budget.ts::estCategorieActiveCeMois la masque de "Tes
+  // catégories"/des pickers de création. Ne JAMAIS confondre avec un champ
+  // de tri/filtre applicatif : c'est un timestamp Supabase, source de
+  // vérité unique de "cette catégorie a-t-elle été supprimée, et quand".
+  supprimeeLe?: string | null;
 };
 
 export type PaiementHistorique = {
@@ -473,6 +486,7 @@ type EnveloppeRow = {
   afficher_dans_planning: boolean | null;
   mois_comptage: string | null;
   partage: boolean | null;
+  supprimee_le: string | null;
 };
 
 function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
@@ -491,6 +505,11 @@ function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
     afficherDansPlanning: l.afficher_dans_planning ?? undefined,
     moisComptage: l.mois_comptage ?? undefined,
     partage: l.partage ?? false,
+    // RÈGLE : colonne absente d'un compte pas encore migré (avant
+    // 20260918090000_enveloppes_soft_delete.sql) → `undefined`, traité
+    // exactement comme "active" partout (cf. estCategorieActiveCeMois),
+    // jamais de crash sur une valeur manquante.
+    supprimeeLe: l.supprimee_le ?? undefined,
   };
 }
 
@@ -1579,6 +1598,21 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
         nbEnveloppesRemisesAZero += 1;
         return { ...e, depense: 0 };
       }
+      // RÈGLE À NE JAMAIS CASSER — GARDE `!e.supprimeeLe` RETIRÉ EN REVUE
+      // (P052, suppression douce, 2026-09-18 — bug trouvé par simulation
+      // par le code-reviewer avant tout commit) : une première version
+      // excluait ici les catégories supprimées de la remise à zéro — cela
+      // laissait `depense` FIGÉE à sa dernière valeur réelle (non nulle)
+      // pour toujours sur une catégorie Fixe/Variable récurrente supprimée,
+      // corrompant silencieusement TOUT calcul qui somme `enveloppe.depense`
+      // sans filtre de mois (score.ts, series.ts, GraphiqueFlux — ces
+      // fichiers lisent `objStore.enveloppes` tel quel, cf. RÈGLE dans
+      // AUDIT_V1.md §2.2) pour TOUS les mois suivants, indéfiniment. La
+      // remise à zéro reste donc INCONDITIONNELLE comme avant P052 — c'est
+      // elle qui garde `depense` propre pour les mois futurs. Le risque
+      // symétrique ("une catégorie supprimée réapparaît comme une ligne
+      // fantôme à 0€ dans CHAQUE snapshot archivé futur") est traité
+      // séparément, à la source (enveloppesSnapshot ci-dessous), pas ici.
       const estPermanente =
         e.type === "Fixe" ? !!e.repeteChaqueMois : !!e.recurrente;
       if (!estPermanente) return e;
@@ -1657,8 +1691,34 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
     // tort les "Entrées totales" de chaque mois traversé entre-temps (catégories
     // Fixe/Variable non concernées : leur `depense` est de toute façon remise à
     // 0 chaque mois, cf. enveloppesMaj plus bas).
+    //
+    // RÈGLE À NE JAMAIS CASSER — CATÉGORIE SUPPRIMÉE : CAPTURÉE UNE SEULE
+    // FOIS, JAMAIS APRÈS (bug trouvé en revue, P052, 2026-09-18, corrigé en
+    // 2 temps) : sans ce filtre, une catégorie supprimée (enveloppes.supprimee_le
+    // posé, ligne jamais retirée de etat.enveloppes, cf. RÈGLE dans
+    // supprimerEnveloppe) réapparaîtrait comme une ligne fantôme dans
+    // CHAQUE snapshot archivé futur, indéfiniment. Pour une catégorie
+    // Fixe/Variable récurrente, la remise à zéro inconditionnelle (RÈGLE
+    // juste au-dessus) rend ce filtre-ci "seulement" cosmétique (sans lui,
+    // ligne fantôme à depense=0 mais budget non nul). Pour une catégorie
+    // Fixe PONCTUELLE (jamais remise à zéro), ce filtre est en revanche
+    // NÉCESSAIRE aux totaux eux-mêmes : même exclusion appliquée à
+    // `enveloppesSansEntree` plus bas (2e round de revue) — sans les DEUX,
+    // `depenseReelle`/`SnapshotMois.totalDepense` restait gonflé
+    // indéfiniment par une Fixe ponctuelle supprimée, même une fois sa
+    // ligne masquée d'ici. `supprimeeLe` est un timestamp complet,
+    // comparaison locale par année/mois — dupliqué ici plutôt qu'importé de
+    // utils/budget.ts (estSupprimeeCeMois) : utils/ ne doit jamais dépendre
+    // de store.ts, et l'inverse non plus (même convention que estPermanente
+    // plus haut).
+    const estSupprimeeCeMoisArchive = (e: Enveloppe) => {
+      if (!e.supprimeeLe) return false;
+      const d = new Date(e.supprimeeLe);
+      return d.getFullYear() === annee && d.getMonth() === mois;
+    };
     const enveloppesSnapshot: SnapshotEnveloppe[] = enveloppesReconciliees
       .filter((e) => e.type !== "Entrée" || estDuMoisArchive(e))
+      .filter((e) => !e.supprimeeLe || estSupprimeeCeMoisArchive(e))
       .map((e) => ({
         id: e.id,
         nom: e.nom,
@@ -1683,8 +1743,16 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
       `[archivage] Début ${mois + 1}/${annee} : ${enveloppesSnapshot.length} enveloppe(s) à snapshoter, ${objectifsSnapshot.length} objectif(s).`,
     );
 
+    // RÈGLE : même exclusion que enveloppesSnapshot ci-dessus (P052, revue
+    // du 2026-09-18) — sans elle, `depenseReelle`/`totalDepense`
+    // (SnapshotMois.totalDepense, LA valeur agrégée qui fait foi, cf.
+    // budgetDuMoisArchive) restait gonflé pour toujours par une catégorie
+    // Fixe PONCTUELLE supprimée (jamais remise à zéro, contrairement aux
+    // catégories permanentes) même après que enveloppesSnapshot ait cessé
+    // de l'afficher — un total faux sans plus aucune ligne pour l'expliquer
+    // dans l'UI, trouvé en revue (2e round).
     const enveloppesSansEntree = enveloppesReconciliees.filter(
-      (e) => e.type !== "Entrée",
+      (e) => e.type !== "Entrée" && (!e.supprimeeLe || estSupprimeeCeMoisArchive(e)),
     );
     entreesDuMois = enveloppesReconciliees.filter(estDuMoisArchive);
 
@@ -1732,6 +1800,21 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
         nbEnveloppesRemisesAZero += 1;
         return { ...e, depense: 0 };
       }
+      // RÈGLE À NE JAMAIS CASSER — GARDE `!e.supprimeeLe` RETIRÉ EN REVUE
+      // (P052, suppression douce, 2026-09-18 — bug trouvé par simulation
+      // par le code-reviewer avant tout commit) : une première version
+      // excluait ici les catégories supprimées de la remise à zéro — cela
+      // laissait `depense` FIGÉE à sa dernière valeur réelle (non nulle)
+      // pour toujours sur une catégorie Fixe/Variable récurrente supprimée,
+      // corrompant silencieusement TOUT calcul qui somme `enveloppe.depense`
+      // sans filtre de mois (score.ts, series.ts, GraphiqueFlux — ces
+      // fichiers lisent `objStore.enveloppes` tel quel, cf. RÈGLE dans
+      // AUDIT_V1.md §2.2) pour TOUS les mois suivants, indéfiniment. La
+      // remise à zéro reste donc INCONDITIONNELLE comme avant P052 — c'est
+      // elle qui garde `depense` propre pour les mois futurs. Le risque
+      // symétrique ("une catégorie supprimée réapparaît comme une ligne
+      // fantôme à 0€ dans CHAQUE snapshot archivé futur") est traité
+      // séparément, à la source (enveloppesSnapshot ci-dessous), pas ici.
       const estPermanente =
         e.type === "Fixe" ? !!e.repeteChaqueMois : !!e.recurrente;
       if (!estPermanente) return e;
@@ -2784,9 +2867,13 @@ export function useObjectifs() {
         // n'élimine pas une vraie course entre 2 appareils simultanés,
         // mais couvre le cas réel (un seul utilisateur, un seul appareil,
         // qui tape deux fois le même nom).
+        // RÈGLE : ajout du 2026-09-18 (P052, suppression douce) —
+        // `!e.supprimeeLe` exclut les catégories masquées de ce contrôle :
+        // leur ancien nom redevient réutilisable, une catégorie "supprimée"
+        // n'existe plus du point de vue de l'utilisateur.
         const nomNormalise = champs.nom.trim().toLowerCase();
         const collision = etat.enveloppes.some(
-          (e) => e.nom.trim().toLowerCase() === nomNormalise,
+          (e) => !e.supprimeeLe && e.nom.trim().toLowerCase() === nomNormalise,
         );
         if (collision) {
           signalerErreurSync("Ce nom de catégorie existe déjà.");
@@ -3448,9 +3535,15 @@ export function useObjectifs() {
       // problème de fusion/masquage (P021/P027/P033) que la création — même
       // garde-fou, exclut les enveloppes déjà nommées `ancienNom` (celles
       // qu'on est justement en train de renommer, pas une collision).
+      // RÈGLE : ajout du 2026-09-18 (P052, suppression douce) —
+      // `!e.supprimeeLe` exclut les catégories masquées, cf. RÈGLE
+      // identique sur ajouterEnveloppe juste au-dessus.
       const nomNormalise = nom.trim().toLowerCase();
       const collision = etat.enveloppes.some(
-        (e) => e.nom !== ancienNom && e.nom.trim().toLowerCase() === nomNormalise,
+        (e) =>
+          !e.supprimeeLe &&
+          e.nom !== ancienNom &&
+          e.nom.trim().toLowerCase() === nomNormalise,
       );
       if (collision) {
         signalerErreurSync("Ce nom de catégorie existe déjà.");
@@ -3584,25 +3677,40 @@ export function useObjectifs() {
 
       sauvegarderEnveloppesSupprimees([enveloppe]);
 
-      // La suppression de la catégorie passe en premier, avant tout autre
-      // effet de bord : snapshot_enveloppes.enveloppe_id est en ON DELETE
-      // NO ACTION, donc une catégorie déjà archivée dans un mois passé sera
-      // rejetée par Postgres (code 23503). On ne touche l'état local ni les
-      // transactions/événements liés tant que ce n'est pas confirmé, pour ne
-      // jamais désynchroniser l'UI et la base, ni perdre des transactions
-      // pour une suppression qui n'aura finalement pas lieu.
+      // RÈGLE À NE JAMAIS CASSER — SUPPRESSION DOUCE (décision produit du
+      // 2026-09-18, P052, AUDIT_V1.md §2.2, migration
+      // 20260918090000_enveloppes_soft_delete.sql) : la catégorie n'est
+      // PLUS jamais DELETE-ée côté Supabase, seulement marquée via
+      // `supprimee_le`. Corrige à la racine l'ancien problème des
+      // transactions "orphelines" (enveloppe_id ne pointant plus vers rien)
+      // — la ligne enveloppe reste en base, donc ses transactions restent
+      // valablement liées pour toujours, leur dépense réelle continue de
+      // compter dans tous les totaux qui somment enveloppe.depense (Aperçu,
+      // Budget, Stats, score, export...), et l'archivage mensuel continue de
+      // la capturer normalement dans le snapshot du mois (elle devient
+      // ensuite "vestigiale" comme toute catégorie ponctuelle passée, cf.
+      // RÈGLE dans archiverMoisActuelInterneCoeur). Seul
+      // utils/budget.ts::estCategorieActiveCeMois la masque désormais de
+      // "Tes catégories"/des pickers de création — c'est la SEULE porte de
+      // sortie de ce type de catégorie, ne jamais en ajouter une deuxième
+      // ailleurs (ex: un filtre `!e.supprimeeLe` réinventé localement)
+      // sous peine de divergence.
+      //
+      // Conséquence directe : plus de conflit possible avec
+      // `snapshot_enveloppes.enveloppe_id` (ON DELETE NO ACTION) — une
+      // catégorie déjà archivée dans un mois passé peut désormais, elle
+      // aussi, être "supprimée" sans erreur (rien n'est plus jamais DELETE-é
+      // qui pourrait violer cette contrainte). L'ancien message d'erreur
+      // "cette catégorie a été archivée dans un mois passé et ne peut plus
+      // être supprimée" (et son code 23503) n'a donc plus lieu d'être.
       const { error } = await supabase
         .from("enveloppes")
-        .delete()
+        .update({ supprimee_le: new Date().toISOString() })
         .eq("id", id)
         .eq("user_id", user.id);
       if (error) {
-        console.error("Supabase delete enveloppe a échoué :", error);
-        signalerErreurSync(
-          error.code === "23503"
-            ? "Cette catégorie a été archivée dans un mois passé et ne peut plus être supprimée."
-            : `Impossible de supprimer la catégorie : ${error.message}`,
-        );
+        console.error("Supabase update supprimee_le (enveloppe) a échoué :", error);
+        signalerErreurSync(`Impossible de supprimer la catégorie : ${error.message}`);
         return;
       }
       journaliserOperationAudit("suppression_enveloppe", {
@@ -3615,40 +3723,26 @@ export function useObjectifs() {
         (e) => e.categorieLiee === enveloppe.nom,
       );
 
-      // RÈGLE À NE JAMAIS CASSER — DÉCISION PRODUIT DU 2026-09-18 (clôt
-      // P028/AUDIT_V1.md §2.2) : une catégorie supprimée n'entraîne PLUS la
-      // suppression de ses transactions liées côté Supabase (comportement
-      // antérieur, corrigé ici sur demande explicite — "ne jamais supprimer
-      // automatiquement les transactions liées"). Elles restent en base,
-      // orphelines (enveloppe_id pointe désormais vers une catégorie qui
-      // n'existe plus), pour une consultation/suppression manuelle future
-      // depuis l'historique — cette UI de consultation reste à construire
-      // (AUDIT_V1.md, nouveau finding, cf. cette date). Elles sont en
-      // revanche bien retirées de l'état local ci-dessous (`transactions:
-      // etat.transactions.filter(...)`) : aucun écran actuel ne sait
-      // afficher une transaction dont l'enveloppeId ne correspond à aucune
-      // catégorie existante (tous les filtres du projet partent d'une
-      // enveloppe connue vers ses transactions, jamais l'inverse — vérifié
-      // par audit de code le 2026-09-18), les laisser dans l'état local
-      // créerait une incohérence visuelle sans les rendre consultables pour
-      // autant. Elles seront rechargées telles quelles (orphelines) au
-      // prochain chargerTransactions() — sans conséquence : `depense` sur
-      // les autres catégories reste la seule source de vérité des totaux
-      // affichés (jamais une re-somme de `transactions` brute, cf. RÈGLE
-      // CLAUDE.md), donc une transaction orpheline n'est comptée nulle part.
       setEtat({
-        enveloppes: etat.enveloppes.filter((e) => e.id !== id),
-        transactions: etat.transactions.filter((t) => t.enveloppeId !== id),
+        // RÈGLE : la catégorie reste dans etat.enveloppes (jamais
+        // filtrée/retirée, cf. RÈGLE ci-dessus) — seul son champ
+        // `supprimeeLe` change. `etat.transactions` n'est plus touché du
+        // tout ici : ses transactions restent normalement liées, aucun état
+        // "orphelin" à gérer.
+        enveloppes: etat.enveloppes.map((e) =>
+          e.id === id ? { ...e, supprimeeLe: new Date().toISOString() } : e,
+        ),
         // RÈGLE À NE JAMAIS CASSER — AUDIT V1 (2026-09-07) : sans ce filtre,
         // un modèle de dépense ("Ajout rapide", budget.tsx) rattaché à cette
         // catégorie restait en base indéfiniment après sa suppression —
         // jamais visible (budget.tsx ne montre que les modèles dont
         // enveloppeId correspond à une enveloppe encore existante, donc
         // aucun symptôme utilisateur), mais orphelin en base pour toujours.
-        // Contrairement aux transactions (cf. RÈGLE juste au-dessus), un
-        // modèle de dépense n'est qu'un raccourci UI, jamais une donnée
-        // financière réelle (cf. P001) — rien n'empêche de le supprimer
-        // aussi côté Supabase, ce qui reste fait juste en dessous.
+        // Contrairement à la catégorie elle-même (suppression douce
+        // ci-dessus), un modèle de dépense n'est qu'un raccourci UI, jamais
+        // une donnée financière réelle (cf. P001) — pas de raison de le
+        // garder pointer vers une catégorie masquée, supprimé pour de bon
+        // côté Supabase juste en dessous.
         modelesDepenses: etat.modelesDepenses.filter(
           (m) => m.enveloppeId !== id,
         ),

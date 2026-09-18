@@ -96,6 +96,17 @@ export function estCategorieActiveCeMois(
   annee: number,
   mois: number,
 ): boolean {
+  // RÈGLE À NE JAMAIS CASSER — SUPPRESSION DOUCE (décision produit du
+  // 2026-09-18, P052) : une catégorie "supprimée" (env.supprimeeLe non nul,
+  // cf. app/store.ts::supprimerEnveloppe) ne doit plus jamais apparaître
+  // dans "Tes catégories"/un picker de création, quel que soit son type ou
+  // sa récurrence — c'est la SEULE porte de sortie de ce type de catégorie,
+  // vérifiée AVANT toute autre règle ci-dessous. Sa dépense réelle du mois
+  // où elle a été supprimée reste néanmoins comptabilisée ailleurs, cf.
+  // calculerResteEstimeCourant/estSupprimeeCeMois plus bas — ce filtre-ci
+  // ne gère QUE la visibilité dans les listes/le budget prévu restant,
+  // jamais le total dépensé.
+  if (env.supprimeeLe) return false;
   const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
   if (env.type === "Entrée") {
     return moisComptageEffectif(env) === moisISO;
@@ -104,6 +115,36 @@ export function estCategorieActiveCeMois(
     env.type === "Fixe" ? !!env.repeteChaqueMois : !!env.recurrente;
   if (estPermanente) return true;
   return moisComptageEffectif(env) === moisISO;
+}
+
+// RÈGLE À NE JAMAIS CASSER — COMPLÉMENT DE estCategorieActiveCeMois
+// (décision produit du 2026-09-18, P052) : une catégorie supprimée est
+// TOUJOURS exclue de estCategorieActiveCeMois (ci-dessus), y compris pour
+// le mois où la suppression a eu lieu — mais sa dépense réelle DE CE
+// MOIS-LÀ doit rester comptabilisée dans les totaux (décision produit :
+// "toujours comptabilisées dans les totaux et statistiques"). Cette
+// fonction répond à une question différente et complémentaire : "cette
+// catégorie a-t-elle été supprimée PENDANT le mois `annee`/`mois` ?" — vrai
+// un seul mois dans la vie d'une catégorie (celui de sa suppression),
+// jamais avant ni après. `supprimeeLe` est un timestamp Supabase complet
+// (pas une date seule façon "YYYY-MM-DD") : `new Date(...)` natif est donc
+// sûr ici, aucun risque du bug de parsing UTC/local qui touche les dates
+// seules (cf. utils/dateOnly.ts) — un timestamp complet porte son propre
+// fuseau, `getFullYear()`/`getMonth()` le restituent déjà en heure locale.
+// RÈGLE : `id` inclus dans le Pick uniquement pour satisfaire la détection
+// TypeScript des "types faibles" (un type entièrement composé de champs
+// optionnels comme `{ supprimeeLe?: ... }` seul est rejeté par TS s'il n'a
+// AUCUN champ en commun avec le type réellement passé, ex. EnveloppePartenaire,
+// utils/espacePartage.ts — erreur TS2559) — jamais utilisé dans le corps de
+// la fonction, ni un vrai besoin fonctionnel.
+export function estSupprimeeCeMois(
+  env: Pick<Enveloppe, "id" | "supprimeeLe">,
+  annee: number,
+  mois: number,
+): boolean {
+  if (!env.supprimeeLe) return false;
+  const d = new Date(env.supprimeeLe);
+  return d.getFullYear() === annee && d.getMonth() === mois;
 }
 
 export type ResteEstimeCourant = {
@@ -133,10 +174,23 @@ export function calculerResteEstimeCourant(
   const enveloppesActivesSansEntree = enveloppes.filter(
     (e) => e.type !== "Entrée" && estCategorieActiveCeMois(e, annee, mois),
   );
-  const totalDepenseEnveloppes = enveloppesActivesSansEntree.reduce(
-    (acc, e) => acc + e.depense,
-    0,
+  // RÈGLE À NE JAMAIS CASSER — CATÉGORIES SUPPRIMÉES CE MOIS-CI (décision
+  // produit du 2026-09-18, P052) : exclues de enveloppesActivesSansEntree
+  // ci-dessus (via estCategorieActiveCeMois, jamais visibles dans "Tes
+  // catégories" ni dans le budget prévu restant) — mais leur dépense RÉELLE
+  // déjà engagée ce mois-ci doit rester comptabilisée dans le total
+  // dépensé, sans quoi "Reste estimé" afficherait plus d'argent disponible
+  // qu'il n'y en a réellement. `estSupprimeeCeMois` (pas juste
+  // `e.supprimeeLe`) borne cet ajout au SEUL mois de la suppression — un
+  // mois plus tard, cette catégorie est déjà "vestigiale" (cf. RÈGLE dans
+  // archiverMoisActuelInterneCoeur, app/store.ts) et ne doit plus compter
+  // nulle part dans le mois courant.
+  const enveloppesSupprimeesCeMois = enveloppes.filter(
+    (e) => e.type !== "Entrée" && estSupprimeeCeMois(e, annee, mois),
   );
+  const totalDepenseEnveloppes =
+    enveloppesActivesSansEntree.reduce((acc, e) => acc + e.depense, 0) +
+    enveloppesSupprimeesCeMois.reduce((acc, e) => acc + e.depense, 0);
   const totalDepensePrevue = enveloppesActivesSansEntree.reduce(
     (acc, e) => acc + Math.max(0, e.budget - e.depense),
     0,

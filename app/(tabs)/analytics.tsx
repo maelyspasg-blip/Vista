@@ -28,6 +28,7 @@ import {
   budgetDuMoisArchive,
   entreesBudgetDuMois,
   estCategorieActiveCeMois,
+  estSupprimeeCeMois,
 } from "../../utils/budget";
 import {
   calculerScoreHistorique,
@@ -1683,11 +1684,17 @@ export default function Analytics() {
   // d'historique).
   const enveloppesPartenaireStats = donneesPartenaire?.enveloppes ?? [];
   const transactionsPartenaireStats = donneesPartenaire?.transactions ?? [];
+  // RÈGLE : `|| estSupprimeeCeMois(...)` ajouté le 2026-09-18 (P052, bug
+  // trouvé en revue) — même raison que dans construireRepartitionSurPeriode
+  // plus bas : sans cet ajout, une catégorie supprimée ce mois-ci
+  // disparaissait de ce total alors qu'elle reste comptée dans "Reste
+  // estimé" (calculerResteEstimeCourant).
   const totalDepensesMoiMois = objStore.enveloppes
     .filter(
       (e) =>
         e.type !== "Entrée" &&
-        estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+        (estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL) ||
+          estSupprimeeCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL)),
     )
     .reduce((acc, e) => acc + e.depense, 0);
   const { total: totalEntreesMoiMois } = entreesBudgetDuMois(
@@ -3215,12 +3222,30 @@ export default function Analytics() {
       // id puisque ce chemin n'est emprunté qu'au mois courant, mais
       // TypeScript ne peut pas relier deux ternaires indépendants pour le
       // prouver) — regrouper les deux évite toute ambiguïté de type.
+      // RÈGLE À NE JAMAIS CASSER — CATÉGORIE SUPPRIMÉE CE MOIS-CI INCLUSE
+      // (bug trouvé en revue, P052, 2026-09-18) : `estCategorieActiveCeMois`
+      // exclut désormais toute catégorie supprimée (cf. RÈGLE dans
+      // utils/budget.ts) — sans le `|| estSupprimeeCeMois(...)` ajouté
+      // ci-dessous, une catégorie supprimée pendant le mois COURANT
+      // disparaissait de Stats/GraphiqueFlux alors qu'elle restait comptée
+      // dans "Reste estimé" (Aperçu/Budget, calculerResteEstimeCourant) —
+      // incohérence directe entre écrans, contraire à la décision produit
+      // "toujours comptabilisées dans les totaux et statistiques". Les mois
+      // ARCHIVÉS (branche historiquesMoisSource ci-dessous) n'ont pas besoin
+      // de cet ajout : enveloppesSnapshot (app/store.ts::archiverMoisActuelInterneCoeur)
+      // capture déjà une catégorie supprimée dans le snapshot du mois de sa
+      // suppression. Sans effet sur EnveloppePartenaire (estSupprimeeCeMois
+      // retombe sur `false`, ce type ne porte pas ce champ).
       const enveloppesMois =
         mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
           ? [
               ...new Map(
                 enveloppesSource
-                  .filter((e) => estCategorieActiveCeMois(e, annee, mois))
+                  .filter(
+                    (e) =>
+                      estCategorieActiveCeMois(e, annee, mois) ||
+                      estSupprimeeCeMois(e, annee, mois),
+                  )
                   .map((e) => [e.id, e]),
               ).values(),
             ]

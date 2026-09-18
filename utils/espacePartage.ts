@@ -149,6 +149,15 @@ export type EnveloppePartenaire = {
   // strictement "own") — sert uniquement à choisir le bon badge pour une
   // catégorie du partenaire non fusionnée avec une des miennes.
   partage?: boolean;
+  // RÈGLE À NE JAMAIS CASSER — CATÉGORIE FANTÔME CROSS-COMPTE (bug trouvé
+  // par security-auditor, P052, 2026-09-18) : sans ce champ,
+  // estCategorieActiveCeMois(e, ...) (qui vérifie e.supprimeeLe) ne
+  // filtrait JAMAIS une catégorie du partenaire supprimée chez lui — elle
+  // restait visible indéfiniment dans la vue partagée (fusionnerCategoriesParNom,
+  // Stats couple), exactement le bug "catégorie fantôme" interdit par
+  // CLAUDE.md. Mappé depuis enveloppes.supprimee_le dans
+  // chargerDonneesPartenaire ci-dessous — jamais déduit autrement.
+  supprimeeLe?: string | null;
 };
 
 export type TransactionPartenaire = {
@@ -568,6 +577,10 @@ export async function chargerDonneesPartenaire(
       repeteChaqueMois: e.repete_chaque_mois ?? undefined,
       moisComptage: e.mois_comptage ?? undefined,
       partage: e.partage ?? false,
+      // RÈGLE : cf. RÈGLE détaillée sur EnveloppePartenaire.supprimeeLe
+      // plus haut — sans ce champ, une catégorie supprimée par le
+      // partenaire restait visible indéfiniment dans la vue partagée.
+      supprimeeLe: e.supprimee_le ?? undefined,
     }));
 
     if (enveloppes.length === 0) {

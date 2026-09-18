@@ -1325,11 +1325,34 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   `enveloppeId` ne correspond à aucune catégorie actuelle, avec actions
   consulter/modifier la catégorie de rattachement/supprimer définitivement
   — chantier UI à part entière, pas un simple correctif.
-- **Statut** : NOUVEAU — décision produit déjà appliquée pour la partie
-  "ne plus supprimer" (conservateur), cette UI de consultation reste à
-  construire.
+- **Statut** : **CORRIGÉ (2026-09-18)** — décision produit reçue (§2.2,
+  entrée "Réponses reçues sur P052/P053") : bascule architecturale de
+  "suppression dure" vers "suppression douce" (`enveloppes.supprimee_le`,
+  migration `20260918090000_enveloppes_soft_delete.sql`). La ligne
+  `enveloppes` n'est plus jamais DELETE-ée — elle est masquée
+  (`estCategorieActiveCeMois`, `utils/budget.ts`) mais reste en base : ses
+  transactions restent donc valablement liées pour toujours (plus aucun
+  concept d'"orpheline"), leur dépense réelle continue de compter dans
+  TOUS les totaux qui somment `enveloppe.depense` (vérifié directement :
+  score.ts/series.ts/trophees.ts et le pipeline GraphiqueFlux/Stats
+  reçoivent `objStore.enveloppes` sans filtre d'activité — ils incluent
+  déjà une catégorie masquée sans aucun changement de code), et
+  l'archivage mensuel la capture normalement dans le snapshot du mois où
+  elle a été supprimée (elle devient ensuite "vestigiale", comme toute
+  catégorie ponctuelle passée). Badge gris "Catégorie supprimée" affiché
+  sur `VueMoisArchive.tsx` (mois archivés) et un nouveau composant partagé
+  `app/CartesCategoriesSupprimees.tsx` (mois courant, monté sur
+  `index.tsx`/`budget.tsx`, vue perso uniquement) — lecture seule pour
+  l'instant (édition/suppression individuelle d'une transaction depuis
+  cette vue reste un chantier séparé, cf. limite documentée ci-dessous).
+  Détail complet dans §2.2.
+- **Limite assumée (inchangée)** : l'édition/suppression individuelle
+  d'une transaction depuis cette nouvelle vue n'est pas câblée dans ce
+  lot — la modale d'édition standard suppose un picker de catégories
+  actives, incompatible tel quel avec une catégorie masquée. Reste un
+  chantier UI séparé si souhaité.
 
-### P053 — `depenseCumuleeAuJour` (insight "meilleur mois") peut inclure une transaction orpheline datée dans un mois déjà archivé
+### P053 (ANCIEN, DEVENU OBSOLÈTE) — `depenseCumuleeAuJour` (insight "meilleur mois") peut inclure une transaction orpheline datée dans un mois déjà archivé
 
 - **Gravité** : 🔵 SUGGESTION (edge case rare, message positif non financier)
 - **Trouvé par** : code-reviewer, en revue du correctif P028 "transactions
@@ -1355,10 +1378,65 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   usages "somme toutes catégories" (sans `enveloppeId` explicite), ou faire
   porter le filtre dans la fonction elle-même via un paramètre optionnel
   d'ids valides.
-- **Statut** : NOUVEAU — non corrigé (nécessite de faire circuler la liste
-  des enveloppes valides jusqu'à `depenseCumuleeAuJour`/`utils/conseils.ts`,
-  hors périmètre du lot de décisions produit du 2026-09-18 ; impact limité
-  à un message positif d'insight, jamais un calcul financier affiché).
+- **Statut** : **DEVENU SANS OBJET (2026-09-18)** — la bascule "suppression
+  douce" du P052 ci-dessus (voir aussi §2.2) supprime la notion même de
+  "transaction orpheline" : `enveloppeId` continue TOUJOURS de correspondre
+  à une ligne `enveloppes` réelle (masquée, jamais effacée), donc
+  `depenseCumuleeAuJour` ne peut plus "inclure une orpheline" — elle inclut
+  désormais légitimement la dépense d'une catégorie supprimée, exactement
+  comme le veut la nouvelle décision produit ("toujours comptabilisées dans
+  les totaux et statistiques"). Aucune correction nécessaire. Note : ce
+  numéro P053 a été RÉUTILISÉ par une décision produit ultérieure du
+  2026-09-18 sur un sujet totalement différent (transactions antidatées
+  dans un mois déjà archivé) — voir **P054** plus bas pour ce sujet, cf.
+  clarification en §2.2 (même mécanique que la clarification P021 du même
+  jour : mappage par contenu, jamais par numéro réutilisé).
+
+### P054 — Aucun sélecteur de date sur les transactions ; décision produit demande de gérer les dates antidatées vers un mois déjà archivé
+
+- **Gravité** : 🟠 MAJEUR (fonctionnalité produit explicitement demandée,
+  pas encore implémentée)
+- **Trouvé par** : décision produit du 2026-09-18 ("Transactions
+  antidatées") — l'investigation menée pour l'implémenter a révélé que la
+  décision présuppose une capacité qui n'existe pas encore dans l'app.
+- **Fichiers** : `app/(tabs)/budget.tsx` (formulaire "Nouvelle dépense" —
+  aucun `DateTimePicker` nulle part dans le projet ; création toujours
+  `dateVersISO(new Date())`, ligne ~960-966 ; modification : date d'origine
+  préservée mais non modifiable, cf. commentaire existant ~244-246),
+  `app/store.ts::ajouterTransaction`/`modifierTransaction` (incrément de
+  `enveloppe.depense` inconditionnel, indépendant de la date — un
+  incrément sur une transaction backdatée gonflerait aujourd'hui le mois
+  COURANT, pas le mois de la transaction), `app/store.ts::verifierIntegriteDepensesInterne`
+  (recalcule uniquement depuis les transactions du mois courant — une
+  transaction backdatée y est déjà correctement exclue, mais comme (a)
+  ci-dessus l'a quand même fait gonfler `enveloppe.depense`, le prochain
+  passage l'efface silencieusement dans la minute qui suit).
+- **Décision produit reçue** : si une transaction est ajoutée avec une date
+  appartenant à un mois déjà archivé, mettre à jour ADDITIVEMENT le
+  snapshot existant de ce mois (`snapshot_enveloppes`/`snapshots_mois`,
+  RLS déjà permissive pour le propriétaire, aucune nouvelle policy
+  nécessaire) plutôt que d'incrémenter l'enveloppe vivante, et afficher une
+  confirmation discrète ("Cette dépense sera ajoutée à [mois archivé]").
+- **Piste de correction** : (1) construire un vrai sélecteur de date sur le
+  formulaire de création/modification de transaction (n'existe pas
+  aujourd'hui) ; (2) à la sauvegarde, si la date choisie tombe dans un mois
+  déjà présent dans `historiquesMois`, dérouter l'écriture vers une
+  nouvelle fonction dédiée (UPDATE ciblé sur la ligne `snapshot_enveloppes`
+  de la bonne catégorie/du bon mois + `snapshots_mois.total_depense`,
+  jamais un recalcul complet du snapshot — même précédent que
+  `renommerCategoriePartout`, qui fait déjà un UPDATE ciblé sur
+  `snapshot_enveloppes` + resynchronise `etat.historiquesMois` localement)
+  plutôt que d'incrémenter `enveloppe.depense` ; sinon, comportement actuel
+  inchangé. (3) Edge case identifié : si la catégorie de la transaction
+  backdatée a ENTRE-TEMPS été supprimée (masquée, cf. P052) avant que ce
+  mois archivé n'existe... n'est en réalité plus un problème depuis la
+  bascule "suppression douce" du P052 — la ligne `enveloppes` existe
+  toujours, donc une ligne `snapshot_enveloppes` cible reste toujours
+  insérable/modifiable normalement.
+- **Statut** : NOUVEAU — non implémenté dans ce lot (chantier plus large
+  que prévu par la décision d'origine, qui présupposait un sélecteur de
+  date déjà existant). Documenté et reporté, cf. §2.2 pour la trace
+  complète de l'échange avec Maëlys sur ce point.
 
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
@@ -1687,6 +1765,220 @@ première passe du lot ci-dessus, 3 points réels corrigés avant commit —
   un message positif d'insight).
 tsc/lint revérifiés propres après ces 3 corrections (10 lignes / 49
 problèmes, 39 erreurs / 10 warnings — sous la baseline).
+
+### 2026-09-18 — Réponses reçues sur P052/P053 — bascule "suppression douce" et report du sélecteur de date
+
+**Décisions reçues** (verbatim, résumé) :
+- **P052 — Transactions orphelines** : les transactions dont la catégorie
+  a été supprimée restent visibles dans l'historique mensuel existant (pas
+  de page dédiée), avec un badge gris "Catégorie supprimée" à côté du nom,
+  et restent TOUJOURS comptabilisées dans les totaux et statistiques.
+- **P053 (nouveau sujet, réutilise ce numéro — cf. note de désambiguïsation
+  dans le finding P053 lui-même)** — Transactions antidatées : si une
+  transaction est ajoutée avec une date dans un mois déjà archivé, la
+  prendre en compte et mettre à jour additivement le snapshot existant de
+  ce mois, avec une confirmation discrète à l'utilisateur.
+
+**Investigation menée avant implémentation** (2 agents en lecture seule,
+cf. règle "diagnostiquer avant de corriger" de cette session) a révélé deux
+points structurants qui changent l'implémentation par rapport à une lecture
+littérale des décisions :
+1. **Pour P052** : "comptabilisées dans les totaux ET statistiques" touche
+   ~20 emplacements de calcul dans tout le projet (Aperçu, Budget,
+   GraphiqueFlux, Stats, score/séries/trophées, export, insights) — presque
+   tous calculés en sommant `enveloppe.depense`, jamais une re-somme de
+   `transactions` brutes. Patcher chacun individuellement (en gardant la
+   suppression dure actuelle) aurait représenté un volume de changement
+   important sur du code déjà audité, avec un risque de régression non
+   négligeable.
+2. **Pour P053** : la décision présuppose qu'on peut déjà choisir une date
+   passée en ajoutant une transaction — **faux** : aucun sélecteur de date
+   n'existe nulle part dans le projet, la date est toujours "aujourd'hui" à
+   la création et non modifiable à l'édition. Implémenter la décision telle
+   quelle nécessite donc de construire cette UI d'abord, un chantier plus
+   large que prévu.
+
+Les deux points ont été présentés à Maëlys avec les options envisagées
+(cf. `AskUserQuestion` de cette session) plutôt que tranchés seul — touchent
+respectivement au modèle de données (P052) et à un périmètre de
+fonctionnalité significativement plus large que la décision initiale (P053),
+les deux relevant de "Modification importante du fonctionnement"/"Doute sur
+l'intention produit" (CLAUDE.md, section "Règle de décision").
+
+**Réponses** : P052 → **catégorie fantôme (suppression douce), recommandé**.
+P053 → **construire le sélecteur de date + la logique maintenant,
+recommandé**.
+
+---
+
+**P052 — Implémenté** (suppression douce) :
+- Nouvelle colonne `enveloppes.supprimee_le` (timestamptz, nullable — SQL
+  complet dans `supabase/migrations/20260918090000_enveloppes_soft_delete.sql`,
+  fourni pour exécution manuelle, non exécuté depuis cet environnement).
+  `NULL` = catégorie active ; non-`NULL` = "supprimée" du point de vue de
+  l'utilisateur, mais la ligne n'est plus jamais DELETE-ée.
+- `app/store.ts::supprimerEnveloppe` : remplace le `DELETE` Supabase par un
+  `UPDATE enveloppes SET supprimee_le = now()`. Conséquence directe : le
+  conflit avec `snapshot_enveloppes.enveloppe_id` (`ON DELETE NO ACTION`)
+  disparaît — une catégorie déjà archivée dans un mois passé peut
+  désormais, elle aussi, être "supprimée" sans erreur (rien n'est plus
+  jamais DELETE-é qui pourrait violer cette contrainte). L'état local
+  ne retire plus l'enveloppe de `etat.enveloppes` (elle y reste, avec son
+  `supprimeeLe` posé) ni ses transactions de `etat.transactions` (elles
+  restent normalement liées — plus aucun concept d'"orpheline").
+- `utils/budget.ts::estCategorieActiveCeMois` : exclut désormais toute
+  catégorie avec `supprimeeLe` non nul — c'est la SEULE porte de sortie
+  d'une catégorie supprimée (masquée de "Tes catégories"/des pickers de
+  création/du budget prévu restant). Nouvelle fonction complémentaire
+  `estSupprimeeCeMois(env, annee, mois)` : répond à "cette catégorie a-t-elle
+  été supprimée PENDANT ce mois précis" (vrai un seul mois dans la vie
+  d'une catégorie).
+- `utils/budget.ts::calculerResteEstimeCourant` (SEULE source du "Reste
+  estimé", Aperçu + Stats, cf. RÈGLE existante dans ce fichier) : ajoute la
+  dépense des catégories supprimées CE mois-ci au total dépensé (via
+  `estSupprimeeCeMois`), sans les remettre dans le budget prévu restant —
+  argent déjà dépensé toujours compté, argent non alloué qui redevient
+  disponible.
+- **Vérifié directement** : `score.ts`/`series.ts`/`trophees.ts` reçoivent
+  `objStore.enveloppes` sans aucun filtre d'activité — une catégorie
+  masquée y est donc déjà incluse aujourd'hui, sans changement de code.
+  **Correction (round de revue, cf. ci-dessous)** : ce n'était PAS vrai
+  pour `analytics.tsx` (Stats/GraphiqueFlux) — cette affirmation, écrite
+  avant la revue, s'est révélée factuellement incorrecte et a été
+  corrigée par du vrai code, pas seulement par du texte (voir plus bas).
+- `app/store.ts::archiverMoisActuelInterneCoeur` : la remise à zéro de
+  `depense` pour une catégorie "permanente" (Fixe récurrente/Variable
+  récurrente) reste INCONDITIONNELLE, supprimée ou non (une première
+  version excluait les catégories supprimées de cette remise à zéro —
+  **revertée en revue**, cf. ci-dessous, elle corrompait les totaux
+  futurs). Un NOUVEAU filtre distinct exclut en revanche une catégorie
+  supprimée de `enveloppesSnapshot` (la capture du snapshot mensuel
+  lui-même) pour tout mois AUTRE que celui de sa suppression — capturée
+  une seule fois, jamais en zombie dans les mois suivants.
+- Contrôles de doublon de nom (`ajouterEnveloppe`, `renommerCategoriePartout`,
+  `sauvegarderEnveloppe` dans `index.tsx`) : excluent désormais les
+  catégories masquées — leur ancien nom redevient réutilisable.
+- Badge d'affichage : `app/VueMoisArchive.tsx` (mois archivés — badge gris
+  ajouté aux cartes catégorie ET entrées existantes, par croisement avec
+  `objStore.enveloppes` puisque le `SnapshotEnveloppe` figé ne porte pas ce
+  champ) et nouveau composant partagé `app/CartesCategoriesSupprimees.tsx`
+  (mois courant — les catégories supprimées ce mois-ci disparaissent de
+  "Tes catégories" via `estCategorieActiveCeMois`, donc invisibles sans ce
+  composant dédié ; monté sur `index.tsx` et `budget.tsx`, vue perso
+  uniquement). Lecture seule (nom, badge, total, liste des transactions) —
+  éditer/supprimer une transaction individuelle depuis cette vue reste hors
+  périmètre (documenté comme limite assumée dans le finding P052).
+- Texte de confirmation de suppression (`app/(tabs)/index.tsx`) corrigé :
+  l'ancien texte ("supprimera aussi toutes les transactions liées") était
+  devenu factuellement faux, remplacé par un texte reflétant le nouveau
+  comportement.
+- tsc/lint vérifiés propres après chaque étape (10 lignes / 49 problèmes).
+
+**Revue code-reviewer (2026-09-18)** : BLOQUANT sur la première passe,
+2 problèmes de fond réels trouvés et corrigés avant commit —
+- 🔴 **Corruption des totaux archivés futurs, confirmée par simulation** :
+  la première version excluait une catégorie supprimée de la remise à zéro
+  (`estPermanente = !e.supprimeeLe && (...)`) pour la rendre "vestigiale
+  immédiatement" — mais comme `enveloppesSnapshot` capture TOUT
+  `etat.enveloppes` sans filtre d'activité à chaque archivage, une
+  catégorie Fixe supprimée voyait sa dépense FIGÉE (jamais remise à 0) et
+  RÉAPPARAISSAIT dans CHAQUE snapshot archivé futur avec cette même valeur
+  non nulle — gonflant indéfiniment le "Total dépensé" de tous les mois
+  suivants. Corrigé en deux temps : (1) la remise à zéro reste
+  INCONDITIONNELLE comme avant P052 (`estPermanente` reverté à sa forme
+  d'origine) — garde `depense` propre pour les mois futurs ; (2) nouveau
+  filtre dédié sur `enveloppesSnapshot` lui-même
+  (`!e.supprimeeLe || estSupprimeeCeMoisArchive(e)`, dupliqué localement
+  plutôt qu'importé de `utils/budget.ts`, même convention que
+  `estPermanente`) — une catégorie supprimée n'est désormais capturée que
+  dans le snapshot du mois exact de sa suppression, jamais après.
+- 🔴 **Incohérence Aperçu/Budget vs Stats/GraphiqueFlux pour le mois de
+  suppression** : `calculerResteEstimeCourant` (corrigé, cf. ci-dessus)
+  comptait bien la dépense d'une catégorie supprimée ce mois-ci, mais
+  `analytics.tsx::construireRepartitionSurPeriode` (alimente
+  GraphiqueFlux/Stats) et `totalDepensesMoiMois` (Stats, vue perso)
+  filtrent par `estCategorieActiveCeMois` SANS l'équivalent add-back —
+  une catégorie supprimée y disparaissait donc immédiatement, alors que
+  "Reste estimé" continuait de la compter. L'affirmation initiale de cette
+  entrée ("score.ts/series.ts/trophees.ts ET le pipeline GraphiqueFlux/
+  Stats... sans changement de code nécessaire") était donc partiellement
+  fausse — corrigée : ajout de `|| estSupprimeeCeMois(...)` aux deux
+  filtres identifiés (`analytics.tsx`), avec le même garde-fou "id inclus
+  dans le `Pick` uniquement pour satisfaire la détection TypeScript des
+  types faibles" ajouté à `estSupprimeeCeMois` (sinon rejeté par TS pour
+  `EnveloppePartenaire`, qui n'a aucun champ en commun avec un type
+  entièrement optionnel).
+- **Limite assumée, non corrigée** (précisée après le round security-auditor
+  ci-dessous) : les 2 occurrences de `estCategorieActiveCeMois` dans le bloc
+  "espace partagé" de `analytics.tsx` (contributions/balance du couple,
+  `vueActive === "partage"` uniquement) n'ont pas reçu l'ajout
+  "comptabilisée le mois de sa suppression" (`estSupprimeeCeMois`) —
+  périmètre non visible en production (`ESPACE_PARTAGE_ACTIF=false`),
+  laissé de côté pour rester proportionné. **Distinct** du bug corrigé
+  ci-dessous (catégorie fantôme) : ici, la catégorie supprimée par le
+  partenaire est bien correctement MASQUÉE (pas de fantôme), juste pas
+  comptée dans le total du mois précis de sa suppression.
+- 🟡 Typo corrigée : `enveloppesSuppimeesCeMois` → `enveloppesSupprimeesCeMois`
+  (`utils/budget.ts`).
+
+**2e round de revue (même jour)** : APPROUVÉ AVEC RÉSERVES sur la 1re
+passe de correctifs — les 2 points bloquants d'origine confirmés résolus
+pour le cas principal (Fixe récurrente + cohérence Aperçu/Stats), mais une
+réserve plus étroite trouvée par re-simulation : pour une catégorie **Fixe
+PONCTUELLE** (jamais récurrente, donc jamais remise à zéro) supprimée,
+`enveloppesSnapshot` cessait bien de l'afficher, mais `depenseReelle`/
+`SnapshotMois.totalDepense` (la valeur agrégée qui fait foi, cf.
+`budgetDuMoisArchive`) — dérivés séparément de `enveloppesSansEntree`,
+sans le même filtre — restaient gonflés indéfiniment par cette catégorie
+dans tous les mois archivés suivants, sans plus aucune ligne dans l'UI
+pour l'expliquer. **Corrigé** : même exclusion
+(`!e.supprimeeLe || estSupprimeeCeMoisArchive(e)`) appliquée à
+`enveloppesSansEntree`. tsc/lint revérifiés propres après ce 3e correctif.
+
+**3e round — confirmation finale du code-reviewer** : **APPROUVÉ** sans
+réserve. Resimulation numérique du cas résiduel (Fixe ponctuelle "Frais de
+notaire" 800€, supprimée en septembre) : `depenseReelle` = 800€ en
+septembre (mois de suppression, correct), retombe à 0€ en octobre et reste
+à 0€ en novembre. Non-régression confirmée sur le cas normal (catégorie
+jamais supprimée, ex. "Loyer" récurrent). Point hors périmètre noté mais
+non traité (pré-existant, sans lien avec P052) : une catégorie
+Variable/Fixe ponctuelle jamais supprimée reste vestigiale et continue
+d'être recomptée indéfiniment — bug distinct, déjà connu, non introduit
+par ce lot.
+
+**Revue security-auditor (2026-09-18)** : APPROUVÉ AVEC RÉSERVES — le diff
+lui-même (migration, `supprimerEnveloppe`, RLS `enveloppes_update_own`,
+`CartesCategoriesSupprimees.tsx`) jugé sûr et conforme, RIEN à corriger
+dessus. Une réserve trouvée, **hors diff mais causée par la décision
+P052** : 🟠 **catégorie fantôme cross-compte** — `utils/espacePartage.ts::chargerDonneesPartenaire`
+mappait les enveloppes du partenaire vers `EnveloppePartenaire` SANS
+jamais recopier `supprimee_le` (le type ne portait même pas ce champ) —
+`estCategorieActiveCeMois` ne filtrait donc JAMAIS une catégorie supprimée
+par le partenaire, qui restait visible indéfiniment dans la vue partagée
+RÉELLE (Aperçu/Budget via `fusionnerCategoriesParNom`, pas seulement
+Stats comme initialement documenté ci-dessus) — exactement la "catégorie
+fantôme" interdite par CLAUDE.md. **Corrigé** : `supprimeeLe` ajouté au
+type `EnveloppePartenaire` et à son mapping dans `chargerDonneesPartenaire`
+(`utils/espacePartage.ts`) — `estCategorieActiveCeMois`/
+`fusionnerCategoriesParNom` filtrent désormais correctement les deux
+côtés (mes catégories ET celles du partenaire). Sans impact utilisateur
+final tant que `ESPACE_PARTAGE_ACTIF=false` en prod, mais actif dès
+maintenant pour les comptes admin Maëlys/Louis — corrigé avant tout
+commit plutôt que reporté, cette classe de bug étant explicitement
+interdite par CLAUDE.md quel que soit le statut du flag.
+tsc/lint revérifiés propres après ce correctif (10 lignes / 49
+problèmes).
+
+**P053/P054 — non implémenté dans ce lot**, malgré la réponse "construire
+maintenant" — en creusant le chantier concret (sélecteur de date +
+redirection de l'écriture vers une mise à jour additive du snapshot
+archivé), son volume s'est avéré représenter une session de travail à part
+entière plutôt qu'un complément au lot P052 déjà conséquent. Documenté en
+détail comme nouveau finding **P054** (voir §2 Journal des problèmes),
+avec la piste de correction complète (sélecteur de date à construire,
+fonction de mise à jour additive du snapshot sur le modèle de
+`renommerCategoriePartout`, RLS déjà suffisante) — reporté à une session
+suivante plutôt que bâclé dans celle-ci.
 
 ### 2026-09-13 — Pubs en vue partagée : contenu flouté "Ton bilan → Vista" (insights)
 
@@ -2138,6 +2430,20 @@ RLS / migrations), réalisé par deux passes de lecture exhaustive : tout
 | RPC espace partagé (`creer_espace_partage`, `rejoindre_espace_par_code`, `quitter_espace_partage`, `modifier_mode_balance_espace`, `fusionner_evenements`) | — | `security definer`, identité toujours dérivée de `auth.uid()` côté serveur | ✅ (ex. `quitter_espace_partage` côté `profil.tsx`) | n/a |
 | `supprimerDonneesUtilisateur` (Edge Function partagée) | `transactions`, `evenements`, `historique_paiements`, `snapshots_mois` (+ enfants), `objectifs`, `enveloppes`, `profils` | ✅ toutes scopées `user_id` | n/a (déclenché par `delete-account`/`cleanup-expired-guests`) | n/a |
 
+**⚠️ Ligne `supprimerEnveloppe` ci-dessus DEVENUE HISTORIQUE (2026-09-18)** :
+décrit l'état du 2026-09-12. Deux décisions produit successives ont changé
+ce chemin depuis — (1) les `transactions` liées ne sont plus DELETE-ées du
+tout (décision du 2026-09-18, "ne jamais supprimer automatiquement les
+transactions liées") ; (2) la ligne `enveloppes` elle-même n'est plus
+jamais DELETE-ée non plus — bascule "suppression douce"
+(`enveloppes.supprimee_le`, P052, même date). `supprimerEnveloppe` ne fait
+donc plus qu'un seul DELETE réel aujourd'hui (`modeles_depenses` liés) ; la
+catégorie et ses transactions passent désormais par un `UPDATE`
+(non destructif au sens strict de cette section), toujours filtré
+`user_id`, toujours confirmé par `Alert.alert`, toujours loggué dans
+`audit_operations`. Détail complet dans le finding P052 et l'entrée §2.2
+du 2026-09-18.
+
 **Corrections appliquées** (commit de ce jour) :
 - `supprimerEnveloppe` : ajout du filtre `.eq("user_id", user.id)` sur 3 des 4 écritures (enveloppes, transactions, modeles_depenses — **pas** `evenements`, voir note ⚠️ ci-dessous), ajout d'un backup `sauvegarderEnveloppesSupprimees` avant suppression (absent sur ce chemin précis — n'existait que dans `appliquerEnveloppes`), ajout d'un log `journaliserOperationAudit("suppression_enveloppe", ...)`.
 - `supprimerObjectif` : ajout du log `journaliserOperationAudit("suppression_objectif", ...)` (le filtre `user_id` et le backup existaient déjà).
@@ -2151,7 +2457,7 @@ RLS / migrations), réalisé par deux passes de lecture exhaustive : tout
 - 🟡 `delete-account` ne fait aucun export/sauvegarde des données avant suppression définitive du compte (contrairement à l'archivage mensuel/aux suppressions de catégorie-objectif, qui ont toutes un filet de secours). Identité de l'appelant vérifiée correctement (JWT via `auth.getUser()`, jamais un `user_id` de body) — pas une faille d'accès, une absence de filet de récupération en cas de suppression accidentelle.
 - 🟡 Confirmation UI non tracée avec certitude pour `supprimerObjectif` (3 sites d'appel dans `index.tsx`) et pour un événement personnel (non "commun") dans `supprimerEvenement` — à vérifier visuellement dans l'app plutôt que supposer une régression à partir d'un simple grep.
 - 🟡 La plupart des `UPDATE` (objectifs, evenements, transactions, modeles_depenses) n'ont toujours pas de filtre `user_id` client explicite — protégés uniquement par RLS. Risque théorique si une policy RLS venait à régresser ; non corrigé ici pour rester proportionné (ce sont des mises à jour, pas des suppressions, et RLS est vérifiée saine en section suivante).
-- 🟡 `supprimerEnveloppe` : en cas d'échec du DELETE `transactions`/`modeles_depenses` liés APRÈS que l'état local les ait déjà retirés, l'UI et la base peuvent diverger (transactions orphelines invisibles côté client) — erreur seulement logguée, jamais réconciliée automatiquement. Pas corrigé (nécessiterait une vraie logique de rollback/retry, hors scope d'un audit).
+- 🟡 `supprimerEnveloppe` : **note du 2026-09-18, mise à jour suite à P052** — ce point ne concerne plus que `modeles_depenses` (les `transactions` liées ne sont plus DELETE-ées du tout depuis le 2026-09-18, cf. note ⚠️ plus haut). En cas d'échec du DELETE `modeles_depenses` lié APRÈS que l'état local l'ait déjà retiré, l'UI et la base peuvent diverger (raccourci fantôme invisible côté client, jamais une donnée financière) — erreur seulement logguée, jamais réconciliée automatiquement. Pas corrigé (nécessiterait une vraie logique de rollback/retry, hors scope d'un audit ; impact mineur, raccourci UI non financier).
 
 **2026-09-13 — Exposition accrue d'un gap déjà connu** : `ESPACE_PARTAGE_ACTIF` passé à `true` "pour les tests" (diagnostic onboarding "Vista à deux", cf. `utils/premium.ts`) — les RPC espace partagé (`creer_espace_partage`/`rejoindre_espace_par_code`/`quitter_espace_partage`, ligne du tableau ci-dessus, colonne Log = `n/a`) restent sans trace `audit_operations`. Jusqu'ici seuls Maëlys/Louis (admin) pouvaient atteindre ce chemin (`estEspacePartageActif = ESPACE_PARTAGE_ACTIF || isAdmin`) ; désormais TOUT compte de test le peut. Aucune faille RLS (policies vérifiées saines par le security-auditor), mais `quitter_espace_partage` fait un vrai DELETE non journalisé — à ajouter (`journaliserOperationAudit`) avant un usage prolongé par plusieurs comptes de test, et à revoir avant que ce flag ne devienne permanent pour la V1. Repasser `ESPACE_PARTAGE_ACTIF` à `false` avant toute build de production reste impératif tant que ce point n'est pas traité.
 

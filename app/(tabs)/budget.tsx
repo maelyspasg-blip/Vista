@@ -60,6 +60,7 @@ import { InfoBulle } from "../InfoBulle";
 import { NombreAnime } from "../NombreAnime";
 import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
+import { CartesCategoriesSupprimees } from "../CartesCategoriesSupprimees";
 import { VueMoisArchive } from "../VueMoisArchive";
 import { BarreProgression, useLargeurAnimee } from "../BarreProgression";
 import { BoutonPrincipal } from "../BoutonPrincipal";
@@ -1943,6 +1944,16 @@ export default function Budget() {
         {affichagePartage
           ? categoriesFusionneesTriees.map(renderCarteCategoriePartagee)
           : categoriesAffichesTriees.map(renderCarteCategorie)}
+
+        {/* RÈGLE : décision produit du 2026-09-18 (P052, suppression douce)
+            — une catégorie supprimée ce mois-ci disparaît de
+            categoriesAffichesTriees ci-dessus (estCategorieActiveCeMois),
+            donc invisible sans ce composant dédié. Vue perso uniquement
+            (!affichagePartage) : ce sont MES catégories supprimées, un
+            concept qui n'a pas de sens fusionné dans la vue Partagé. */}
+        {!affichagePartage && (
+          <CartesCategoriesSupprimees annee={ANNEE_ACTUELLE} mois={MOIS_ACTUEL} />
+        )}
 
         {entreesRecues.length > 0 && (
           <>

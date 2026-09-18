@@ -36,6 +36,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Calendar } from "react-native-calendars";
 import Svg, { Circle } from "react-native-svg";
 import { calculerScrollAutoTutoriel } from "../../utils/tutorielScroll";
+import { CartesCategoriesSupprimees } from "../CartesCategoriesSupprimees";
 import { BarreProgression, useLargeurAnimee } from "../BarreProgression";
 import { NombreAnime } from "../NombreAnime";
 import { CocheAnimee } from "../CocheAnimee";
@@ -994,9 +995,13 @@ export default function Dashboard() {
     // doublon) — réintroduisant exactement P021/P027/P033 par ce chemin.
     // Vérifié AVANT tout appel, synchrone, jamais de course possible.
     if (nouveauNom && nouveauNom !== enveloppeEnEdition.nom) {
+      // RÈGLE : ajout du 2026-09-18 (P052, suppression douce) —
+      // `!e.supprimeeLe` exclut les catégories masquées, cf. RÈGLE
+      // identique dans app/store.ts::ajouterEnveloppe.
       const nomNormalise = nouveauNom.toLowerCase();
       const collision = enveloppes.some(
         (e) =>
+          !e.supprimeeLe &&
           e.id !== enveloppeEnEdition.id &&
           e.nom.trim().toLowerCase() === nomNormalise,
       );
@@ -1073,9 +1078,14 @@ export default function Dashboard() {
   const supprimerEnveloppe = () => {
     if (!enveloppeEnEdition) return;
     const cible = enveloppeEnEdition;
+    // RÈGLE : texte mis à jour le 2026-09-18 (P052, suppression douce —
+    // cf. RÈGLE détaillée dans app/store.ts::supprimerEnveloppe) — l'ancien
+    // texte ("supprimera aussi toutes les transactions liées") est devenu
+    // FAUX : les dépenses déjà enregistrées ne sont plus jamais supprimées,
+    // elles restent comptabilisées. Ne jamais réintroduire cette mention.
     Alert.alert(
       `Supprimer "${cible.nom}" ?`,
-      "Cette action est définitive et supprimera aussi toutes les transactions liées. Cette catégorie ne sera plus disponible pour tes dépenses passées ou futures.",
+      "Cette catégorie ne sera plus disponible pour de nouvelles dépenses. Les dépenses déjà enregistrées restent comptabilisées et consultables dans ton historique.",
       [
         { text: "Annuler", style: "cancel" },
         {
@@ -2359,6 +2369,19 @@ export default function Dashboard() {
               </View>
             </SectionCollapsable>
           </View>
+        )}
+
+        {/* RÈGLE : décision produit du 2026-09-18 (P052, suppression douce)
+            — une catégorie supprimée ce mois-ci disparaît de
+            enveloppesTriees/enveloppesTrieesDepenses ci-dessus
+            (estCategorieActiveCeMois), donc invisible sans ce composant
+            dédié. Vue perso uniquement (!affichagePartage), même RÈGLE que
+            app/(tabs)/budget.tsx. */}
+        {!affichagePartage && (
+          <CartesCategoriesSupprimees
+            annee={maintenant.getFullYear()}
+            mois={maintenant.getMonth()}
+          />
         )}
 
         <View

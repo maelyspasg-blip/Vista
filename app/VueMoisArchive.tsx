@@ -174,6 +174,18 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
         const lignesTriees = [...lignes].sort(
           (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
         );
+        // RÈGLE : décision produit du 2026-09-18 (P052, suppression douce) —
+        // `env` ici est un SnapshotEnveloppe figé, sans champ `supprimeeLe`
+        // (ce concept n'existe que côté enveloppe live, cf. RÈGLE dans
+        // app/store.ts::Enveloppe) : on croise avec objStore.enveloppes (qui
+        // garde toujours la ligne, même supprimée) pour savoir si CETTE
+        // catégorie a depuis été supprimée — vrai quel que soit le mois
+        // affiché ici, pas seulement celui de la suppression (contrairement
+        // à estSupprimeeCeMois, utilisé ailleurs pour les TOTAUX, pas
+        // l'affichage).
+        const estSupprimee = !!objStore.enveloppes.find(
+          (e) => e.id === env.id,
+        )?.supprimeeLe;
 
         return (
           <View key={cle} style={[styles.envCard, { backgroundColor: couleur + "22" }]}>
@@ -192,6 +204,20 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                   >
                     {env.nom}
                   </Text>
+                  {estSupprimee && (
+                    <View
+                      style={[
+                        styles.badgeSupprimee,
+                        { backgroundColor: C.separateur },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.badgeSupprimeeTexte, { color: C.texteMuted }]}
+                      >
+                        Catégorie supprimée
+                      </Text>
+                    </View>
+                  )}
                   <TouchableOpacity
                     onPress={() => ouvrirRenommage(env.nom)}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -281,6 +307,11 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
           {entrees.map((env, index) => {
             const cle = env.id || `entree-${env.nom}-${index}`;
             const couleur = (env as unknown as { couleur?: string }).couleur ?? C.vert;
+            // RÈGLE : même croisement que la carte Dépenses plus haut — cf.
+            // RÈGLE détaillée là-bas (P052, décision produit du 2026-09-18).
+            const estSupprimee = !!objStore.enveloppes.find(
+              (e) => e.id === env.id,
+            )?.supprimeeLe;
             return (
               <View key={cle} style={[styles.envCard, { backgroundColor: couleur + "22" }]}>
                 <View style={styles.envRow}>
@@ -289,6 +320,20 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
                     <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
                       {env.nom}
                     </Text>
+                    {estSupprimee && (
+                      <View
+                        style={[
+                          styles.badgeSupprimee,
+                          { backgroundColor: C.separateur },
+                        ]}
+                      >
+                        <Text
+                          style={[styles.badgeSupprimeeTexte, { color: C.texteMuted }]}
+                        >
+                          Catégorie supprimée
+                        </Text>
+                      </View>
+                    )}
                     <TouchableOpacity
                       onPress={() => ouvrirRenommage(env.nom)}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -451,6 +496,17 @@ const styles = StyleSheet.create({
   },
   videTexte: { fontSize: 13, textAlign: "center", paddingVertical: 20 },
   envCard: { borderRadius: 16, padding: 18, marginBottom: 10 },
+  // RÈGLE : badge gris discret (P052, décision produit du 2026-09-18) —
+  // JAMAIS de couleur d'alerte ici, une catégorie supprimée n'est pas une
+  // erreur. Même esprit que EspaceDissousBanner.tsx (teal neutre) mais en
+  // gris, cohérent avec le reste des textes secondaires (C.texteMuted).
+  badgeSupprimee: {
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    flexShrink: 0,
+  },
+  badgeSupprimeeTexte: { fontSize: 10, fontWeight: "600" },
   envRow: {
     flexDirection: "row",
     justifyContent: "space-between",
