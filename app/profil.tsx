@@ -11,6 +11,7 @@ import {
   Alert,
   Clipboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -39,6 +40,7 @@ import { getInitiales } from "../utils/initiales";
 import { CALCULS_DOC } from "../utils/calculsDoc";
 import {
   CONDITIONS_GENERALES_UTILISATION,
+  EMAIL_CONTACT_VISTA,
   POLITIQUE_CONFIDENTIALITE,
 } from "../utils/documentsLegaux";
 import { ModaleDocumentLegal } from "./ModaleDocumentLegal";
@@ -1611,6 +1613,29 @@ export default function Profil() {
             <Ionicons name="document-text-outline" size={16} color={C.texte} />
             <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
               Conditions générales d&apos;utilisation
+            </Text>
+          </TouchableOpacity>
+
+          {/* RÈGLE : ajoutée le 2026-09-18 (demande explicite) — même style
+              que les 2 lignes ci-dessus (btnSecondaire), ouvre le client
+              mail natif de l'appareil sur l'adresse de contact unique du
+              projet (EMAIL_CONTACT_VISTA, utils/documentsLegaux.ts, aussi
+              utilisée — interpolée — dans les 2 documents légaux
+              ci-dessus). Aucune vérification Linking.canOpenURL() avant :
+              un mailto: est un schéma standard supporté nativement par
+              iOS/Android, jamais besoin de vérifier sa disponibilité
+              contrairement à un deep link tiers. */}
+          <TouchableOpacity
+            style={[
+              styles.btnSecondaire,
+              { borderColor: C.separateur, marginTop: 12 },
+            ]}
+            onPress={() => Linking.openURL(`mailto:${EMAIL_CONTACT_VISTA}`)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="mail-outline" size={16} color={C.texte} />
+            <Text style={[styles.btnSecondaireTexte, { color: C.texte }]}>
+              Nous contacter
             </Text>
           </TouchableOpacity>
         </View>

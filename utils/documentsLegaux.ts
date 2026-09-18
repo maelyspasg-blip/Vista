@@ -1,7 +1,15 @@
 // Contenu fourni par l'éditeur de l'application (version 1.0, août 2026).
-// [EMAIL_CONTACT] est un placeholder intentionnel, laissé tel quel sur
-// demande explicite : à remplacer manuellement par la vraie adresse de
-// contact une fois créée, avant toute publication.
+// Adresse de contact : EMAIL_CONTACT_VISTA ci-dessous (demande explicite du
+// 2026-09-18) — remplace le placeholder [EMAIL_CONTACT] laissé
+// intentionnellement dans les 5 occurrences ci-dessous jusqu'à ce jour.
+
+// RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE DE L'ADRESSE DE CONTACT :
+// interpolée dans les 5 occurrences ci-dessous (jamais recopiée en dur une
+// 2e fois) ET réutilisée telle quelle par la ligne "Nous contacter" de
+// Profil (app/profil.tsx) — un seul endroit à modifier si cette adresse
+// change un jour, jamais un risque de divergence entre les documents
+// légaux et le reste de l'app.
+export const EMAIL_CONTACT_VISTA = "vistabudgetapp@gmail.com";
 
 export const POLITIQUE_CONFIDENTIALITE = `POLITIQUE DE CONFIDENTIALITÉ — VISTA
 Version 1.0 — Août 2026
@@ -12,7 +20,7 @@ L'application Vista est développée et exploitée conjointement par :
 - Maëlys Pasgrimaud, personne physique, France
 - Louis Vedel, personne physique, France
 
-Contact : [EMAIL_CONTACT]
+Contact : ${EMAIL_CONTACT_VISTA}
 
 Les deux développeurs ont conjointement accès aux données utilisateurs dans le cadre de la maintenance et de l'amélioration de l'application.
 
@@ -69,7 +77,7 @@ Conformément au RGPD (articles 15 à 22), vous disposez des droits suivants :
 - Droit de retrait du consentement : retirer votre consentement à tout moment
 - Droit à la limitation (art. 18) : demander la suspension temporaire d'un traitement
 
-Pour exercer ces droits : [EMAIL_CONTACT]
+Pour exercer ces droits : ${EMAIL_CONTACT_VISTA}
 Délai de réponse : 30 jours maximum.
 
 Vous pouvez également introduire une réclamation auprès de la CNIL : www.cnil.fr
@@ -84,7 +92,7 @@ Vous pouvez également introduire une réclamation auprès de la CNIL : www.cnil
 7. Mineurs
 
 Vista est destinée aux personnes âgées de 16 ans et plus. Nous ne collectons pas sciemment de données concernant des personnes de moins de 16 ans.
-Contact : [EMAIL_CONTACT]
+Contact : ${EMAIL_CONTACT_VISTA}
 
 8. Cookies et traceurs
 
@@ -96,7 +104,7 @@ En cas de modification substantielle, vous serez notifié dans l'application au 
 
 10. Contact
 
-[EMAIL_CONTACT]
+${EMAIL_CONTACT_VISTA}
 Responsables de traitement : Maëlys Pasgrimaud et Louis Vedel`;
 
 export const CONDITIONS_GENERALES_UTILISATION = `CONDITIONS GÉNÉRALES D'UTILISATION — VISTA
@@ -177,4 +185,4 @@ Pour les consommateurs résidant dans l'UE : https://ec.europa.eu/consumers/odr
 
 Article 13 — Contact
 
-[EMAIL_CONTACT]`;
+${EMAIL_CONTACT_VISTA}`;

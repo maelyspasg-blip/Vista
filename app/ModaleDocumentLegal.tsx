@@ -1,10 +1,59 @@
-import { Modal, ScrollView, StyleSheet, View } from "react-native";
+import type { ReactNode } from "react";
+import { Linking, Modal, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAccessibilite } from "./AccessibiliteContext";
 import { BoutonPrincipal } from "./BoutonPrincipal";
 import { useTheme } from "./ThemeContext";
 import { Text } from "./Texte";
 import { useEstTablette } from "./useTablette";
+
+// RÈGLE : regex email volontairement simple (pas de validation RFC 5322
+// complète) — sert uniquement à repérer la SEULE adresse déjà présente dans
+// utils/documentsLegaux.ts (vistabudgetapp@gmail.com, 5 occurrences) pour
+// la rendre cliquable dans le texte, jamais à valider une saisie
+// utilisateur. `RegExp` déclarée une seule fois au niveau module (jamais
+// recréée à chaque rendu) et volontairement PARTAGÉE entre tous les appels
+// de `linkifierEmails` ci-dessous — sûr malgré le flag `g` (qui, avec une
+// boucle manuelle `.exec()`/`.test()`, muterait `lastIndex` et ferait
+// fuiter un état entre deux appels) précisément PARCE QUE
+// `String.prototype.matchAll` ne mute jamais `lastIndex` de la regex
+// source qu'on lui passe (spec ECMA-262 : matchAll clone la regex en
+// interne) — vérifié en revue par simulation directe, plusieurs textes
+// différents passés successivement à la même instance sans aucune fuite.
+const MOTIF_EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+
+// RÈGLE À NE JAMAIS CASSER — SEULE L'ADRESSE EMAIL DEVIENT TAPABLE, JAMAIS
+// LE RESTE DU TEXTE : un <Text> RN peut imbriquer des <Text onPress=.../>
+// enfants sans perdre le flux normal du texte autour (contrairement à
+// remplacer tout le bloc par un seul élément cliquable) — c'est ce pattern
+// qui est utilisé ici, jamais un Text unique enveloppé dans un
+// TouchableOpacity qui rendrait TOUT le corps du document tapable.
+function linkifierEmails(texte: string, couleurLien: string) {
+  const segments: ReactNode[] = [];
+  let dernierIndex = 0;
+  for (const correspondance of texte.matchAll(MOTIF_EMAIL)) {
+    const email = correspondance[0];
+    const index = correspondance.index ?? 0;
+    if (index > dernierIndex) {
+      segments.push(texte.slice(dernierIndex, index));
+    }
+    segments.push(
+      <Text
+        key={`email-${index}`}
+        style={{ color: couleurLien, textDecorationLine: "underline" }}
+        onPress={() => Linking.openURL(`mailto:${email}`)}
+        suppressHighlighting={false}
+      >
+        {email}
+      </Text>,
+    );
+    dernierIndex = index + email.length;
+  }
+  if (dernierIndex < texte.length) {
+    segments.push(texte.slice(dernierIndex));
+  }
+  return segments;
+}
 
 // Modale plein écran réutilisée pour la politique de confidentialité et les
 // CGU, accessible depuis Profil et depuis l'écran de connexion (avant même
@@ -53,7 +102,9 @@ export function ModaleDocumentLegal({
         >
           <Text style={[styles.titre, { color: C.texte }]}>{titre}</Text>
           <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-            <Text style={[styles.corps, { color: C.texte }]}>{texte}</Text>
+            <Text style={[styles.corps, { color: C.texte }]}>
+              {linkifierEmails(texte, C.purple)}
+            </Text>
             <View style={{ height: 20 }} />
           </ScrollView>
           <BoutonPrincipal
