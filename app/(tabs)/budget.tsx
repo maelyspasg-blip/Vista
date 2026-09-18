@@ -2411,16 +2411,32 @@ export default function Budget() {
                     </>
                   )}
 
+                {/* RÈGLE : décision "correction certaine" (P037, AUDIT_V1.md) —
+                    tapoter ce bouton formulaire incomplet ne produisait
+                    jusqu'ici aucun retour visuel (validerAjout no-op
+                    silencieux, cf. son garde `if (!nomTx || !montantTx ||
+                    !enveloppeTx...)`). Désactivé + assombri tant que le
+                    formulaire est incomplet, même geste que le bouton
+                    "Continuer" de l'onboarding (`disabled={!formulaireValide}`,
+                    inscription.tsx). */}
                 <BoutonPrincipal
                   style={[
                     styles.btnValider,
                     {
                       backgroundColor: C.hero,
-                      opacity: ajoutTransactionEnCours ? 0.6 : 1,
+                      opacity:
+                        ajoutTransactionEnCours ||
+                        !nomTx ||
+                        !montantTx ||
+                        !enveloppeTx
+                          ? 0.6
+                          : 1,
                     },
                   ]}
                   onPress={validerAjout}
-                  disabled={ajoutTransactionEnCours}
+                  disabled={
+                    ajoutTransactionEnCours || !nomTx || !montantTx || !enveloppeTx
+                  }
                 >
                   {ajoutTransactionEnCours ? (
                     <ActivityIndicator color="#FFFFFF" />

@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -5,6 +6,7 @@ import {
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
+    TouchableOpacity,
     View,
 } from "react-native";
 import { supabase } from "../../supabaseClient";
@@ -70,6 +72,24 @@ export default function Invite() {
       {/* RÈGLE — iPad : colonne de contenu limitée à 560px, centrée — même
           pattern que app/onboarding/connexion.tsx. */}
       <View style={[{ flex: 1 }, styleModaleTablette(estTablette, 560)]}>
+      {/* RÈGLE : correction certaine (P047, AUDIT_V1.md) — seul écran
+          d'onboarding sans bouton retour, contrairement à OnboardingEtape.tsx
+          (le wrapper des 6 écrans du questionnaire, non utilisé ici). Même
+          geste visuel (Ionicons "arrow-back", accessibilityLabel "Étape
+          précédente") ; invite.tsx est toujours atteint via
+          router.push("/onboarding/invite") depuis connexion.tsx, donc
+          router.back() y ramène systématiquement — jamais le premier écran
+          d'une pile. */}
+      <TouchableOpacity
+        onPress={() => router.back()}
+        disabled={chargement}
+        style={styles.boutonRetour}
+        accessibilityRole="button"
+        accessibilityLabel="Étape précédente"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Ionicons name="arrow-back" size={22} color={C.texte} />
+      </TouchableOpacity>
       <View style={styles.header}>
         <Text style={[styles.titre, { color: C.texte }]}>Essayer Vista</Text>
         <Text style={[styles.sousTitre, { color: C.texteMuted }]}>
@@ -124,6 +144,7 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 24,
   },
+  boutonRetour: { marginBottom: 16, alignSelf: "flex-start" },
   infoBox: {
     borderRadius: 14,
     padding: 16,

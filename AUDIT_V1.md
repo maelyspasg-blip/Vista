@@ -1096,7 +1096,11 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Fichier** : `app/(tabs)/budget.tsx:930-931,2392-2396`.
 - **Description** : taper sur "Ajouter la dépense" sans nom/montant/catégorie renseignés ne produit aucun retour visuel (bouton toujours actif, pas de message).
 - **Piste de correction** : désactiver le bouton tant que le formulaire est incomplet, ou afficher une erreur explicite.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+- **Statut** : **CORRIGÉ (2026-09-18)** — bouton "Ajouter la dépense"/
+  "Enregistrer les modifications" désactivé + assombri (opacity 0.6) tant
+  que nom/montant/catégorie ne sont pas tous renseignés, même geste que le
+  bouton "Continuer" de l'onboarding (`disabled={!formulaireValide}`,
+  cf. P049). tsc/lint vérifiés propres.
 
 ### P038 — Budget : nom de catégorie très long tronqué silencieusement à 50 caractères sans avertissement
 
@@ -1254,7 +1258,16 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Trouvé par** : audit UX écran par écran (2026-09-17).
 - **Fichiers** : `onboarding/invite.tsx` (aucun bouton retour visible, contrairement à `components/OnboardingEtape.tsx:80-90` qui en a un avec `accessibilityLabel="Étape précédente"`) ; `onboarding/preferences.tsx:122-220` (étapes Salaire/Loyer/Courses skippables silencieusement — champ vide + "Continuer" = no-op — mais bouton toujours pleine opacité, sans mention "optionnel") vs `:504-522` (étape "Autres dépenses", SEULE à afficher un bouton secondaire explicite "Passer cette étape").
 - **Piste de correction** : bouton retour discret sur `invite.tsx` ; même `boutonSecondaireLabel="Passer cette étape"` (ou texte d'aide "Laisse vide si non applicable") sur les 3 premières étapes du questionnaire.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+- **Statut** : **PARTIELLEMENT CORRIGÉ (2026-09-18)** — bouton retour
+  ajouté sur `invite.tsx` (même geste visuel que
+  `components/OnboardingEtape.tsx` : `Ionicons "arrow-back"`,
+  `accessibilityLabel="Étape précédente"`, `router.back()` — vérifié que
+  `invite.tsx` est toujours atteint via `router.push` depuis
+  `connexion.tsx`, jamais le premier écran d'une pile). La 2e partie
+  (skippabilité peu claire des 3 premières étapes de `preferences.tsx`)
+  reste NON corrigée — périmètre plus large (retouche de 3 écrans de
+  questionnaire), laissée pour une session suivante. tsc/lint vérifiés
+  propres.
 
 ### P048 — Budget/Stats : 2 boutons icône sans `accessibilityLabel` (raccourci de dépense, info balance)
 
