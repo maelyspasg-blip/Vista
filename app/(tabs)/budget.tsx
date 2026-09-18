@@ -631,8 +631,13 @@ export default function Budget() {
     );
   };
 
+  // RÈGLE À NE JAMAIS CASSER — CATÉGORIE SUPPRIMÉE (bug corrigé le
+  // 2026-09-18) : `e.supprimeeLe` vérifié en premier, même garde que
+  // estCategorieActiveCeMois (utils/budget.ts) — une catégorie supprimée ne
+  // doit plus jamais apparaître comme "à venir" (impossible de payer une
+  // facture d'une catégorie qui n'existe plus).
   const enveloppesAVenir = objStore.enveloppes.filter((e) => {
-    if (e.type !== "Fixe" || e.payee || !e.dateFixe) return false;
+    if (e.supprimeeLe || e.type !== "Fixe" || e.payee || !e.dateFixe) return false;
     const d = parseDateFixeLocale(e.dateFixe);
     return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
   });
@@ -671,9 +676,16 @@ export default function Budget() {
     )
     .sort((a, b) => b.budget - a.budget);
 
+  // RÈGLE À NE JAMAIS CASSER — CATÉGORIE SUPPRIMÉE (bug corrigé le
+  // 2026-09-18, même principe qu'entreesBudgetDuMois/utils/budget.ts) :
+  // `!e.supprimeeLe` exclut une catégorie "Entrée" supprimée de "à venir" —
+  // impossible d'attendre un revenu d'une catégorie qui n'existe plus. Son
+  // montant déjà reçu ce mois-ci (le cas échéant) reste visible dans
+  // entreesRecues ci-dessus, jamais retiré rétroactivement.
   const entreesAVenir = objStore.enveloppes.filter(
     (e) =>
       e.type === "Entrée" &&
+      !e.supprimeeLe &&
       moisComptageEffectif(e) === moisActuelISO &&
       !entreeEstEffectivementRecue(e),
   );

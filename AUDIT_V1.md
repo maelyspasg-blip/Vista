@@ -1607,6 +1607,61 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Statut** : NOUVEAU — documenté, non corrigé (edge case mineur, portée
   jugée étroite, correction propre non triviale).
 
+### P056 — Catégorie "Entrée" supprimée encore comptée comme "à venir" (Budget, Reste estimé, Hero Aperçu)
+
+- **Gravité** : 🟠 MAJEUR (calcul financier faux — un revenu supprimé
+  continuait de gonfler "Reste estimé"/le budget disponible affiché)
+- **Trouvé par** : demande explicite de Maëlys, 2026-09-18 ("catégorie
+  supprimée dans Aperçu reste visible dans Budget → 'Entrées à venir' et
+  continue d'être comptabilisée dans le reste estimé fin de mois").
+- **Fichiers** : `utils/budget.ts` (`entreesBudgetDuMois`, `EnveloppeComptable`),
+  `app/(tabs)/budget.tsx` (`enveloppesAVenir`, `entreesAVenir`).
+- **Description** : `entreesBudgetDuMois` (SEULE source de
+  `disponibleEffectif`, donc de `calculerResteEstimeCourant`/"Reste estimé"
+  — Aperçu Hero, Stats, Budget — ainsi que de la liste "entrées ce mois-ci"
+  affichée dans le Hero Aperçu) filtrait uniquement sur `type`/mois de
+  comptage, sans jamais vérifier `supprimeeLe` (contrairement à
+  `estCategorieActiveCeMois`, qui l'exclut déjà partout ailleurs depuis
+  P052). Une catégorie "Entrée" supprimée mais pas encore reçue
+  (`payee=false`) restait donc comptée dans `attendu`/`disponibleEffectif`
+  indéfiniment. Même bug, indépendant, dans `budget.tsx` :
+  `enveloppesAVenir` (Fixe à venir) et `entreesAVenir` (Entrées à venir) —
+  les deux listes qui alimentent la carte "À venir ce mois-ci" — filtraient
+  directement `objStore.enveloppes` sans passer par `estCategorieActiveCeMois`
+  ni vérifier `supprimeeLe`, donc affichaient la catégorie supprimée
+  indéfiniment.
+- **Vérifié, non buggé** : `supprimerEnveloppe()` (`app/store.ts`) met déjà
+  à jour `etat.enveloppes` de façon synchrone via `setEtat` (qui notifie
+  tous les abonnés immédiatement, `ecouteurs.forEach`) juste après le
+  succès de l'UPDATE Supabase — aucun rechargement manuel requis, la
+  disparition est déjà immédiate partout où le filtre est correct. Le
+  pull-to-refresh sur Aperçu, également signalé comme "manquant", est en
+  réalité déjà implémenté à l'identique de Budget (`RefreshControl` +
+  `gererRafraichissement`, ajouté le 2026-09-06) — vérifié dans le code,
+  non reproduit, aucun changement nécessaire.
+- **Correction appliquée** : `entreesBudgetDuMois` exclut désormais une
+  catégorie "Entrée" supprimée de `attendu` dans tous les cas, mais garde
+  son montant déjà REÇU dans `recu` UNIQUEMENT pour le mois de la
+  suppression (`estSupprimeeCeMois`, même principe et même fonction que
+  `calculerResteEstimeCourant` côté dépenses) — l'argent réellement perçu
+  ne doit pas disparaître rétroactivement du budget du mois, mais on ne
+  peut plus "attendre" un revenu d'une catégorie qui n'existe plus. Un mois
+  plus tard, la catégorie devient vestigiale et ne compte plus nulle part.
+  `enveloppesAVenir`/`entreesAVenir` (`budget.tsx`) reçoivent chacune une
+  garde `supprimeeLe` symétrique. `EnveloppeComptable` (type générique
+  partagé par `Enveloppe`/`EnveloppePartenaire`/`CategorieExport`) étendu
+  avec `id`/`supprimeeLe` pour permettre l'appel à `estSupprimeeCeMois` —
+  vérifié structurellement compatible avec tous les appelants existants
+  (`CategorieExport` n'a pas `supprimeeLe`, traité comme "jamais
+  supprimée", correct pour des données déjà archivées).
+- **Effet de bord positif** : corrige aussi silencieusement le même calcul
+  en vision partagée (`entreesBudgetDuMois(enveloppesPartenaireStats, ...)`,
+  `analytics.tsx`) et dans l'export Excel/résumé visuel
+  (`utils/exportExcel.ts`), qui réutilisent tous la même fonction — aucun
+  changement séparé nécessaire dans ces fichiers.
+- **Statut** : **CORRIGÉ (2026-09-18)** — tsc/lint vérifiés propres (10
+  lignes / 49 problèmes).
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 

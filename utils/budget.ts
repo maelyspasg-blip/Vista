@@ -6,13 +6,21 @@ import { parseDateFixeLocale } from "./dateOnly";
 // `Enveloppe` (app/store.ts) et par `CategorieExport` (utils/exportExcel.ts).
 // Permet à l'export Excel et au résumé visuel de réutiliser exactement le
 // même calcul que l'app plutôt que de le dupliquer avec leur propre type.
+// `id`/`supprimeeLe` ajoutés le 2026-09-18 (bug trouvé : une catégorie
+// "Entrée" supprimée continuait d'être comptée comme "à venir" dans Reste
+// estimé) — nécessaires pour appeler estSupprimeeCeMois depuis
+// entreesBudgetDuMois ci-dessous. `CategorieExport` n'a pas `supprimeeLe`
+// (optionnel, donc compatible structurellement : traité comme "jamais
+// supprimée", correct pour des données déjà archivées/figées).
 export type EnveloppeComptable = {
+  id: string;
   type: "Fixe" | "Variable" | "Entrée";
   dateFixe?: string;
   payee?: boolean;
   moisComptage?: string;
   depense: number;
   budget: number;
+  supprimeeLe?: string | null;
 };
 
 // Mois auquel une enveloppe "Entrée" est comptée : moisComptage si défini,
@@ -49,9 +57,24 @@ export function entreesBudgetDuMois<T extends EnveloppeComptable>(
   mois: number,
 ): EntreesBudgetMois<T> {
   const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
-  const entrees = enveloppes.filter(
-    (e) => e.type === "Entrée" && moisComptageEffectif(e) === moisISO,
-  );
+  // RÈGLE À NE JAMAIS CASSER — CATÉGORIE "ENTRÉE" SUPPRIMÉE (bug corrigé le
+  // 2026-09-18, même principe que calculerResteEstimeCourant/
+  // estSupprimeeCeMois plus bas pour les dépenses) : une catégorie
+  // "Entrée" supprimée ne doit plus jamais compter comme "attendue" — on ne
+  // peut pas attendre un revenu d'une catégorie qui n'existe plus, c'est
+  // exactement le bug remonté (catégorie supprimée dans Aperçu, encore
+  // visible dans Budget → "Entrées à venir" et comptée dans "Reste estimé
+  // fin de mois"). Son montant déjà REÇU (payee=true) CE MOIS-LÀ, lui, reste
+  // comptabilisé : l'argent a réellement été perçu, le retirer
+  // rétroactivement fausserait le budget disponible du mois (même logique
+  // que le total dépensé pour les enveloppes de dépense). Un mois plus
+  // tard, cette catégorie devient "vestigiale" et ne compte plus nulle part
+  // (estSupprimeeCeMois redevient false).
+  const entrees = enveloppes.filter((e) => {
+    if (e.type !== "Entrée" || moisComptageEffectif(e) !== moisISO) return false;
+    if (!e.supprimeeLe) return true;
+    return !!e.payee && estSupprimeeCeMois(e, annee, mois);
+  });
   const recu = entrees
     .filter((e) => e.payee)
     .reduce((acc, e) => acc + e.depense, 0);
