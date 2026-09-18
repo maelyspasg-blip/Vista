@@ -349,6 +349,22 @@ export default function Profil() {
     }
   };
 
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF UX DU 2026-09-18 (bug remonté par
+  // Maëlys) : cette fonction créait auparavant un espace ET générait un
+  // code IMMÉDIATEMENT à l'ouverture de la modale, avant toute action de
+  // l'utilisateur — fermer la modale avec la croix sans rien faire
+  // laissait un espace "en attente" bien réel côté serveur, que
+  // l'utilisateur devait ensuite explicitement annuler ("Annuler
+  // l'espace", carte persistante sur cet écran). N'ouvre plus désormais
+  // QUE la modale (+ vérifie s'il existe déjà un espace "en attente"
+  // valide, pour l'afficher directement sans en recréer un second) —
+  // la création réelle est déplacée sur le bouton "Générer mon code" de
+  // l'onglet "Créer un espace" (cf. son onPress plus bas), qui reste le
+  // SEUL site d'appel de creerEtAfficherEspace désormais. Le tap sur
+  // "Partage ton budget à deux" lui-même passe en plus par une confirmation
+  // Alert avant même d'appeler cette fonction (cf. son site d'appel) —
+  // deux confirmations explicites requises avant qu'un espace existe
+  // réellement en base.
   const ouvrirModalEspacePartage = async () => {
     setOngletEspacePartage("creer");
     setCodeGenere("");
@@ -359,23 +375,36 @@ export default function Profil() {
     setRejoindreEnCours(false);
     setModalEspacePartageVisible(true);
 
-    // RÈGLE À NE JAMAIS CASSER — VÉRIFIE D'ABORD, NE CRÉE QUE SI BESOIN :
-    // rouvrir cette modale ne doit jamais générer un nouveau code tant
-    // qu'un espace "en attente" existant est encore valide (24h) — ça
-    // invaliderait silencieusement un code déjà partagé au partenaire.
-    // creer_espace_partage() fait la même vérification côté serveur en
-    // défense en profondeur (migration
-    // 20260831130000_creer_espace_partage_reutilise_en_attente.sql), mais
-    // on vérifie aussi ici pour éviter l'aller-retour réseau inutile et
-    // afficher directement le bon "Expire dans Xh" sans dépendre d'un
-    // format retourné par une création.
+    // RÈGLE À NE JAMAIS CASSER — VÉRIFIE D'ABORD, NE CRÉE JAMAIS ICI :
+    // rouvrir cette modale doit afficher un espace "en attente" déjà
+    // existant et encore valide (24h) sans jamais en recréer un second —
+    // ça invaliderait silencieusement un code déjà partagé au partenaire.
+    // Ne déclenche plus creerEtAfficherEspace() dans le cas contraire :
+    // seul le bouton "Générer mon code" (onglet "Créer") le fait
+    // désormais, sur tap explicite.
     const etat = await chargerEtatEspacePartage();
     if (etat?.statut === "en_attente") {
       setCodeGenere(etat.code);
       setCodeExpireLabel(formaterExpirationCode(etat.expireAt));
-      return;
     }
-    creerEtAfficherEspace();
+  };
+
+  // RÈGLE À NE JAMAIS CASSER — PREMIÈRE DES 2 CONFIRMATIONS EXPLICITES
+  // (correctif UX du 2026-09-18) : seul site d'appel du bouton "Partage ton
+  // budget à deux" — ouvre désormais TOUJOURS par cet Alert plutôt que
+  // directement ouvrirModalEspacePartage, pour qu'un tap accidentel sur la
+  // carte ne mène jamais à une création d'espace sans qu'aucune intention
+  // n'ait été confirmée. La 2e confirmation est le bouton "Générer mon
+  // code" à l'intérieur de la modale (onglet "Créer un espace").
+  const confirmerOuvertureEspacePartage = () => {
+    Alert.alert(
+      "Créer un espace partagé ?",
+      "Vous pourrez inviter votre partenaire avec un code unique.",
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Créer", onPress: () => ouvrirModalEspacePartage() },
+      ],
+    );
   };
 
   // RÈGLE À NE JAMAIS CASSER — MESSAGE DE CONFIRMATION SELON LE NOMBRE DE
@@ -1333,7 +1362,7 @@ export default function Profil() {
             ) : (
               <TouchableOpacity
                 style={[styles.carte, { backgroundColor: C.carte, borderColor: C.carteBorder }, styleCarte(theme, C.purple, contrasteRenforce)]}
-                onPress={ouvrirModalEspacePartage}
+                onPress={confirmerOuvertureEspacePartage}
                 activeOpacity={0.7}
               >
                 <Text style={[styles.switchLabel, { color: C.texte }]}>
@@ -2286,7 +2315,7 @@ export default function Profil() {
                       </Text>
                     </TouchableOpacity>
                   </>
-                ) : (
+                ) : codeGenere ? (
                   <>
                     <Text style={[styles.codeEspacePartage, { color: C.texte }]}>
                       {codeGenere}
@@ -2329,6 +2358,37 @@ export default function Profil() {
                       activeOpacity={0.7}
                     >
                       <Text style={styles.btnPrincipalTexte}>Partager</Text>
+                    </BoutonPrincipal>
+                  </>
+                ) : (
+                  // RÈGLE À NE JAMAIS CASSER — 2e DES 2 CONFIRMATIONS
+                  // EXPLICITES (correctif UX du 2026-09-18) : rien n'est créé
+                  // tant que ce bouton n'a pas été tapé — cf. RÈGLE détaillée
+                  // sur ouvrirModalEspacePartage/confirmerOuvertureEspacePartage
+                  // plus haut. creerEtAfficherEspace reste la même fonction
+                  // qu'avant ce correctif, simplement déclenchée ici plutôt
+                  // qu'automatiquement à l'ouverture de la modale.
+                  <>
+                    <Text
+                      style={[
+                        styles.switchSub,
+                        { color: C.texteMuted, textAlign: "center" },
+                      ]}
+                    >
+                      Génère un code unique à partager avec ton/ta
+                      partenaire pour qu&apos;il/elle puisse te rejoindre.
+                    </Text>
+                    <BoutonPrincipal
+                      style={[
+                        styles.btnPrincipal,
+                        { backgroundColor: C.purple, marginTop: 16 },
+                      ]}
+                      onPress={creerEtAfficherEspace}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.btnPrincipalTexte}>
+                        Générer mon code
+                      </Text>
                     </BoutonPrincipal>
                   </>
                 )}
