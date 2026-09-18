@@ -1635,8 +1635,14 @@ export default function Analytics() {
       setNbAmeliorations(await chargerNbAmeliorations(userId));
     })();
   }, []);
+  // RÈGLE : `!e.supprimeeLe` (bug corrigé le 2026-09-18) — un simulateur de
+  // budget FUTUR ne doit jamais proposer une catégorie supprimée (rien à
+  // ajuster), contrairement aux sélecteurs d'analyse historique de cet
+  // écran (voir RÈGLE dans utils/budget.ts:estCategorieActiveCeMois : les
+  // agrégations qui portent sur toute une période, elles, gardent
+  // volontairement les catégories supprimées).
   const categoriesSimulables = objStore.enveloppes.filter(
-    (e) => e.type !== "Entrée",
+    (e) => !e.supprimeeLe && e.type !== "Entrée",
   );
   const enveloppeSimulee =
     categoriesSimulables.find((e) => e.id === categorieSimulee) ?? null;

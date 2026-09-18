@@ -1660,6 +1660,66 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   (`utils/exportExcel.ts`), qui réutilisent tous la même fonction — aucun
   changement séparé nécessaire dans ces fichiers.
 - **Statut** : **CORRIGÉ (2026-09-18)** — tsc/lint vérifiés propres (10
+  lignes / 49 problèmes). **Portée précisée le 2026-09-18** : ce correctif
+  couvrait `utils/budget.ts`/`budget.tsx` (Budget, Reste estimé, Hero
+  Aperçu) mais pas `planning.tsx`, qui a son propre bug indépendant — voir
+  P057 ci-dessous.
+
+### P057 — Catégorie supprimée : événements fantômes et picker dans Planning (P056 incomplet)
+
+- **Gravité** : 🟠 MAJEUR (rendez-vous fantôme récurrent — interdit
+  explicitement par CLAUDE.md — + catégorie supprimée sélectionnable pour
+  un nouvel événement)
+- **Trouvé par** : demande explicite de Maëlys, 2026-09-18 — "Le correctif
+  P056 n'a pas suffi... apparaît encore dans... Planning", avec demande
+  d'audit exhaustif de tous les sites de filtrage des enveloppes.
+- **Fichiers** : `app/(tabs)/planning.tsx` (générateurs d'échéances
+  synthétiques Fixe/Entrée, picker "Lier à une catégorie").
+- **Description** : deux générateurs d'événements synthétiques (Fixe
+  récurrente/ponctuelle et Entrée récurrente/ponctuelle, lignes ~597 et
+  ~675) filtraient `objStore.enveloppes` uniquement sur
+  `type`/`afficherDansPlanning`/`dateFixe`, **jamais sur `supprimeeLe`**.
+  Depuis la suppression douce (P052), une catégorie supprimée garde ces
+  trois champs intacts en base — son échéance synthétique continuait donc
+  à être générée et affichée dans Planning INDÉFINIMENT après suppression
+  (chaque mois pour une catégorie récurrente), un vrai "rendez-vous
+  fantôme" au sens strict de CLAUDE.md ("Ne doit jamais apparaître : [...]
+  événement qui réapparaît après suppression"). Second bug indépendant
+  dans le même fichier : le picker "Lier à une catégorie" de la modale de
+  création/édition d'événement (ligne ~3098) filtrait uniquement par
+  `type`, sans jamais vérifier `supprimeeLe` — une catégorie supprimée
+  restait sélectionnable pour un NOUVEL événement financier, violation
+  directe de la RÈGLE déjà documentée dans
+  `utils/budget.ts:estCategorieActiveCeMois` ("ne doit plus jamais
+  apparaître... dans un picker de création").
+- **Vérifié, non buggé, dans le même fichier** : les événements générés
+  depuis `historiquePaiements` (paiements déjà réglés, ligne ~765,
+  `idsEnveloppesVivantes`) continuent volontairement d'afficher un reçu
+  historique même après suppression de la catégorie — comportement
+  intentionnel et correct (même principe que `entreesRecues`/
+  `paiementsDuMois` dans `budget.tsx`, un fait déjà survenu n'est jamais
+  effacé rétroactivement), pas un bug.
+- **Audit étendu (hors périmètre demandé, fait par prudence)** :
+  `app/(tabs)/analytics.tsx` contient ~14 usages bruts de
+  `objStore.enveloppes` non filtrés par `supprimeeLe`. La quasi-totalité
+  sont des agrégations historiques/séries temporelles — protégées par la
+  RÈGLE déjà documentée dans `utils/budget.ts:estCategorieActiveCeMois`
+  ("ne PAS l'appliquer aux agrégations qui portent volontairement sur
+  toute une période [...] analytics.tsx séries/comparaisons") : une
+  catégorie supprimée doit y rester visible pour ne pas amputer son
+  historique. Une exception trouvée et corrigée : `categoriesSimulables`
+  (simulateur de budget FUTUR, onglet Simulateur) — corrigé avec la même
+  garde `!e.supprimeeLe`. Les ~13 autres sites n'ont été revus qu'à haut
+  niveau (pas un à un comme `budget.tsx`/`planning.tsx`) — aucun autre
+  bug confirmé, mais pas une garantie d'exhaustivité au même niveau que le
+  reste de cette entrée.
+- **Correction appliquée** : `!e.supprimeeLe`/`!env.supprimeeLe` ajouté en
+  tête des 3 filtres concernés dans `planning.tsx`, et de
+  `categoriesSimulables` dans `analytics.tsx` — même garde minimale que
+  P056, jamais `estCategorieActiveCeMois` en entier (qui exclurait aussi
+  les catégories ponctuelles d'un autre mois, un changement de
+  comportement plus large que celui demandé/nécessaire ici).
+- **Statut** : **CORRIGÉ (2026-09-18)** — tsc/lint vérifiés propres (10
   lignes / 49 problèmes).
 
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la

@@ -593,9 +593,22 @@ export default function Planning() {
   // catégorie — sans ce filtre, chacune générait sa propre échéance le même
   // jour, affichant "Loyer" en double dans la grille (et gonflant son total
   // dans le Top dépenses de Stats, qui regroupe aussi par nom).
+  //
+  // RÈGLE À NE JAMAIS CASSER — CATÉGORIE SUPPRIMÉE (bug corrigé le
+  // 2026-09-18) : `!e.supprimeeLe` ajouté en tête du filtre — depuis la
+  // suppression douce (P052), une catégorie supprimée reste en base avec
+  // `dateFixe`/`afficherDansPlanning` intacts. Sans ce filtre, l'échéance
+  // synthétique générée ci-dessous réapparaissait indéfiniment dans
+  // Planning après suppression (chaque mois pour une récurrente) — un vrai
+  // "rendez-vous fantôme" au sens de CLAUDE.md. Accessoirement, exclure ces
+  // lignes ici élimine aussi tout risque que la déduplication par nom
+  // ci-dessus choisisse par erreur l'ancienne ligne supprimée plutôt qu'une
+  // catégorie recréée sous le même nom.
   const enveloppesFixesUniques = new Map<string, Enveloppe>();
   objStore.enveloppes
-    .filter((e) => e.type === "Fixe" && e.afficherDansPlanning && e.dateFixe)
+    .filter(
+      (e) => !e.supprimeeLe && e.type === "Fixe" && e.afficherDansPlanning && e.dateFixe,
+    )
     .forEach((e) => {
       if (!enveloppesFixesUniques.has(e.nom)) enveloppesFixesUniques.set(e.nom, e);
     });
@@ -658,9 +671,14 @@ export default function Planning() {
   // Contrôle par enveloppe (e.afficherDansPlanning), jamais par réglage
   // global — un ancien toggle dans Profil → Paramètres a été retiré à la
   // demande explicite de l'utilisateur.
+  // RÈGLE : `!e.supprimeeLe` — même correctif que pour les échéances Fixe
+  // juste au-dessus (bug corrigé le 2026-09-18), copié littéralement pour
+  // rester cohérent avec le reste de ce bloc.
   const enveloppesEntreesUniques = new Map<string, Enveloppe>();
   objStore.enveloppes
-    .filter((e) => e.type === "Entrée" && e.afficherDansPlanning && e.dateFixe)
+    .filter(
+      (e) => !e.supprimeeLe && e.type === "Entrée" && e.afficherDansPlanning && e.dateFixe,
+    )
     .forEach((e) => {
       if (!enveloppesEntreesUniques.has(e.nom)) enveloppesEntreesUniques.set(e.nom, e);
     });
@@ -3076,12 +3094,20 @@ export default function Planning() {
                             ? "Lier à une catégorie d'entrée d'argent"
                             : "Lier à une catégorie"}
                         </Text>
+                        {/* RÈGLE À NE JAMAIS CASSER — CATÉGORIE SUPPRIMÉE (bug
+                            corrigé le 2026-09-18) : `!env.supprimeeLe` — une
+                            catégorie supprimée ne doit plus jamais apparaître
+                            dans un picker de création (cf. RÈGLE dans
+                            utils/budget.ts:estCategorieActiveCeMois), or ce
+                            picker filtrait uniquement par type, sans jamais
+                            vérifier supprimeeLe. */}
                         <View style={styles.categorieGrid}>
                           {objStore.enveloppes
                             .filter((env) =>
-                              typeFinancierEvent === "entree"
+                              !env.supprimeeLe &&
+                              (typeFinancierEvent === "entree"
                                 ? env.type === "Entrée"
-                                : env.type !== "Entrée",
+                                : env.type !== "Entrée"),
                             )
                             .map((env) => (
                             <TouchableOpacity

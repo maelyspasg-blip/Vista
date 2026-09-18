@@ -455,13 +455,19 @@ export default function Budget() {
 
   const enveloppesParId = new Map(objStore.enveloppes.map((e) => [e.id, e]));
 
-  // Une catégorie supprimée définitivement n'a plus de ligne dans `enveloppes`,
-  // mais son historique de paiement reste (c'est un reçu, cf. historique_paiements
-  // et snapshots_mois qui ne sont jamais modifiés rétroactivement). On ne doit
-  // en revanche plus le reconstruire en carte de catégorie : il disparaît
-  // simplement de l'affichage courant. Idem si la catégorie est repassée en
-  // "Variable" entre-temps : la carte "payée" (propre au type Fixe) ne doit
-  // plus s'afficher, sinon elle coexiste en double avec la carte Variable.
+  // RÈGLE — commentaire corrigé le 2026-09-18 (P052, suppression douce) :
+  // contrairement à l'ancienne description ("n'a plus de ligne dans
+  // enveloppes"), une catégorie supprimée GARDE sa ligne en base
+  // (`enveloppes.supprimee_le` non nul) — `enveloppesParId.get(...)` la
+  // retrouve donc toujours. Son historique de paiement (historique_paiements,
+  // jamais modifié rétroactivement) continue volontairement d'alimenter la
+  // carte "payée" ci-dessous — mais SEULEMENT pour le mois réel du paiement
+  // (`MOIS_ACTUEL`/`ANNEE_ACTUELLE`, jamais un mois navigable sur cet écran) :
+  // un reçu déjà réglé reste un fait historique, jamais effacé
+  // rétroactivement par une suppression ultérieure — même principe que
+  // entreesRecues plus bas. Idem si la catégorie est repassée en "Variable"
+  // entre-temps : la carte "payée" (propre au type Fixe) ne doit plus
+  // s'afficher, sinon elle coexiste en double avec la carte Variable.
   const paiementsDuMois = objStore.historiquePaiements.filter((p) => {
     const enveloppe = enveloppesParId.get(p.enveloppeId);
     if (!enveloppe || enveloppe.type !== "Fixe") return false;
