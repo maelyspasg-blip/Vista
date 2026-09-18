@@ -2350,40 +2350,69 @@ export default function Dashboard() {
           </TouchableOpacity>
         </View>
 
-        {enveloppesTrieesEntrees.length > 0 && (
-          <SectionCollapsable
-            titre="ENTRÉES D'ARGENT"
-            cleStockage={
-              objStore.userId
-                ? `vista_section_ouverte_entrees_${objStore.userId}`
-                : null
-            }
-            ouvertParDefaut={false}
-          >
-            <View style={estTablette ? styles.grilleTablette : undefined}>
-              {enveloppesTrieesEntrees.map(renderCarteEnveloppe)}
-            </View>
-          </SectionCollapsable>
-        )}
-
-        {enveloppesTrieesDepenses.length > 0 && (
-          <View
-            style={{ marginTop: enveloppesTrieesEntrees.length > 0 ? 16 : 0 }}
-          >
-            <SectionCollapsable
-              titre="DÉPENSES"
-              cleStockage={
-                objStore.userId
-                  ? `vista_section_ouverte_depenses_${objStore.userId}`
-                  : null
-              }
-              ouvertParDefaut={true}
-            >
-              <View style={estTablette ? styles.grilleTablette : undefined}>
-                {enveloppesTrieesDepenses.map(renderCarteEnveloppe)}
-              </View>
-            </SectionCollapsable>
+        {/* RÈGLE À NE JAMAIS CASSER — CLÔT P016/P035 (AUDIT_V1.md,
+            2026-09-18), même RÈGLE que app/(tabs)/budget.tsx : sans ce
+            garde, `objStore.enveloppes` vide (ETAT_INITIAL, le temps que le
+            premier Promise.all de _layout.tsx se résolve après un
+            démarrage à froid) faisait disparaître les DEUX sections
+            entièrement (aucun header, aucun repli) — indiscernable d'un
+            compte réellement sans catégorie. `chargementInitialTermine`
+            distingue les deux cas, cf. EtatStore.chargementInitialTermine
+            (app/store.ts). */}
+        {!objStore.chargementInitialTermine ? (
+          <View style={styles.chargementPartageBox}>
+            <ActivityIndicator color={C.accent} />
           </View>
+        ) : enveloppesTrieesEntrees.length === 0 &&
+          enveloppesTrieesDepenses.length === 0 ? (
+          <View
+            style={[
+              styles.videContainer,
+              { backgroundColor: C.carte, borderColor: C.carteBorder },
+            ]}
+          >
+            <Text style={[styles.videTexte, { color: C.texteMuted }]}>
+              Aucune catégorie pour le moment
+            </Text>
+          </View>
+        ) : (
+          <>
+            {enveloppesTrieesEntrees.length > 0 && (
+              <SectionCollapsable
+                titre="ENTRÉES D'ARGENT"
+                cleStockage={
+                  objStore.userId
+                    ? `vista_section_ouverte_entrees_${objStore.userId}`
+                    : null
+                }
+                ouvertParDefaut={false}
+              >
+                <View style={estTablette ? styles.grilleTablette : undefined}>
+                  {enveloppesTrieesEntrees.map(renderCarteEnveloppe)}
+                </View>
+              </SectionCollapsable>
+            )}
+
+            {enveloppesTrieesDepenses.length > 0 && (
+              <View
+                style={{ marginTop: enveloppesTrieesEntrees.length > 0 ? 16 : 0 }}
+              >
+                <SectionCollapsable
+                  titre="DÉPENSES"
+                  cleStockage={
+                    objStore.userId
+                      ? `vista_section_ouverte_depenses_${objStore.userId}`
+                      : null
+                  }
+                  ouvertParDefaut={true}
+                >
+                  <View style={estTablette ? styles.grilleTablette : undefined}>
+                    {enveloppesTrieesDepenses.map(renderCarteEnveloppe)}
+                  </View>
+                </SectionCollapsable>
+              </View>
+            )}
+          </>
         )}
 
         {/* RÈGLE : décision produit du 2026-09-18 (P052, suppression douce)
@@ -4196,6 +4225,17 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   chargementPartageTexte: { fontSize: 13 },
+  // RÈGLE : clôt P016/P035 (AUDIT_V1.md, 2026-09-18) — même gabarit que
+  // app/(tabs)/budget.tsx::styles.videContainer/videTexte, pour une
+  // cohérence visuelle entre les deux écrans qui partageaient le même gap.
+  videContainer: {
+    borderRadius: 16,
+    padding: 20,
+    alignItems: "center",
+    marginBottom: 10,
+    borderWidth: 0.5,
+  },
+  videTexte: { fontSize: 13 },
   badgePartageMini: {
     paddingHorizontal: 7,
     paddingVertical: 2,

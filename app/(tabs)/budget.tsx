@@ -1928,36 +1928,86 @@ export default function Budget() {
           </CibleTutoriel>
         </View>
 
-        {paiementsDuMois.map((p) => (
+        {/* RÈGLE À NE JAMAIS CASSER — CLÔT P016/P035 (AUDIT_V1.md,
+            2026-09-18) : `objStore.enveloppes`/`transactions` valent `[]`
+            aussi bien pour un compte réellement neuf que pour N'IMPORTE
+            QUEL compte le temps que le premier chargement (Promise.all,
+            app/(tabs)/_layout.tsx) se résolve après un démarrage à froid —
+            sans ce garde, un swipe rapide vers Budget avant cette
+            résolution affichait "aucune catégorie" (aucun état vide
+            n'existait avant ce correctif) plutôt qu'un indicateur de
+            chargement, pour un compte établi qui a pourtant de vraies
+            catégories en route. `chargementInitialTermine` (posé une seule
+            fois par _layout.tsx après ce premier chargement) distingue les
+            deux cas — même source que utils/conseils.ts::genererConseils
+            pour le message de bienvenue "compte neuf" (RÈGLE identique,
+            cf. EtatStore.chargementInitialTermine, app/store.ts).
+            `affichagePartage && !donneesPartenaire` ajouté en revue
+            (code-reviewer) : `categoriesFusionneesTriees` (contrairement à
+            `enveloppesAffichees`/les totaux, cf. RÈGLE "&& donneesPartenaire"
+            plus haut sur ce fichier) retombe sur `[]` tant que
+            donneesPartenaire n'a pas fini de charger en vue partagée —
+            sans ce garde ici aussi, "Aucune catégorie" s'affichait à tort
+            pour un couple qui a pourtant de vraies catégories communes en
+            cours de chargement. */}
+        {!objStore.chargementInitialTermine ||
+        (affichagePartage && !donneesPartenaire) ? (
           <View
-            key={`paye-${p.id}`}
             style={[
-              styles.envCard,
-              { backgroundColor: p.couleur + "22", borderColor: "transparent" },
+              styles.videContainer,
+              { backgroundColor: C.carte, borderColor: C.carteBorder },
             ]}
           >
-            <View style={styles.envRow}>
-              <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
-                {p.nom}
-              </Text>
-              <Text style={[styles.envMontant, { color: p.couleur }]}>
-                {formaterMontant(p.montant)} € / {formaterMontant(p.montant)} €
-              </Text>
-            </View>
-            <View style={[styles.envBarBg, { backgroundColor: C.separateur }]}>
-              <View
-                style={[
-                  styles.envBarFill,
-                  { width: "100%", backgroundColor: p.couleur },
-                ]}
-              />
-            </View>
+            <ActivityIndicator color={C.accent} />
           </View>
-        ))}
+        ) : paiementsDuMois.length === 0 &&
+          (affichagePartage
+            ? categoriesFusionneesTriees.length === 0
+            : categoriesAffichesTriees.length === 0) ? (
+          <View
+            style={[
+              styles.videContainer,
+              { backgroundColor: C.carte, borderColor: C.carteBorder },
+            ]}
+          >
+            <Text style={[styles.videTexte, { color: C.texteMuted }]}>
+              Aucune catégorie pour le moment
+            </Text>
+          </View>
+        ) : (
+          <>
+            {paiementsDuMois.map((p) => (
+              <View
+                key={`paye-${p.id}`}
+                style={[
+                  styles.envCard,
+                  { backgroundColor: p.couleur + "22", borderColor: "transparent" },
+                ]}
+              >
+                <View style={styles.envRow}>
+                  <Text style={[styles.envNom, { color: C.texte }]} numberOfLines={1}>
+                    {p.nom}
+                  </Text>
+                  <Text style={[styles.envMontant, { color: p.couleur }]}>
+                    {formaterMontant(p.montant)} € / {formaterMontant(p.montant)} €
+                  </Text>
+                </View>
+                <View style={[styles.envBarBg, { backgroundColor: C.separateur }]}>
+                  <View
+                    style={[
+                      styles.envBarFill,
+                      { width: "100%", backgroundColor: p.couleur },
+                    ]}
+                  />
+                </View>
+              </View>
+            ))}
 
-        {affichagePartage
-          ? categoriesFusionneesTriees.map(renderCarteCategoriePartagee)
-          : categoriesAffichesTriees.map(renderCarteCategorie)}
+            {affichagePartage
+              ? categoriesFusionneesTriees.map(renderCarteCategoriePartagee)
+              : categoriesAffichesTriees.map(renderCarteCategorie)}
+          </>
+        )}
 
         {/* RÈGLE : décision produit du 2026-09-18 (P052, suppression douce)
             — une catégorie supprimée ce mois-ci disparaît de

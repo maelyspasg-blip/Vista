@@ -655,7 +655,17 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Piste de correction** : propager `chargementInitialTermine` (déjà
   disponible via `useObjectifs()`) aux gardes d'affichage "vide" de
   Budget/Planning/Stats, comme déjà fait pour les insights.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), correction non encore appliquée.
+- **Statut** : **PARTIELLEMENT CORRIGÉ (2026-09-18)** — `chargementInitialTermine`
+  propagé sur la liste "Tes catégories" des DEUX écrans concernés
+  (`app/(tabs)/budget.tsx`, `app/(tabs)/index.tsx`, cf. détail complet dans
+  P035 ci-dessous) : `ActivityIndicator` tant que le premier chargement
+  n'est pas terminé, état vide explicite seulement une fois terminé ET
+  réellement vide. `planning.tsx`/`analytics.tsx` restent NON corrigés —
+  aucun état "vide" existant à leur protéger contre un flash prématuré
+  (contrairement à Budget/Aperçu qui, eux, affichaient carrément "aucune
+  catégorie" avant ce correctif) : une vue calendrier/graphique vide
+  pendant le chargement ressemble déjà à une vue sans données ce jour-là,
+  risque de confusion jugé nettement plus faible — reporté, pas oublié.
 
 ### P017 — Logique dupliquée : 13 copies quasi identiques du pattern "getUser → update 1 colonne profils"
 
@@ -757,7 +767,42 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   ou un seul `useDeblocagePub` partagé au niveau de la modale "Ton bilan"
   (cohérent avec l'intention produit déjà documentée en commentaire : "une
   seule pub débloque les 4 onglets").
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code), correction non encore appliquée.
+- **Diagnostic complet (2026-09-18)** : confirmé — jusqu'à 3 `RewardedAd`
+  simultanées en production pour un compte non-premium/non-invité typique
+  (ADMOB_ACTIF=true depuis le 2026-09-14, donc ce n'est plus une
+  hypothèse) : (1) `declencherPubPeriodeStatsPerso`
+  (`analytics.tsx:1440-1446`), chargée dès la visite de l'onglet Stats,
+  indépendamment de "Ton bilan" ; (2) idem pour la vue partagée
+  (`declencherPubPeriodeStatsPartage`), déjà correctement no-op pour un
+  compte hors espace partagé (`!estDansUnEspace`, cas ~100% des comptes en
+  prod aujourd'hui) ; (3) `TonBilanVerrou` + `InsightVerrouille` de
+  l'onglet "Vista" de "Ton bilan", tous deux gardés SEULEMENT par
+  `!tonBilanVisible`, sans le `vueModalStats === "vista"` déjà présent sur
+  les 3 autres onglets. **Vérifié : aucun déverrouillage croisé entre
+  zones distinctes** — "Ton bilan" (`tonBilanDebloque`) et "période Stats"
+  (`statsPeriodeDebloquePerso`/`Partage`) utilisent des états séparés,
+  regarder une pub pour l'un ne débloque jamais l'autre. Le fait qu'une
+  seule pub débloque les 4 onglets DE "Ton bilan" entre eux est le
+  comportement voulu, documenté explicitement en commentaire depuis le
+  2026-09-12 — pas un bug.
+- **Statut** : **PARTIELLEMENT CORRIGÉ (2026-09-18)** — `TonBilanVerrou`
+  et `InsightVerrouille` de l'onglet "Vista" gardés désormais par
+  `vueModalStats === "vista"` (ou `tonBilanVisible` déjà vrai), exactement
+  aligné sur le pattern déjà correct des 3 autres onglets — switcher vers
+  Santé/Trophées/Simulateur démonte désormais réellement ces 2 composants
+  (donc leur pub chargée), au lieu de les laisser tourner en arrière-plan
+  indéfiniment. Ramène le pire cas de 3 pubs simultanées à 1 seule (celle
+  de l'onglet "Ton bilan" réellement actif) + la pub "période Stats"
+  déjà en cours indépendamment. **Non corrigé, accepté comme compromis
+  produit** : `declencherPubPeriodeStatsPerso` (écran Stats, chargée dès
+  la visite de l'onglet, avant tout tap) et l'`InsightVerrouille` du tiroir
+  "Ce qu'il faut retenir" (`analytics.tsx:5791`, même écran, même
+  chargement anticipé) — passer ces deux-là en "chargement à la demande"
+  changerait l'UX (le premier tap sur un contenu verrouillé afficherait
+  "Publicité indisponible, réessaie" le temps du chargement, au lieu
+  d'une pub déjà prête) ; ce compromis vitesse-perçue vs quota AdMob est
+  un choix produit, pas une correction "certaine" au sens de CLAUDE.md —
+  laissé tel quel plutôt que tranché seul. tsc/lint vérifiés propres.
 
 ### P021 — GraphiqueFlux : catégories homonymes de types différents peuvent fusionner/mal classer leurs montants
 
@@ -1076,7 +1121,24 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Fichier** : `app/(tabs)/budget.tsx:1920-1922`.
 - **Description** : contrairement à "À venir ce mois-ci" et à la liste de transactions d'une carte dépliée (qui ont un vrai état vide), la liste principale de catégories n'a AUCUN message de repli — ni pour un compte réellement sans catégorie, ni pour le flash de chargement initial (P016). Gap confirmé partagé avec `index.tsx` par grep, pas une régression isolée.
 - **Piste de correction** : ajouter un état vide explicite distinct d'un état "chargement en cours" (lui-même à câbler sur `chargementInitialTermine`, cf. P016).
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code).
+- **Statut** : **CORRIGÉ (2026-09-18)** — les 2 listes ("Tes catégories" sur
+  `budget.tsx`, "Entrées d'argent"/"Dépenses" sur `index.tsx`) distinguent
+  désormais 3 états : `!chargementInitialTermine` → `ActivityIndicator` ;
+  chargement terminé ET réellement vide → message "Aucune catégorie pour
+  le moment" (nouveau style `videContainer`/`videTexte`, gabarit identique
+  aux 2 écrans) ; sinon → rendu normal inchangé. Ferme aussi la partie
+  Budget/Aperçu de P016. **Revue code-reviewer** : réserve trouvée et
+  corrigée — `categoriesFusionneesTriees` (vue partagée, `budget.tsx`)
+  retombe sur `[]` tant que `donneesPartenaire` n'a pas fini de charger
+  (contrairement à `enveloppesAffichees`/les totaux, déjà gardés par
+  `&& donneesPartenaire`, cf. RÈGLE existante juste au-dessus dans le même
+  fichier) — sans ce même garde sur le nouvel état vide, "Aucune catégorie"
+  s'affichait à tort pour un couple avec de vraies catégories communes en
+  cours de chargement. Ajouté : `(affichagePartage && !donneesPartenaire)`
+  traité comme "encore en chargement", pas "vide". Sans impact utilisateur
+  en prod (vue partagée réservée aux comptes admin,
+  `ESPACE_PARTAGE_ACTIF=false`), corrigé quand même plutôt que juste
+  documenté. tsc/lint vérifiés propres.
 
 ### P036 — Budget : tap en dehors de la modale d'ajout enregistre, bouton retour Android annule (incohérence de geste)
 

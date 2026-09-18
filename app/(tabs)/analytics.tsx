@@ -6073,10 +6073,23 @@ export default function Analytics() {
                   )}
                 </>
               ) : (
-                <TonBilanVerrou
-                  hauteur={260}
-                  onDeverrouille={() => setTonBilanDebloque(true)}
-                />
+                // RÈGLE À NE JAMAIS CASSER — CLÔT P020 (AUDIT_V1.md,
+                // 2026-09-18) : contrairement aux onglets Santé/Trophées/
+                // Simulateur (qui gardent déjà leur TonBilanVerrou par
+                // `vueModalStats === "X"`, cf. RÈGLE plus bas), ce
+                // TonBilanVerrou était monté dès `!tonBilanVisible`, quel
+                // que soit l'onglet réellement affiché — son useDeblocagePub
+                // (app/InsightVerrouille.tsx) chargeait donc une RewardedAd
+                // même si l'utilisateur regardait Santé/Trophées/Simulateur.
+                // `vueModalStats === "vista"` aligne ce comportement sur les
+                // 3 autres onglets : ne monte (et ne charge une pub) que
+                // quand cet onglet est réellement actif.
+                vueModalStats === "vista" && (
+                  <TonBilanVerrou
+                    hauteur={260}
+                    onDeverrouille={() => setTonBilanDebloque(true)}
+                  />
+                )
               )}
             </View>
 
@@ -6108,17 +6121,27 @@ export default function Analytics() {
                     {analyseFlux.insight1}
                   </Text>
                 </View>
-                <InsightVerrouille
-                  deverrouille={tonBilanVisible}
-                  onDeverrouille={() => setTonBilanDebloque(true)}
-                >
-                  <View style={[styles.observationLigne, { marginTop: 6 }]}>
-                    <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
-                    <Text style={[styles.observationTexte, { color: C.texte }]}>
-                      {analyseFlux.insight2}
-                    </Text>
-                  </View>
-                </InsightVerrouille>
+                {/* RÈGLE : même correctif P020 que TonBilanVerrou plus
+                    haut — ne monte (et ne charge une pub via
+                    useDeblocagePub) que si déjà déverrouillé, ou si
+                    l'onglet Vista est réellement actif. Une fois
+                    tonBilanVisible vrai, useDeblocagePub ne charge de
+                    toute façon plus rien (dejaDeverrouille), donc cette
+                    condition ne change rien au cas déjà déverrouillé —
+                    seulement au cas verrouillé + onglet non actif. */}
+                {(tonBilanVisible || vueModalStats === "vista") && (
+                  <InsightVerrouille
+                    deverrouille={tonBilanVisible}
+                    onDeverrouille={() => setTonBilanDebloque(true)}
+                  >
+                    <View style={[styles.observationLigne, { marginTop: 6 }]}>
+                      <View style={[styles.insightDot, { backgroundColor: C.purple }]} />
+                      <Text style={[styles.observationTexte, { color: C.texte }]}>
+                        {analyseFlux.insight2}
+                      </Text>
+                    </View>
+                  </InsightVerrouille>
+                )}
               </View>
             )}
 
