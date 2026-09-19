@@ -1733,6 +1733,46 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Statut** : **CORRIGÉ (2026-09-18)** — tsc/lint vérifiés propres (10
   lignes / 49 problèmes).
 
+### P058 — Insight "dépassement de budget" : messages absurdes "dépassé de 0€" et "0,0€/jour"
+
+- **Gravité** : 🟡 MINEUR (message trompeur/absurde, pas de perte de
+  donnée ni de calcul financier faux — uniquement le TEXTE affiché)
+- **Trouvé par** : demande explicite de Maëlys, 2026-09-19.
+- **Fichier** : `utils/conseils.ts` (`texteBudgetCategorie`).
+- **Description** : deux bugs de formulation, tous deux dans le même
+  texte "budget de catégorie dépassé/imminent" :
+  1. La branche "a dépassé son budget de X€" se déclenchait sur
+     `ratio >= 1` (donc y compris `depense === budget` exactement, ou un
+     écart arrondi à 0€ par flottant) — affichait "a dépassé son budget
+     de 0€", un non-sens (0€ n'est pas un dépassement).
+  2. Le conseil "limiter ce poste à environ X€/jour" se déclenchait dès
+     `depassementProjete > 0`, sans jamais vérifier que
+     `budgetJournalierRestant` (calculé via `Math.max(0, (budget -
+     depense) / joursRestants)`) était réellement positif — or ce champ
+     vaut exactement 0 dans deux cas fréquents : dernier jour du mois
+     (`joursRestants = 0`) ET catégorie déjà à budget ou déjà dépassée
+     (`depense >= budget`, LE cas le plus courant où
+     `depassementProjete > 0` est vrai). Résultat : "limiter ce poste à
+     environ 0,0€/jour" — un conseil vide de sens dès qu'il ne reste
+     justement plus rien à répartir.
+- **Correction appliquée** :
+  - `montantDepassement = Math.round(e.depense - e.budget)` calculé une
+    fois, utilisé à la fois pour l'affichage ET pour la condition
+    (`montantDepassement > 0`) — jamais `ratio >= 1` seul, qui pouvait
+    diverger de l'arrondi réellement affiché.
+  - Condition de l'action étendue à
+    `depassementProjete > 0 && budgetJournalierRestant > 0` — couvre à la
+    fois le cas "dernier jour du mois" et le cas "déjà au-dessus du
+    budget", les deux clampés à 0 par le même `Math.max(0, ...)`.
+  - Vérifié par un test numérique isolé (5 scénarios : budget atteint
+    exactement, écart arrondi à 0€, dernier jour du mois avec vrai
+    dépassement, dépassement réel en cours de mois, situation "imminente"
+    légitime) — les 3 premiers ne produisent plus jamais "dépassé de 0€"
+    ni "0,0€/jour", les 2 derniers (cas réels/légitimes) affichent
+    toujours le message attendu, sans régression.
+- **Statut** : **CORRIGÉ (2026-09-19)** — tsc/lint vérifiés propres (10
+  lignes / 49 problèmes).
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 

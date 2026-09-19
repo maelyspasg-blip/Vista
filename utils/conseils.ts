@@ -819,16 +819,40 @@ function texteBudgetCategorie(
   const budgetJournalierRestant =
     joursRestantsDansMois > 0 ? Math.max(0, (e.budget - e.depense) / joursRestantsDansMois) : 0;
 
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-19 (bug P058) :
+  // `montantDepassement` (arrondi affiché) fait foi, jamais `ratio >= 1`
+  // seul — un budget/dépense
+  // à peine au-dessus l'un de l'autre (ex: 100,30€ dépensé pour 100,29€ de
+  // budget) donne `ratio > 1` strict mais un montant arrondi à 0€, ce qui
+  // affichait "a dépassé son budget de 0€" : un non-sens (0€ n'est pas un
+  // dépassement) que `depense === budget` exactement reproduisait aussi
+  // (`ratio >= 1` avec `ratio === 1`). En dessous de ce seuil, l'autre
+  // branche ("a déjà consommé 100%...") est la formulation correcte —
+  // jamais "dépassé de 0€".
+  const montantDepassement = Math.round(e.depense - e.budget);
   const constat =
-    ratio >= 1
-      ? `${e.nom} a dépassé son budget de ${Math.round(e.depense - e.budget)}€ ce mois-ci.`
+    montantDepassement > 0
+      ? `${e.nom} a dépassé son budget de ${montantDepassement}€ ce mois-ci.`
       : `${e.nom} a déjà consommé ${pct}% de son budget et il reste ${joursRestantsDansMois} jour${joursRestantsDansMois > 1 ? "s" : ""} ce mois-ci.`;
   // RÈGLE : cette fonction n'est appelée que pour des catégories Variable
   // (candidatsBudget filtre sur enveloppesVariables, cf. RÈGLE en tête de
   // fichier) — une catégorie Fixe n'atteint jamais ce texte, donc l'action
   // de réduction est toujours pertinente ici, sans condition sur `e.type`.
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF DU 2026-09-19 (bug P058) :
+  // `budgetJournalierRestant > 0` ajouté — ce champ vaut exactement 0 dans
+  // DEUX cas dégénérés, par deux mécanismes distincts : (a)
+  // `joursRestantsDansMois <= 0` (dernier jour du mois) court-circuite au
+  // littéral `0` de la branche fausse du ternaire ci-dessus, AVANT même
+  // d'atteindre `Math.max` — aucun rythme journalier n'a de sens à
+  // recommander ce jour-là ; et surtout (b) `e.depense >= e.budget`
+  // (catégorie déjà à budget ou déjà dépassée — LE CAS LE PLUS FRÉQUENT où
+  // `depassementProjete > 0` est vrai), cette fois réellement clampé à 0
+  // par `Math.max(0, ...)` (la soustraction `budget - depense` y est
+  // négative ou nulle). Sans cette garde, le message affichait "limiter ce
+  // poste à environ 0,0€/jour" — un non-sens à chaque fois qu'il ne reste
+  // justement plus rien à répartir sur les jours restants.
   const action =
-    depassementProjete > 0
+    depassementProjete > 0 && budgetJournalierRestant > 0
       ? ` À ce rythme, le dépassement atteindrait ${depassementProjete}€ — limiter ce poste à environ ${budgetJournalierRestant.toFixed(1)}€/jour permettrait de rester dans votre budget.`
       : "";
   const suggestionRevision =
