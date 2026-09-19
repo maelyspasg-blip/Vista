@@ -3753,6 +3753,19 @@ export function useObjectifs() {
         ),
       });
 
+      // LOG TEMPORAIRE DE DIAGNOSTIC (demandé le 2026-09-19, à retirer une
+      // fois le comportement confirmé sur device) — `etat` est déjà la
+      // nouvelle valeur ici : `setEtat` (juste au-dessus) est synchrone
+      // (`etat = {...etat, ...nouvelEtat}` avant de notifier les
+      // abonnés), donc ce log capture l'état RÉELLEMENT à jour, pas une
+      // valeur avant mutation. Champ correct : `supprimeeLe` (camelCase,
+      // côté TypeScript) — `supprimee_le` (snake_case) est le nom de la
+      // colonne Supabase, jamais un champ de l'objet Enveloppe en mémoire.
+      console.log(
+        "[supprimerEnveloppe] après suppression, enveloppes restantes:",
+        etat.enveloppes.filter((e) => !e.supprimeeLe).map((e) => e.nom),
+      );
+
       const { error: erreurModeles } = await supabase
         .from("modeles_depenses")
         .delete()
