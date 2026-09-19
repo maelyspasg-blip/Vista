@@ -104,7 +104,7 @@ En cas de modification substantielle, vous serez notifié dans l'application au 
 
 10. Contact
 
-${EMAIL_CONTACT_VISTA}
+Pour toute question relative à vos données personnelles, contactez-nous à : ${EMAIL_CONTACT_VISTA}
 Responsables de traitement : Maëlys Pasgrimaud et Louis Vedel`;
 
 export const CONDITIONS_GENERALES_UTILISATION = `CONDITIONS GÉNÉRALES D'UTILISATION — VISTA
@@ -185,4 +185,4 @@ Pour les consommateurs résidant dans l'UE : https://ec.europa.eu/consumers/odr
 
 Article 13 — Contact
 
-${EMAIL_CONTACT_VISTA}`;
+Pour toute question relative aux présentes conditions, contactez-nous à : ${EMAIL_CONTACT_VISTA}`;
