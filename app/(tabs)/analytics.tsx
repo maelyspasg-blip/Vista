@@ -2666,6 +2666,15 @@ export default function Analytics() {
       .filter((e) => e.type !== "Entrée")
       .reduce((acc, e) => acc + e.budget, 0);
   };
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF P012 (2026-09-19) : pour un mois
+  // archivé, `snap.disponible` (pré-calculé à l'archivage, cf. RÈGLE sur
+  // SnapshotMoisPartenaire, utils/espacePartage.ts) est la SEULE source
+  // fiable — jamais resommer `enveloppes[].depense` des lignes "Entrée"
+  // (une Entrée non reçue à l'archivage a `depense = 0`, ce qui faisait
+  // disparaître tout salaire du partenaire pas encore marqué reçu au
+  // moment de l'archivage). Même pattern que getDisponibleMois/
+  // budgetDuMoisArchive pour "moi" (utils/budget.ts) et que
+  // getEpargneMoisPartenaire juste en dessous.
   const getDisponibleMoisPartenaire = (mois: number, annee: number): number => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {
       return entreesBudgetDuMois(enveloppesPartenaireStats, annee, mois).total;
@@ -2673,10 +2682,7 @@ export default function Analytics() {
     const snap = historiqueMoisPartenaire.find(
       (s) => s.mois === mois && s.annee === annee,
     );
-    if (!snap) return 0;
-    return snap.enveloppes
-      .filter((e) => e.type === "Entrée")
-      .reduce((acc, e) => acc + e.depense, 0);
+    return snap?.disponible ?? 0;
   };
   const getEpargneMoisPartenaire = (mois: number, annee: number): number => {
     if (mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE) {

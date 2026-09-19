@@ -1021,6 +1021,20 @@ export type SnapshotMoisPartenaire = {
   // le partenaire via snapshots_mois_select_espace_partage (migration
   // 20260905101000), aucune nouvelle policy nécessaire pour ce champ.
   epargne: number;
+  // RÈGLE À NE JAMAIS CASSER — CORRECTIF P012 (2026-09-19) : champ
+  // PRÉ-CALCULÉ à l'archivage (reçu + attendu, cf. `disponible` dans
+  // `SnapshotMois`/app/store.ts, posé par archiverMoisActuelInterne) —
+  // SEULE source fiable du "disponible" d'un mois archivé du partenaire,
+  // exactement comme `budgetDuMoisArchive(snap)` pour "moi"
+  // (utils/budget.ts). Ne JAMAIS re-dériver ce total en resommant
+  // `enveloppes[].depense` des lignes "Entrée" ci-dessous : `depense` d'une
+  // Entrée NON reçue au moment de l'archivage vaut 0 (store.ts :
+  // `depense: env.budget` seulement quand `payee` devient `true`), donc un
+  // salaire attendu mais pas encore marqué reçu à l'archivage disparaissait
+  // entièrement du total — c'était exactement le bug P012. Même colonne
+  // Supabase, déjà lisible sans nouvelle policy (RLS row-level, cf. RÈGLE
+  // ci-dessus sur `epargne`).
+  disponible: number;
   enveloppes: {
     nom: string;
     couleur: string;
@@ -1036,7 +1050,7 @@ export async function chargerHistoriqueMoisPartenaire(
   try {
     const { data: snapshotsData, error: erreurSnapshots } = await supabase
       .from("snapshots_mois")
-      .select("id, mois, annee, epargne")
+      .select("id, mois, annee, epargne, disponible")
       .eq("user_id", partenaireId);
 
     if (erreurSnapshots) {
@@ -1070,6 +1084,7 @@ export async function chargerHistoriqueMoisPartenaire(
       mois: s.mois,
       annee: s.annee,
       epargne: s.epargne ?? 0,
+      disponible: s.disponible ?? 0,
       enveloppes: (enveloppesData ?? [])
         .filter((e) => e.snapshot_mois_id === s.id)
         .map((e) => ({

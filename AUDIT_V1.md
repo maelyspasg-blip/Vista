@@ -578,12 +578,23 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
   requête Supabase et l'utiliser directement, comme `budgetDuMoisArchive`, plutôt
   que de re-dériver depuis des champs qui n'ont plus cette sémantique une fois
   archivés.
-- **Statut** : NOUVEAU — VÉRIFIÉ (lecture de code). **Mise à jour du
-  2026-09-18** : `ESPACE_PARTAGE_ACTIF` est passé à `true` pour tous les
-  comptes (demande explicite, cf. `utils/premium.ts`) — ce finding a
-  désormais un impact utilisateur RÉEL, ce n'est plus un problème
-  théorique masqué en prod. Non corrigé à ce jour — à traiter en
-  priorité, pas juste "avant réactivation" (déjà réactivé).
+- **Statut** : **CORRIGÉ (2026-09-19)** — `SnapshotMoisPartenaire`
+  (`utils/espacePartage.ts`) expose désormais `disponible` (colonne
+  `snapshots_mois.disponible`, déjà lisible pour le partenaire via la
+  policy RLS `snapshots_mois_select_espace_partage` existante — row-level,
+  aucune nouvelle policy nécessaire pour ce champ). `chargerHistoriqueMoisPartenaire`
+  le sélectionne et le mappe. `getDisponibleMoisPartenaire`
+  (`app/(tabs)/analytics.tsx`) utilise désormais directement `snap.disponible`
+  pour un mois archivé, au lieu de resommer `enveloppes[].depense` des
+  lignes "Entrée" (qui valait 0 pour une Entrée non encore marquée reçue
+  à l'archivage) — même pattern que `getDisponibleMois`/`budgetDuMoisArchive`
+  pour "moi" et que `getEpargneMoisPartenaire` juste en dessous. tsc/lint
+  vérifiés propres (10 lignes / 49 problèmes).
+  <br>**Mise à jour du 2026-09-18** (précédant ce correctif) :
+  `ESPACE_PARTAGE_ACTIF` est passé à `true` pour tous les comptes (demande
+  explicite, cf. `utils/premium.ts`) — ce finding avait un impact
+  utilisateur RÉEL au moment où il a été corrigé, ce n'était plus un
+  problème théorique masqué en prod.
 
 ### P013 — Sous-poste "Objectifs" peut afficher plus que son total parent "Argent immobilisé" (dupliqué dans 2 écrans)
 
