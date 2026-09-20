@@ -1,0 +1,18 @@
+Bienvenue dans Vista V1 !
+
+Cette version marque le lancement officiel de Vista, ton assistant budget au quotidien.
+
+Ce qui t'attend dans cette V1 :
+
+💰 Suivi de budget en temps réel, catégorie par catégorie
+📅 Planning connecté à ton budget — tes factures et revenus se synchronisent automatiquement, plus de mauvaise surprise en fin de mois
+🎯 Objectifs d'épargne pour suivre tes projets, mois après mois
+💑 Espace partagé — gère ton budget à deux en toute transparence, tout en gardant tes comptes personnels
+🔔 Alertes intelligentes avant un dépassement de budget
+📊 Des graphiques clairs pour voir où part ton argent, sans jargon financier
+
+Et sous le capot : de nombreuses corrections de fiabilité sur les calculs de budget, l'archivage mensuel et la synchronisation de tes données — pour que les chiffres que tu vois soient toujours les bons.
+
+Merci à celles et ceux qui ont testé Vista avant tout le monde : vos retours ont façonné cette version.
+
+On continue à améliorer Vista. Une idée, un bug, une envie ? Écris-nous à vistabudgetapp@gmail.com — on lit tout.
