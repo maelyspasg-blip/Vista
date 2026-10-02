@@ -696,6 +696,31 @@ export default function Dashboard() {
   const enveloppesActives = enveloppesAffichees.filter((e) =>
     estCategorieActiveCeMois(e, maintenant.getFullYear(), maintenant.getMonth()),
   );
+  // LOG TEMPORAIRE DE DIAGNOSTIC (demandé le 2026-10-02, bug catégories
+  // Entrée d'octobre invisibles — à retirer une fois le comportement
+  // confirmé sur device). Corrigé par rapport à la demande : l'appel à
+  // estCategorieActiveCeMois nécessite les 2 vrais arguments (année, mois),
+  // `...` n'est pas une syntaxe JS valide.
+  console.log(
+    "[debug] mois actuel:",
+    maintenant.getMonth(),
+    maintenant.getFullYear(),
+  );
+  console.log(
+    "[debug] enveloppes Entrée (Aperçu):",
+    enveloppesAffichees
+      .filter((e) => e.type === "Entrée")
+      .map((e) => ({
+        nom: e.nom,
+        moisComptage: e.moisComptage,
+        supprimeeLe: e.supprimeeLe,
+        active: estCategorieActiveCeMois(
+          e,
+          maintenant.getFullYear(),
+          maintenant.getMonth(),
+        ),
+      })),
+  );
   const enveloppesTriees = [...enveloppesActives].sort((a, b) => {
     if (triCategories === "alpha") return a.nom.localeCompare(b.nom, "fr");
     return triCategories === "montantAsc"

@@ -391,6 +391,22 @@ export default function Budget() {
   const MOIS_ACTUEL = new Date().getMonth();
   const ANNEE_ACTUELLE = new Date().getFullYear();
 
+  // LOG TEMPORAIRE DE DIAGNOSTIC (demandé le 2026-10-02, bug catégories
+  // Entrée d'octobre invisibles — à retirer une fois le comportement
+  // confirmé sur device).
+  console.log("[debug] mois actuel:", MOIS_ACTUEL, ANNEE_ACTUELLE);
+  console.log(
+    "[debug] enveloppes Entrée (Budget):",
+    objStore.enveloppes
+      .filter((e) => e.type === "Entrée")
+      .map((e) => ({
+        nom: e.nom,
+        moisComptage: e.moisComptage,
+        supprimeeLe: e.supprimeeLe,
+        active: estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+      })),
+  );
+
   const moisDisponibles = [
     ...objStore.historiquesMois.map((s) => ({
       mois: s.mois,
