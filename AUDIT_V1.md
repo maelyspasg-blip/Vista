@@ -1985,6 +1985,49 @@ alter table public.enveloppes
 - **Statut** : **CORRIGÉ (2026-10-02)** — tsc/lint vérifiés propres (10
   lignes / 49 problèmes).
 
+### P062 — P061 incomplet : un 2e chemin de création d'Entrée gardait l'ancien formulaire
+
+- **Gravité** : 🟠 MAJEUR (le nouveau flux P061 n'était pas réellement
+  généralisé — un utilisateur passant par ce 2e chemin voyait encore
+  l'ancienne UX complète, contrairement à la demande explicite)
+- **Trouvé par** : demande explicite de Maëlys, 2026-10-02 — "le nouveau
+  formulaire en 2 étapes n'apparaît pas... l'ancien formulaire avec date
+  prévue, se répète chaque mois, affiché dans le planning s'affiche
+  encore."
+- **Fichier** : `app/(tabs)/index.tsx`.
+- **Description** : P061 n'avait redessiné que le formulaire DÉDIÉ "Ajouter
+  une entrée d'argent" (`modalAjoutEntreeBudgetVisible`/`ajouterEntreeBudget`,
+  déclenché depuis le FAB et les boutons "+ Ajouter une entrée" d'Aperçu/
+  Budget). La modale GÉNÉRIQUE "Nouvelle catégorie" (`modalAjoutVisible`/
+  `ajouterEnveloppe`, accessible via le bouton "+ Ajouter" de "Tes
+  catégories", qui propose un sélecteur de type Variable/Fixe/Entrée) avait
+  elle aussi reçu `montantHabituel` lors de P060, mais gardait encore
+  l'intégralité de l'ANCIENNE UX (Calendrier "Date prévue", toggle "Se
+  répète chaque mois", toggle "Afficher dans Planning") pour le type
+  "Entrée" — jamais redessinée.
+- **Audit exhaustif fait avant correction** (`grep` sur tout le
+  repo pour chaque site qui assigne `type: "Entrée"`, littéral ou via
+  ternaire) : confirmé qu'il n'existe que 2 formulaires INTERACTIFS de
+  création d'Entrée au total (le dédié, déjà corrigé en P061 ; le
+  générique, corrigé ici) — les autres sites (`app/store.ts` : reconduction
+  mensuelle/"Report du mois précédent", système, pas un formulaire ;
+  `app/onboarding/preferences.tsx` : écran dédié "Salaire" de l'onboarding,
+  déjà minimal, pas de date/toggles à l'écran ; `app/(tabs)/planning.tsx` :
+  création rapide inline d'une catégorie DEPUIS la modale d'événement, déjà
+  minimale — nom + type seulement, aucun champ date/toggle affiché,
+  contexte différent d'un "ajout de catégorie" dédié) ne correspondent pas
+  au symptôme décrit et n'ont pas été touchés — décision documentée plutôt
+  que silencieuse.
+- **Correction appliquée** : le chip "Entrée d'argent" de la modale
+  générique ne fait plus `setNouveauType("Entrée")` — il ferme cette
+  modale et ouvre directement le formulaire dédié (réinitialisé, étape 1),
+  jamais un 2e flux dupliqué. `nouveauType` ne peut donc plus jamais valoir
+  `"Entrée"` nulle part (vérifié par grep : aucun autre site ne l'assigne)
+  — la branche JSX `nouveauType === "Entrée"` (Calendrier + 2 toggles,
+  l'ancienne UX) est par conséquent du code strictement mort, retirée.
+- **Statut** : **CORRIGÉ (2026-10-02)** — tsc/lint vérifiés propres (10
+  lignes / 49 problèmes).
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 

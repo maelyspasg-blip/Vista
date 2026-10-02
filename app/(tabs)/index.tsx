@@ -3567,17 +3567,32 @@ export default function Dashboard() {
                       styles.typeChipAvecInfo,
                       styles.typeChipEntree,
                       { backgroundColor: C.fondSecondaire },
-                      nouveauType === "Entrée" && { backgroundColor: C.vert },
                     ]}
-                    onPress={() => setNouveauType("Entrée")}
+                    // RÈGLE À NE JAMAIS CASSER — BUG CORRIGÉ LE 2026-10-02
+                    // (demande explicite, "le nouveau flux doit s'ouvrir dans
+                    // TOUS les cas d'ajout d'une catégorie Entrée") : ce
+                    // formulaire générique ("Nouvelle catégorie") gardait
+                    // l'ANCIEN formulaire complet (date/se répète chaque
+                    // mois/afficher dans Planning) pour le type "Entrée" —
+                    // jamais redessiné en P061, qui n'avait couvert que le
+                    // formulaire dédié "Ajouter une entrée d'argent". Plutôt
+                    // que de dupliquer le flux guidé en 2 étapes une 2e fois
+                    // ici, ce tap ferme CE modal et ouvre directement l'autre
+                    // (réinitialisé, étape 1) — jamais deux formulaires de
+                    // création d'Entrée différents dans l'app. `nouveauType`
+                    // ne peut donc plus jamais valoir "Entrée" nulle part
+                    // (vérifié : aucun autre site ne l'assigne) — la branche
+                    // `nouveauType === "Entrée"` plus bas dans ce même modal
+                    // est par conséquent du code mort, retirée.
+                    onPress={() => {
+                      setModalAjoutVisible(false);
+                      reinitialiserAjoutEntreeBudget();
+                      setModalAjoutEntreeBudgetVisible(true);
+                    }}
                     activeOpacity={0.7}
                   >
                     <Text
-                      style={[
-                        styles.typeChipTexte,
-                        { color: C.texteMuted },
-                        nouveauType === "Entrée" && styles.typeChipTexteActif,
-                      ]}
+                      style={[styles.typeChipTexte, { color: C.texteMuted }]}
                       numberOfLines={1}
                       adjustsFontSizeToFit
                     >
@@ -3587,9 +3602,7 @@ export default function Dashboard() {
                       titre="Entrée d'argent"
                       texte="Une catégorie de type Entrée d'argent s'additionne à ton Budget au lieu de s'en soustraire, contrairement à une catégorie de dépense classique."
                       taille={13}
-                      couleur={
-                        nouveauType === "Entrée" ? "#FFFFFF" : C.texteMuted
-                      }
+                      couleur={C.texteMuted}
                     />
                   </TouchableOpacity>
                 </View>
@@ -3673,103 +3686,11 @@ export default function Dashboard() {
                   </View>
                 )}
 
-                {nouveauType === "Entrée" && (
-                  <>
-                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Date prévue</Text>
-                    <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
-                      <Calendar
-                        current={nouvelleDate}
-                        onDayPress={(day) => setNouvelleDate(day.dateString)}
-                        markedDates={{
-                          [nouvelleDate]: {
-                            selected: true,
-                            selectedColor: C.vert,
-                          },
-                        }}
-                        theme={{
-                          calendarBackground: C.carte,
-                          dayTextColor: C.texte,
-                          monthTextColor: C.texte,
-                          textDisabledColor: C.texteMuted,
-                          textSectionTitleColor: C.texteMuted,
-                          selectedDayTextColor: "#FFFFFF",
-                          selectedDayBackgroundColor: C.vert,
-                          todayTextColor: C.vert,
-                          arrowColor: C.vert,
-                        }}
-                      />
-                    </View>
-
-                    <View style={styles.switchRow}>
-                      <View>
-                        <Text style={[styles.switchLabel, { color: C.texte }]}>
-                          Se répète chaque mois
-                        </Text>
-                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                          Comme un salaire ou une allocation
-                        </Text>
-                      </View>
-                      <Switch
-                        value={nouveauRepeteChaqueMois}
-                        onValueChange={setNouveauRepeteChaqueMois}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={nouveauRepeteChaqueMois ? C.purple : "#FFF"}
-                      />
-                    </View>
-
-                    {/* RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel
-                        (app/store.ts), même garde que la modale d'édition. */}
-                    {nouveauRepeteChaqueMois && (
-                      <>
-                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                          Montant habituel (optionnel)
-                        </Text>
-                        <View style={styles.modalInputRow}>
-                          <TextInput
-                            style={[
-                              styles.input,
-                              {
-                                flex: 1,
-                                backgroundColor: C.fondSecondaire,
-                                color: C.texte,
-                              },
-                            ]}
-                            placeholder="Laisser vide si le montant varie"
-                            placeholderTextColor={C.texteMuted}
-                            keyboardType="decimal-pad"
-                            value={nouveauMontantHabituel}
-                            onChangeText={(text) =>
-                              setNouveauMontantHabituel(sanitizeMontantInput(text))
-                            }
-                            returnKeyType="done"
-                            inputAccessoryViewID={ACCESSORY_ID}
-                          />
-                          <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
-                        </View>
-                        <Text style={[styles.switchSub, { color: C.texteMuted, marginTop: -8, marginBottom: 12 }]}>
-                          Si renseigné, ce montant sera automatiquement compté comme reçu chaque mois — sinon tu le confirmeras toi-même.
-                        </Text>
-                      </>
-                    )}
-
-                    <View style={styles.switchRow}>
-                      <View>
-                        <Text style={[styles.switchLabel, { color: C.texte }]}>
-                          Afficher dans Planning
-                        </Text>
-                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                          Visible aussi dans ton agenda
-                        </Text>
-                      </View>
-                      <Switch
-                        value={nouveauAfficherPlanning}
-                        onValueChange={setNouveauAfficherPlanning}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={nouveauAfficherPlanning ? C.purple : "#FFF"}
-                      />
-                    </View>
-                  </>
-                )}
+                {/* RÈGLE : branche "Entrée" retirée le 2026-10-02 — cf.
+                    RÈGLE sur le chip "Entrée d'argent" plus haut :
+                    nouveauType ne peut plus jamais valoir "Entrée" dans ce
+                    modal (le tap redirige vers le formulaire dédié avant
+                    que cet état ne soit jamais atteint). */}
 
                 {nouveauType === "Fixe" && (
                   <>
