@@ -348,6 +348,16 @@ type EtatStore = {
   historiquesMois: SnapshotMois[];
   dernierMoisArchive: { mois: number; annee: number } | null;
   erreurSync: string | null;
+  // RÈGLE : distinct d'erreurSync (bannière rouge, auto-effacée après 5s,
+  // générique à toute écriture Supabase) — demande explicite du 2026-10-02,
+  // point 2 : une bannière SOBRE et PERSISTANTE dédiée à l'archivage mensuel
+  // spécifiquement, qui reste affichée tant que l'archivage n'a pas abouti
+  // (jamais de timeout d'auto-effacement ici), posée uniquement après
+  // épuisement des réessais automatiques (cf. DELAIS_RETRY_ARCHIVAGE_MS et
+  // RÈGLE sur verifierArchivageMoisInterne) — jamais sur le tout premier
+  // échec, qui est une situation réseau normale et déjà invisible pour
+  // l'utilisateur la plupart du temps.
+  archivageEnDifficulte: boolean;
   suggestionsIgnorees: string[];
   suggestionRecurrence: SuggestionRecurrence | null;
   // RÈGLE À NE JAMAIS CASSER — DISTINGUER "PAS ENCORE CHARGÉ" DE "RÉELLEMENT
@@ -399,6 +409,7 @@ const ETAT_INITIAL: EtatStore = {
   historiquesMois: [],
   dernierMoisArchive: null,
   erreurSync: null,
+  archivageEnDifficulte: false,
   suggestionsIgnorees: [],
   suggestionRecurrence: null,
   chargementInitialTermine: false,
@@ -2141,6 +2152,45 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
 // échouait silencieusement sans jamais faire avancer dernierMoisArchive
 // (ex: etat.userId redevenu null en cours de route) — jamais atteint en
 // usage normal, largement au-dessus de tout retard plausible.
+// RÈGLE À NE JAMAIS CASSER — RÉESSAIS À DÉLAI CROISSANT (demande explicite du
+// 2026-10-02, point 2) : un échec d'archivage (snapshot non validé côté
+// Supabase, cf. RÈGLE sur enregistrerSnapshotMoisSupabase) est le plus
+// souvent un problème réseau transitoire — retenter immédiatement avec un
+// délai croissant maximise les chances de réussir avant même que
+// l'utilisateur ne s'en aperçoive, plutôt que d'attendre la prochaine
+// vérification périodique (60s, cf. INTERVALLE_VERIFICATION_MS dans
+// app/(tabs)/_layout.tsx). 3 réessais, délais croissants en secondes —
+// volontairement courts (quelques secondes au total) pour ne jamais faire
+// paraître l'app figée au lancement.
+const DELAIS_RETRY_ARCHIVAGE_MS = [2000, 5000, 10000];
+
+function attendre(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// RÈGLE À NE JAMAIS CASSER — DÉTECTION DU RETARD AU LANCEMENT (demande
+// explicite du 2026-10-02, point 1) : la valeur retournée ici est le
+// nombre de mois ENTIERS déjà terminés qui restent à archiver, PAS un
+// simple écart de calendrier. `dernier.mois/annee === mois précédent`
+// (rien à rattraper, cf. estMoisEnCours dans verifierArchivageMoisInterne)
+// retourne 0. Un retard de 1 (un seul mois entier jamais archivé) reste
+// lui aussi un cas NORMAL/attendu, déjà couvert en tâche de fond avant ce
+// changement — PAS une anomalie non plus. Seul un retard STRICTEMENT
+// supérieur à 1 (au moins DEUX mois entiers jamais archivés d'affilée)
+// signale que l'app est restée fermée à cheval sur plusieurs changements
+// de mois sans jamais rattraper — c'est ce cas, et uniquement celui-ci,
+// que verifierArchivageMoisAuLancement (plus bas) force à rattraper AVANT
+// tout affichage plutôt qu'en tâche de fond, pour ne jamais montrer des
+// totaux/catégories vieux de plusieurs mois ne serait-ce qu'un instant.
+function moisDeRetardArchivage(): number {
+  if (!etat.dernierMoisArchive) return 0;
+  const maintenant = new Date();
+  const diffMois =
+    (maintenant.getFullYear() - etat.dernierMoisArchive.annee) * 12 +
+    (maintenant.getMonth() - etat.dernierMoisArchive.mois);
+  return Math.max(0, diffMois - 1);
+}
+
 async function verifierArchivageMoisInterne() {
   if (!etat.userId) return;
 
@@ -2202,15 +2252,57 @@ async function verifierArchivageMoisInterne() {
 
     if (estMoisEnCours) return;
 
-    await archiverMoisActuelInterne(moisAArchiver, anneeAArchiver);
+    // RÈGLE À NE JAMAIS CASSER — RÉESSAIS À DÉLAI CROISSANT (demande
+    // explicite du 2026-10-02, point 2) : avant, un seul essai puis abandon
+    // immédiat si le curseur n'avançait pas (prochain essai seulement 60s
+    // plus tard, cf. INTERVALLE_VERIFICATION_MS) — maintenant jusqu'à
+    // DELAIS_RETRY_ARCHIVAGE_MS.length réessais supplémentaires, délai
+    // croissant entre chacun, AVANT d'abandonner pour de bon. Chaque essai
+    // reste individuellement journalisé (`archivage_mois_echec`, posé à
+    // l'intérieur d'archiverMoisActuelInterneCoeur) — ce qui change ici,
+    // c'est seulement QUAND on arrête de retenter dans la même passe.
+    let curseurAvance = false;
+    for (let tentative = 0; ; tentative += 1) {
+      await archiverMoisActuelInterne(moisAArchiver, anneeAArchiver);
+      curseurAvance = !(
+        etat.dernierMoisArchive?.mois === dernier.mois &&
+        etat.dernierMoisArchive?.annee === dernier.annee
+      );
+      if (curseurAvance) break;
+      if (tentative >= DELAIS_RETRY_ARCHIVAGE_MS.length) break;
+      console.warn(
+        `[archivage] Tentative ${tentative + 1} échouée pour ${moisAArchiver + 1}/${anneeAArchiver} — nouvel essai dans ${DELAIS_RETRY_ARCHIVAGE_MS[tentative]}ms.`,
+      );
+      await attendre(DELAIS_RETRY_ARCHIVAGE_MS[tentative]);
+    }
 
-    // Filet de sécurité : le curseur n'a pas avancé malgré l'appel — sort
-    // plutôt que de reboucler sur le même mois indéfiniment.
-    if (
-      etat.dernierMoisArchive?.mois === dernier.mois &&
-      etat.dernierMoisArchive?.annee === dernier.annee
-    ) {
+    // Filet de sécurité : le curseur n'a pas avancé malgré l'essai initial
+    // ET tous les réessais — sort plutôt que de reboucler sur le même mois
+    // indéfiniment. RÈGLE : point 2 de la demande du 2026-10-02 — c'est
+    // seulement ICI, après épuisement de tous les réessais (jamais au tout
+    // premier échec, qui est une situation réseau normale et transitoire la
+    // plupart du temps), que la bannière discrète et persistante
+    // "Synchronisation en cours..." s'affiche (cf. SynchronisationBanner.tsx)
+    // — elle reste levée jusqu'à ce qu'un essai FUTUR (prochaine
+    // vérification périodique à 60s, retour au premier plan, ou prochain
+    // lancement) réussisse enfin, cf. branche de succès plus bas.
+    if (!curseurAvance) {
+      if (!etat.archivageEnDifficulte) {
+        setEtat({ archivageEnDifficulte: true });
+      }
+      journaliserOperationAudit("archivage_mois_echec_definitif", {
+        mois: moisAArchiver,
+        annee: anneeAArchiver,
+        tentatives: DELAIS_RETRY_ARCHIVAGE_MS.length + 1,
+      });
       return;
+    }
+
+    // Succès (au premier essai ou après réessais) : si la bannière était
+    // levée suite à une tentative précédente (dans cette passe ou une
+    // vérification périodique antérieure), elle redevient inutile.
+    if (etat.archivageEnDifficulte) {
+      setEtat({ archivageEnDifficulte: false });
     }
   }
 }
@@ -2818,6 +2910,7 @@ export function useObjectifs() {
     historiquesMois: local.historiquesMois,
     dernierMoisArchive: local.dernierMoisArchive,
     erreurSync: local.erreurSync,
+    archivageEnDifficulte: local.archivageEnDifficulte,
     suggestionRecurrence: local.suggestionRecurrence,
     chargementInitialTermine: local.chargementInitialTermine,
 
@@ -3998,6 +4091,30 @@ export function useObjectifs() {
       return verifierArchivageMoisInterne();
     },
 
+    // RÈGLE À NE JAMAIS CASSER — RATTRAPAGE FORCÉ AVANT AFFICHAGE (demande
+    // explicite du 2026-10-02, point 1) : appelée par app/(tabs)/_layout.tsx
+    // AVANT marquerChargementInitialTermine(), contrairement à
+    // verifierArchivageMois() ci-dessus (volontairement fire-and-forget
+    // derrière ce flag, cf. RÈGLE sur EtatStore.chargementInitialTermine —
+    // pour ne jamais faire paraître l'app figée au lancement dans le cas
+    // normal). Ne force l'attente ET ne journalise dans audit_operations
+    // QUE si moisDeRetardArchivage() > 1 (au moins un mois entier jamais
+    // archivé) — en dessous, no-op immédiat, le rattrapage normal (1 mois,
+    // l'état courant) continue de se faire en tâche de fond comme avant,
+    // sans changement de comportement perceptible.
+    verifierArchivageMoisAuLancement: async (): Promise<void> => {
+      const retard = moisDeRetardArchivage();
+      if (retard <= 1) return;
+      console.warn(
+        `[archivage] Retard de ${retard} mois détecté au lancement — archivage forcé avant affichage.`,
+      );
+      journaliserOperationAudit("archivage_rattrapage_force_lancement", {
+        moisEnRetard: retard,
+        dernierMoisArchive: etat.dernierMoisArchive,
+      });
+      await verifierArchivageMoisInterne();
+    },
+
     // RÈGLE : point 3 de la RÈGLE "Sécurité maximale" — retourne aussi sa
     // Promise pour permettre à app/(tabs)/_layout.tsx de l'attendre APRÈS
     // verifierArchivageMois() (jamais avant : la vérification doit porter
@@ -4539,3 +4656,20 @@ export function useObjectifs() {
     },
   };
 }
+
+// RÈGLE À NE JAMAIS CASSER — EXPORT RÉSERVÉ AUX TESTS UNITAIRES (demande
+// explicite du 2026-10-02, point 3 ; consommé uniquement par
+// __tests__/archivageMensuel.test.ts) : JAMAIS importé par du code
+// applicatif. `etat` reste privé à ce module partout ailleurs (cf. RÈGLE en
+// tête de fichier sur reinitialiserEtatUtilisateur et la fuite de données
+// entre comptes) — ce bloc expose le strict minimum pour piloter
+// l'archivage mensuel directement dans un test (useObjectifs() est un hook
+// React, inappelable hors d'un composant monté) et en vérifier le résultat,
+// sans affaiblir cette encapsulation pour le reste de l'app.
+export const __testArchivage = {
+  definirEtatPourTest: (partiel: Partial<EtatStore>): void => {
+    etat = { ...etat, ...partiel };
+  },
+  obtenirEtatPourTest: (): EtatStore => etat,
+  archiverMoisActuelInterneCoeur,
+};

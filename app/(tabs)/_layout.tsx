@@ -15,6 +15,7 @@ import { useEspacePartage } from "../EspacePartageContext";
 import { GuestBanner } from "../GuestBanner";
 import { PagerSwipeProvider, usePagerSwipe } from "../PagerSwipeContext";
 import { RecurrenceSuggestionBanner } from "../RecurrenceSuggestionBanner";
+import { SynchronisationBanner } from "../SynchronisationBanner";
 import { SyncErrorBanner } from "../SyncErrorBanner";
 import { useObjectifs } from "../store";
 import { useTheme } from "../ThemeContext";
@@ -150,6 +151,16 @@ export default function TabLayout() {
         objStore.chargerHistoriquePaiements(),
         objStore.chargerHistoriquesMois(),
       ]);
+      // RÈGLE À NE JAMAIS CASSER — RATTRAPAGE FORCÉ SI TROP EN RETARD
+      // (demande explicite du 2026-10-02, point 1) : etat.dernierMoisArchive
+      // vient d'être chargé par chargerObjectifs() ci-dessus — on peut donc
+      // déjà juger ici, AVANT marquerChargementInitialTermine(), si l'app a
+      // raté plus d'un changement de mois complet. Dans ce cas (seulement),
+      // on attend que l'archivage ait fini de rattraper avant de lever le
+      // flag qui autorise l'affichage — jamais pour le cas normal (1 mois de
+      // retard, l'état courant), qui reste géré en tâche de fond par
+      // verifierEtat() ci-dessous comme avant, sans ralentir le lancement.
+      await objStore.verifierArchivageMoisAuLancement();
       // RÈGLE À NE JAMAIS CASSER — cf. EtatStore.chargementInitialTermine :
       // posé ICI, juste après ce premier Promise.all, avant verifierEtat()
       // (qui peut lui-même prendre du temps) — c'est le signal que
@@ -177,6 +188,7 @@ export default function TabLayout() {
         <SyncErrorBanner />
         <EspaceDissousBanner />
         <RecurrenceSuggestionBanner />
+        <SynchronisationBanner />
         <TabsNavigator />
       </View>
     </PagerSwipeProvider>

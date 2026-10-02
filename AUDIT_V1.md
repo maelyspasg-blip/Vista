@@ -2028,6 +2028,79 @@ alter table public.enveloppes
 - **Statut** : **CORRIGÉ (2026-10-02)** — tsc/lint vérifiés propres (10
   lignes / 49 problèmes).
 
+### P063 — Robustesse de l'archivage mensuel : rattrapage forcé, réessais, test unitaire (demande explicite)
+
+- **Gravité** : 🔵 SUGGESTION (renforcement préventif — aucun bug concret
+  rapporté sur l'archivage lui-même ; l'infrastructure existante
+  (`verifierArchivageMoisInterne`, cf. RÈGLE "RATTRAPE TOUS LES MOIS EN
+  RETARD EN UNE SEULE PASSE") couvrait déjà le rattrapage multi-mois et la
+  reprise après interruption)
+- **Trouvé par** : demande explicite de Maëlys, 2026-10-02 — 3 points :
+  rattrapage forcé avant affichage si retard > 1 mois ; réessais à délai
+  croissant + bannière "Synchronisation en cours..." en cas d'échec
+  persistant ; test unitaire du passage au 1er du mois.
+- **Fichiers** : `app/store.ts`, `app/(tabs)/_layout.tsx`,
+  `app/SynchronisationBanner.tsx` (nouveau), `jest.config.js` (nouveau),
+  `package.json`, `__tests__/archivageMensuel.test.ts` (nouveau),
+  `__tests__/jest-globals.d.ts` (nouveau).
+- **Point 1 — rattrapage forcé** : nouvelle fonction `moisDeRetardArchivage()`
+  (diff en mois entre `dernierMoisArchive` et le mois réel, moins 1 — un
+  retard de 1 est l'état NORMAL en cours de mois, cf. RÈGLE au site de
+  déclaration) et nouvelle action `verifierArchivageMoisAuLancement()`,
+  appelée par `app/(tabs)/_layout.tsx` juste après le premier chargement,
+  AVANT `marquerChargementInitialTermine()` (qui autorise l'affichage).
+  Si retard > 1 mois (au moins un mois entier jamais archivé — l'app est
+  restée fermée à cheval sur plusieurs changements de mois) : journalise
+  `archivage_rattrapage_force_lancement` dans `audit_operations` puis
+  ATTEND la fin du rattrapage avant de lever le flag d'affichage. En
+  dessous (le cas normal), no-op immédiat — le rattrapage continue de se
+  faire en tâche de fond comme avant, sans ralentir le lancement normal.
+- **Point 2 — réessais + bannière** : `verifierArchivageMoisInterne()`
+  retente désormais jusqu'à 3 fois (délais croissants 2s/5s/10s,
+  `DELAIS_RETRY_ARCHIVAGE_MS`) un mois dont l'archivage échoue, avant
+  d'abandonner pour de bon (comme avant, le prochain essai restera la
+  prochaine vérification périodique à 60s/retour au premier plan/
+  lancement). Épuisement de tous les réessais → nouveau champ
+  `EtatStore.archivageEnDifficulte` levé + nouveau log d'audit distinct
+  `archivage_mois_echec_definitif` (distinct du `archivage_mois_echec`
+  existant, posé à chaque tentative individuelle). Nouveau composant
+  `SynchronisationBanner.tsx` (sobre, gris — jamais confondu avec
+  `SyncErrorBanner`, rouge et auto-effacée après 5s) affiché tant que ce
+  flag reste levé, repositionné `top:165` pour ne jamais chevaucher
+  `SyncErrorBanner`/`RecurrenceSuggestionBanner` (même convention de
+  stacking déjà en place entre ces deux-là) puisque les deux peuvent être
+  vrais simultanément en pratique.
+- **Point 3 — test unitaire** : aucune infrastructure de test n'existait
+  dans le projet — ajout de `jest-expo@56.0.5` (aligné sur le SDK Expo du
+  projet) + `jest`/`@types/jest`/`@jest/globals` en devDependencies,
+  `npm test` (nouveau script). Nouveau dossier `__tests__/` À LA RACINE du
+  repo (jamais dans `app/`, qu'Expo Router scanne comme routes). Nouvel
+  export réservé aux tests `__testArchivage` (app/store.ts, RÈGLE explicite
+  "jamais importé par du code applicatif") exposant le strict nécessaire
+  pour piloter `archiverMoisActuelInterneCoeur` directement (contournant
+  `useObjectifs()`, un hook React inappelable hors composant monté) sans
+  affaiblir l'encapsulation de `etat` pour le reste de l'app. Mock Supabase
+  générique écrit à la main (chaînable, "thenable") plutôt qu'une vraie
+  connexion — aucun accès réseau Supabase direct n'est possible depuis cet
+  environnement (cf. CLAUDE.md). Le test simule le passage au 1er du mois
+  (appel direct avec mois/année cibles) et vérifie : catégorie Variable
+  RÉCURRENTE remise à 0, catégorie Fixe récurrente remise à 0 (`payee:
+  false`), snapshot créé pour le mois archivé, ET — vérification
+  supplémentaire au-delà de la demande littérale — qu'une catégorie
+  Variable PONCTUELLE (`recurrente: false`) n'est PAS remise à 0,
+  protégeant la RÈGLE existante "REMISE À ZÉRO UNIQUEMENT POUR LES
+  CATÉGORIES PERMANENTES" plutôt que de la contredire par un test trop
+  large ("TOUTES les Variable à 0" aurait été une régression déguisée en
+  test). 2e test : un 2e appel pour le même mois est un no-op (protection
+  `dejaArchive` déjà existante). `@types/jest` récent (v30) ne déclare plus
+  le global `jest` comme valeur (seulement le namespace) — fix via
+  `/// <reference types="jest" />` dans `__tests__/jest-globals.d.ts`
+  plutôt qu'un `"types"` explicite dans tsconfig.json (qui aurait désactivé
+  l'auto-découverte des AUTRES @types pour tout le projet, dont le
+  namespace JSX de @types/react — risque de régression massive écarté).
+- **Statut** : **FAIT (2026-10-02)** — tsc/lint vérifiés propres (10
+  lignes / 49 problèmes), `npm test` : 2/2 tests passent.
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 
