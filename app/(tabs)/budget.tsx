@@ -2053,22 +2053,46 @@ export default function Budget() {
           <CartesCategoriesSupprimees annee={ANNEE_ACTUELLE} mois={MOIS_ACTUEL} />
         )}
 
+        {/* RÈGLE À NE JAMAIS CASSER — AJOUT DU 2026-10-02 (demande
+            explicite, décision confirmée) : ce bouton n'ouvre AUCUN
+            formulaire propre à cet écran — Budget n'a jamais eu de
+            formulaire de création d'Entrée d'argent — il navigue vers
+            Aperçu via le même deep link que les cartes "Entrées à venir"
+            (P059, params.ouvrirCategorie), ici params.ouvrirCreationEntree,
+            pour ouvrir LA seule modale de création qui existe dans l'app
+            (refondue en flux guidé le 2026-10-02) — jamais dupliquée ici. */}
+        <View style={[styles.sectionTitleAvecInfo, { marginTop: 20 }]}>
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
+            ]}
+          >
+            ENTRÉES D&apos;ARGENT
+          </Text>
+          <InfoBulle
+            titre="Entrées d'argent"
+            texte="Une catégorie de type Entrée d'argent s'additionne à ton Budget au lieu de s'en soustraire, contrairement à une catégorie de dépense classique."
+          />
+        </View>
+        <TouchableOpacity
+          style={styles.budgetAjouterBouton}
+          activeOpacity={0.7}
+          onPress={() => {
+            if (bloquerSiInvite(isGuest, router)) return;
+            router.push({
+              pathname: "/(tabs)",
+              params: { ouvrirCreationEntree: "1" },
+            });
+          }}
+        >
+          <Text style={[styles.budgetAjouterTexte, { color: C.purple }]}>
+            + Ajouter une entrée
+          </Text>
+        </TouchableOpacity>
+
         {entreesRecues.length > 0 && (
           <>
-            <View style={[styles.sectionTitleAvecInfo, { marginTop: 20 }]}>
-              <Text
-                style={[
-                  styles.sectionTitle,
-                  { color: C.texteMuted, marginTop: 0, marginBottom: 0 },
-                ]}
-              >
-                ENTRÉES D&apos;ARGENT REÇUES
-              </Text>
-              <InfoBulle
-                titre="Entrées d'argent"
-                texte="Une catégorie de type Entrée d'argent s'additionne à ton Budget au lieu de s'en soustraire, contrairement à une catégorie de dépense classique."
-              />
-            </View>
             {entreesRecues.map((env) => (
               <View
                 key={env.id}
@@ -2993,6 +3017,16 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   btnAjouterIciTexte: { fontSize: 13, fontWeight: "700", color: "#FFFFFF" },
+  // RÈGLE : copié tel quel depuis app/(tabs)/index.tsx (même style, même
+  // bouton "+ Ajouter une entrée") — ajouté le 2026-10-02 pour le nouveau
+  // bouton "Entrées d'argent" de cet écran.
+  budgetAjouterBouton: {
+    alignSelf: "stretch",
+    alignItems: "center",
+    marginTop: 10,
+    paddingVertical: 6,
+  },
+  budgetAjouterTexte: { fontSize: 13, fontWeight: "700" },
   videContainer: {
     borderRadius: 16,
     padding: 20,

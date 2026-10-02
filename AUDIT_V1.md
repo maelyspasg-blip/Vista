@@ -1901,6 +1901,90 @@ alter table public.enveloppes
   add column if not exists montant_habituel numeric null;
 ```
 
+### P061 — Refonte du formulaire "Nouvelle entrée de Budget" en flux guidé à 2 étapes
+
+- **Gravité** : 🔵 SUGGESTION (refonte UX, pas un bug)
+- **Trouvé par** : demande explicite de Maëlys, 2026-10-02 — "simplification
+  complète" du formulaire de création d'entrée d'argent.
+- **Fichiers** : `app/(tabs)/index.tsx` (formulaire de création refondu +
+  section Entrée du formulaire d'édition), `app/(tabs)/budget.tsx` (nouveau
+  bouton "+ Ajouter une entrée").
+- **2 points clarifiés avec Maëlys avant implémentation** (AskUserQuestion,
+  options recommandées choisies toutes les deux) :
+  1. La demande initiale incluait "supprimer le filtre
+     `estCategorieActiveCeMois` pour les catégories Entrée" — refusé
+     d'implémenter littéralement : ce filtre est la protection contre le
+     bug "catégorie fantôme" (P052/P056/P059, une bonne partie de cette
+     session). Le même objectif ("toutes les Entrée visibles chaque mois")
+     est déjà atteint par la reconduction mensuelle existante, puisque le
+     nouveau flux rend `recurrente` TOUJOURS vrai — **le filtre n'a pas été
+     touché**.
+  2. "Appliquer dans le formulaire de création depuis Budget" — vérifié que
+     Budget n'a jamais eu son propre formulaire de création d'Entrée.
+     Plutôt que d'en dupliquer un (risque de divergence future), un bouton
+     dans Budget navigue vers Aperçu via deep link
+     (`params.ouvrirCreationEntree`, même mécanique que `params.ouvrirCategorie`
+     de P059) pour ouvrir LA seule modale de création, jamais dupliquée.
+- **Fait** :
+  - Formulaire de création (Aperçu + bouton Budget, même modale) : étape 1,
+    grille de 6 catégories prédéfinies (Salaire/CAF-Aides/Remboursement/
+    Freelance/Prime/Autre..., icônes Ionicons, mise en évidence teal
+    `#1D9E75` au tap) ; étape 2, Nom (pré-rempli, modifiable), sélecteur
+    Type Fixe/Variable, Montant habituel (grisé + non éditable si
+    Variable, message teal explicatif).
+  - Toutes les entrées créées par ce flux ont désormais `recurrente: true`
+    et `repeteChaqueMois: true` — plus de cas "ponctuel" via ce formulaire
+    (les 2 seuls cas demandés, Fixe/Variable, sont tous deux récurrents).
+  - Champs retirés du formulaire par cette simplification (jamais
+    mentionnés dans la nouvelle spec) : date réelle, "compter pour le mois
+    de", couleur (auto-assignée, `couleurLaPlusDistincte`), champ "Montant"
+    séparé (le budget affiché reprend désormais le montant habituel, ou 0€
+    si Variable).
+  - Formulaire d'édition d'une catégorie Entrée existante : même sélecteur
+    Fixe/Variable remplace l'ancien toggle "Se répète chaque mois".
+    **Protection ajoutée** : pour une Entrée DÉJÀ existante, ce formulaire
+    ne touche plus jamais `recurrente`/`repeteChaqueMois`/`dateFixe`/
+    `afficherDansPlanning` — ces 4 valeurs restent préservées telles
+    quelles (seul `montantHabituel` reste pilotable) — nécessaire pour ne
+    jamais transformer silencieusement une entrée "Report du mois
+    précédent" (générée par l'archivage avec `recurrente: false`) en
+    entrée récurrente à l'insu de l'utilisateur. Pour une catégorie
+    fraîchement convertie EN "Entrée" depuis Fixe/Variable via ce même
+    formulaire, les valeurs par défaut du nouveau flux s'appliquent
+    (recurrente/repeteChaqueMois=true, dateFixe=aujourd'hui).
+  - Vérifié par test numérique isolé (Fixe avec montant, Variable avec un
+    montant resté dans le champ masqué mais ignoré, Fixe vide) — aucune
+    fuite de montant côté Variable.
+- **Effet de bord positif** : en cherchant à câbler le deep link
+  `ouvrirCreationEntree`, une référence à une fonction déclarée plus loin
+  dans le composant (`reinitialiserAjoutEntreeBudget`) a été détectée par
+  le React Compiler (`experiments.reactCompiler`, `app.json`) comme invalide
+  — corrigé en la déclarant avant son premier usage (jamais un problème
+  purement JS, une contrainte spécifique au compiler).
+- **🔴 Bug bloquant trouvé en revue (code-reviewer) et corrigé avant
+  commit** : "tap en dehors de la modale = sauvegarde" (décision produit
+  du 2026-09-18, clôt P036, appliquée partout dans ce fichier) combiné au
+  pré-remplissage automatique du Nom dès l'étape 1 créait une vraie
+  catégorie Entrée (`recurrente: true`) sur la seule base d'un tap de
+  preset suivi d'un tap accidentel en dehors de la modale — sans qu'aucune
+  saisie délibérée n'ait eu lieu à l'étape 2. Corrigé avec un nouveau flag
+  `entreeBudgetEtape2Engagee` (jamais `true` au moment de l'auto-fill,
+  passé à `true` uniquement par une interaction SUBSÉQUENTE avec un champ
+  de l'étape 2 — nom modifié, montant habituel saisi, type changé) : le
+  tap-en-dehors n'enregistre désormais que si ce flag est vrai ; le bouton
+  "Ajouter" reste lui un geste délibéré en soi, jamais bloqué par ce flag.
+  Vérifié par un test numérique isolé reproduisant exactement le scénario
+  du bug (preset seul → aucune sauvegarde ; preset + champ touché →
+  sauvegarde normale).
+- **Changement non documenté initialement, signalé en revue** :
+  `app/(tabs)/budget.tsx` — le titre de section passe de "ENTRÉES D'ARGENT
+  REÇUES" (visible seulement si au moins une entrée existe) à "ENTRÉES
+  D'ARGENT" désormais toujours visible, pour accueillir le nouveau bouton
+  "+ Ajouter une entrée" même quand aucune catégorie Entrée n'existe
+  encore sur ce compte — changement mineur et délibéré, pas un oubli.
+- **Statut** : **CORRIGÉ (2026-10-02)** — tsc/lint vérifiés propres (10
+  lignes / 49 problèmes).
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 

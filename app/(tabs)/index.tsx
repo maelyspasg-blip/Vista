@@ -114,6 +114,23 @@ function montantHabituelDepuisTexte(texte: string): number | undefined {
   return Number.isFinite(valeur) && valeur >= 0 ? valeur : undefined;
 }
 
+// RÈGLE À NE JAMAIS CASSER — REFONTE DU FORMULAIRE "NOUVELLE ENTRÉE"
+// (2026-10-02, demande explicite) : étape 1 du flux guidé — une catégorie
+// choisie ici pré-remplit le nom (modifiable ensuite) et fait passer à
+// l'étape 2. "Autre..." est un intitulé d'invite, jamais un vrai nom —
+// son tap laisse le champ Nom vide plutôt que d'y recopier "Autre...".
+const PRESETS_ENTREE: {
+  nom: string;
+  icone: React.ComponentProps<typeof Ionicons>["name"];
+}[] = [
+  { nom: "Salaire", icone: "briefcase-outline" },
+  { nom: "CAF / Aides", icone: "business-outline" },
+  { nom: "Remboursement", icone: "return-down-back-outline" },
+  { nom: "Freelance", icone: "laptop-outline" },
+  { nom: "Prime", icone: "gift-outline" },
+  { nom: "Autre...", icone: "add-circle-outline" },
+];
+
 function formaterDateLongue(dateISO: string): string {
   const d = parseDateFixeLocale(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
@@ -444,7 +461,14 @@ export default function Dashboard() {
   // garde tous les onglets montés, cf. RÈGLE identique là-bas), et
   // router.setParams({ouvrirCategorie: undefined}) consomme le param une
   // fois traité.
-  const params = useLocalSearchParams<{ ouvrirCategorie?: string }>();
+  // RÈGLE : `ouvrirCreationEntree` ajouté le 2026-10-02 (demande explicite)
+  // — même deep link, pour le bouton "Nouvelle entrée" de Budget (qui n'a
+  // pas son propre formulaire de création, cf. décision confirmée :
+  // jamais dupliquer ce formulaire).
+  const params = useLocalSearchParams<{
+    ouvrirCategorie?: string;
+    ouvrirCreationEntree?: string;
+  }>();
   const [fabMenuOuvert, setFabMenuOuvert] = useState(false);
   // RÈGLE À NE JAMAIS CASSER : ce déblocage est volontairement un state
   // local (pas persisté en base ni dans un store partagé) — "pour la
@@ -630,24 +654,59 @@ export default function Dashboard() {
     );
   const maintenant = new Date();
 
+  // RÈGLE À NE JAMAIS CASSER — REFONTE DU 2026-10-02 (demande explicite,
+  // "simplification complète") : ce formulaire est désormais un flux guidé
+  // en 2 étapes (choix d'une catégorie prédéfinie, puis personnalisation),
+  // remplace entièrement l'ancien formulaire libre (nom/montant/date/
+  // couleur/récurrence tous saisis manuellement). Champs volontairement
+  // retirés de l'UI par cette refonte (jamais demandés dans la nouvelle
+  // spec) : date réelle, "compter pour le mois de", couleur, et le toggle
+  // "se répète chaque mois" — recurrente/repeteChaqueMois valent désormais
+  // TOUJOURS true pour une entrée créée ici (plus de cas "ponctuel" via ce
+  // formulaire précis ; dateFixe/moisComptage/couleur pris automatiquement
+  // à la création, jamais demandés à l'utilisateur).
   const [modalAjoutEntreeBudgetVisible, setModalAjoutEntreeBudgetVisible] =
     useState(false);
+  // Étape 1 (grille de catégories prédéfinies) ou 2 (personnalisation).
+  const [etapeEntreeBudget, setEtapeEntreeBudget] = useState<1 | 2>(1);
+  // RÈGLE : conservé séparément de nomEntreeBudget (que l'utilisateur peut
+  // modifier librement à l'étape 2) — sert uniquement à ré-afficher la
+  // mise en évidence teal de la carte choisie si l'utilisateur revient à
+  // l'étape 1 via "Changer de catégorie".
+  const [presetSelectionneEntree, setPresetSelectionneEntree] = useState<
+    string | null
+  >(null);
   const [nomEntreeBudget, setNomEntreeBudget] = useState("");
-  const [montantEntreeBudget, setMontantEntreeBudget] = useState("");
-  const [dateEntreeBudget, setDateEntreeBudget] = useState(
-    dateVersISO(new Date()),
+  // RÈGLE : "Fixe" = montant habituel connu (pré-rempli chaque mois),
+  // "Variable" = montant habituel absent (reconduit à 0€, confirmé
+  // manuellement chaque mois) — cf. RÈGLE sur Enveloppe.montantHabituel
+  // (app/store.ts). Pas un nouveau champ en base : recurrente/
+  // repeteChaqueMois valent TOUJOURS true pour les deux ; seul
+  // montantHabituel diffère (valeur vs undefined). Purement un état local
+  // de ce formulaire, jamais persisté tel quel.
+  const [typeEntreeBudget, setTypeEntreeBudget] = useState<"Fixe" | "Variable">(
+    "Fixe",
   );
-  const [moisComptageEntreeBudget, setMoisComptageEntreeBudget] = useState(
-    premierJourMoisISO(new Date()),
-  );
-  const [recurrenteEntreeBudget, setRecurrenteEntreeBudget] = useState(false);
   // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts).
   const [montantHabituelEntreeBudget, setMontantHabituelEntreeBudget] =
     useState("");
-  const [couleurEntreeBudget, setCouleurEntreeBudget] = useState(
-    PALETTE_COULEURS[0],
-  );
-  const [paletteOuverteEntreeBudget, setPaletteOuverteEntreeBudget] =
+  // RÈGLE À NE JAMAIS CASSER — BUG CORRIGÉ EN REVUE (code-reviewer,
+  // 2026-10-02) : "tap en dehors de la modale = sauvegarde" est le
+  // comportement voulu partout dans ce fichier (décision produit du
+  // 2026-09-18, clôt P036) — mais pour CE formulaire précis, l'étape 1
+  // (tap sur un preset) avance automatiquement à l'étape 2 en ne
+  // remplissant QUE le nom, qui seul suffisait à satisfaire le garde de
+  // `ajouterEntreeBudget` — un simple tap de preset suivi d'un tap
+  // accidentel en dehors créait donc une vraie catégorie Entrée
+  // (recurrente=true) sans qu'aucune saisie délibérée à l'étape 2 n'ait
+  // eu lieu. Ce flag distingue "vient d'arriver à l'étape 2 via l'auto-fill"
+  // de "a réellement touché un champ de l'étape 2" — jamais à `true` au
+  // moment du tap sur un preset, seulement sur une interaction
+  // SUBSÉQUENTE (nom modifié, montant habituel saisi, type changé). Lu
+  // UNIQUEMENT par le tap-en-dehors (fermerModalAjoutEntreeBudgetAvecSauvegarde)
+  // — le bouton "Ajouter" reste, lui, toujours un geste délibéré en soi,
+  // jamais bloqué par ce flag.
+  const [entreeBudgetEtape2Engagee, setEntreeBudgetEtape2Engagee] =
     useState(false);
   const [creationEntreeBudgetEnCours, setCreationEntreeBudgetEnCours] =
     useState(false);
@@ -671,6 +730,20 @@ export default function Dashboard() {
   // brut (comme budgetTemp), jamais pré-parsé ici, pour laisser l'utilisateur
   // taper librement avant la sauvegarde.
   const [montantHabituelTemp, setMontantHabituelTemp] = useState("");
+  // RÈGLE À NE JAMAIS CASSER — REFONTE DU 2026-10-02 (demande explicite) :
+  // remplace l'ancien toggle "Se répète chaque mois" pour une catégorie
+  // "Entrée" dans CE formulaire d'édition — même framing Fixe/Variable que
+  // le nouveau formulaire de création (cf. RÈGLE sur typeEntreeBudget).
+  // Purement local à l'UI, jamais persisté tel quel : ne pilote QUE
+  // montantHabituel à la sauvegarde (cf. sauvegarderEnveloppe) —
+  // recurrente/repeteChaqueMois d'une Entrée déjà existante restent
+  // PRÉSERVÉS tels quels par ce formulaire, jamais réécrits (protège en
+  // particulier les entrées "Report du mois précédent", générées par
+  // l'archivage avec recurrente=false — ce formulaire ne doit jamais les
+  // transformer en entrées récurrentes à l'insu de l'utilisateur).
+  const [modeEntreeTemp, setModeEntreeTemp] = useState<"Fixe" | "Variable">(
+    "Fixe",
+  );
 
   const [modalAjoutVisible, setModalAjoutVisible] = useState(false);
   const [nouveauNom, setNouveauNom] = useState("");
@@ -1048,6 +1121,7 @@ export default function Dashboard() {
     setMontantHabituelTemp(
       env.montantHabituel !== undefined ? String(env.montantHabituel) : "",
     );
+    setModeEntreeTemp(env.montantHabituel !== undefined ? "Fixe" : "Variable");
     setModalEnveloppeVisible(true);
   };
 
@@ -1076,19 +1150,45 @@ export default function Dashboard() {
     const env = objStore.enveloppes.find((e) => e.id === id);
     if (env) ouvrirEditionEnveloppe(env);
   };
+  // RÈGLE : déclarée ici (avant le useFocusEffect qui l'utilise, cf.
+  // ouvrirCreationEntree plus bas) — le React Compiler (experiments.reactCompiler,
+  // app.json) rejette toute référence à une const déclarée plus loin dans
+  // le même composant, même depuis une closure dont l'exécution réelle est
+  // différée (contrainte spécifique au compiler, pas une limite JS pure).
+  const reinitialiserAjoutEntreeBudget = () => {
+    setEtapeEntreeBudget(1);
+    setPresetSelectionneEntree(null);
+    setNomEntreeBudget("");
+    setTypeEntreeBudget("Fixe");
+    setMontantHabituelEntreeBudget("");
+    setEntreeBudgetEtape2Engagee(false);
+  };
   const dernierOuvrirCategorieTraite = useRef<string | null>(null);
+  // RÈGLE : cf. RÈGLE sur `ouvrirCreationEntree` plus haut — même ref
+  // "dernier traité" que ouvrirCategorie, mais une valeur "1" simple
+  // suffit (toujours la même action, jamais un id à distinguer).
+  const dernierOuvrirCreationEntreeTraite = useRef<string | null>(null);
   useFocusEffect(
     useCallback(() => {
       if (!params.ouvrirCategorie) {
         dernierOuvrirCategorieTraite.current = null;
-        return;
+      } else if (params.ouvrirCategorie !== dernierOuvrirCategorieTraite.current) {
+        dernierOuvrirCategorieTraite.current = params.ouvrirCategorie;
+        ouvrirCategorieDepuisParam(params.ouvrirCategorie);
+        router.setParams({ ouvrirCategorie: undefined });
       }
-      if (params.ouvrirCategorie === dernierOuvrirCategorieTraite.current) return;
-      dernierOuvrirCategorieTraite.current = params.ouvrirCategorie;
-      ouvrirCategorieDepuisParam(params.ouvrirCategorie);
-      router.setParams({ ouvrirCategorie: undefined });
+      if (!params.ouvrirCreationEntree) {
+        dernierOuvrirCreationEntreeTraite.current = null;
+      } else if (
+        params.ouvrirCreationEntree !== dernierOuvrirCreationEntreeTraite.current
+      ) {
+        dernierOuvrirCreationEntreeTraite.current = params.ouvrirCreationEntree;
+        reinitialiserAjoutEntreeBudget();
+        setModalAjoutEntreeBudgetVisible(true);
+        router.setParams({ ouvrirCreationEntree: undefined });
+      }
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [params.ouvrirCategorie, router]),
+    }, [params.ouvrirCategorie, params.ouvrirCreationEntree, router]),
   );
 
   const sauvegarderEnveloppe = () => {
@@ -1133,68 +1233,86 @@ export default function Dashboard() {
       objStore.renommerCategoriePartout(enveloppeEnEdition.nom, nouveauNom);
     }
     setEnveloppes(
-      enveloppes.map((e) =>
-        e.id === enveloppeEnEdition.id
-          ? {
-              ...e,
-              nom: nouveauNom || e.nom,
-              budget: parseMontant(budgetTemp) || 0,
-              couleur: couleurTemp,
-              type: typeTemp,
-              // RÈGLE : pour "Entrée", `recurrente` (le mécanisme RÉEL de
-              // reconduction mensuelle de l'enveloppe, cf.
-              // archiverMoisActuelInterne dans app/store.ts, qui filtre sur
-              // e.recurrente) est piloté par le même toggle "Se répète
-              // chaque mois" que repeteChaqueMois (affichage Planning) —
-              // un seul toggle pour une seule notion de récurrence, cf.
-              // suppression du toggle "Récurrente" dédoublé pour ce type.
-              recurrente:
-                typeTemp === "Variable"
-                  ? recurrenteTemp
-                  : typeTemp === "Entrée"
-                    ? repeteChaqueMoisTemp
-                    : false,
-              frequenceJours:
-                typeTemp === "Variable" && recurrenteTemp ? 30 : undefined,
-              dateFixe:
-                typeTemp === "Fixe" || typeTemp === "Entrée"
-                  ? dateTemp
-                  : undefined,
-              payee: typeTemp === "Fixe" ? (e.payee ?? false) : undefined,
-              repeteChaqueMois:
-                typeTemp === "Fixe" || typeTemp === "Entrée"
-                  ? repeteChaqueMoisTemp
-                  : undefined,
-              afficherDansPlanning:
-                typeTemp === "Fixe" || typeTemp === "Entrée"
-                  ? afficherPlanningTemp
-                  : undefined,
-              // Une catégorie Variable qui devient non récurrente ici et
-              // n'a encore jamais eu de mois de comptage (ex: elle était
-              // récurrente depuis sa création, donc jamais concernée par le
-              // backfill) est rattachée à maintenant, pour ne pas
-              // disparaître immédiatement de "Tes catégories" au moment de
-              // cet enregistrement. Une catégorie déjà non récurrente garde
-              // son mois de comptage existant, même modifiée par ailleurs —
-              // sinon toute retouche (couleur, budget...) la "ressusciterait"
-              // en repoussant indéfiniment son expiration.
-              moisComptage:
-                typeTemp === "Variable" && !recurrenteTemp && !e.moisComptage
-                  ? premierJourMoisISO(new Date())
-                  : e.moisComptage,
-              // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts)
-              // — pertinent uniquement pour une Entrée récurrente, jamais
-              // conservé si le toggle "Se répète chaque mois" est désactivé
-              // (sinon une valeur orpheline resterait en base, invisible
-              // dans ce formulaire, mais reprise à la prochaine réactivation
-              // du toggle sans que l'utilisateur ne l'ait jamais revue).
-              montantHabituel:
-                typeTemp === "Entrée" && repeteChaqueMoisTemp
-                  ? montantHabituelDepuisTexte(montantHabituelTemp)
-                  : undefined,
-            }
-          : e,
-      ),
+      enveloppes.map((e) => {
+        if (e.id !== enveloppeEnEdition.id) return e;
+        // RÈGLE À NE JAMAIS CASSER — REFONTE DU 2026-10-02 (demande
+        // explicite) : une Entrée DÉJÀ existante garde son
+        // recurrente/repeteChaqueMois tel quel, jamais réécrit par ce
+        // formulaire redessiné (protège notamment "Report du mois
+        // précédent", généré par l'archivage avec recurrente=false — ce
+        // formulaire ne doit jamais le transformer en entrée récurrente à
+        // l'insu de l'utilisateur, cf. RÈGLE sur modeEntreeTemp plus haut).
+        // Une catégorie FRAÎCHEMENT CONVERTIE en "Entrée" (typeTemp
+        // changé depuis Fixe/Variable) suit au contraire le nouveau
+        // comportement par défaut (toujours récurrente), cohérent avec le
+        // formulaire de création.
+        const etaitDejaEntree = e.type === "Entrée";
+        return {
+          ...e,
+          nom: nouveauNom || e.nom,
+          budget: parseMontant(budgetTemp) || 0,
+          couleur: couleurTemp,
+          type: typeTemp,
+          recurrente:
+            typeTemp === "Variable"
+              ? recurrenteTemp
+              : typeTemp === "Entrée"
+                ? etaitDejaEntree
+                  ? e.recurrente
+                  : true
+                : false,
+          frequenceJours:
+            typeTemp === "Variable" && recurrenteTemp ? 30 : undefined,
+          dateFixe:
+            typeTemp === "Fixe"
+              ? dateTemp
+              : typeTemp === "Entrée"
+                ? etaitDejaEntree
+                  ? e.dateFixe
+                  : dateVersISO(new Date())
+                : undefined,
+          payee: typeTemp === "Fixe" ? (e.payee ?? false) : undefined,
+          repeteChaqueMois:
+            typeTemp === "Fixe"
+              ? repeteChaqueMoisTemp
+              : typeTemp === "Entrée"
+                ? etaitDejaEntree
+                  ? e.repeteChaqueMois
+                  : true
+                : undefined,
+          afficherDansPlanning:
+            typeTemp === "Fixe"
+              ? afficherPlanningTemp
+              : typeTemp === "Entrée"
+                ? etaitDejaEntree
+                  ? e.afficherDansPlanning
+                  : false
+                : undefined,
+          // Une catégorie Variable qui devient non récurrente ici et
+          // n'a encore jamais eu de mois de comptage (ex: elle était
+          // récurrente depuis sa création, donc jamais concernée par le
+          // backfill) est rattachée à maintenant, pour ne pas
+          // disparaître immédiatement de "Tes catégories" au moment de
+          // cet enregistrement. Une catégorie déjà non récurrente garde
+          // son mois de comptage existant, même modifiée par ailleurs —
+          // sinon toute retouche (couleur, budget...) la "ressusciterait"
+          // en repoussant indéfiniment son expiration.
+          moisComptage:
+            typeTemp === "Variable" && !recurrenteTemp && !e.moisComptage
+              ? premierJourMoisISO(new Date())
+              : typeTemp === "Entrée" && !etaitDejaEntree
+                ? premierJourMoisISO(new Date())
+                : e.moisComptage,
+          // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts)
+          // — pilotée par modeEntreeTemp (Fixe/Variable), jamais par
+          // repeteChaqueMoisTemp (qui ne contrôle plus ce champ depuis la
+          // refonte du 2026-10-02).
+          montantHabituel:
+            typeTemp === "Entrée" && modeEntreeTemp === "Fixe"
+              ? montantHabituelDepuisTexte(montantHabituelTemp)
+              : undefined,
+        };
+      }),
     );
     setModalEnveloppeVisible(false);
   };
@@ -1331,48 +1449,54 @@ export default function Dashboard() {
     setModalAjoutVisible(false);
   };
 
+  // RÈGLE : couleur et date/mois de comptage ne sont plus demandés à
+  // l'utilisateur (refonte du 2026-10-02) — couleur auto-assignée (même
+  // mécanisme que creerNouvelleCategorieInline, budget.tsx), dateFixe/
+  // moisComptage pris au moment même de la création (aujourd'hui), jamais
+  // un champ éditable dans ce formulaire simplifié.
   const ajouterEntreeBudget = async () => {
-    if (
-      !nomEntreeBudget ||
-      !montantEntreeBudget ||
-      creationEntreeBudgetEnCours
-    )
-      return;
+    if (!nomEntreeBudget || creationEntreeBudgetEnCours) return;
     setCreationEntreeBudgetEnCours(true);
+    const montantHabituel =
+      typeEntreeBudget === "Fixe"
+        ? montantHabituelDepuisTexte(montantHabituelEntreeBudget)
+        : undefined;
+    const maintenantCreation = new Date();
     const nouvelle = await objStore.ajouterEnveloppe({
       nom: nomEntreeBudget,
       depense: 0,
-      budget: parseMontant(montantEntreeBudget),
-      couleur: couleurEntreeBudget,
-      type: "Entrée",
-      recurrente: recurrenteEntreeBudget,
-      dateFixe: dateEntreeBudget,
-      moisComptage: moisComptageEntreeBudget,
-      // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts).
-      montantHabituel: recurrenteEntreeBudget
-        ? montantHabituelDepuisTexte(montantHabituelEntreeBudget)
-        : undefined,
-    });
-    setCreationEntreeBudgetEnCours(false);
-    if (!nouvelle) return;
-    setNomEntreeBudget("");
-    setMontantEntreeBudget("");
-    setDateEntreeBudget(dateVersISO(new Date()));
-    setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
-    setRecurrenteEntreeBudget(false);
-    setMontantHabituelEntreeBudget("");
-    setCouleurEntreeBudget(
-      couleurLaPlusDistincte(
+      // RÈGLE : plus de champ "Montant" distinct dans cette refonte — le
+      // budget (montant attendu/affiché) reprend le montant habituel s'il
+      // est connu (Fixe), sinon 0 (Variable, inconnu tant que l'utilisateur
+      // ne l'a pas reçu et confirmé).
+      budget: montantHabituel ?? 0,
+      couleur: couleurLaPlusDistincte(
         PALETTE_COULEURS,
         enveloppes.map((e) => e.couleur),
       ),
-    );
-    setPaletteOuverteEntreeBudget(false);
+      type: "Entrée",
+      // RÈGLE : toujours true dans ce formulaire refondu — cf. RÈGLE sur
+      // typeEntreeBudget plus haut, les 2 cas (Fixe/Variable) demandés
+      // sont tous deux récurrents, plus de cas "ponctuel" ici.
+      recurrente: true,
+      repeteChaqueMois: true,
+      dateFixe: dateVersISO(maintenantCreation),
+      moisComptage: premierJourMoisISO(maintenantCreation),
+      montantHabituel,
+    });
+    setCreationEntreeBudgetEnCours(false);
+    if (!nouvelle) return;
+    reinitialiserAjoutEntreeBudget();
     setModalAjoutEntreeBudgetVisible(false);
   };
 
   const fermerModalAjoutEntreeBudgetAvecSauvegarde = () => {
-    ajouterEntreeBudget();
+    // RÈGLE : cf. RÈGLE sur entreeBudgetEtape2Engagee plus haut — un tap en
+    // dehors n'enregistre que si l'étape 2 a été réellement engagée, jamais
+    // sur la seule base de l'auto-fill d'un tap de preset.
+    if (etapeEntreeBudget === 2 && entreeBudgetEtape2Engagee) {
+      ajouterEntreeBudget();
+    }
     setModalAjoutEntreeBudgetVisible(false);
   };
 
@@ -1388,8 +1512,7 @@ export default function Dashboard() {
   const ouvrirAjoutEntreeDepuisFab = () => {
     setFabMenuOuvert(false);
     if (bloquerSiInvite(isGuest, router)) return;
-    setDateEntreeBudget(dateVersISO(new Date()));
-    setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
+    reinitialiserAjoutEntreeBudget();
     setModalAjoutEntreeBudgetVisible(true);
   };
 
@@ -2314,14 +2437,7 @@ export default function Dashboard() {
               style={styles.budgetAjouterBouton}
               activeOpacity={0.7}
               onPress={() => {
-                setDateEntreeBudget(dateVersISO(new Date()));
-                setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
-                setCouleurEntreeBudget(
-                  couleurLaPlusDistincte(
-                    PALETTE_COULEURS,
-                    enveloppes.map((e) => e.couleur),
-                  ),
-                );
+                reinitialiserAjoutEntreeBudget();
                 setModalAjoutEntreeBudgetVisible(true);
               }}
             >
@@ -2717,183 +2833,149 @@ export default function Dashboard() {
               onPress={() => {}}
             >
               <Text style={[styles.modalTitre, { color: C.texte }]}>
-                Nouvelle entrée de Budget
+                {etapeEntreeBudget === 1 ? "Nouvelle entrée" : "Personnalise"}
               </Text>
 
               <ScrollView
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
-                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                  Nom
-                </Text>
-                <TextInput
-                  style={[
-                    styles.input,
-                    { backgroundColor: C.fondSecondaire, color: C.texte },
-                  ]}
-                  placeholder="Ex : Salaire, Prime..."
-                  placeholderTextColor={C.texteMuted}
-                  value={nomEntreeBudget}
-                  onChangeText={setNomEntreeBudget}
-                  returnKeyType="done"
-                />
-
-                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                  Montant
-                </Text>
-                <View style={styles.modalInputRow}>
-                  <TextInput
-                    style={[
-                      styles.input,
-                      { flex: 1, backgroundColor: C.fondSecondaire, color: C.texte },
-                    ]}
-                    placeholder="0"
-                    placeholderTextColor={C.texteMuted}
-                    keyboardType="decimal-pad"
-                    value={montantEntreeBudget}
-                    onChangeText={(text) =>
-                      setMontantEntreeBudget(sanitizeMontantInput(text))
-                    }
-                    returnKeyType="done"
-                    inputAccessoryViewID={ACCESSORY_ID}
-                  />
-                  <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
-                </View>
-
-                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                  Date réelle
-                </Text>
-                <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
-                  <Calendar
-                    current={dateEntreeBudget}
-                    onDayPress={(day) => {
-                      setDateEntreeBudget(day.dateString);
-                      setMoisComptageEntreeBudget(
-                        premierJourMoisISO(parseDateFixeLocale(day.dateString)),
+                {etapeEntreeBudget === 1 ? (
+                  <View style={styles.entreePresetsGrid}>
+                    {PRESETS_ENTREE.map((preset) => {
+                      const selectionne = presetSelectionneEntree === preset.nom;
+                      return (
+                        <TouchableOpacity
+                          key={preset.nom}
+                          style={[
+                            styles.entreePresetCard,
+                            {
+                              backgroundColor: selectionne
+                                ? "#E1F5EE"
+                                : C.fondSecondaire,
+                              borderColor: selectionne ? "#1D9E75" : "transparent",
+                            },
+                          ]}
+                          onPress={() => {
+                            setPresetSelectionneEntree(preset.nom);
+                            setNomEntreeBudget(
+                              preset.nom === "Autre..." ? "" : preset.nom,
+                            );
+                            setEtapeEntreeBudget(2);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons
+                            name={preset.icone}
+                            size={26}
+                            color={selectionne ? "#1D9E75" : C.texte}
+                          />
+                          <Text
+                            style={[
+                              styles.entreePresetTexte,
+                              { color: selectionne ? "#1D9E75" : C.texte },
+                            ]}
+                          >
+                            {preset.nom}
+                          </Text>
+                        </TouchableOpacity>
                       );
-                    }}
-                    markedDates={{
-                      [dateEntreeBudget]: { selected: true, selectedColor: C.purple },
-                    }}
-                    theme={{
-                      calendarBackground: C.carte,
-                      dayTextColor: C.texte,
-                      monthTextColor: C.texte,
-                      textDisabledColor: C.texteMuted,
-                      textSectionTitleColor: C.texteMuted,
-                      selectedDayTextColor: "#FFFFFF",
-                      selectedDayBackgroundColor: C.purple,
-                      todayTextColor: C.purple,
-                      arrowColor: C.purple,
-                    }}
-                  />
-                </View>
+                    })}
+                  </View>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      style={styles.entreeRetourBouton}
+                      onPress={() => setEtapeEntreeBudget(1)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="chevron-back" size={16} color={C.texteMuted} />
+                      <Text
+                        style={[styles.entreeRetourTexte, { color: C.texteMuted }]}
+                      >
+                        Changer de catégorie
+                      </Text>
+                    </TouchableOpacity>
 
-                <View style={styles.switchLabelLigne}>
-                  <Text style={[styles.modalLabel, { color: C.texteMuted, marginBottom: 0 }]}>
-                    Compter pour le mois de
-                  </Text>
-                  <InfoBulle
-                    titre="Compter pour le mois de"
-                    texte="Par défaut, le mois calendaire de la date réelle. Change-le si tu veux qu'un montant reçu en fin de mois soit compté pour le mois suivant."
-                  />
-                </View>
-                <View style={styles.typeRow}>
-                  {Array.from({ length: 4 }, (_, i) => {
-                    const d = new Date(
-                      maintenant.getFullYear(),
-                      maintenant.getMonth() + i,
-                      1,
-                    );
-                    const iso = premierJourMoisISO(d);
-                    const selectionne = moisComptageEntreeBudget === iso;
-                    return (
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Nom
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.input,
+                        { backgroundColor: C.fondSecondaire, color: C.texte },
+                      ]}
+                      placeholder="Ex : Salaire, Prime..."
+                      placeholderTextColor={C.texteMuted}
+                      value={nomEntreeBudget}
+                      onChangeText={(text) => {
+                        setNomEntreeBudget(text);
+                        setEntreeBudgetEtape2Engagee(true);
+                      }}
+                      returnKeyType="done"
+                    />
+
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Type
+                    </Text>
+                    <View style={styles.typeRow}>
                       <TouchableOpacity
-                        key={iso}
                         style={[
                           styles.typeChip,
                           { backgroundColor: C.fondSecondaire },
-                          selectionne && { backgroundColor: C.purple },
+                          typeEntreeBudget === "Fixe" && {
+                            backgroundColor: C.purple,
+                          },
                         ]}
-                        onPress={() => setMoisComptageEntreeBudget(iso)}
+                        onPress={() => {
+                          setTypeEntreeBudget("Fixe");
+                          setEntreeBudgetEtape2Engagee(true);
+                        }}
                         activeOpacity={0.7}
                       >
                         <Text
                           style={[
                             styles.typeChipTexte,
                             { color: C.texteMuted },
-                            selectionne && styles.typeChipTexteActif,
+                            typeEntreeBudget === "Fixe" &&
+                              styles.typeChipTexteActif,
                           ]}
                         >
-                          {d.toLocaleDateString("fr-FR", { month: "long" })}
+                          Fixe
                         </Text>
                       </TouchableOpacity>
-                    );
-                  })}
-                </View>
+                      <TouchableOpacity
+                        style={[
+                          styles.typeChip,
+                          { backgroundColor: C.fondSecondaire },
+                          typeEntreeBudget === "Variable" && {
+                            backgroundColor: C.purple,
+                          },
+                        ]}
+                        onPress={() => {
+                          setTypeEntreeBudget("Variable");
+                          // RÈGLE : jamais garder une valeur orpheline
+                          // grisée/invisible — cf. même précaution que les
+                          // 2 autres formulaires de catégorie Entrée
+                          // (vidé si la condition d'affichage change).
+                          setMontantHabituelEntreeBudget("");
+                          setEntreeBudgetEtape2Engagee(true);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text
+                          style={[
+                            styles.typeChipTexte,
+                            { color: C.texteMuted },
+                            typeEntreeBudget === "Variable" &&
+                              styles.typeChipTexteActif,
+                          ]}
+                        >
+                          Variable
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
 
-                <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                  Couleur
-                </Text>
-                <TouchableOpacity
-                  style={[
-                    styles.couleurTiroirBouton,
-                    { backgroundColor: C.fondSecondaire },
-                  ]}
-                  onPress={() =>
-                    setPaletteOuverteEntreeBudget(!paletteOuverteEntreeBudget)
-                  }
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[
-                      styles.couleurRond,
-                      { backgroundColor: couleurEntreeBudget },
-                    ]}
-                  />
-                  <Text style={[styles.couleurTiroirTexte, { color: C.texte }]}>
-                    Choisir une couleur
-                  </Text>
-                  <Text style={[styles.couleurChevron, { color: C.texteMuted }]}>
-                    {paletteOuverteEntreeBudget ? "▾" : "▸"}
-                  </Text>
-                </TouchableOpacity>
-                {paletteOuverteEntreeBudget && (
-                  <ColorPicker
-                    value={couleurEntreeBudget}
-                    onChange={(c) => {
-                      setCouleurEntreeBudget(c);
-                      setPaletteOuverteEntreeBudget(false);
-                    }}
-                    borderColor={C.texte}
-                    couleursUtilisees={enveloppes.map((e) => e.couleur)}
-                  />
-                )}
-
-                <View style={styles.switchRow}>
-                  <View style={styles.switchRowLabel}>
-                    <Text style={[styles.switchLabel, { color: C.texte }]}>
-                      Répéter ce montant chaque mois
-                    </Text>
-                    <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                      Une nouvelle entrée identique sera créée automatiquement
-                      le mois suivant
-                    </Text>
-                  </View>
-                  <Switch
-                    value={recurrenteEntreeBudget}
-                    onValueChange={setRecurrenteEntreeBudget}
-                    trackColor={{ false: C.separateur, true: C.purpleLight }}
-                    thumbColor={recurrenteEntreeBudget ? C.purple : "#FFF"}
-                  />
-                </View>
-
-                {/* RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel
-                    (app/store.ts), même garde que les 2 autres formulaires
-                    de catégorie Entrée. */}
-                {recurrenteEntreeBudget && (
-                  <>
                     <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
                       Montant habituel (optionnel)
                     </Text>
@@ -2901,53 +2983,78 @@ export default function Dashboard() {
                       <TextInput
                         style={[
                           styles.input,
-                          { flex: 1, backgroundColor: C.fondSecondaire, color: C.texte },
+                          {
+                            flex: 1,
+                            backgroundColor:
+                              typeEntreeBudget === "Variable"
+                                ? C.separateur
+                                : C.fondSecondaire,
+                            color: C.texte,
+                          },
                         ]}
+                        editable={typeEntreeBudget === "Fixe"}
                         placeholder="Laisser vide si le montant varie"
                         placeholderTextColor={C.texteMuted}
                         keyboardType="decimal-pad"
                         value={montantHabituelEntreeBudget}
-                        onChangeText={(text) =>
-                          setMontantHabituelEntreeBudget(sanitizeMontantInput(text))
-                        }
+                        onChangeText={(text) => {
+                          setMontantHabituelEntreeBudget(sanitizeMontantInput(text));
+                          setEntreeBudgetEtape2Engagee(true);
+                        }}
                         returnKeyType="done"
                         inputAccessoryViewID={ACCESSORY_ID}
                       />
                       <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
                     </View>
-                    <Text style={[styles.switchSub, { color: C.texteMuted, marginTop: -8, marginBottom: 12 }]}>
-                      Si renseigné, ce montant sera automatiquement compté comme reçu chaque mois — sinon tu le confirmeras toi-même.
-                    </Text>
+
+                    {typeEntreeBudget === "Variable" && (
+                      <View
+                        style={[
+                          styles.entreeInfoVariable,
+                          { backgroundColor: "#E1F5EE" },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.entreeInfoVariableTexte,
+                            { color: "#1D9E75" },
+                          ]}
+                        >
+                          Chaque mois, cette catégorie apparaîtra à 0 €. Tu
+                          remplis le montant quand tu reçois l&apos;argent.
+                        </Text>
+                      </View>
+                    )}
+
+                    <TouchableOpacity
+                      style={[
+                        styles.btnAjouter,
+                        {
+                          backgroundColor: C.hero,
+                          opacity: creationEntreeBudgetEnCours ? 0.6 : 1,
+                        },
+                      ]}
+                      onPress={ajouterEntreeBudget}
+                      activeOpacity={0.7}
+                      disabled={creationEntreeBudgetEnCours}
+                    >
+                      {creationEntreeBudgetEnCours ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.btnAjouterTexte}>Ajouter</Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.btnAnnuler}
+                      onPress={() => setModalAjoutEntreeBudgetVisible(false)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
+                        Annuler
+                      </Text>
+                    </TouchableOpacity>
                   </>
                 )}
-
-                <TouchableOpacity
-                  style={[
-                    styles.btnAjouter,
-                    {
-                      backgroundColor: C.hero,
-                      opacity: creationEntreeBudgetEnCours ? 0.6 : 1,
-                    },
-                  ]}
-                  onPress={ajouterEntreeBudget}
-                  activeOpacity={0.7}
-                  disabled={creationEntreeBudgetEnCours}
-                >
-                  {creationEntreeBudgetEnCours ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.btnAjouterTexte}>Ajouter</Text>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.btnAnnuler}
-                  onPress={() => setModalAjoutEntreeBudgetVisible(false)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.btnAnnulerTexte, { color: C.texteMuted }]}>
-                    Annuler
-                  </Text>
-                </TouchableOpacity>
               </ScrollView>
             </TouchableOpacity>
           </TouchableOpacity>
@@ -3162,100 +3269,118 @@ export default function Dashboard() {
                   </View>
                 )}
 
+                {/* RÈGLE À NE JAMAIS CASSER — REFONTE DU 2026-10-02 (demande
+                    explicite) : même framing Fixe/Variable que le nouveau
+                    formulaire de création — plus de date/"se répète"/
+                    "afficher dans Planning" éditables ici (champs retirés
+                    par la simplification demandée), ces 3 valeurs restent
+                    PRÉSERVÉES telles quelles pour une Entrée déjà
+                    existante (cf. RÈGLE sur modeEntreeTemp plus haut),
+                    seul montantHabituel reste pilotable depuis ce
+                    formulaire. */}
                 {typeTemp === "Entrée" && (
                   <>
-                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Date prévue</Text>
-                    <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
-                      <Calendar
-                        current={dateTemp}
-                        onDayPress={(day) => setDateTemp(day.dateString)}
-                        markedDates={{
-                          [dateTemp]: { selected: true, selectedColor: C.vert },
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Type
+                    </Text>
+                    <View style={styles.typeRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.typeChip,
+                          { backgroundColor: C.fondSecondaire },
+                          modeEntreeTemp === "Fixe" && {
+                            backgroundColor: C.purple,
+                          },
+                        ]}
+                        onPress={() => setModeEntreeTemp("Fixe")}
+                        activeOpacity={0.7}
+                      >
+                        <Text
+                          style={[
+                            styles.typeChipTexte,
+                            { color: C.texteMuted },
+                            modeEntreeTemp === "Fixe" &&
+                              styles.typeChipTexteActif,
+                          ]}
+                        >
+                          Fixe
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.typeChip,
+                          { backgroundColor: C.fondSecondaire },
+                          modeEntreeTemp === "Variable" && {
+                            backgroundColor: C.purple,
+                          },
+                        ]}
+                        onPress={() => {
+                          setModeEntreeTemp("Variable");
+                          setMontantHabituelTemp("");
                         }}
-                        theme={{
-                          calendarBackground: C.carte,
-                          dayTextColor: C.texte,
-                          monthTextColor: C.texte,
-                          textDisabledColor: C.texteMuted,
-                          textSectionTitleColor: C.texteMuted,
-                          selectedDayTextColor: "#FFFFFF",
-                          selectedDayBackgroundColor: C.vert,
-                          todayTextColor: C.vert,
-                          arrowColor: C.vert,
-                        }}
-                      />
+                        activeOpacity={0.7}
+                      >
+                        <Text
+                          style={[
+                            styles.typeChipTexte,
+                            { color: C.texteMuted },
+                            modeEntreeTemp === "Variable" &&
+                              styles.typeChipTexteActif,
+                          ]}
+                        >
+                          Variable
+                        </Text>
+                      </TouchableOpacity>
                     </View>
 
-                    <View style={styles.switchRow}>
-                      <View>
-                        <Text style={[styles.switchLabel, { color: C.texte }]}>
-                          Se répète chaque mois
-                        </Text>
-                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                          Comme un salaire ou une allocation
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Montant habituel (optionnel)
+                    </Text>
+                    <View style={styles.modalInputRow}>
+                      <TextInput
+                        style={[
+                          styles.input,
+                          {
+                            flex: 1,
+                            backgroundColor:
+                              modeEntreeTemp === "Variable"
+                                ? C.separateur
+                                : C.fondSecondaire,
+                            color: C.texte,
+                          },
+                        ]}
+                        editable={modeEntreeTemp === "Fixe"}
+                        placeholder="Laisser vide si le montant varie"
+                        placeholderTextColor={C.texteMuted}
+                        keyboardType="decimal-pad"
+                        value={montantHabituelTemp}
+                        onChangeText={(text) =>
+                          setMontantHabituelTemp(sanitizeMontantInput(text))
+                        }
+                        returnKeyType="done"
+                        inputAccessoryViewID={ACCESSORY_ID}
+                      />
+                      <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
+                    </View>
+
+                    {modeEntreeTemp === "Variable" && (
+                      <View
+                        style={[
+                          styles.entreeInfoVariable,
+                          { backgroundColor: "#E1F5EE" },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.entreeInfoVariableTexte,
+                            { color: "#1D9E75" },
+                          ]}
+                        >
+                          Chaque mois, cette catégorie apparaîtra à 0 €. Tu
+                          remplis le montant quand tu reçois l&apos;argent.
                         </Text>
                       </View>
-                      <Switch
-                        value={repeteChaqueMoisTemp}
-                        onValueChange={setRepeteChaqueMoisTemp}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={repeteChaqueMoisTemp ? C.purple : "#FFF"}
-                      />
-                    </View>
-
-                    {/* RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel
-                        (app/store.ts) — visible UNIQUEMENT si repeteChaqueMoisTemp,
-                        jamais pour une Entrée ponctuelle (aucun sens à "pré-remplir
-                        le mois suivant" pour une entrée qui ne se reconduit pas). */}
-                    {repeteChaqueMoisTemp && (
-                      <>
-                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                          Montant habituel (optionnel)
-                        </Text>
-                        <View style={styles.modalInputRow}>
-                          <TextInput
-                            style={[
-                              styles.input,
-                              {
-                                flex: 1,
-                                backgroundColor: C.fondSecondaire,
-                                color: C.texte,
-                              },
-                            ]}
-                            placeholder="Laisser vide si le montant varie"
-                            placeholderTextColor={C.texteMuted}
-                            keyboardType="decimal-pad"
-                            value={montantHabituelTemp}
-                            onChangeText={(text) =>
-                              setMontantHabituelTemp(sanitizeMontantInput(text))
-                            }
-                            returnKeyType="done"
-                            inputAccessoryViewID={ACCESSORY_ID}
-                          />
-                          <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
-                        </View>
-                        <Text style={[styles.switchSub, { color: C.texteMuted, marginTop: -8, marginBottom: 12 }]}>
-                          Si renseigné, ce montant sera automatiquement compté comme reçu chaque mois — sinon tu le confirmeras toi-même.
-                        </Text>
-                      </>
                     )}
-
-                    <View style={styles.switchRow}>
-                      <View>
-                        <Text style={[styles.switchLabel, { color: C.texte }]}>
-                          Afficher dans Planning
-                        </Text>
-                        <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                          Visible aussi dans ton agenda
-                        </Text>
-                      </View>
-                      <Switch
-                        value={afficherPlanningTemp}
-                        onValueChange={setAfficherPlanningTemp}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={afficherPlanningTemp ? C.purple : "#FFF"}
-                      />
-                    </View>
                   </>
                 )}
 
@@ -4898,6 +5023,44 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 3,
   },
+  // RÈGLE : cf. RÈGLE sur PRESETS_ENTREE — étape 1 du flux guidé "Nouvelle
+  // entrée" (refonte du 2026-10-02).
+  entreePresetsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  entreePresetCard: {
+    width: "31%",
+    aspectRatio: 1,
+    borderRadius: 16,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+    gap: 8,
+    padding: 6,
+  },
+  entreePresetTexte: {
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  entreeRetourBouton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginBottom: 16,
+  },
+  entreeRetourTexte: { fontSize: 14, fontWeight: "600" },
+  entreeInfoVariable: {
+    borderRadius: 13,
+    padding: 14,
+    marginTop: -4,
+    marginBottom: 14,
+  },
+  entreeInfoVariableTexte: { fontSize: 13, lineHeight: 19 },
   calendarWrap: {
     borderRadius: 14,
     overflow: "hidden",
