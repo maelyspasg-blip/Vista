@@ -1773,6 +1773,52 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Statut** : **CORRIGÉ (2026-09-19)** — tsc/lint vérifiés propres (10
   lignes / 49 problèmes).
 
+### P059 — Cartes "Entrées à venir" de Budget en lecture seule, aucune modification possible
+
+- **Gravité** : 🟡 MINEUR (ergonomie — aucune perte de donnée, juste une
+  action manquante)
+- **Trouvé par** : demande explicite de Maëlys, 2026-09-27.
+- **Fichiers** : `app/(tabs)/budget.tsx` (rendu de la carte "envelope" dans
+  "À VENIR CE MOIS-CI"), `app/(tabs)/index.tsx` (nouveau deep link
+  `params.ouvrirCategorie`).
+- **Description** : dans la carte "À VENIR CE MOIS-CI" de Budget, les
+  lignes de type `envelope` (catégories "Fixe"/"Entrée" à venir,
+  `enveloppesAVenir`/`entreesAVenir`) se rendaient dans un simple `<View>`
+  non interactif — contrairement aux lignes de type `evenement`, déjà
+  tappables (`setGestionEvenement`). Aucune modale d'édition de catégorie
+  n'existe dans `budget.tsx` lui-même : la seule modale de modification
+  d'une enveloppe (`ouvrirEditionEnveloppe`/`modalEnveloppeVisible`) vit
+  dans `app/(tabs)/index.tsx` (Aperçu), déclenchée par le tap d'une carte
+  dans "Tes catégories".
+- **Correction appliquée** (scope volontairement limité aux "Entrées à
+  venir", comme demandé — les cartes "Fixe" à venir restent inchangées,
+  en lecture seule) :
+  - `budget.tsx` : les cartes `ligne.source === "envelope" && ligne.estEntree`
+    deviennent un `TouchableOpacity` qui navigue vers Aperçu avec
+    `router.push({ pathname: "/(tabs)", params: { ouvrirCategorie: ligne.id } })`.
+  - `index.tsx` : nouveau `useFocusEffect` (même mécanique exacte que
+    `params.ouvrirAjout`, déjà établie dans `budget.tsx` — ref "dernier
+    traité" pour ne jamais retraiter deux fois la même valeur, ni
+    redéclencher sur un focus non intentionnel de material-top-tabs) qui
+    résout `params.ouvrirCategorie` en enveloppe et appelle
+    `ouvrirEditionEnveloppe` — jamais une modale dupliquée. Catégorie
+    introuvable (supprimée entre-temps) → no-op silencieux, param quand
+    même consommé.
+  - `bloquerSiInvite` (déjà appelé au tout début d'`ouvrirEditionEnveloppe`)
+    protège nativement ce nouveau chemin sans code supplémentaire — un
+    compte invité qui tape sur une carte est redirigé comme n'importe quel
+    autre tap sur "Tes catégories".
+  - Un warning `react-hooks/exhaustive-deps` (référence à
+    `ouvrirCategorieDepuisParam` dans les deps du `useCallback`) supprimé
+    explicitement — même situation, déjà présente et non supprimée ailleurs
+    dans ce fichier et dans `planning.tsx` (une fonction qui relit
+    `objStore.*` à chaque appel plutôt que de figer sa valeur à la création
+    du callback), mais supprimée ici pour ne pas faire grimper le nombre de
+    warnings au-delà de la baseline stricte tenue tout au long de cette
+    session.
+- **Statut** : **CORRIGÉ (2026-09-27)** — tsc/lint vérifiés propres (10
+  lignes / 49 problèmes).
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 

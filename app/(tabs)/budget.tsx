@@ -2236,6 +2236,38 @@ export default function Budget() {
               );
             }
 
+            // RÈGLE À NE JAMAIS CASSER — CARTE "ENTRÉE À VENIR" CLIQUABLE
+            // (ajouté le 2026-09-27, demande explicite) : scope volontairement
+            // limité à `ligne.estEntree` — les catégories "Fixe" à venir
+            // (enveloppesAVenir) restent en lecture seule ci-dessous, jamais
+            // demandé, jamais touché ici. Ouvre la SEULE modale de
+            // modification de catégorie qui existe dans l'app (celle
+            // d'Aperçu, `ouvrirEditionEnveloppe`/`modalEnveloppeVisible`,
+            // app/(tabs)/index.tsx) — jamais dupliquée ici — via un deep
+            // link `params.ouvrirCategorie` consommé par un useFocusEffect
+            // côté Aperçu, même mécanique que `params.ouvrirAjout` déjà
+            // utilisée pour naviguer vers ce même onglet.
+            if (ligne.source === "envelope" && ligne.estEntree) {
+              return (
+                <TouchableOpacity
+                  key={ligne.id}
+                  style={[
+                    styles.fixeCard,
+                    { backgroundColor: ligne.couleur + "22" },
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/(tabs)",
+                      params: { ouvrirCategorie: ligne.id },
+                    })
+                  }
+                >
+                  {contenu}
+                </TouchableOpacity>
+              );
+            }
+
             return (
               <View
                 key={ligne.id}

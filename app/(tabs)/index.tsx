@@ -10,8 +10,8 @@ import {
   estCategorieActiveCeMois,
 } from "../../utils/budget";
 import type { CategorieFusionnee } from "../../utils/espacePartage";
-import { useRouter } from "expo-router";
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -418,6 +418,15 @@ export default function Dashboard() {
   const { reduireAnimations } = useAccessibilite();
   const C = couleurs;
   const router = useRouter();
+  // RÈGLE : deep link "ouvrir la modale de modification d'une catégorie
+  // depuis un autre onglet" (ajouté le 2026-09-27, demande explicite pour
+  // les cartes "Entrées à venir" de Budget) — même mécanique que
+  // params.ouvrirAjout (app/(tabs)/budget.tsx), jamais réinventée : un ref
+  // "dernier traité" empêche tout retraitement en boucle (material-top-tabs
+  // garde tous les onglets montés, cf. RÈGLE identique là-bas), et
+  // router.setParams({ouvrirCategorie: undefined}) consomme le param une
+  // fois traité.
+  const params = useLocalSearchParams<{ ouvrirCategorie?: string }>();
   const [fabMenuOuvert, setFabMenuOuvert] = useState(false);
   // RÈGLE À NE JAMAIS CASSER : ce déblocage est volontairement un state
   // local (pas persisté en base ni dans un store partagé) — "pour la
@@ -986,6 +995,46 @@ export default function Dashboard() {
     setAfficherPlanningTemp(env.afficherDansPlanning || false);
     setModalEnveloppeVisible(true);
   };
+
+  // RÈGLE : cf. RÈGLE sur `params` plus haut — ouvre ouvrirEditionEnveloppe
+  // pour l'id reçu en param dès que cet onglet reprend le focus, jamais au
+  // montage seul (router.push depuis un onglet déjà monté ne redéclenche
+  // pas un montage, cf. même contrainte que params.ouvrirAjout dans
+  // budget.tsx). Introuvable (catégorie supprimée entre-temps, id invalide)
+  // → no-op silencieux, jamais une erreur : le param est quand même
+  // consommé pour ne pas retenter indéfiniment.
+  //
+  // RÈGLE : la recherche de l'enveloppe est isolée dans cette fonction
+  // dédiée (jamais inline dans le useCallback plus bas) pour lire
+  // `objStore.enveloppes` à jour à CHAQUE appel plutôt que figée à la
+  // création du callback — même besoin qu'ouvrirAjout (app/(tabs)/budget.tsx,
+  // qui lit `enveloppesCourantes` de la même façon) ou qu'ouvrirEditionEvenement
+  // (app/(tabs)/planning.tsx). Ces deux précédents laissent le warning
+  // react-hooks/exhaustive-deps s'afficher tel quel (déjà dans la baseline
+  // du projet) ; supprimé ici explicitement pour ne pas faire grimper le
+  // nombre de warnings au-delà de la baseline stricte tenue tout au long de
+  // cette session — mêmes raisons que ces deux précédents : inclure
+  // `ouvrirCategorieDepuisParam` (ou `objStore.enveloppes`) redéclencherait
+  // cet effet à chaque changement du store, pas seulement à la prise de
+  // focus voulue.
+  const ouvrirCategorieDepuisParam = (id: string) => {
+    const env = objStore.enveloppes.find((e) => e.id === id);
+    if (env) ouvrirEditionEnveloppe(env);
+  };
+  const dernierOuvrirCategorieTraite = useRef<string | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      if (!params.ouvrirCategorie) {
+        dernierOuvrirCategorieTraite.current = null;
+        return;
+      }
+      if (params.ouvrirCategorie === dernierOuvrirCategorieTraite.current) return;
+      dernierOuvrirCategorieTraite.current = params.ouvrirCategorie;
+      ouvrirCategorieDepuisParam(params.ouvrirCategorie);
+      router.setParams({ ouvrirCategorie: undefined });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [params.ouvrirCategorie, router]),
+  );
 
   const sauvegarderEnveloppe = () => {
     if (!enveloppeEnEdition) return;
