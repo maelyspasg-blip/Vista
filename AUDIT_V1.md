@@ -1819,6 +1819,88 @@ dans le dashboard — même convention que toutes les migrations de ce projet.
 - **Statut** : **CORRIGÉ (2026-09-27)** — tsc/lint vérifiés propres (10
   lignes / 49 problèmes).
 
+### P060 — Montant habituel pour une catégorie Entrée récurrente (nouvelle fonctionnalité)
+
+- **Gravité** : 🔵 SUGGESTION (amélioration de confort, pas un bug)
+- **Trouvé par** : demande explicite de Maëlys, 2026-10-02 — séparer
+  "cette entrée se répète chaque mois" (déjà géré) de "le montant reçu est
+  toujours le même, pas besoin de le confirmer chaque mois" (nouveau).
+- **Fichiers** : migration `20261002090000_enveloppes_montant_habituel.sql`,
+  `app/store.ts` (`Enveloppe`/`EnveloppeRow`/`enveloppeDepuisLigne`/
+  `enveloppeVersColonnes`/`enveloppesEgales`/reconduction mensuelle dans
+  `archiverMoisActuelInterneCoeur`), `app/(tabs)/index.tsx` (3 formulaires
+  de catégorie Entrée : modale d'édition, modale "Nouvelle catégorie",
+  modale dédiée "Entrée d'argent").
+- **Correction du premier point de la demande** : le toggle "déjà existant
+  repete_chaque_mois" cité dans la demande correspond en réalité, pour le
+  mécanisme RÉEL de reconduction, à `enveloppe.recurrente` (filtré ainsi
+  dans `archiverMoisActuelInterneCoeur` : `entreesDuMois.filter(e =>
+  e.recurrente)`) — `repeteChaqueMois` est le champ historiquement dédié à
+  "Fixe" pour l'affichage Planning. Les 2 formulaires génériques (édition,
+  "Nouvelle catégorie") pilotent déjà les deux champs en même temps avec un
+  seul toggle UI pour "Entrée" (décision produit antérieure, "un seul
+  toggle pour une seule notion de récurrence") — le nouveau champ "Montant
+  habituel" est donc correctement branché sur `recurrente` (via ce même
+  toggle), pas une divergence introduite ici.
+- **Fait** :
+  - Migration additive `montant_habituel numeric null` sur `enveloppes` —
+    RLS déjà suffisante (policies row-level existantes sur `user_id`,
+    aucune politique column-level dans ce projet), aucune nouvelle policy
+    nécessaire.
+  - `Enveloppe.montantHabituel?: number` — `undefined`/`null` = montant
+    variable (comportement historique inchangé), valeur = pré-rempli
+    automatiquement à la reconduction.
+  - `enveloppesEgales` mis à jour pour inclure ce champ — **bug évité
+    avant qu'il n'existe** : sans cet ajout, modifier UNIQUEMENT ce champ
+    depuis la modale d'édition aurait été détecté comme "aucun changement"
+    par `appliquerEnveloppes`, l'UPDATE Supabase ne serait jamais parti.
+  - Reconduction mensuelle (`archiverMoisActuelInterneCoeur`) : si
+    `montantHabituel` défini → `depense = montantHabituel` **et**
+    `payee = true` (ajout délibéré au-delà de la demande initiale, qui ne
+    mentionnait que `depense`) — nécessaire pour la cohérence avec
+    `entreesBudgetDuMois` (utils/budget.ts), qui classe "reçu" vs "attendu"
+    sur `payee`, jamais sur `depense` seul ; sans ce `payee=true`, la ligne
+    serait apparue "reçue" dans Budget (qui lit `depense>0`) tout en étant
+    comptée "attendue" dans Reste estimé (qui lit `payee`) — un désaccord
+    entre deux parties de l'app pour la même ligne. Vérifié par un test
+    numérique isolé (3 scénarios : montant fixe, montant variable, montant
+    habituel à 0€ explicite).
+  - UI : champ "Montant habituel (optionnel)" ajouté dans les 3 endroits où
+    le toggle de récurrence Entrée existe, visible uniquement quand ce
+    toggle est actif ; vidé automatiquement si le toggle est désactivé
+    avant sauvegarde (jamais une valeur orpheline invisible qui
+    resurgirait à une réactivation ultérieure du toggle).
+- **Bug trouvé en revue (code-reviewer) et corrigé avant commit** : les 3
+  sites de saisie appelaient `parseMontant(...)` nu, sans garde — un
+  utilisateur tapant juste "." (séparateur décimal seul, accessible au
+  clavier `decimal-pad`) produisait `montantHabituel: NaN`, assigné
+  directement en état local (avant même l'écriture Supabase, où
+  `montantHabituelSecurise` l'aurait sanitisé) : affichage "NaN €" au
+  prochain tour d'édition, et surtout contamination de `depense`/`payee` à
+  la reconduction mensuelle (`depense: e.montantHabituel ?? 0` ne filtre
+  pas `NaN`, seul `null`/`undefined` le sont). Corrigé avec un nouveau
+  helper `montantHabituelDepuisTexte` (`app/(tabs)/index.tsx`,
+  `Number.isFinite` + `>= 0`, retourne `undefined` sinon), utilisé aux 3
+  sites — vérifié par test numérique isolé (repro exacte ".", plus les cas
+  normaux).
+- **Second problème trouvé en marge (security-auditor), pré-existant, pas
+  spécifique à cette feature** : l'UPDATE Supabase d'`enveloppes`
+  (`appliquerEnveloppes`, commun à TOUS les champs — budget, couleur,
+  montant_habituel...) n'avait jamais de filtre `user_id` explicite côté
+  client, en écart avec la RÈGLE DE SÉCURITÉ #1 de CLAUDE.md ("jamais
+  compter sur RLS seule"). RLS bloquait déjà toute exploitation en
+  pratique (`enveloppes_update_own`), mais corrigé par prudence en miroir
+  exact du DELETE juste au-dessus dans la même fonction (re-vérification
+  `supabase.auth.getUser()` + `.eq("user_id", user.id)`).
+- **Statut** : **CORRIGÉ (2026-10-02)** — tsc/lint vérifiés propres (10
+  lignes / 49 problèmes). SQL fourni ci-dessous pour exécution manuelle
+  dans le dashboard Supabase (aucun accès CLI depuis cet environnement).
+
+```sql
+alter table public.enveloppes
+  add column if not exists montant_habituel numeric null;
+```
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 

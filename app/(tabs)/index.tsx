@@ -96,6 +96,24 @@ function premierJourMoisISO(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
+// RÈGLE À NE JAMAIS CASSER — GARDE-FOU NaN (bug corrigé le 2026-10-02,
+// trouvé en revue sur les 3 formulaires de catégorie Entrée) :
+// `parseMontant(".")` (un utilisateur peut taper juste un séparateur
+// décimal via le clavier "decimal-pad") renvoie `NaN`, jamais filtré par le
+// `??`/ternaire des 3 sites d'appel — un `montantHabituel: NaN` passait
+// directement en état local via setEnveloppes/appliquerEnveloppes (avant
+// même l'écriture Supabase, où montantHabituelSecurise, app/store.ts,
+// aurait sanitisé `NaN` en `null`), affichant "NaN €" au prochain tour
+// d'édition et, plus grave, contaminant `depense`/`payee` à la reconduction
+// mensuelle (`depense: e.montantHabituel ?? 0` ne filtre pas NaN, seul
+// `null`/`undefined` le sont). Utilisée aux 3 sites de saisie de "Montant
+// habituel" — jamais parseMontant(...) appelé nu sur ce champ précis.
+function montantHabituelDepuisTexte(texte: string): number | undefined {
+  if (!texte) return undefined;
+  const valeur = parseMontant(texte);
+  return Number.isFinite(valeur) && valeur >= 0 ? valeur : undefined;
+}
+
 function formaterDateLongue(dateISO: string): string {
   const d = parseDateFixeLocale(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
@@ -623,6 +641,9 @@ export default function Dashboard() {
     premierJourMoisISO(new Date()),
   );
   const [recurrenteEntreeBudget, setRecurrenteEntreeBudget] = useState(false);
+  // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts).
+  const [montantHabituelEntreeBudget, setMontantHabituelEntreeBudget] =
+    useState("");
   const [couleurEntreeBudget, setCouleurEntreeBudget] = useState(
     PALETTE_COULEURS[0],
   );
@@ -646,6 +667,10 @@ export default function Dashboard() {
   const [dateTemp, setDateTemp] = useState(dateVersISO(new Date()));
   const [repeteChaqueMoisTemp, setRepeteChaqueMoisTemp] = useState(false);
   const [afficherPlanningTemp, setAfficherPlanningTemp] = useState(false);
+  // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts) — texte
+  // brut (comme budgetTemp), jamais pré-parsé ici, pour laisser l'utilisateur
+  // taper librement avant la sauvegarde.
+  const [montantHabituelTemp, setMontantHabituelTemp] = useState("");
 
   const [modalAjoutVisible, setModalAjoutVisible] = useState(false);
   const [nouveauNom, setNouveauNom] = useState("");
@@ -659,6 +684,8 @@ export default function Dashboard() {
   const [nouvelleDate, setNouvelleDate] = useState(dateVersISO(new Date()));
   const [nouveauRepeteChaqueMois, setNouveauRepeteChaqueMois] = useState(false);
   const [nouveauAfficherPlanning, setNouveauAfficherPlanning] = useState(false);
+  // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts).
+  const [nouveauMontantHabituel, setNouveauMontantHabituel] = useState("");
   const [creationEnveloppeEnCours, setCreationEnveloppeEnCours] =
     useState(false);
 
@@ -1018,6 +1045,9 @@ export default function Dashboard() {
     setDateTemp(env.dateFixe || dateVersISO(new Date()));
     setRepeteChaqueMoisTemp(env.repeteChaqueMois || false);
     setAfficherPlanningTemp(env.afficherDansPlanning || false);
+    setMontantHabituelTemp(
+      env.montantHabituel !== undefined ? String(env.montantHabituel) : "",
+    );
     setModalEnveloppeVisible(true);
   };
 
@@ -1152,6 +1182,16 @@ export default function Dashboard() {
                 typeTemp === "Variable" && !recurrenteTemp && !e.moisComptage
                   ? premierJourMoisISO(new Date())
                   : e.moisComptage,
+              // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts)
+              // — pertinent uniquement pour une Entrée récurrente, jamais
+              // conservé si le toggle "Se répète chaque mois" est désactivé
+              // (sinon une valeur orpheline resterait en base, invisible
+              // dans ce formulaire, mais reprise à la prochaine réactivation
+              // du toggle sans que l'utilisateur ne l'ait jamais revue).
+              montantHabituel:
+                typeTemp === "Entrée" && repeteChaqueMoisTemp
+                  ? montantHabituelDepuisTexte(montantHabituelTemp)
+                  : undefined,
             }
           : e,
       ),
@@ -1260,11 +1300,17 @@ export default function Dashboard() {
       // n'est pas récurrente (cf. utils/budget.ts:estCategorieActiveCeMois).
       moisComptage:
         nouveauType === "Variable" ? premierJourMoisISO(new Date()) : undefined,
+      // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts).
+      montantHabituel:
+        nouveauType === "Entrée" && nouveauRepeteChaqueMois
+          ? montantHabituelDepuisTexte(nouveauMontantHabituel)
+          : undefined,
     });
     setCreationEnveloppeEnCours(false);
     if (!nouvelle) return;
     setNouveauNom("");
     setNouveauBudget("");
+    setNouveauMontantHabituel("");
     setNouvelleCouleur(
       couleurLaPlusDistincte(
         PALETTE_COULEURS,
@@ -1302,6 +1348,10 @@ export default function Dashboard() {
       recurrente: recurrenteEntreeBudget,
       dateFixe: dateEntreeBudget,
       moisComptage: moisComptageEntreeBudget,
+      // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts).
+      montantHabituel: recurrenteEntreeBudget
+        ? montantHabituelDepuisTexte(montantHabituelEntreeBudget)
+        : undefined,
     });
     setCreationEntreeBudgetEnCours(false);
     if (!nouvelle) return;
@@ -1310,6 +1360,7 @@ export default function Dashboard() {
     setDateEntreeBudget(dateVersISO(new Date()));
     setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
     setRecurrenteEntreeBudget(false);
+    setMontantHabituelEntreeBudget("");
     setCouleurEntreeBudget(
       couleurLaPlusDistincte(
         PALETTE_COULEURS,
@@ -2838,6 +2889,38 @@ export default function Dashboard() {
                   />
                 </View>
 
+                {/* RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel
+                    (app/store.ts), même garde que les 2 autres formulaires
+                    de catégorie Entrée. */}
+                {recurrenteEntreeBudget && (
+                  <>
+                    <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                      Montant habituel (optionnel)
+                    </Text>
+                    <View style={styles.modalInputRow}>
+                      <TextInput
+                        style={[
+                          styles.input,
+                          { flex: 1, backgroundColor: C.fondSecondaire, color: C.texte },
+                        ]}
+                        placeholder="Laisser vide si le montant varie"
+                        placeholderTextColor={C.texteMuted}
+                        keyboardType="decimal-pad"
+                        value={montantHabituelEntreeBudget}
+                        onChangeText={(text) =>
+                          setMontantHabituelEntreeBudget(sanitizeMontantInput(text))
+                        }
+                        returnKeyType="done"
+                        inputAccessoryViewID={ACCESSORY_ID}
+                      />
+                      <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
+                    </View>
+                    <Text style={[styles.switchSub, { color: C.texteMuted, marginTop: -8, marginBottom: 12 }]}>
+                      Si renseigné, ce montant sera automatiquement compté comme reçu chaque mois — sinon tu le confirmeras toi-même.
+                    </Text>
+                  </>
+                )}
+
                 <TouchableOpacity
                   style={[
                     styles.btnAjouter,
@@ -3119,6 +3202,43 @@ export default function Dashboard() {
                         thumbColor={repeteChaqueMoisTemp ? C.purple : "#FFF"}
                       />
                     </View>
+
+                    {/* RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel
+                        (app/store.ts) — visible UNIQUEMENT si repeteChaqueMoisTemp,
+                        jamais pour une Entrée ponctuelle (aucun sens à "pré-remplir
+                        le mois suivant" pour une entrée qui ne se reconduit pas). */}
+                    {repeteChaqueMoisTemp && (
+                      <>
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Montant habituel (optionnel)
+                        </Text>
+                        <View style={styles.modalInputRow}>
+                          <TextInput
+                            style={[
+                              styles.input,
+                              {
+                                flex: 1,
+                                backgroundColor: C.fondSecondaire,
+                                color: C.texte,
+                              },
+                            ]}
+                            placeholder="Laisser vide si le montant varie"
+                            placeholderTextColor={C.texteMuted}
+                            keyboardType="decimal-pad"
+                            value={montantHabituelTemp}
+                            onChangeText={(text) =>
+                              setMontantHabituelTemp(sanitizeMontantInput(text))
+                            }
+                            returnKeyType="done"
+                            inputAccessoryViewID={ACCESSORY_ID}
+                          />
+                          <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
+                        </View>
+                        <Text style={[styles.switchSub, { color: C.texteMuted, marginTop: -8, marginBottom: 12 }]}>
+                          Si renseigné, ce montant sera automatiquement compté comme reçu chaque mois — sinon tu le confirmeras toi-même.
+                        </Text>
+                      </>
+                    )}
 
                     <View style={styles.switchRow}>
                       <View>
@@ -3471,6 +3591,41 @@ export default function Dashboard() {
                         thumbColor={nouveauRepeteChaqueMois ? C.purple : "#FFF"}
                       />
                     </View>
+
+                    {/* RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel
+                        (app/store.ts), même garde que la modale d'édition. */}
+                    {nouveauRepeteChaqueMois && (
+                      <>
+                        <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
+                          Montant habituel (optionnel)
+                        </Text>
+                        <View style={styles.modalInputRow}>
+                          <TextInput
+                            style={[
+                              styles.input,
+                              {
+                                flex: 1,
+                                backgroundColor: C.fondSecondaire,
+                                color: C.texte,
+                              },
+                            ]}
+                            placeholder="Laisser vide si le montant varie"
+                            placeholderTextColor={C.texteMuted}
+                            keyboardType="decimal-pad"
+                            value={nouveauMontantHabituel}
+                            onChangeText={(text) =>
+                              setNouveauMontantHabituel(sanitizeMontantInput(text))
+                            }
+                            returnKeyType="done"
+                            inputAccessoryViewID={ACCESSORY_ID}
+                          />
+                          <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
+                        </View>
+                        <Text style={[styles.switchSub, { color: C.texteMuted, marginTop: -8, marginBottom: 12 }]}>
+                          Si renseigné, ce montant sera automatiquement compté comme reçu chaque mois — sinon tu le confirmeras toi-même.
+                        </Text>
+                      </>
+                    )}
 
                     <View style={styles.switchRow}>
                       <View>

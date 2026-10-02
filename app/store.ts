@@ -173,6 +173,19 @@ export type Enveloppe = {
   // (1er jour du mois, ex. "2026-08-01"), indépendant de dateFixe — permet
   // de recevoir un salaire le 28 juillet mais de le compter pour août.
   moisComptage?: string;
+  // RÈGLE À NE JAMAIS CASSER — MONTANT HABITUEL (ajouté le 2026-10-02,
+  // demande explicite) : uniquement pertinent pour une catégorie "Entrée"
+  // récurrente (recurrente === true). `undefined` = montant variable,
+  // l'utilisateur renseigne chaque mois manuellement (comportement
+  // historique, inchangé). Une valeur = montant pré-rempli AUTOMATIQUEMENT
+  // (depense ET payee, cf. RÈGLE dans archiverMoisActuelInterneCoeur) à la
+  // reconduction mensuelle — pour un salaire fixe qui ne nécessite jamais
+  // de confirmation manuelle. Distinct de `budget` (qui reste le montant
+  // "attendu"/affiché même pour une Entrée variable, et sert aussi de
+  // valeur par défaut affichée avant la première reconduction) : ce champ
+  // ne pilote QUE le comportement automatique au changement de mois,
+  // jamais l'affichage du mois en cours tel quel.
+  montantHabituel?: number;
   // Mode espace partagé : cette catégorie est-elle visible du partenaire
   // (vue "Partagé" d'Aperçu/Budget) ? Réglable uniquement via la modale
   // "Gérer mes catégories partagées" (app/profil.tsx) — jamais déduit d'une
@@ -487,6 +500,7 @@ type EnveloppeRow = {
   mois_comptage: string | null;
   partage: boolean | null;
   supprimee_le: string | null;
+  montant_habituel: number | null;
 };
 
 function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
@@ -510,6 +524,7 @@ function enveloppeDepuisLigne(l: EnveloppeRow): Enveloppe {
     // exactement comme "active" partout (cf. estCategorieActiveCeMois),
     // jamais de crash sur une valeur manquante.
     supprimeeLe: l.supprimee_le ?? undefined,
+    montantHabituel: l.montant_habituel ?? undefined,
   };
 }
 
@@ -528,6 +543,15 @@ const LONGUEUR_TEXTE_MAX = 50;
 
 function montantSecurise(valeur: number): number {
   return Number.isFinite(valeur) && valeur >= 0 ? valeur : 0;
+}
+
+// RÈGLE : distinct de montantSecurise ci-dessus — `undefined`/invalide doit
+// rester `null` (= "montant variable", cf. RÈGLE sur Enveloppe.montantHabituel),
+// jamais ramené à 0 (0€ serait une vraie valeur de montant habituel, pas la
+// même chose que "pas de montant habituel").
+function montantHabituelSecurise(valeur: number | undefined): number | null {
+  if (valeur === undefined) return null;
+  return Number.isFinite(valeur) && valeur >= 0 ? valeur : null;
 }
 
 function texteSecurise(valeur: string, max: number = LONGUEUR_TEXTE_MAX): string {
@@ -549,6 +573,7 @@ function enveloppeVersColonnes(e: Omit<Enveloppe, "id">) {
     afficher_dans_planning: e.afficherDansPlanning ?? null,
     mois_comptage: e.moisComptage ?? null,
     partage: e.partage ?? false,
+    montant_habituel: montantHabituelSecurise(e.montantHabituel),
   };
 }
 
@@ -566,7 +591,13 @@ function enveloppesEgales(a: Enveloppe, b: Enveloppe): boolean {
     a.payee === b.payee &&
     a.repeteChaqueMois === b.repeteChaqueMois &&
     a.afficherDansPlanning === b.afficherDansPlanning &&
-    a.moisComptage === b.moisComptage
+    a.moisComptage === b.moisComptage &&
+    // RÈGLE À NE JAMAIS CASSER — AJOUTÉ LE 2026-10-02 (montant habituel) :
+    // sans cette ligne, modifier UNIQUEMENT montantHabituel depuis la
+    // modale d'édition serait détecté comme "aucun changement" par
+    // appliquerEnveloppes (cf. ses 2 sites d'appel) — l'UPDATE Supabase ne
+    // partirait jamais, la valeur resterait silencieusement figée en base.
+    a.montantHabituel === b.montantHabituel
   );
 }
 
@@ -797,18 +828,34 @@ function appliquerEnveloppes(
   nouvellesEnveloppes.forEach((e) => {
     const ancienne = anciennes.find((a) => a.id === e.id);
     if (!ancienne || enveloppesEgales(ancienne, e)) return;
-    supabase
-      .from("enveloppes")
-      .update(enveloppeVersColonnes(e))
-      .eq("id", e.id)
-      .then(({ error }) => {
-        if (error) {
-          console.error("Supabase update enveloppe a échoué :", error);
-          signalerErreurSync(
-            `Impossible de sauvegarder la catégorie : ${error.message}`,
-          );
-        }
-      });
+    // RÈGLE À NE JAMAIS CASSER — DEFENSE-IN-DEPTH (corrigé le 2026-10-02,
+    // trouvé par security-auditor en marge de la revue de
+    // Enveloppe.montantHabituel) : même garde que la suppression
+    // juste au-dessus (`.eq("user_id", user.id)` explicite, jamais RLS
+    // seule) — ce chemin UPDATE, commun à TOUS les champs d'`enveloppes`
+    // (budget, couleur, montant_habituel...), en était dépourvu depuis
+    // l'origine, en écart avec la RÈGLE DE SÉCURITÉ en tête de ce fichier.
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) {
+        console.warn(
+          `[store] Mise à jour de l'enveloppe ${e.id} annulée : aucun utilisateur connecté.`,
+        );
+        return;
+      }
+      supabase
+        .from("enveloppes")
+        .update(enveloppeVersColonnes(e))
+        .eq("id", e.id)
+        .eq("user_id", user.id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Supabase update enveloppe a échoué :", error);
+            signalerErreurSync(
+              `Impossible de sauvegarder la catégorie : ${error.message}`,
+            );
+          }
+        });
+    });
   });
 }
 
@@ -1903,16 +1950,32 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
         d.setMonth(d.getMonth() + 1);
         dateFixeSuivante = dateVersISOInterne(d);
       }
+      // RÈGLE À NE JAMAIS CASSER — MONTANT HABITUEL (2026-10-02, demande
+      // explicite) : `montantHabituel` non défini → comportement historique
+      // inchangé (depense=0, payee=false, l'utilisateur confirme et saisit
+      // le montant reçu chaque mois). Défini → la reconduction pré-remplit
+      // depense directement à cette valeur, ET marque payee=true — ajout
+      // délibéré au-delà de la demande initiale (qui ne mentionnait que
+      // depense), nécessaire pour la cohérence interne : entreesBudgetDuMois
+      // (utils/budget.ts) classe "reçu" vs "attendu" sur `payee`, jamais sur
+      // `depense` seul — laisser payee=false avec depense déjà renseignée
+      // aurait fait apparaître cette entrée comme "reçue" dans Budget (qui
+      // lit depense>0) tout en la comptant comme "attendue" dans Reste
+      // estimé (qui lit payee), un désaccord entre deux parties de l'app
+      // pour la même ligne. `montantHabituel` lui-même est reconduit tel
+      // quel (comme `budget`/`couleur`) : une fois fixé, reste actif tant
+      // que l'utilisateur ne le modifie pas explicitement.
       nouvellesEntrees.push({
         nom: e.nom,
-        depense: 0,
+        depense: e.montantHabituel ?? 0,
         budget: e.budget,
         couleur: e.couleur,
         recurrente: true,
         type: "Entrée",
         dateFixe: dateFixeSuivante,
-        payee: false,
+        payee: e.montantHabituel !== undefined,
         moisComptage: moisComptageSuivant,
+        montantHabituel: e.montantHabituel,
       });
     });
 
