@@ -94,6 +94,21 @@ export function budgetDuMoisArchive(snapshot: SnapshotMois): number {
   return snapshot.disponible;
 }
 
+// RÈGLE À NE JAMAIS CASSER — MARGE D'UN MOIS ARCHIVÉ, SOURCE UNIQUE (bug
+// P067 corrigé le 2026-10-09) : `totalDepense` d'un snapshot CONTIENT DÉJÀ
+// l'épargne du mois (`totalDepense = depenseReelle + epargneMois`,
+// app/store.ts::archiverMoisActuelInterneCoeur — et le seed invité suit la
+// même convention). Les 3 copies locales (conseils, trophées, Ton bilan)
+// calculaient `disponible − totalDepense − epargne` : l'épargne était
+// retirée DEUX fois, pénalisant à tort un utilisateur qui épargne. Même
+// valeur que `resteReel` à la clôture du mois. Ne jamais réécrire cette
+// formule localement.
+export function margeMoisArchive(
+  snapshot: Pick<SnapshotMois, "disponible" | "totalDepense">,
+): number {
+  return snapshot.disponible - snapshot.totalDepense;
+}
+
 /**
  * Une catégorie (tout type confondu) est-elle active pour le mois donné ?
  * "Active" = doit apparaître dans les listes courantes (Tes catégories

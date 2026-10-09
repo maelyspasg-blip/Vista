@@ -4,6 +4,7 @@
 // toute écriture vit dans app/store.ts (cf. RÈGLE DE SÉCURITÉ en tête de
 // ce fichier).
 import { Enveloppe, Objectif, PaiementHistorique, SnapshotMois, Transaction } from "../app/store";
+import { margeMoisArchive } from "./budget";
 import { calculerRythmeObjectif } from "./conseils";
 import { parseDateFixeLocale } from "./dateOnly";
 
@@ -114,7 +115,8 @@ export function calculerTrophees(params: {
     enveloppesBudgetees.length > 0 &&
     enveloppesBudgetees.every((e) => e.depense <= e.budget);
 
-  const margeSnapshot = (s: SnapshotMois) => s.disponible - s.totalDepense - s.epargne;
+  // Cf. RÈGLE sur utils/budget.ts::margeMoisArchive (P067, 2026-10-09).
+  const margeSnapshot = margeMoisArchive;
   const derniersMoisArchives = historiquesMois.slice(-2);
   const retourEquilibre =
     derniersMoisArchives.length === 2 &&

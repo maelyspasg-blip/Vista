@@ -8,6 +8,7 @@
 // référence à une catégorie supprimée/inactive, jamais un pourcentage
 // aberrant. Silencieux + console.warn en cas d'échec, jamais de crash.
 import { Enveloppe, SnapshotEnveloppe, SnapshotMois, Transaction } from "../app/store";
+import { margeMoisArchive } from "./budget";
 import { validerConseil } from "./conseils";
 
 // === "Flux de votre argent" — analyse automatique de la période sélectionnée ===
@@ -198,7 +199,8 @@ export function analyserFluxFinancier(params: {
 
   // Retournement de tendance : 2 derniers mois archivés, indépendant de nbMoisSelectionne.
   if (historiquesMois.length >= 2) {
-    const marge = (s: SnapshotMois) => s.disponible - s.totalDepense - s.epargne;
+    // Cf. RÈGLE sur utils/budget.ts::margeMoisArchive (P067, 2026-10-09).
+    const marge = margeMoisArchive;
     const avantDernier = marge(historiquesMois[historiquesMois.length - 2]);
     const dernier = marge(historiquesMois[historiquesMois.length - 1]);
     if (avantDernier < 0 && dernier > 0) {

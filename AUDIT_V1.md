@@ -2247,8 +2247,7 @@ alter table public.enveloppes
 
 ### P067 — Épargne retirée deux fois dans la marge des mois archivés (trouvé en revue, 2026-10-09)
 
-- **Gravité** : 🟠 MAJEUR (calcul faux, plusieurs écrans) — **non corrigé,
-  en attente de décision**.
+- **Gravité** : 🟠 MAJEUR (calcul faux, plusieurs écrans).
 - **Description** : `utils/conseils.ts:1040`, `utils/trophees.ts:117` et
   `utils/bilanVista.ts:201` calculent la marge d'un mois archivé par
   `s.disponible - s.totalDepense - s.epargne`. Or `totalDepense` contient
@@ -2263,7 +2262,32 @@ alter table public.enveloppes
   `utils/bilanVista.ts` sont des fichiers "aucune écriture Supabase" : la
   correction est un calcul pur, compatible avec cette règle. Les trophées
   déjà débloqués ne seraient pas recalculés rétroactivement : à décider.
-- **Statut** : 🔴 ouvert — question pour Maëlys.
+- **Correction (même jour, demande de Maëlys)** : formule centralisée dans
+  `utils/budget.ts::margeMoisArchive` (`disponible − totalDepense`), seule
+  source désormais des 3 fichiers. Seed invité vérifié cohérent
+  (M−3 : 750+42+378+132+95+20 = 1417, + 90 d'épargne = 1507 =
+  `total_depense`). Test : `__tests__/margeMoisArchive.test.ts`.
+- **Trophées** : ils ne sont stockés nulle part (recalculés à chaque
+  affichage de Stats). Décision de Maëlys : accepter le recalcul, pas de
+  mémoire des trophées. Seul « Retour à l'équilibre » (N−2 négatif puis N−1
+  positif) dépend de cette marge et peut changer une fois à la mise à jour
+  — il change de toute façon chaque mois.
+- **Effets visibles** : conseils de tendance de marge, trophée « Retour à
+  l'équilibre » et phrases de retournement de tendance de Ton bilan
+  reflètent désormais une marge qui ne pénalise plus l'épargne.
+- **Relu par code-reviewer** (OK pour commit) : aucune autre occurrence de
+  l'erreur (les autres calculs prennent leurs dépenses des enveloppes, sans
+  l'épargne) ; seed invité cohérent sur les 3 mois ; seuls des tests de
+  signe/ordre consomment cette marge. Suivi : (a) une situation
+  `comportement:degradation` déjà suivie peut basculer une fois en « se
+  redresse » du seul fait de la correction ; (b) préexistant —
+  `resteEstime` (mois en cours, prévu retiré) est comparé à des marges
+  réalisées (sans prévu) dans `conseils.ts` ~l.1527 et ~l.1561 : avec des
+  marges désormais plus hautes du montant épargné, `enAmelioration` /
+  `retour_normale` se déclenchent un peu moins souvent pour un utilisateur
+  qui épargne.
+- **Statut** : ✅ corrigé ; tsc 10 lignes / lint 49 (39 err, 10 warn) /
+  tests 30/30.
 
 ---
 

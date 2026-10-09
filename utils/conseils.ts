@@ -59,7 +59,7 @@ import {
   Transaction,
 } from "../app/store";
 import { depenseCumuleeAuJour, joursDansMois, MOIS_LABELS, moisPrecedent } from "./exportExcel";
-import { estCategorieActiveCeMois } from "./budget";
+import { estCategorieActiveCeMois, margeMoisArchive } from "./budget";
 
 export type NiveauConseil = "bon" | "attention" | "alerte";
 
@@ -1037,7 +1037,8 @@ function detecterSituations(
     (s) => s.mois === moisPrec && s.annee === anneePrec,
   );
 
-  const margeSnapshot = (s: SnapshotMois) => s.disponible - s.totalDepense - s.epargne;
+  // Cf. RÈGLE sur utils/budget.ts::margeMoisArchive (P067, 2026-10-09).
+  const margeSnapshot = margeMoisArchive;
   const derniersMoisArchives = historiquesMois.slice(-NB_MOIS_MOYENNE_CATEGORIE);
 
   const objectifsActifs = objectifs.filter((o) => !o.ferme);
