@@ -1,6 +1,10 @@
 import { supabase } from "../supabaseClient";
 import type { Enveloppe, Evenement } from "../app/store";
-import { estCategorieActiveCeMois } from "./budget";
+import {
+  dateRepresentativeEntree,
+  estCategorieActiveCeMois,
+  type PartEntree,
+} from "./budget";
 
 // RÈGLE À NE JAMAIS CASSER — RESTE DERRIÈRE ESPACE_PARTAGE_ACTIF : ce
 // fichier est maintenant appelé depuis app/profil.tsx (modale "Espace
@@ -679,6 +683,14 @@ export type CategorieFusionnee = Enveloppe & {
   moiDepense: number;
   partenaireDepense: number;
   badge: { texte: string; couleur: string };
+  // Ajout du 2026-10-09 (validé par Maëlys) : pour une ligne d'Entrée
+  // fusionnée ou partenaire seule, le détail de CHAQUE entrée réunie (sa
+  // date de réception, son montant reçu/attendu) — sans ça, la ligne
+  // synthétique n'avait ni date ni statut : une entrée attendue du
+  // partenaire disparaissait de "à recevoir ce mois-ci" et de la liste
+  // verte (utils/budget.ts::revenusDuMoisHero / statutAffichageEntree).
+  // Absent pour une ligne "moi seul" (objet réel, déjà daté).
+  partsEntree?: PartEntree[];
 };
 
 export function fusionnerCategoriesParNom(
@@ -706,6 +718,7 @@ export function fusionnerCategoriesParNom(
     moiIds: string[];
     moiPartage: boolean;
     partenairePartage: boolean;
+    partsEntree: PartEntree[];
   };
   const parNom = new Map<string, Accumulateur>();
   const nouvelAccumulateur = (e: {
@@ -725,6 +738,7 @@ export function fusionnerCategoriesParNom(
     moiIds: [],
     moiPartage: false,
     partenairePartage: false,
+    partsEntree: [],
   });
 
   mesEnveloppes
@@ -737,6 +751,13 @@ export function fusionnerCategoriesParNom(
       acc.moiDepense += e.depense;
       acc.moiEnveloppe = e;
       acc.moiIds.push(e.id);
+      if (e.type === "Entrée") {
+        acc.partsEntree.push({
+          depense: e.depense,
+          budget: e.budget,
+          dateFixe: e.dateFixe,
+        });
+      }
       if (e.partage) acc.moiPartage = true;
       parNom.set(cle, acc);
     });
@@ -750,6 +771,13 @@ export function fusionnerCategoriesParNom(
       acc.budget += e.budget;
       acc.partenaireDepense += e.depense;
       acc.depuisPartenaire = true;
+      if (e.type === "Entrée") {
+        acc.partsEntree.push({
+          depense: e.depense,
+          budget: e.budget,
+          dateFixe: e.dateFixe,
+        });
+      }
       if (e.partage) acc.partenairePartage = true;
       parNom.set(cle, acc);
     });
@@ -797,6 +825,15 @@ export function fusionnerCategoriesParNom(
       budget: acc.budget,
       recurrente: true,
       moisComptage: moisISO,
+      // Entrée uniquement (cf. RÈGLE sur partsEntree) : date représentative
+      // + détail par part. moisComptage reste forcé au mois courant, donc
+      // les totaux (entreesBudgetDuMois) ne changent pas.
+      ...(acc.type === "Entrée"
+        ? {
+            dateFixe: dateRepresentativeEntree(acc.partsEntree, new Date()),
+            partsEntree: acc.partsEntree,
+          }
+        : {}),
       fusionnee,
       moiIds: acc.moiIds,
       moiPartage: acc.moiPartage,

@@ -189,12 +189,35 @@ export function totalParType(envs: CategorieExport[], estEntree: boolean): numbe
     .reduce((acc, e) => acc + e.depense, 0);
 }
 
+// Variante pour le delta "vs mois dernier" du HERO d'Aperçu UNIQUEMENT
+// (2026-10-09) : rejoue sur le snapshot la formule du "Reste estimé en fin
+// de mois" du hero (cf. RÈGLE "HERO D'APERÇU" dans app/(tabs)/index.tsx) :
+// revenus reçus (depense des Entrées archivées) − dépensé (depense des
+// autres catégories) − épargne du mois. "À recevoir" vaut 0 sur un mois
+// clos. N'utilise volontairement PAS `snapshot.disponible`, qui contient
+// déjà les entrées du mois (reçues + attendues, cf. budgetDuMois dans
+// app/store.ts) : calculerResteEstimeArchive ci-dessous l'additionne en
+// plus de totalParType(…, true), ce qui semble compter deux fois les
+// entrées reçues — point remonté dans AUDIT_V1.md (P066), non corrigé ici
+// (formule partagée avec le coach de Stats, hors périmètre).
+export function calculerResteHeroArchive(snapshot: {
+  enveloppes: CategorieExport[];
+  epargne: number;
+}): number {
+  return (
+    totalParType(snapshot.enveloppes, true) -
+    totalParType(snapshot.enveloppes, false) -
+    snapshot.epargne
+  );
+}
+
 // RÈGLE À NE JAMAIS CASSER : SEULE source du "Reste estimé" reconstruit
 // pour un mois DÉJÀ ARCHIVÉ — même principe que
 // utils/budget.ts::calculerResteEstimeCourant (mois en cours) : Aperçu et
 // le bloc coach de Stats doivent tous les deux appeler cette fonction pour
 // la comparaison "vs mois précédent", jamais reconstruire la formule
-// indépendamment. Accepte n'importe quel snapshot structurellement
+// indépendamment. Seule autre formule tolérée : calculerResteHeroArchive
+// ci-dessus, réservée au delta du hero d'Aperçu. Accepte n'importe quel snapshot structurellement
 // compatible (SnapshotMois de app/store.ts comme SnapshotExport ci-dessus).
 export function calculerResteEstimeArchive(snapshot: {
   enveloppes: CategorieExport[];

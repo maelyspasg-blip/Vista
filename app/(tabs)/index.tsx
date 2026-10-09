@@ -3,12 +3,17 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "expo-image";
 import { formaterMontant, parseMontant, sanitizeMontantInput } from "../../utils/montant";
 import { getInitiales } from "../../utils/initiales";
-import { calculerResteEstimeArchive, moisPrecedent } from "../../utils/exportExcel";
+import {
+  calculerResteEstimeArchive,
+  calculerResteHeroArchive,
+  moisPrecedent,
+} from "../../utils/exportExcel";
 import {
   calculerResteEstimeCourant,
   estCategorieActiveCeMois,
   nomReservePar,
   entreesAffichablesDuMois,
+  revenusDuMoisHero,
 } from "../../utils/budget";
 import type { CategorieFusionnee } from "../../utils/espacePartage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -805,8 +810,11 @@ export default function Dashboard() {
     })
     .reduce((acc, e) => acc + (e.montant ?? 0), 0);
 
-  // "Reste estimé en fin de mois" : une vraie projection de fin de mois —
-  // Budget (disponible saisi + entrées reçues + entrées encore attendues)
+  // `resteEstime` (calculerResteEstimeCourant) : projection de fin de mois
+  // COMPLÈTE — n'est plus le chiffre affiché par le hero depuis le
+  // 2026-10-09 (cf. RÈGLE "HERO D'APERÇU" plus bas) mais reste la source
+  // des conseils et de la jauge. Formule : Budget (disponible saisi +
+  // entrées reçues + entrées encore attendues)
   // moins tout ce qui est prévu d'être dépensé ce mois-ci (déjà dépensé +
   // encore budgété dans chaque catégorie) moins l'argent immobilisé
   // (épargne + objectifs). Ce chiffre ne correspond donc plus exactement au
@@ -866,37 +874,70 @@ export default function Dashboard() {
   const resteEstimePrecedent = snapshotMoisPrecedent
     ? calculerResteEstimeArchive(snapshotMoisPrecedent)
     : null;
+  // RÈGLE À NE JAMAIS CASSER — HERO D'APERÇU (demande du 2026-10-09,
+  // AFFICHAGE DU HERO UNIQUEMENT) : 3 chiffres, tous dérivés des MÊMES
+  // lignes que la liste "entrées ce mois-ci" (entreesBudgetTriees,
+  // utils/budget.ts::entreesAffichablesDuMois) et des mêmes dépenses que
+  // calculerResteEstimeCourant — jamais une source parallèle.
+  //   - resteActuelHero = revenus REÇUS ce mois (statut "recue") − déjà
+  //     dépensé (totalDepenseEnveloppes) − argent immobilisé du mois
+  //     (épargne/objectifs, décision de Maëlys : "dépenses engagées" =
+  //     dépensé + épargne ; le budget prévu non dépensé n'est PAS retiré).
+  //   - aRecevoirCeMoisHero = montant attendu (budget) des entrées "à
+  //     venir" dont la date de réception tombe DANS le mois civil en cours
+  //     — jamais une date d'un mois suivant, même comptée pour ce mois.
+  //   - resteEstimeHero = resteActuelHero + aRecevoirCeMoisHero (projection
+  //     de fin de mois : base du delta "vs mois dernier" et du bandeau).
+  // `resteEstime` (calculerResteEstimeCourant) reste inchangé et continue
+  // d'alimenter les conseils — ni Stats ni Budget ne sont touchés.
+  // Ventilation part par part (vue partagée : chaque entrée réunie dans
+  // une ligne fusionnée garde sa date, cf. utils/budget.ts::
+  // revenusDuMoisHero) — jamais recalculée localement.
+  const { recu: recuCeMoisHero, aRecevoir: aRecevoirCeMoisHero } =
+    revenusDuMoisHero(entreesBudgetTriees, maintenant);
+  const resteActuelHero =
+    recuCeMoisHero - totalDepenseEnveloppes - epargneMoisAffiche;
+  const resteEstimeHero = resteActuelHero + aRecevoirCeMoisHero;
+  // Delta "vs mois dernier" du hero : comparé à la MÊME formule rejouée sur
+  // le snapshot (calculerResteHeroArchive, sans le prévu non dépensé) —
+  // jamais à resteEstimePrecedent (formule complète, qui reste celle des
+  // conseils).
+  const resteHeroPrecedent = snapshotMoisPrecedent
+    ? calculerResteHeroArchive(snapshotMoisPrecedent)
+    : null;
   const deltaReste =
-    resteEstimePrecedent !== null ? resteEstime - resteEstimePrecedent : null;
+    resteHeroPrecedent !== null ? resteEstimeHero - resteHeroPrecedent : null;
   // Comparaison en % en plus du delta en €, togglable au clic (voir hero
   // "Reste estimé" ci-dessous) — au niveau du mois complet comme le delta,
   // jamais "au même jour" puisque resteEstime est une projection de fin de
   // mois, pas un cumul quotidien.
   const pctDeltaReste =
-    deltaReste !== null && resteEstimePrecedent !== null && resteEstimePrecedent !== 0
-      ? (deltaReste / Math.abs(resteEstimePrecedent)) * 100
+    deltaReste !== null && resteHeroPrecedent !== null && resteHeroPrecedent !== 0
+      ? (deltaReste / Math.abs(resteHeroPrecedent)) * 100
       : null;
+  // État du chiffre PRINCIPAL du hero (reste actuel) — cf. RÈGLE "HERO
+  // D'APERÇU" plus haut.
   const etatReste: "positif" | "procheLimite" | "negatif" =
-    resteEstime < 0
+    resteActuelHero < 0
       ? "negatif"
-      : resteEstime < disponibleEffectif * 0.15
+      : resteActuelHero < recuCeMoisHero * 0.15
         ? "procheLimite"
         : "positif";
   const heroResteLabel =
     etatReste === "negatif"
-      ? "DÉPASSEMENT ESTIMÉ EN FIN DE MOIS"
+      ? "DÉPASSEMENT ACTUEL"
       : etatReste === "procheLimite"
-        ? "RESTE ESTIMÉ — BUDGET SERRÉ"
-        : "RESTE ESTIMÉ EN FIN DE MOIS";
+        ? "RESTE ACTUEL — BUDGET SERRÉ"
+        : "RESTE ACTUEL";
   const heroResteValeur =
-    etatReste === "negatif" ? Math.abs(resteEstime) : resteEstime;
+    etatReste === "negatif" ? Math.abs(resteActuelHero) : resteActuelHero;
   // RÈGLE À NE JAMAIS CASSER — ROUGE UNIQUEMENT SI NÉGATIF : contrairement à
   // heroResteLabel/lecture ci-dessus (qui distinguent bien les 3 états pour
   // le texte), la COULEUR du chiffre ne doit jamais signaler "procheLimite"
-  // comme un danger — resteEstime reste positif dans ce cas, donc couleur
-  // normale (navy en clair, blanc en sombre) ; seul un vrai dépassement
-  // (etatReste === "negatif", strictement équivalent à resteEstime < 0)
-  // déclenche le rouge.
+  // comme un danger — resteActuelHero reste positif dans ce cas, donc
+  // couleur normale (navy en clair, blanc en sombre) ; seul un vrai
+  // dépassement (etatReste === "negatif", strictement équivalent à
+  // resteActuelHero < 0) déclenche le rouge.
   const heroResteCouleurClair =
     etatReste === "negatif" ? C.peachText : C.texte;
   const heroResteCouleurSombre =
@@ -960,19 +1001,19 @@ export default function Dashboard() {
   const largeurObjectifsAnimee = useLargeurAnimee(pctObjectifsEstime);
   const largeurEpargneAnimee = useLargeurAnimee(pctEpargneEstime);
   const largeurPrevuAnimee = useLargeurAnimee(pctPrevuEstime);
-  // Bandeau sous le hero "Reste estimé" : reflète directement heroResteValeur,
-  // le même montant que le chiffre affiché en gros au-dessus — une seule
-  // vérité pour toute la carte (chiffre principal, phrase et delta vs mois
-  // dernier découlent tous de resteEstime), jamais une estimation parallèle
-  // (ex. extrapolation du rythme de dépense) qui pourrait diverger.
+  // Bandeau sous le hero : met en phrase resteEstimeHero (la ligne "Reste
+  // estimé en fin de mois" du hero, base aussi du delta), jamais une
+  // estimation parallèle (ex. extrapolation du rythme de dépense).
+  // Bandeau : projection de fin de mois = resteEstimeHero (décision de
+  // Maëlys du 2026-10-09, cf. RÈGLE "HERO D'APERÇU").
   const lecture =
-    etatReste !== "negatif"
+    resteEstimeHero >= 0
       ? {
-          texte: `Il te restera environ ${Math.round(heroResteValeur)}€ à la fin du mois si tu continues comme ça.`,
+          texte: `Il te restera environ ${Math.round(resteEstimeHero)}€ à la fin du mois si tu continues comme ça.`,
           couleurTexte: "#D2F5E5",
         }
       : {
-          texte: `Si tu continues comme ça, tu risques d'être à environ ${Math.round(heroResteValeur)}€ de dépassement en fin de mois.`,
+          texte: `Si tu continues comme ça, tu risques d'être à environ ${Math.round(Math.abs(resteEstimeHero))}€ de dépassement en fin de mois.`,
           couleurTexte: "#FFD2D2",
         };
 
@@ -1975,32 +2016,59 @@ export default function Dashboard() {
               },
             ]}
           />
-          {deltaReste !== null && (
-            <View style={styles.heroDeltaRow}>
-              <Ionicons
-                name={deltaReste >= 0 ? "arrow-up" : "arrow-down"}
-                size={11}
-                color={deltaReste >= 0 ? C.accentText : C.peachText}
-              />
-              <TouchableOpacity
-                activeOpacity={0.6}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                onPress={() => setDeltaRestePourcentage((v) => !v)}
+          <View style={styles.heroResteDetails}>
+            {aRecevoirCeMoisHero > 0 && (
+              <Text
+                style={[
+                  styles.heroARecevoir,
+                  { color: theme === "sombre" ? C.accent : "#1D9E75" },
+                ]}
               >
-                <Text
-                  style={[
-                    styles.heroDeltaTexte,
-                    { color: deltaReste >= 0 ? C.accentText : C.peachText },
-                  ]}
+                + {formaterMontant(aRecevoirCeMoisHero)} € à recevoir ce mois-ci
+              </Text>
+            )}
+            <Text
+              style={[
+                styles.heroResteEstime,
+                {
+                  color:
+                    resteEstimeHero < 0
+                      ? C.peachText
+                      : theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted,
+                },
+              ]}
+            >
+              {resteEstimeHero < 0
+                ? `Dépassement estimé en fin de mois : ${formaterMontant(Math.abs(resteEstimeHero))} €`
+                : `Reste estimé en fin de mois : ${formaterMontant(resteEstimeHero)} €`}
+            </Text>
+            {deltaReste !== null && (
+              <View style={[styles.heroDeltaRow, styles.heroDeltaRowDetails]}>
+                <Ionicons
+                  name={deltaReste >= 0 ? "arrow-up" : "arrow-down"}
+                  size={11}
+                  color={deltaReste >= 0 ? C.accentText : C.peachText}
+                />
+                <TouchableOpacity
+                  activeOpacity={0.6}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  onPress={() => setDeltaRestePourcentage((v) => !v)}
                 >
-                  {deltaRestePourcentage && pctDeltaReste !== null
-                    ? `${pctDeltaReste > 0 ? "+" : ""}${pctDeltaReste.toFixed(0)} %`
-                    : `${deltaReste > 0 ? "+" : ""}${formaterMontant(deltaReste)} €`}
-                  {" vs mois dernier"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
+                  <Text
+                    style={[
+                      styles.heroDeltaTexte,
+                      { color: deltaReste >= 0 ? C.accentText : C.peachText },
+                    ]}
+                  >
+                    {deltaRestePourcentage && pctDeltaReste !== null
+                      ? `${pctDeltaReste > 0 ? "+" : ""}${pctDeltaReste.toFixed(0)} %`
+                      : `${deltaReste > 0 ? "+" : ""}${formaterMontant(deltaReste)} €`}
+                    {" vs mois dernier"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
           <View
             style={[
               styles.barBg,
@@ -4627,6 +4695,16 @@ const styles = StyleSheet.create({
   heroLegendeItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   heroLegendeDot: { width: 7, height: 7, borderRadius: 4 },
   heroSub: { fontSize: 14, color: "rgba(255,255,255,0.7)" },
+  // Bloc sous le chiffre principal du hero (à recevoir, reste estimé,
+  // delta) — remonte dans la marge basse de heroAmount, comme heroDeltaRow.
+  heroResteDetails: {
+    marginTop: -14,
+    marginBottom: 14,
+    gap: 2,
+  },
+  heroARecevoir: { fontSize: 15, fontWeight: "600" },
+  heroResteEstime: { fontSize: 13 },
+  heroDeltaRowDetails: { marginTop: 2, marginBottom: 0 },
   heroDeltaRow: {
     flexDirection: "row",
     alignItems: "center",

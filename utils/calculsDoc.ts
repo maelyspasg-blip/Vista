@@ -20,32 +20,42 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "X entrée(s) ce mois-ci",
         explication:
-          "Sous-ligne dépliable sous BUDGET, qui liste chaque entrée comptée pour le mois en cours avec son nom, son montant et sa date — reçues et encore attendues confondues (les entrées encore attendues sont affichées dans une couleur plus neutre).",
+          "Sous-ligne dépliable sous BUDGET, qui liste les entrées du mois en cours avec leur nom, leur montant et leur date. Une entrée apparaît si de l'argent a été reçu (« reçu »), ou si rien n'a encore été reçu mais que sa date de réception est encore à venir (« à venir », couleur plus neutre). Une entrée sans montant reçu, sans date ou dont la date est passée n'est pas listée. Budget applique exactement la même règle à ses lignes vertes « reçues » et « à venir ».",
       },
       {
-        titre: "RESTE ESTIMÉ EN FIN DE MOIS",
+        titre: "RESTE ACTUEL",
         explication:
-          "Une projection de fin de mois, pas un solde déjà réalisé : BUDGET (voir ci-dessus, la somme des entrées de Budget comptées pour ce mois) moins tout ce qui est prévu d'être dépensé ce mois-ci (Dépensé + Dépense prévue, soit le budget complet de chaque catégorie de dépense, qu'il soit déjà consommé ou non — une catégorie déjà en dépassement contribue son dépassement réel, jamais moins que ça) moins l'argent immobilisé (épargne + objectifs mis de côté ce mois-ci). Le libellé et la couleur changent selon un seuil sur ce même total : \"RESTE ESTIMÉ EN FIN DE MOIS\" si le reste dépasse 15% du BUDGET, \"RESTE ESTIMÉ — BUDGET SERRÉ\" en dessous de ce seuil, \"DÉPASSEMENT ESTIMÉ EN FIN DE MOIS\" si le reste est négatif (le montant affiché devient alors la valeur absolue du dépassement). Important : comme ce chiffre compte les dépenses encore seulement prévues, il ne correspond plus exactement au montant réellement reporté au mois suivant — voir \"Reporter le reste non dépensé\" plus bas, qui lui ne reporte que les flux déjà réalisés.",
+          "Le chiffre principal : l'argent déjà reçu ce mois-ci (les entrées listées comme « reçu » ci-dessus) moins ce qui est déjà dépensé (Dépensé) moins l'argent immobilisé (épargne + objectifs mis de côté ce mois-ci). Le budget encore prévu mais pas dépensé dans tes catégories n'est pas retiré. Le libellé change selon un seuil sur ce même chiffre : « RESTE ACTUEL » au-dessus de 15 % de l'argent reçu ce mois-ci, « RESTE ACTUEL — BUDGET SERRÉ » en dessous, « DÉPASSEMENT ACTUEL » s'il est négatif (le montant affiché devient alors la valeur absolue, en rouge). En vue partagée, les entrées des deux comptes sont additionnées, chacune avec sa propre date.",
+      },
+      {
+        titre: "+X € à recevoir ce mois-ci",
+        explication:
+          "Ligne teal sous le chiffre principal : la somme des montants attendus des entrées pas encore reçues dont la date de réception tombe plus tard dans le mois en cours — jamais une date d'un mois suivant. N'apparaît pas s'il n'y a rien à recevoir ce mois-ci.",
+      },
+      {
+        titre: "Reste estimé en fin de mois",
+        explication:
+          "Ligne plus petite sous « à recevoir » : RESTE ACTUEL + à recevoir ce mois-ci. C'est la projection de fin de mois du hero. Elle devient « Dépassement estimé en fin de mois » si elle est négative.",
       },
       {
         titre: "Bandeau de projection (\"Il te restera environ...\")",
         explication:
-          "N'est pas un deuxième calcul : ce bandeau met en phrase exactement le même montant que \"RESTE ESTIMÉ EN FIN DE MOIS\" ci-dessus (aucune extrapolation séparée du rythme de dépense) — chiffre principal, phrase et delta vs mois dernier découlent tous de la même valeur, pour ne jamais afficher deux estimations qui pourraient se contredire. Si ce montant est positif ou nul : \"Il te restera environ [X]€ à la fin du mois si tu continues comme ça.\" S'il est négatif : \"Si tu continues comme ça, tu risques d'être à environ [X]€ de dépassement en fin de mois.\"",
+          "N'est pas un calcul séparé : ce bandeau met en phrase le « Reste estimé en fin de mois » du hero (aucune extrapolation du rythme de dépense). S'il est positif ou nul : \"Il te restera environ [X]€ à la fin du mois si tu continues comme ça.\" S'il est négatif : \"Si tu continues comme ça, tu risques d'être à environ [X]€ de dépassement en fin de mois.\"",
       },
       {
         titre: "Nos conseils",
         explication:
-          "Sous le bandeau de projection, jusqu'à 3 phrases de coaching courtes, sans jargon, choisies parmi une dizaine de règles possibles et classées par ordre de priorité (dépassement de budget en premier, bonnes nouvelles en dernier) — seules les 2-3 plus pertinentes du moment s'affichent, jamais une liste qui s'allonge. Chaque règle regarde un signal déjà utilisé ailleurs dans l'app (le \"reste estimé\" ci-dessus, le taux d'épargne et le rythme des objectifs de Stats, la plus grosse dépense de Budget) ou compare le cumul de dépenses d'une catégorie à celui du mois dernier au même jour. Une puce verte signale une bonne nouvelle, orange une vigilance, rouge une alerte (dépassement réel ou quasi certain). Recalculé à chaque rendu à partir des données du mois en cours, jamais mis en cache.",
+          "Sous le bandeau de projection, jusqu'à 3 phrases de coaching courtes, sans jargon, choisies parmi une dizaine de règles possibles et classées par ordre de priorité (dépassement de budget en premier, bonnes nouvelles en dernier) — seules les 2-3 plus pertinentes du moment s'affichent, jamais une liste qui s'allonge. Chaque règle regarde un signal déjà utilisé ailleurs dans l'app (une projection de fin de mois qui, elle, retire aussi le budget prévu non dépensé, le taux d'épargne et le rythme des objectifs de Stats, la plus grosse dépense de Budget) ou compare le cumul de dépenses d'une catégorie à celui du mois dernier au même jour. Une puce verte signale une bonne nouvelle, orange une vigilance, rouge une alerte (dépassement réel ou quasi certain). Recalculé à chaque rendu à partir des données du mois en cours, jamais mis en cache.",
       },
       {
         titre: "+X € / +X % vs mois dernier",
         explication:
-          "Écart entre le Reste estimé de ce mois et celui du mois dernier archivé, rejoué avec la même formule (Dépensé + Dépense prévue du snapshot archivé) sur les valeurs figées du mois précédent — comparé mois complet à mois complet. Un tap sur la valeur bascule l'affichage entre euros et pourcentage (pourcentage non disponible si le reste du mois dernier était nul).",
+          "Écart entre le « Reste estimé en fin de mois » de ce mois et celui du mois dernier archivé, rejoué avec la même formule (revenus − dépensé − argent immobilisé, sans le budget prévu non dépensé) sur les valeurs figées du mois précédent. Un tap sur la valeur bascule l'affichage entre euros et pourcentage (pourcentage non disponible si le reste du mois dernier était nul).",
       },
       {
         titre: "Ordre des segments de la barre de progression et de sa légende",
         explication:
-          "Dans cet ordre, sur la barre comme dans la légende juste en dessous : \"Dépensé\", puis \"Argent immobilisé\", puis \"Dépense prévue\". Le reste de la barre (entrées de Budget déjà reçues ou encore attendues ce mois-ci) n'a plus de couleur ni de nom propre — il se fond avec le fond neutre de la barre, comme de l'argent encore disponible. Ces montants restent comptés normalement dans BUDGET et dans RESTE ESTIMÉ EN FIN DE MOIS ci-dessus : seul l'affichage détaillé de la barre a changé, aucune formule.",
+          "Dans cet ordre, sur la barre comme dans la légende juste en dessous : \"Dépensé\", puis \"Argent immobilisé\", puis \"Dépense prévue\". Le reste de la barre (entrées de Budget déjà reçues ou encore attendues ce mois-ci) n'a plus de couleur ni de nom propre — il se fond avec le fond neutre de la barre, comme de l'argent encore disponible. Ces montants restent comptés normalement dans BUDGET ci-dessus : seul l'affichage détaillé de la barre a changé, aucune formule.",
       },
       {
         titre: "Légende « Argent immobilisé »",
@@ -85,7 +95,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Reporter le reste non dépensé",
         explication:
-          "Ce switch, affiché directement sur la carte BUDGET, détermine ce qui alimente le Budget du mois suivant. À la clôture du mois, le reste reporté n'est pas calculé comme \"RESTE ESTIMÉ EN FIN DE MOIS\" ci-dessus, mais uniquement à partir de ce qui a été réellement réalisé, jamais des dépenses encore prévues : BUDGET du mois − dépenses réelles − épargne mise de côté. Si le switch est activé, ce reste réalisé devient automatiquement une nouvelle entrée « Report du mois précédent » comptée pour le mois suivant. Séparément, chaque entrée de Budget marquée \"Répéter ce montant chaque mois\" est elle aussi reconduite pour le mois suivant sous forme d'une nouvelle entrée identique — les deux mécanismes s'additionnent, ils ne s'excluent pas. Ce total reporté est donc généralement différent (plus élevé) de ce qu'affichait \"RESTE ESTIMÉ EN FIN DE MOIS\" juste avant la clôture, puisque celui-ci avait déjà déduit les dépenses encore seulement prévues.",
+          "Ce switch, affiché directement sur la carte BUDGET, détermine ce qui alimente le Budget du mois suivant. À la clôture du mois, le reste reporté est calculé uniquement à partir de ce qui a été réellement réalisé, jamais des dépenses encore prévues : BUDGET du mois − dépenses réelles − épargne mise de côté. Si le switch est activé, ce reste réalisé devient automatiquement une nouvelle entrée « Report du mois précédent » comptée pour le mois suivant. Séparément, chaque entrée de Budget marquée \"Répéter ce montant chaque mois\" est elle aussi reconduite pour le mois suivant sous forme d'une nouvelle entrée identique — les deux mécanismes s'additionnent, ils ne s'excluent pas. Comme BUDGET compte aussi les entrées encore attendues, ce total peut différer du « Reste estimé en fin de mois » du hero, qui ne compte que l'argent reçu et celui attendu plus tard dans le mois.",
       },
     ],
   },

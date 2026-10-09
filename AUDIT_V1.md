@@ -2178,6 +2178,60 @@ alter table public.enveloppes
 
 ---
 
+### P066 — Hero d'Aperçu : Reste actuel / À recevoir ce mois-ci / Reste estimé (demande explicite, 2026-10-09)
+
+- **Gravité** : 🔵 évolution d'affichage demandée.
+- **Décisions de Maëlys** : « dépenses engagées » = dépensé + argent
+  immobilisé (le budget prévu non dépensé n'est plus retiré du hero) ; delta
+  « vs mois dernier » et bandeau basés sur le nouveau Reste estimé ; en vue
+  partagée, correction à la racine dans la fusion (date transmise).
+- **Formules** (`utils/budget.ts::revenusDuMoisHero`, à partir des MÊMES
+  lignes que la liste « entrées ce mois-ci ») : Reste actuel = reçu −
+  dépensé − épargne ; À recevoir = attendu des parts non reçues datées plus
+  tard dans le mois civil courant (jamais un mois suivant) ; Reste estimé =
+  somme des deux. `resteEstime` (calculerResteEstimeCourant) inchangé :
+  conseils, jauge, Stats et Budget non touchés.
+- **Vue partagée** (`utils/espacePartage.ts::fusionnerCategoriesParNom`) :
+  une ligne d'Entrée fusionnée ou partenaire seule garde `partsEntree`
+  (date + reçu/attendu de chaque entrée réunie) et une date représentative
+  (plus proche date future encore attendue). Avant : ni date ni statut, les
+  entrées attendues du partenaire disparaissaient de la liste verte et du
+  « à recevoir ». Totaux inchangés (`moisComptage` reste forcé).
+- **Delta** : `utils/exportExcel.ts::calculerResteHeroArchive` rejoue la
+  formule du hero sur le snapshot (reçu − dépensé − épargne), au lieu de
+  `calculerResteEstimeArchive` (qui retire le prévu).
+- **⚠️ Question pour Maëlys — double comptage probable dans
+  `calculerResteEstimeArchive`** : `snapshot.disponible` vaut déjà la somme
+  des entrées du mois (`budgetDuMois` = reçu + attendu, `app/store.ts`
+  ~l.1847), et la fonction y ajoute encore `totalParType(enveloppes, true)`
+  (les entrées reçues du même snapshot). Le « reste estimé » archivé
+  utilisé par le coach de Stats et par les conseils (« marge qui se
+  réduit ») semble donc gonflé du montant reçu le mois archivé. Non corrigé
+  (Stats hors périmètre de cette demande) — à confirmer avant correction.
+- **Tests** : `__tests__/heroApercu.test.ts` (8 cas, dont la fusion).
+- **Relu 2 fois par code-reviewer** : OK pour commit. Mineurs suivis :
+  (a) `fusionnerCategoriesParNom` lit `new Date()` dans un `useMemo`
+  (EspacePartageContext) sans le jour en dépendance — app laissée ouverte,
+  la date représentative d'une ligne fusionnée peut rester sur une date
+  passée jusqu'au prochain rechargement des données partenaire (la ligne et
+  sa part future sortent alors de « à recevoir ») ; correction propre :
+  passer `aujourdhui` en paramètre. (b) Biais préexistant du delta : une
+  Fixe ponctuelle d'un mois ancien, jamais remise à zéro (vestigiale), reste
+  dans `enveloppesSnapshot` des snapshots suivants (filtre `supprimeeLe`
+  seul, store.ts ~l.1776) et gonfle le « dépensé » archivé, alors que le
+  mois courant l'exclut — reste du mois précédent sous-estimé.
+- **Risques résiduels** : un mois commence en « DÉPASSEMENT ACTUEL » rouge
+  tant que le salaire n'est pas reçu si une dépense est déjà saisie
+  (cohérent avec la définition, la ligne « à recevoir » l'explique) ; les
+  conseils parlent encore de la projection complète (avec le prévu), qui
+  peut différer du Reste estimé du hero ; une ligne fusionnée à moitié
+  reçue s'affiche « reçue » dans la liste avec la seule part reçue (le
+  hero, lui, compte bien la part attendue).
+- **Statut** : ✅ fait ; tsc 10 lignes / lint 49 (39 err, 10 warn) /
+  tests 27/27. À vérifier sur device.
+
+---
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 

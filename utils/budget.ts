@@ -154,8 +154,14 @@ export function estCategorieActiveCeMois(
 // Écart assumé : `depense !== 0` plutôt que `> 0` pour "recue" — le seul
 // cas négatif est "Report du mois précédent" en déficit (archivage), un vrai
 // montant du mois qu'on ne doit pas cacher. Une catégorie supprimée n'est
-// jamais "à venir". AFFICHAGE UNIQUEMENT : les totaux (entreesBudgetDuMois,
-// Reste estimé) ne sont pas filtrés par cette fonction.
+// jamais "à venir". Les totaux (entreesBudgetDuMois, calculerResteEstime-
+// Courant, Stats, Budget) ne sont pas filtrés par cette fonction — SEULE
+// exception voulue : les chiffres du hero d'Aperçu (demande du 2026-10-09),
+// calculés à partir de ces mêmes lignes via revenusDuMoisHero, pour que le
+// hero et la liste "entrées ce mois-ci" partent toujours des mêmes entrées.
+// Limite connue (vue partagée) : une ligne fusionnée à moitié reçue est
+// listée une seule fois "reçue", alors que le hero compte aussi sa part
+// encore attendue dans "à recevoir" (ventilation part par part).
 export type StatutAffichageEntree = "recue" | "a_venir" | "masquee";
 
 export function statutAffichageEntree(
@@ -188,6 +194,79 @@ export function entreesAffichablesDuMois<T extends Enveloppe>(
     if (statut !== "masquee") resultat.push({ env, statut });
   });
   return resultat;
+}
+
+// Une "part" d'une ligne d'Entrée : la ligne elle-même en vue personnelle,
+// ou chacune des entrées (la mienne, celle du partenaire) réunies dans une
+// ligne fusionnée en vue partagée (utils/espacePartage.ts::
+// fusionnerCategoriesParNom, champ partsEntree) — chaque part garde SA
+// date de réception et SON montant reçu/attendu.
+export type PartEntree = {
+  depense: number;
+  budget: number;
+  dateFixe?: string;
+};
+
+// Date "représentative" d'une ligne d'Entrée fusionnée (2026-10-09) : la
+// plus proche date FUTURE d'une part encore attendue (depense 0) s'il y en
+// a une — la ligne reste alors "à venir" tant qu'une part l'est —, sinon la
+// plus ancienne date connue. `undefined` si aucune part n'est datée.
+export function dateRepresentativeEntree(
+  parts: PartEntree[],
+  aujourdhui: Date,
+): string | undefined {
+  const debutJour = new Date(aujourdhui);
+  debutJour.setHours(0, 0, 0, 0);
+  const datees = parts.filter((p) => !!p.dateFixe);
+  const futuresAttendues = datees
+    .filter(
+      (p) => p.depense === 0 && parseDateFixeLocale(p.dateFixe!) > debutJour,
+    )
+    .map((p) => p.dateFixe!)
+    .sort();
+  if (futuresAttendues.length > 0) return futuresAttendues[0];
+  return datees.map((p) => p.dateFixe!).sort()[0];
+}
+
+// RÈGLE À NE JAMAIS CASSER — REVENUS DU HERO D'APERÇU (demande du
+// 2026-10-09) : ventile, PART PAR PART (cf. PartEntree), les lignes
+// d'entrées affichées (entreesAffichablesDuMois) en :
+//   - recu       : somme des montants reçus (depense ≠ 0) ;
+//   - aRecevoir  : somme des montants attendus (budget) des parts non reçues
+//                  dont la date de réception est FUTURE et DANS le mois
+//                  civil de `aujourdhui` — jamais un mois suivant.
+// Seul usage voulu : le hero d'Aperçu (Reste actuel / À recevoir / Reste
+// estimé). Les autres totaux (entreesBudgetDuMois, calculerResteEstime-
+// Courant, Stats, Budget) n'en dépendent pas.
+export function revenusDuMoisHero(
+  lignes: { env: Enveloppe & { partsEntree?: PartEntree[] } }[],
+  aujourdhui: Date,
+): { recu: number; aRecevoir: number } {
+  const debutJour = new Date(aujourdhui);
+  debutJour.setHours(0, 0, 0, 0);
+  let recu = 0;
+  let aRecevoir = 0;
+  lignes.forEach(({ env }) => {
+    const parts: PartEntree[] = env.partsEntree ?? [
+      { depense: env.depense, budget: env.budget, dateFixe: env.dateFixe },
+    ];
+    parts.forEach((p) => {
+      if (p.depense !== 0) {
+        recu += p.depense;
+        return;
+      }
+      if (!p.dateFixe) return;
+      const d = parseDateFixeLocale(p.dateFixe);
+      if (
+        d > debutJour &&
+        d.getFullYear() === debutJour.getFullYear() &&
+        d.getMonth() === debutJour.getMonth()
+      ) {
+        aRecevoir += p.budget;
+      }
+    });
+  });
+  return { recu, aRecevoir };
 }
 
 // RÈGLE À NE JAMAIS CASSER — GARDE-FOU ANTI-DOUBLON DE NOM (2026-10-09,
