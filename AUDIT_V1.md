@@ -2200,15 +2200,28 @@ alter table public.enveloppes
 - **Delta** : `utils/exportExcel.ts::calculerResteHeroArchive` rejoue la
   formule du hero sur le snapshot (reçu − dépensé − épargne), au lieu de
   `calculerResteEstimeArchive` (qui retire le prévu).
-- **⚠️ Question pour Maëlys — double comptage probable dans
-  `calculerResteEstimeArchive`** : `snapshot.disponible` vaut déjà la somme
+- **Double comptage dans `calculerResteEstimeArchive` — ✅ corrigé (même
+  jour, à la demande de Maëlys)** : `snapshot.disponible` vaut déjà la somme
   des entrées du mois (`budgetDuMois` = reçu + attendu, `app/store.ts`
-  ~l.1847), et la fonction y ajoute encore `totalParType(enveloppes, true)`
-  (les entrées reçues du même snapshot). Le « reste estimé » archivé
-  utilisé par le coach de Stats et par les conseils (« marge qui se
-  réduit ») semble donc gonflé du montant reçu le mois archivé. Non corrigé
-  (Stats hors périmètre de cette demande) — à confirmer avant correction.
-- **Tests** : `__tests__/heroApercu.test.ts` (8 cas, dont la fusion).
+  ~l.1847, depuis le 2026-08-01) et la fonction (ajoutée le 2026-08-20) y
+  ajoutait encore `totalParType(enveloppes, true)` : chaque entrée reçue
+  comptait deux fois dans le reste archivé. Les snapshots antérieurs au
+  2026-08-01 (`disponible` = argent disponible saisi à la main) existent
+  encore et l'ancienne formule leur convenait, mais le seul appelant ne lit
+  que le mois précédent (septembre 2026 aujourd'hui) : la correction est
+  juste pour tout snapshot réellement lu. Formule alignée sur le mois en
+  cours : disponible − dépensé − prévu − épargne. Seul consommateur : `resteEstimePrecedent`
+  d'Aperçu → conseils « marge qui se réduit » (`utils/conseils.ts` l.1493
+  et 1507) et allocation par jour (l.1610) — le coach de Stats ne l'appelait
+  pas. Effet visible : ces conseils comparent enfin à une marge du mois
+  précédent réaliste (avant : gonflée du salaire, donc « marge qui se
+  réduit » déclenché presque à tort chaque mois). Effet de bord unique :
+  un utilisateur chez qui la situation `marge:global` était déjà suivie
+  recevra une fois le conseil « Votre marge de fin de mois s'est redressée
+  récemment », dû au seul changement de formule. Relu par code-reviewer
+  (diagnostic et périmètre confirmés).
+- **Tests** : `__tests__/heroApercu.test.ts` (9 cas, dont la fusion et la
+  formule archivée corrigée).
 - **Relu 2 fois par code-reviewer** : OK pour commit. Mineurs suivis :
   (a) `fusionnerCategoriesParNom` lit `new Date()` dans un `useMemo`
   (EspacePartageContext) sans le jour en dépendance — app laissée ouverte,
@@ -2229,6 +2242,28 @@ alter table public.enveloppes
   hero, lui, compte bien la part attendue).
 - **Statut** : ✅ fait ; tsc 10 lignes / lint 49 (39 err, 10 warn) /
   tests 27/27. À vérifier sur device.
+
+---
+
+### P067 — Épargne retirée deux fois dans la marge des mois archivés (trouvé en revue, 2026-10-09)
+
+- **Gravité** : 🟠 MAJEUR (calcul faux, plusieurs écrans) — **non corrigé,
+  en attente de décision**.
+- **Description** : `utils/conseils.ts:1040`, `utils/trophees.ts:117` et
+  `utils/bilanVista.ts:201` calculent la marge d'un mois archivé par
+  `s.disponible - s.totalDepense - s.epargne`. Or `totalDepense` contient
+  déjà l'épargne (`totalDepense = depenseReelle + etat.epargneMois`,
+  `app/store.ts:1851`) : l'épargne est retirée deux fois.
+- **Conséquence** : marge des mois passés sous-estimée du montant épargné —
+  tendance de marge sur plusieurs mois (conseils), trophées liés à la marge
+  et Ton bilan. Un utilisateur qui épargne beaucoup est pénalisé à tort.
+- **Correction proposée** : `s.disponible - s.totalDepense` (déjà la forme
+  de `resteReel` à la reprise d'archivage, store.ts ~l.1674), dans les 3
+  fichiers, avec un test. ⚠️ `utils/conseils.ts`, `utils/trophees.ts` et
+  `utils/bilanVista.ts` sont des fichiers "aucune écriture Supabase" : la
+  correction est un calcul pur, compatible avec cette règle. Les trophées
+  déjà débloqués ne seraient pas recalculés rétroactivement : à décider.
+- **Statut** : 🔴 ouvert — question pour Maëlys.
 
 ---
 

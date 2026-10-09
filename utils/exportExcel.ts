@@ -195,11 +195,8 @@ export function totalParType(envs: CategorieExport[], estEntree: boolean): numbe
 // revenus reçus (depense des Entrées archivées) − dépensé (depense des
 // autres catégories) − épargne du mois. "À recevoir" vaut 0 sur un mois
 // clos. N'utilise volontairement PAS `snapshot.disponible`, qui contient
-// déjà les entrées du mois (reçues + attendues, cf. budgetDuMois dans
-// app/store.ts) : calculerResteEstimeArchive ci-dessous l'additionne en
-// plus de totalParType(…, true), ce qui semble compter deux fois les
-// entrées reçues — point remonté dans AUDIT_V1.md (P066), non corrigé ici
-// (formule partagée avec le coach de Stats, hors périmètre).
+// aussi les entrées attendues jamais reçues (budgetDuMois = reçu + attendu,
+// app/store.ts) — le hero ne compte que l'argent effectivement reçu.
 export function calculerResteHeroArchive(snapshot: {
   enveloppes: CategorieExport[];
   epargne: number;
@@ -213,12 +210,14 @@ export function calculerResteHeroArchive(snapshot: {
 
 // RÈGLE À NE JAMAIS CASSER : SEULE source du "Reste estimé" reconstruit
 // pour un mois DÉJÀ ARCHIVÉ — même principe que
-// utils/budget.ts::calculerResteEstimeCourant (mois en cours) : Aperçu et
-// le bloc coach de Stats doivent tous les deux appeler cette fonction pour
-// la comparaison "vs mois précédent", jamais reconstruire la formule
-// indépendamment. Seule autre formule tolérée : calculerResteHeroArchive
-// ci-dessus, réservée au delta du hero d'Aperçu. Accepte n'importe quel snapshot structurellement
-// compatible (SnapshotMois de app/store.ts comme SnapshotExport ci-dessus).
+// utils/budget.ts::calculerResteEstimeCourant (mois en cours) : tout écran
+// qui compare au "reste estimé" du mois précédent doit appeler cette
+// fonction (aujourd'hui : uniquement Aperçu → conseils, via
+// resteEstimePrecedent), jamais reconstruire la formule indépendamment.
+// Seule autre formule tolérée : calculerResteHeroArchive ci-dessus,
+// réservée au delta du hero d'Aperçu. Accepte n'importe quel snapshot
+// structurellement compatible (SnapshotMois de app/store.ts comme
+// SnapshotExport ci-dessus).
 export function calculerResteEstimeArchive(snapshot: {
   enveloppes: CategorieExport[];
   epargne: number;
@@ -227,9 +226,17 @@ export function calculerResteEstimeArchive(snapshot: {
   const totalPrevu = snapshot.enveloppes
     .filter((e) => e.type !== "Entrée")
     .reduce((acc, e) => acc + Math.max(0, e.budget - e.depense), 0);
+  // RÈGLE À NE JAMAIS CASSER — PAS DE DOUBLE COMPTAGE DES ENTRÉES (bug
+  // corrigé le 2026-10-09, P066, demande de Maëlys) : `snapshot.disponible`
+  // VAUT DÉJÀ la somme des entrées du mois archivé (budgetDuMois = reçu +
+  // attendu, app/store.ts::archiverMoisActuelInterneCoeur, depuis le
+  // 2026-08-01). L'ancienne formule y ajoutait EN PLUS
+  // totalParType(enveloppes, true) — chaque entrée reçue était comptée deux
+  // fois, gonflant le reste archivé de tout le reçu du mois (conseil « marge
+  // qui se réduit » faussé). Même formule que le mois en cours
+  // (calculerResteEstimeCourant) : disponible − dépensé − prévu − épargne.
   return (
-    snapshot.disponible +
-    totalParType(snapshot.enveloppes, true) -
+    snapshot.disponible -
     totalParType(snapshot.enveloppes, false) -
     totalPrevu -
     snapshot.epargne

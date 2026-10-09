@@ -7,7 +7,10 @@ import {
   entreesAffichablesDuMois,
   revenusDuMoisHero,
 } from "../utils/budget";
-import { calculerResteHeroArchive } from "../utils/exportExcel";
+import {
+  calculerResteEstimeArchive,
+  calculerResteHeroArchive,
+} from "../utils/exportExcel";
 import { fusionnerCategoriesParNom } from "../utils/espacePartage";
 
 jest.mock("../supabaseClient", () => ({ supabase: {} }));
@@ -162,5 +165,22 @@ describe("calculerResteHeroArchive", () => {
         epargne: 100,
       }),
     ).toBe(800);
+  });
+});
+
+describe("calculerResteEstimeArchive (double comptage corrigé le 2026-10-09)", () => {
+  it("disponible − dépensé − prévu − épargne, sans recompter les entrées", () => {
+    expect(
+      calculerResteEstimeArchive({
+        // disponible = somme des entrées du mois (budgetDuMois, store.ts).
+        disponible: 2000,
+        enveloppes: [
+          { id: "s", nom: "Salaire", depense: 2000, budget: 2000, type: "Entrée" },
+          { id: "c", nom: "Courses", depense: 300, budget: 500, type: "Variable" },
+          { id: "l", nom: "Loyer", depense: 800, budget: 800, type: "Fixe" },
+        ],
+        epargne: 100,
+      }),
+    ).toBe(600); // 2000 − 1100 − 200 − 100 (avant : 2600)
   });
 });
