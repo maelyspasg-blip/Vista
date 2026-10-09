@@ -2101,6 +2101,83 @@ alter table public.enveloppes
 - **Statut** : **FAIT (2026-10-02)** — tsc/lint vérifiés propres (10
   lignes / 49 problèmes), `npm test` : 2/2 tests passent.
 
+### P064 — Revert de P061 + P062 : retour à l'ancien formulaire de création d'Entrée (demande explicite, 2026-10-09)
+
+- **Gravité** : 🟠 MAJEUR — sur device, la création de catégorie Entrée via
+  le flux en 2 étapes (P061/P062) semblait ne rien faire.
+- **Décision de Maëlys** : revenir à l'ancien formulaire (état d'avant
+  P061, commit `e5bed2d`) pour retrouver un état stable. `git revert` de
+  `b2e866b` (P062) puis `062aa03` (P061) ; `app/(tabs)/index.tsx` et
+  `app/(tabs)/budget.tsx` sont identiques octet pour octet à `e5bed2d`
+  (vérifié par `git diff e5bed2d HEAD`). Les sections P061/P062 ci-dessus
+  sont conservées pour l'historique — elles ne décrivent plus le code.
+- **Cause racine du « bouton qui ne fait rien »** (indépendante de P061, donc
+  corrigée après le revert) :
+  1. `objStore.ajouterEnveloppe` refusait tout nom porté par n'importe
+     quelle catégorie non supprimée, y compris les lignes d'Entrée des mois
+     passés que laisse CHAQUE reconduction mensuelle (« Salaire » de
+     septembre bloquait la création de « Salaire » en octobre) →
+     nouveau `utils/budget.ts::nomReservePar` : un homonyme ne bloque plus
+     s'il est supprimé ou ponctuel d'un mois entièrement passé ; il bloque
+     toujours s'il est visible ce mois-ci OU d'un mois futur (P021/P027/P033
+     préservés). Test : `__tests__/nomReservePar.test.ts`.
+  2. Le refus passait par `signalerErreurSync`, bandeau affiché dans
+     `(tabs)/_layout.tsx` donc caché derrière la modale → `Alert.alert`
+     ajouté dans les 2 formulaires de création d'Aperçu (nom déjà pris,
+     échec d'enregistrement).
+- **Travail non commité mis de côté** (`git stash`, message « session
+  2026-10-09 … avant revert P061/P062 ») : suppression d'une entrée reçue
+  par appui long dans Budget, sélecteur de date en roue
+  (`components/DatePickerRoue.tsx`), champ « Reçu le », bornage du jour
+  31 dans la reconduction et dans Planning, garde `supprimeeLe` dans
+  l'auto-confirmation des échéances, non-reconduction d'une Entrée
+  supprimée. Une partie dépendait du formulaire P061 : à réappliquer au
+  cas par cas sur l'ancien formulaire, jamais par un `git stash pop` brut.
+- **Correction en revue (code-reviewer)** : l'assouplissement du garde-fou
+  est limité aux ENTRÉES. Une Variable/Fixe non supprimée réserve toujours
+  son nom, même ponctuelle passée : plusieurs traitements relient les
+  catégories par nom sans filtre de mois (événements financiers liés,
+  `renommerCategoriePartout`, dédup Fixe de Planning), la libérer
+  modifierait la `depense` d'une ligne archivée. Copie conforme
+  `nomReserveParInterne` dans `store.ts` (convention : store.ts n'importe pas
+  utils/budget.ts).
+- **Statut** : ✅ revert fait. Création Entrée/Variable/Fixe à confirmer sur
+  device.
+
+### P065 — Entrées absentes du Planning + lignes à 0 € + cohérence Aperçu/Budget (demande explicite, 2026-10-09)
+
+- **Gravité** : 🟠 MAJEUR (« Salaire n'apparaît pas dans le Planning »).
+- **Planning — cause** : seules les Entrées avec `afficher_dans_planning =
+  true` étaient affichées ; le champ est null pour le Salaire de
+  l'onboarding, l'ancien formulaire dédié et toute ligne reconduite.
+  **Correction** (`planning.tsx`) : affichée si datée et
+  `afficherDansPlanning !== false` ; chaque ligne à sa propre date ; seule la
+  ligne la plus récente d'un nom (choisie AVANT l'interrupteur, noms
+  normalisés) est projetée sur les mois suivants, jamais si supprimée ; jour
+  borné au mois (31 → fin février). Création : `afficherDansPlanning: true`
+  par défaut (formulaire dédié, chip « Entrée » de la modale générique) ;
+  l'édition ne réécrit plus un champ absent en `false`.
+- **Archivage** (`archiverMoisActuelInterneCoeur`, bloc de reconduction
+  uniquement, après le snapshot) : une Entrée supprimée n'est plus
+  reconduite ; `repeteChaqueMois`/`afficherDansPlanning` sont recopiés.
+- **Lignes vertes** : source unique `utils/budget.ts::
+  entreesAffichablesDuMois` pour Aperçu ET Budget. depense ≠ 0 → reçue ;
+  0 € + date future → « À venir » ; 0 € sans date ou date atteinte →
+  masquée. Écart assumé : `≠ 0` (et non `> 0`) pour ne pas cacher un
+  « Report du mois précédent » en déficit. Affichage uniquement, totaux
+  inchangés.
+- **Tests** : `__tests__/nomReservePar.test.ts` (10 cas),
+  `__tests__/entreesAffichees.test.ts` (7 cas) — 19/19 avec l'archivage.
+- **Risques résiduels** : en vue partagée, Aperçu (catégories fusionnées) et
+  Budget (catégories propres) ne partent pas de la même source ; le montant
+  projeté dans Planning est celui de la dernière ligne (reçu s'il diffère du
+  prévu) ; `renommerCategoriePartout` garde l'ancien critère strict ; la
+  logique Planning n'a pas de test automatisé.
+- **Statut** : ✅ corrigé ; tsc 10 lignes / lint 49 (39 err, 10 warn) /
+  tests 19/19. À confirmer sur device.
+
+---
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 

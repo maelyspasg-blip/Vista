@@ -140,6 +140,84 @@ export function estCategorieActiveCeMois(
   return moisComptageEffectif(env) === moisISO;
 }
 
+// RÈGLE À NE JAMAIS CASSER — LIGNES D'ENTRÉES AFFICHÉES (demande du
+// 2026-10-09) : SOURCE UNIQUE des lignes vertes "entrées d'argent" d'Aperçu
+// ET de Budget — pour les mêmes catégories en entrée, une entrée absente de
+// l'un ne doit jamais apparaître dans l'autre, donc jamais de filtre
+// réinventé localement dans l'un des deux écrans. (En vue partagée, Aperçu
+// passe ses catégories fusionnées et Budget les siennes : divergence de
+// SOURCE antérieure à cette règle, pas de filtre.) Règle exacte demandée :
+//   - depense > 0                    → "recue"   (toujours affichée)
+//   - depense = 0, date future       → "a_venir" (section "À venir" seule)
+//   - depense = 0, pas de date       → masquée
+//   - depense = 0, date atteinte     → masquée (attendue mais non reçue)
+// Écart assumé : `depense !== 0` plutôt que `> 0` pour "recue" — le seul
+// cas négatif est "Report du mois précédent" en déficit (archivage), un vrai
+// montant du mois qu'on ne doit pas cacher. Une catégorie supprimée n'est
+// jamais "à venir". AFFICHAGE UNIQUEMENT : les totaux (entreesBudgetDuMois,
+// Reste estimé) ne sont pas filtrés par cette fonction.
+export type StatutAffichageEntree = "recue" | "a_venir" | "masquee";
+
+export function statutAffichageEntree(
+  env: Enveloppe,
+  aujourdhui: Date,
+): StatutAffichageEntree {
+  if (env.depense !== 0) return "recue";
+  if (env.supprimeeLe || !env.dateFixe) return "masquee";
+  const dateReception = parseDateFixeLocale(env.dateFixe);
+  dateReception.setHours(0, 0, 0, 0);
+  const debutJour = new Date(aujourdhui);
+  debutJour.setHours(0, 0, 0, 0);
+  return dateReception > debutJour ? "a_venir" : "masquee";
+}
+
+// Entrées du mois `annee`/`mois` à afficher (Aperçu et Budget), avec leur
+// statut — cf. RÈGLE ci-dessus.
+export function entreesAffichablesDuMois<T extends Enveloppe>(
+  enveloppes: T[],
+  annee: number,
+  mois: number,
+  aujourdhui: Date,
+): { env: T; statut: Exclude<StatutAffichageEntree, "masquee"> }[] {
+  const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
+  const resultat: { env: T; statut: Exclude<StatutAffichageEntree, "masquee"> }[] =
+    [];
+  enveloppes.forEach((env) => {
+    if (env.type !== "Entrée" || moisComptageEffectif(env) !== moisISO) return;
+    const statut = statutAffichageEntree(env, aujourdhui);
+    if (statut !== "masquee") resultat.push({ env, statut });
+  });
+  return resultat;
+}
+
+// RÈGLE À NE JAMAIS CASSER — GARDE-FOU ANTI-DOUBLON DE NOM (2026-10-09,
+// cf. P021/P027/P033 et objStore.ajouterEnveloppe) : une catégorie existante
+// "réserve" son nom SAUF si elle est supprimée, ou si c'est une ENTRÉE
+// rattachée à un mois entièrement PASSÉ (les lignes "Salaire" des mois
+// précédents laissées par chaque reconduction mensuelle — le bug réel).
+// Une Variable/Fixe non supprimée réserve TOUJOURS son nom, même ponctuelle
+// et passée : plusieurs traitements relient les catégories PAR NOM sans
+// filtre de mois (verifierEvenementsFinanciersInterne et la suppression
+// d'événement ajoutent/retirent un montant à TOUTES les lignes du même
+// nom, ajusterForecastEvenementsFinanciers prend le premier `find`,
+// renommerCategoriePartout réécrit les snapshots, dédup Fixe de Planning) —
+// les y exposer modifierait la `depense` d'une ligne archivée (trouvé en
+// revue le 2026-10-09). Une Entrée d'un mois FUTUR reste réservée ; mois
+// inconnu → réservé par prudence. COPIE CONFORME dans app/store.ts
+// (nomReserveParInterne) : toute modification doit être reportée là-bas.
+export function nomReservePar(
+  env: Enveloppe,
+  annee: number,
+  mois: number,
+): boolean {
+  if (env.supprimeeLe) return false;
+  if (env.type !== "Entrée") return true;
+  const moisCategorie = moisComptageEffectif(env);
+  if (!moisCategorie) return true;
+  const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
+  return moisCategorie >= moisISO;
+}
+
 // RÈGLE À NE JAMAIS CASSER — COMPLÉMENT DE estCategorieActiveCeMois
 // (décision produit du 2026-09-18, P052) : une catégorie supprimée est
 // TOUJOURS exclue de estCategorieActiveCeMois (ci-dessus), y compris pour

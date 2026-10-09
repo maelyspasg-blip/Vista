@@ -486,6 +486,29 @@ supabase.auth.onAuthStateChange((evenement, session) => {
 
 let minuteurErreurSync: ReturnType<typeof setTimeout> | null = null;
 
+// RÈGLE À NE JAMAIS CASSER : COPIE CONFORME de utils/budget.ts::
+// nomReservePar (voir sa RÈGLE détaillée et __tests__/nomReservePar.test.ts)
+// — dupliquée ici, pas importée : utils/ ne dépend pas de store.ts et
+// l'inverse non plus (même convention que estPermanente/
+// estSupprimeeCeMoisArchive). Toute modification doit être reportée dans
+// les DEUX fonctions.
+function nomReserveParInterne(
+  env: Enveloppe,
+  annee: number,
+  mois: number,
+): boolean {
+  if (env.supprimeeLe) return false;
+  if (env.type !== "Entrée") return true;
+  let moisCategorie = env.moisComptage;
+  if (!moisCategorie && env.dateFixe) {
+    const d = parseDateFixeLocale(env.dateFixe);
+    moisCategorie = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  }
+  if (!moisCategorie) return true;
+  const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
+  return moisCategorie >= moisISO;
+}
+
 export function signalerErreurSync(message: string) {
   setEtat({ erreurSync: message });
   if (minuteurErreurSync) clearTimeout(minuteurErreurSync);
@@ -1952,8 +1975,14 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
   // une récurrence par entrée, désormais réellement effective (elle ne
   // l'était pas jusqu'ici : recurrente/frequenceJours n'étaient stockés que
   // pour l'affichage d'un badge, sans regénération automatique).
+  // RÈGLE À NE JAMAIS CASSER (bug corrigé le 2026-10-09) : `!e.supprimeeLe`
+  // — une Entrée récurrente supprimée n'est JAMAIS reconduite, sinon elle
+  // réapparaissait le 1er du mois suivant comme une ligne neuve non
+  // supprimée (catégorie fantôme, et projetée de nouveau dans Planning).
+  // Filtre posé ICI seulement, jamais sur entreesDuMois (qui sert aussi au
+  // snapshot et à budgetDuMois du mois archivé, où elle doit rester).
   entreesDuMois
-    .filter((e) => e.recurrente)
+    .filter((e) => e.recurrente && !e.supprimeeLe)
     .forEach((e) => {
       let dateFixeSuivante = moisComptageSuivant;
       if (e.dateFixe) {
@@ -1984,6 +2013,11 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
         recurrente: true,
         type: "Entrée",
         dateFixe: dateFixeSuivante,
+        // Ajout du 2026-10-09 : réglages Planning reconduits tels quels — le
+        // choix "Afficher dans Planning" de l'utilisateur n'est plus perdu
+        // au changement de mois.
+        repeteChaqueMois: e.repeteChaqueMois,
+        afficherDansPlanning: e.afficherDansPlanning,
         payee: e.montantHabituel !== undefined,
         moisComptage: moisComptageSuivant,
         montantHabituel: e.montantHabituel,
@@ -3027,9 +3061,22 @@ export function useObjectifs() {
         // `!e.supprimeeLe` exclut les catégories masquées de ce contrôle :
         // leur ancien nom redevient réutilisable, une catégorie "supprimée"
         // n'existe plus du point de vue de l'utilisateur.
+        // RÈGLE : ajout du 2026-10-09 (demande explicite, "ce nom existe
+        // déjà" bloquait injustement) — une catégorie supprimée, ou une
+        // Entrée d'un mois passé (ex : ligne "Salaire" du mois dernier,
+        // laissée par la reconduction mensuelle), ne bloque plus un nom ;
+        // tout le reste bloque toujours, cf. RÈGLE sur
+        // utils/budget.ts::nomReservePar.
         const nomNormalise = champs.nom.trim().toLowerCase();
+        const maintenantControle = new Date();
         const collision = etat.enveloppes.some(
-          (e) => !e.supprimeeLe && e.nom.trim().toLowerCase() === nomNormalise,
+          (e) =>
+            e.nom.trim().toLowerCase() === nomNormalise &&
+            nomReserveParInterne(
+              e,
+              maintenantControle.getFullYear(),
+              maintenantControle.getMonth(),
+            ),
         );
         if (collision) {
           signalerErreurSync("Ce nom de catégorie existe déjà.");

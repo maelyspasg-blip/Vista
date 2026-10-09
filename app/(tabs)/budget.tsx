@@ -52,8 +52,8 @@ import {
 import { trouverDepenseDominante } from "../../utils/conseils";
 import {
   calculerResteEstimeCourant,
+  entreesAffichablesDuMois,
   estCategorieActiveCeMois,
-  moisComptageEffectif,
 } from "../../utils/budget";
 import type { CategorieFusionnee } from "../../utils/espacePartage";
 import { InfoBulle } from "../InfoBulle";
@@ -664,17 +664,10 @@ export default function Budget() {
     return d.getMonth() === MOIS_ACTUEL && d.getFullYear() === ANNEE_ACTUELLE;
   });
 
-  // Comptée pour le mois via moisComptage (pas dateFixe) — même critère que
-  // entreesBudgetDuMois, pour rester cohérent avec le total Budget affiché
-  // juste au-dessus de cette section. RÈGLE À NE JAMAIS CASSER : les DEUX
-  // listes (reçues/à venir) utilisent le MÊME critère de mois
-  // (moisComptageEffectif) — bug corrigé où "à venir" filtrait par le mois
-  // de dateFixe au lieu de moisComptage, une incohérence avec "reçues" (et
-  // avec entreesBudgetDuMois) qui pouvait faire disparaître ou mal classer
-  // une entrée reçue un mois mais comptée pour un autre (cf. commentaire
-  // sur Enveloppe.moisComptage, app/store.ts : "recevoir un salaire le 28
-  // juillet mais le compter pour août").
-  const moisActuelISO = `${ANNEE_ACTUELLE}-${String(MOIS_ACTUEL + 1).padStart(2, "0")}-01`;
+  // Les DEUX listes (reçues/à venir) sont comptées pour le mois via
+  // moisComptage (moisComptageEffectif, pas le mois de dateFixe) — même
+  // critère que entreesBudgetDuMois, cf. entreesAffichablesDuMois ci-dessous
+  // ("recevoir un salaire le 28 juillet mais le compter pour août").
   const aujourdhui = new Date();
   aujourdhui.setHours(0, 0, 0, 0);
   // RÈGLE À NE JAMAIS CASSER — depense ET mois_comptage FONT SEULS FOI,
@@ -688,29 +681,23 @@ export default function Budget() {
   // distingue une entrée réellement reçue CE mois d'une entrée encore
   // attendue : payee n'ajoute rien et peut désynchroniser (ex: reconduction
   // partiellement échouée, cf. RÈGLE sur l'archivage dans app/store.ts).
-  const entreeEstEffectivementRecue = (e: Enveloppe): boolean => e.depense > 0;
-  const entreesRecues = objStore.enveloppes
-    .filter(
-      (e) =>
-        e.type === "Entrée" &&
-        moisComptageEffectif(e) === moisActuelISO &&
-        entreeEstEffectivementRecue(e),
-    )
-    .sort((a, b) => b.budget - a.budget);
-
-  // RÈGLE À NE JAMAIS CASSER — CATÉGORIE SUPPRIMÉE (bug corrigé le
-  // 2026-09-18, même principe qu'entreesBudgetDuMois/utils/budget.ts) :
-  // `!e.supprimeeLe` exclut une catégorie "Entrée" supprimée de "à venir" —
-  // impossible d'attendre un revenu d'une catégorie qui n'existe plus. Son
-  // montant déjà reçu ce mois-ci (le cas échéant) reste visible dans
-  // entreesRecues ci-dessus, jamais retiré rétroactivement.
-  const entreesAVenir = objStore.enveloppes.filter(
-    (e) =>
-      e.type === "Entrée" &&
-      !e.supprimeeLe &&
-      moisComptageEffectif(e) === moisActuelISO &&
-      !entreeEstEffectivementRecue(e),
+  // RÈGLE À NE JAMAIS CASSER (2026-10-09) : lignes vertes "reçues" et "à
+  // venir" issues de la MÊME fonction qu'Aperçu (utils/budget.ts::
+  // entreesAffichablesDuMois) — jamais de filtre local ici, cf. RÈGLE "LIGNES
+  // D'ENTRÉES AFFICHÉES" (une entrée absente d'Aperçu n'apparaît jamais ici).
+  const entreesAffichables = entreesAffichablesDuMois(
+    objStore.enveloppes,
+    ANNEE_ACTUELLE,
+    MOIS_ACTUEL,
+    aujourdhui,
   );
+  const entreesRecues = entreesAffichables
+    .filter((l) => l.statut === "recue")
+    .map((l) => l.env)
+    .sort((a, b) => b.budget - a.budget);
+  const entreesAVenir = entreesAffichables
+    .filter((l) => l.statut === "a_venir")
+    .map((l) => l.env);
 
   const evenementsAVenir = objStore.evenements.filter((e) => {
     if (!e.estFinancier || !e.montant) return false;

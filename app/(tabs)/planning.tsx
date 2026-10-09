@@ -28,6 +28,7 @@ import {
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { scheduleOnRN } from "react-native-worklets";
 import { Calendar } from "react-native-calendars";
+import { moisComptageEffectif } from "../../utils/budget";
 import { ColorPicker, PALETTE_COULEURS } from "../ColorPicker";
 import { couleurLaPlusDistincte } from "../../utils/couleurs";
 import { usePagerSwipe } from "../PagerSwipeContext";
@@ -659,73 +660,105 @@ export default function Planning() {
       }
     });
 
-  // RÈGLE : entrées d'argent prévues affichées comme événements "toute la
-  // journée" dans Planning — copie LITTÉRALE du mécanisme utilisé pour les
-  // catégories Fixe juste au-dessus (dédup par nom, boucle sur les mois
-  // voisins si repete_chaque_mois, sinon un seul événement à dateFixe, même
-  // garde-fou "déjà payée ce mois" via historiquePaiements), appliqué à
-  // type === "Entrée" au lieu de "Fixe" — cf. demande explicite "pas de
-  // réinvention". Seule différence assumée : couleur fixe
-  // (COULEUR_ENTREE_PLANNING) au lieu de e.couleur, pour distinguer
-  // visuellement une entrée d'argent d'une dépense, cf. demande initiale.
+  // Entrées d'argent affichées comme événements "toute la journée", couleur
+  // fixe COULEUR_ENTREE_PLANNING (distingue une entrée d'une dépense).
   // Contrôle par enveloppe (e.afficherDansPlanning), jamais par réglage
   // global — un ancien toggle dans Profil → Paramètres a été retiré à la
   // demande explicite de l'utilisateur.
-  // RÈGLE : `!e.supprimeeLe` — même correctif que pour les échéances Fixe
-  // juste au-dessus (bug corrigé le 2026-09-18), copié littéralement pour
-  // rester cohérent avec le reste de ce bloc.
-  const enveloppesEntreesUniques = new Map<string, Enveloppe>();
-  objStore.enveloppes
+  // RÈGLE À NE JAMAIS CASSER — ENTRÉES DANS PLANNING (refonte du
+  // 2026-10-09, "Salaire n'apparaît pas dans le Planning") :
+  // 1. Affichée dès qu'elle a une date (dateFixe), SAUF si l'utilisateur a
+  //    explicitement coupé "Afficher dans Planning" (`=== false`). Un champ
+  //    absent (null en base : onboarding, ancien formulaire dédié, lignes
+  //    reconduites par l'archivage) vaut "affichée" — c'était la cause du
+  //    bug : seul `true` était accepté.
+  // 2. Contrairement à une Fixe (une seule ligne, dateFixe avancée), une
+  //    Entrée récurrente laisse UNE LIGNE PAR MOIS (reconduction mensuelle).
+  //    Chaque ligne non supprimée s'affiche à SA propre date (son mois réel,
+  //    historique compris) ; seule la ligne la PLUS RÉCENTE de chaque nom est
+  //    projetée sur les mois suivants (si récurrente), et jamais si elle est
+  //    supprimée — sinon supprimer "Salaire" (qui ne marque que la ligne du
+  //    mois) laissait les lignes passées le projeter encore (rendez-vous
+  //    fantôme), avec en plus un jour/montant périmé.
+  // 3. Jour borné au mois projeté : un "31" en février débordait sur le
+  //    3 mars (2 occurrences en mars, aucune en février).
+  // 4. La ligne la plus récente est choisie parmi TOUTES les Entrées datées,
+  //    AVANT d'appliquer l'interrupteur (bug trouvé en revue le 2026-10-09) :
+  //    filtrer d'abord faisait d'une ligne passée la "plus récente" dès que
+  //    l'utilisateur coupait l'affichage sur celle du mois — elle était
+  //    alors projetée à sa place, impossible à masquer. Noms comparés
+  //    trimés/insensibles à la casse (même convention que le garde-fou
+  //    anti-doublon).
+  const entreesPlanning = objStore.enveloppes.filter(
+    (e) => e.type === "Entrée" && !!e.dateFixe,
+  );
+  const estAfficheeDansPlanning = (e: Enveloppe) =>
+    !e.supprimeeLe && e.afficherDansPlanning !== false;
+  const evenementEntree = (
+    e: Enveloppe,
+    date: Date,
+    id: string,
+  ): EvenementUnifie => ({
+    id,
+    nom: e.nom,
+    heure: "",
+    duree: 0,
+    couleur: COULEUR_ENTREE_PLANNING,
+    estFinancier: true,
+    montant: e.depense > 0 ? e.depense : e.budget,
+    touteLaJournee: true,
+    date,
+    modifiable: false,
+    proprietaire: "moi",
+    visibilite: "commun",
+  });
+  const derniereEntreeParNom = new Map<string, Enveloppe>();
+  entreesPlanning.forEach((e) => {
+    if (estAfficheeDansPlanning(e)) {
+      tousLesEvenements.push(
+        evenementEntree(e, parseDateFixeLocale(e.dateFixe!), `entree_${e.id}`),
+      );
+    }
+    const cleNom = e.nom.trim().toLowerCase();
+    const actuelle = derniereEntreeParNom.get(cleNom);
+    const moisE = moisComptageEffectif(e) ?? "";
+    const moisActuelle = actuelle ? (moisComptageEffectif(actuelle) ?? "") : "";
+    if (
+      !actuelle ||
+      moisE > moisActuelle ||
+      (moisE === moisActuelle && actuelle.supprimeeLe && !e.supprimeeLe)
+    ) {
+      derniereEntreeParNom.set(cleNom, e);
+    }
+  });
+  [...derniereEntreeParNom.values()]
     .filter(
-      (e) => !e.supprimeeLe && e.type === "Entrée" && e.afficherDansPlanning && e.dateFixe,
+      (e) => estAfficheeDansPlanning(e) && (e.recurrente || e.repeteChaqueMois),
     )
     .forEach((e) => {
-      if (!enveloppesEntreesUniques.has(e.nom)) enveloppesEntreesUniques.set(e.nom, e);
-    });
-  [...enveloppesEntreesUniques.values()]
-    .forEach((e) => {
       const dateOrigine = parseDateFixeLocale(e.dateFixe!);
-      if (e.repeteChaqueMois) {
-        const jour = dateOrigine.getDate();
-        for (let offset = -2; offset <= 2; offset++) {
-          const d = new Date(anneeVue, moisVue + offset, jour);
-          const dejaPayeeCeMois = objStore.historiquePaiements.some(
-            (p) =>
-              p.enveloppeId === e.id &&
-              parseDateFixeLocale(p.date).getMonth() === d.getMonth() &&
-              parseDateFixeLocale(p.date).getFullYear() === d.getFullYear(),
-          );
-          if (dejaPayeeCeMois) continue;
-          tousLesEvenements.push({
-            id: `entree_${e.id}-${d.getFullYear()}-${d.getMonth()}`,
-            nom: e.nom,
-            heure: "",
-            duree: 0,
-            couleur: COULEUR_ENTREE_PLANNING,
-            estFinancier: true,
-            montant: e.budget,
-            touteLaJournee: true,
-            date: d,
-            modifiable: false,
-            proprietaire: "moi",
-            visibilite: "commun",
-          });
+      const jour = dateOrigine.getDate();
+      for (let offset = -2; offset <= 2; offset++) {
+        const premier = new Date(anneeVue, moisVue + offset, 1);
+        // Uniquement APRÈS le mois de la ligne : son propre mois est déjà
+        // affiché ci-dessus, et les mois passés ont leur propre ligne.
+        if (
+          premier.getFullYear() * 12 + premier.getMonth() <=
+          dateOrigine.getFullYear() * 12 + dateOrigine.getMonth()
+        ) {
+          continue;
         }
-      } else {
-        tousLesEvenements.push({
-          id: `entree_${e.id}`,
-          nom: e.nom,
-          heure: "",
-          duree: 0,
-          couleur: COULEUR_ENTREE_PLANNING,
-          estFinancier: true,
-          montant: e.budget,
-          touteLaJournee: true,
-          date: dateOrigine,
-          modifiable: false,
-          proprietaire: "moi",
-          visibilite: "commun",
-        });
+        const d = new Date(
+          premier.getFullYear(),
+          premier.getMonth(),
+          Math.min(
+            jour,
+            new Date(premier.getFullYear(), premier.getMonth() + 1, 0).getDate(),
+          ),
+        );
+        tousLesEvenements.push(
+          evenementEntree(e, d, `entree_${e.id}-${d.getFullYear()}-${d.getMonth()}`),
+        );
       }
     });
 

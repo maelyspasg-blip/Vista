@@ -6,8 +6,9 @@ import { getInitiales } from "../../utils/initiales";
 import { calculerResteEstimeArchive, moisPrecedent } from "../../utils/exportExcel";
 import {
   calculerResteEstimeCourant,
-  entreesBudgetDuMois,
   estCategorieActiveCeMois,
+  nomReservePar,
+  entreesAffichablesDuMois,
 } from "../../utils/budget";
 import type { CategorieFusionnee } from "../../utils/espacePartage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -773,14 +774,19 @@ export default function Dashboard() {
   const enveloppesActivesSansEntree = enveloppesTriees.filter(
     (e) => e.type !== "Entrée",
   );
-  const budgetMois = entreesBudgetDuMois(
+  // RÈGLE À NE JAMAIS CASSER (2026-10-09) : lignes affichées issues de la
+  // MÊME fonction que Budget (utils/budget.ts::entreesAffichablesDuMois) —
+  // cf. RÈGLE "LIGNES D'ENTRÉES AFFICHÉES". Affichage uniquement : les
+  // totaux (disponibleEffectif) ne sont jamais filtrés par cette règle.
+  const entreesBudgetTriees = entreesAffichablesDuMois(
     enveloppesAffichees,
     maintenant.getFullYear(),
     maintenant.getMonth(),
-  );
-  const entreesBudgetTriees = [...budgetMois.entrees].sort(
+    maintenant,
+  ).sort(
     (a, b) =>
-      new Date(b.dateFixe ?? 0).getTime() - new Date(a.dateFixe ?? 0).getTime(),
+      new Date(b.env.dateFixe ?? 0).getTime() -
+      new Date(a.env.dateFixe ?? 0).getTime(),
   );
 
   const depensesNonCategorisees = objStore.evenements
@@ -1044,7 +1050,12 @@ export default function Dashboard() {
     setRecurrenteTemp(env.recurrente);
     setDateTemp(env.dateFixe || dateVersISO(new Date()));
     setRepeteChaqueMoisTemp(env.repeteChaqueMois || false);
-    setAfficherPlanningTemp(env.afficherDansPlanning || false);
+    // RÈGLE (2026-10-09) : champ absent sur une Entrée = affichée dans
+    // Planning (cf. RÈGLE "ENTRÉES DANS PLANNING", planning.tsx) — ne jamais
+    // le transformer en `false` explicite par une simple édition.
+    setAfficherPlanningTemp(
+      env.afficherDansPlanning ?? env.type === "Entrée",
+    );
     setMontantHabituelTemp(
       env.montantHabituel !== undefined ? String(env.montantHabituel) : "",
     );
@@ -1259,8 +1270,43 @@ export default function Dashboard() {
     );
   };
 
+  // RÈGLE (bug corrigé le 2026-10-09) : signalerErreurSync s'affiche dans un
+  // bandeau de (tabs)/_layout.tsx, caché DERRIÈRE les modales de création —
+  // un refus (nom déjà pris, connexion) y passait donc inaperçu et le
+  // bouton "Ajouter" semblait ne rien faire. Même contrôle de nom que
+  // objStore.ajouterEnveloppe (utils/budget.ts::nomReservePar), fait ici
+  // pour répondre par une Alert visible au-dessus de la modale.
+  const alerterSiCreationRefusee = (nom: string): boolean => {
+    const nomNormalise = nom.trim().toLowerCase();
+    const maintenantControle = new Date();
+    const nomPris = enveloppes.some(
+      (e) =>
+        e.nom.trim().toLowerCase() === nomNormalise &&
+        nomReservePar(
+          e,
+          maintenantControle.getFullYear(),
+          maintenantControle.getMonth(),
+        ),
+    );
+    if (nomPris) {
+      Alert.alert(
+        "Nom déjà utilisé",
+        `Une catégorie « ${nom.trim()} » existe déjà. Choisis un autre nom.`,
+      );
+    }
+    return nomPris;
+  };
+
+  const alerterEchecCreation = () => {
+    Alert.alert(
+      "Catégorie non créée",
+      "Impossible d'enregistrer cette catégorie. Vérifie ta connexion et réessaie.",
+    );
+  };
+
   const ajouterEnveloppe = async () => {
     if (!nouveauNom || !nouveauBudget || creationEnveloppeEnCours) return;
+    if (alerterSiCreationRefusee(nouveauNom)) return;
     setCreationEnveloppeEnCours(true);
     const nouvelle = await objStore.ajouterEnveloppe({
       nom: nouveauNom,
@@ -1307,7 +1353,10 @@ export default function Dashboard() {
           : undefined,
     });
     setCreationEnveloppeEnCours(false);
-    if (!nouvelle) return;
+    if (!nouvelle) {
+      alerterEchecCreation();
+      return;
+    }
     setNouveauNom("");
     setNouveauBudget("");
     setNouveauMontantHabituel("");
@@ -1338,6 +1387,7 @@ export default function Dashboard() {
       creationEntreeBudgetEnCours
     )
       return;
+    if (alerterSiCreationRefusee(nomEntreeBudget)) return;
     setCreationEntreeBudgetEnCours(true);
     const nouvelle = await objStore.ajouterEnveloppe({
       nom: nomEntreeBudget,
@@ -1347,6 +1397,9 @@ export default function Dashboard() {
       type: "Entrée",
       recurrente: recurrenteEntreeBudget,
       dateFixe: dateEntreeBudget,
+      // RÈGLE (2026-10-09) : une Entrée datée apparaît dans Planning à sa
+      // date de réception (ce formulaire n'a pas d'interrupteur dédié).
+      afficherDansPlanning: true,
       moisComptage: moisComptageEntreeBudget,
       // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts).
       montantHabituel: recurrenteEntreeBudget
@@ -1354,7 +1407,10 @@ export default function Dashboard() {
         : undefined,
     });
     setCreationEntreeBudgetEnCours(false);
-    if (!nouvelle) return;
+    if (!nouvelle) {
+      alerterEchecCreation();
+      return;
+    }
     setNomEntreeBudget("");
     setMontantEntreeBudget("");
     setDateEntreeBudget(dateVersISO(new Date()));
@@ -2283,28 +2339,31 @@ export default function Dashboard() {
                 </TouchableOpacity>
                 {entreesBudgetOuvert && (
                   <View style={styles.statImpactTiroir}>
-                    {entreesBudgetTriees.map((e) => (
-                      <View key={e.id} style={styles.statImpactLigne}>
-                        <Text
-                          style={[styles.statImpactLigneNom, { color: C.texte }]}
-                          numberOfLines={1}
-                        >
-                          {e.nom}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.statImpactLigneDetail,
-                            { color: e.payee ? C.vertText : C.texteMuted },
-                          ]}
-                        >
-                          {e.payee ? "+" : ""}
-                          {formaterMontant(e.payee ? e.depense : e.budget)}€
-                          {e.dateFixe
-                            ? ` · ${e.payee ? "reçu" : "attendu"} ${formaterDateLongue(e.dateFixe)}`
-                            : ""}
-                        </Text>
-                      </View>
-                    ))}
+                    {entreesBudgetTriees.map(({ env: e, statut }) => {
+                      const recue = statut === "recue";
+                      return (
+                        <View key={e.id} style={styles.statImpactLigne}>
+                          <Text
+                            style={[styles.statImpactLigneNom, { color: C.texte }]}
+                            numberOfLines={1}
+                          >
+                            {e.nom}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.statImpactLigneDetail,
+                              { color: recue ? C.vertText : C.texteMuted },
+                            ]}
+                          >
+                            {recue ? "+" : ""}
+                            {formaterMontant(recue ? e.depense : e.budget)}€
+                            {e.dateFixe
+                              ? ` · ${recue ? "reçu" : "à venir"} ${formaterDateLongue(e.dateFixe)}`
+                              : ""}
+                          </Text>
+                        </View>
+                      );
+                    })}
                   </View>
                 )}
               </>
@@ -3444,7 +3503,13 @@ export default function Dashboard() {
                       { backgroundColor: C.fondSecondaire },
                       nouveauType === "Entrée" && { backgroundColor: C.vert },
                     ]}
-                    onPress={() => setNouveauType("Entrée")}
+                    onPress={() => {
+                      setNouveauType("Entrée");
+                      // RÈGLE (2026-10-09) : une Entrée datée apparaît dans
+                      // Planning par défaut — l'utilisateur peut toujours
+                      // couper l'interrupteur juste en dessous.
+                      setNouveauAfficherPlanning(true);
+                    }}
                     activeOpacity={0.7}
                   >
                     <Text
