@@ -2359,20 +2359,85 @@ alter table public.enveloppes
      toute date déjà passée) et compte dans le « à recevoir » du hero
      (`utils/budget.ts::statutAffichageEntree` / `revenusDuMoisHero`).
      Une date passée DANS le mois de comptage reste masquée.
+     **Portée réelle (constat de revue, accepté par Maëlys le 2026-10-10)** :
+     `verifierEcheancesFixesInterneCoeur` (au montage, toutes les 60 s et
+     au retour au premier plan) confirme automatiquement toute Entrée à
+     date passée non payée (depense = budget, payee = true). Une entrée
+     avec un montant connu passe donc en « reçue » en moins d'une minute —
+     comportement voulu (« montant connu et date passée → reçue »).
+     L'état « À venir » ne concerne durablement que les entrées sans
+     montant connu (budget 0).
   2. À la reconduction, la date de réception garde son jour mais est
      recalée dans le NOUVEAU mois de comptage (`memeJourDansMoisISO`,
      app/store.ts) au lieu de « +1 mois » : une entrée décalée d'un mois
      est réalignée dès le mois suivant. Identique à « +1 mois » pour une
-     entrée normale. Conséquence assumée : le cas voulu « reçu le 28
+     entrée normale. Conséquences assumées : le cas voulu « reçu le 28
      juillet, compté pour août » est lui aussi réaligné (28 septembre pour
-     septembre) dès sa première reconduction.
+     septembre) dès sa première reconduction ; de même, une entrée datée
+     APRÈS son mois de comptage (ex. reçue le 1er novembre, comptée pour
+     octobre) est datée du 1er novembre pour novembre, au lieu du
+     1er décembre (constat de revue, accepté par Maëlys, sans correction).
 - **Garde invité (trouvé en revue sécurité)** : 4 ouvertures de
   formulaire d'écriture sans `bloquerSiInvite` corrigées — boutons « + »
   d'Aperçu (« + Ajouter une entrée », nouvelle catégorie), clic long
   d'édition d'une dépense et ajout rapide depuis un modèle (Budget).
+  Puis (demande de Maëlys du 2026-10-10) les autres écritures relevées en
+  revue sécurité : Aperçu (édition d'un objectif, versement
+  ponctuel, interrupteur « Reporter le reste »), Budget (création d'un
+  modèle d'ajout rapide), Planning (édition/suppression d'un événement au
+  tap), Stats (édition du seuil d'épargne), mois archivés (renommage d'une
+  catégorie, `VueMoisArchive`), Profil (prénom/nom — valeur restaurée —,
+  mot de passe, espace partagé, notifications, alertes budget, masquage des
+  événements personnels). Restent libres pour un invité, volontairement :
+  thème, contraste renforcé, réduction des animations, taille du texte
+  (préférences d'affichage). La modale d'épargne reste consultable mais
+  n'écrit plus qu'en cas de changement réel (elle écrivait à chaque
+  fermeture, pour TOUS les comptes) ; un invité qui modifie le montant voit
+  « Créer mon compte ». Seconde revue sécurité : suppressions encore
+  accessibles fermées à leur tour — objectif (×, modale « Mis de côté »),
+  dépense (×), événement (« Supprimer » de la fiche événement de Budget),
+  modèle d'ajout rapide (×) ; bannière de suggestion de récurrence masquée
+  pour un invité (« Automatiser »/« Ignorer » écrivent en base). Champs
+  prénom/nom et épargne non modifiables pour un invité (garde à l'ouverture
+  de l'édition, cf. RÈGLE de guestGate.ts). Reste volontairement possible :
+  supprimer son propre compte d'essai (Profil). Limite d'architecture :
+  aucune garde invité dans `app/store.ts`, la lecture seule repose sur
+  l'interface seule — toute nouvelle écriture doit poser sa garde.
 - **Statut** : ✅ traité — mois courts corrigés, cas bloqué dans les
   formulaires, entrées décalées visibles et réalignées ; correction de
   données de Maëlys fournie (à exécuter manuellement, non exécutée).
+
+---
+
+### P069 — Épargne libre et objectifs confondus ; « Disponible maintenant » (demande explicite, 2026-10-10)
+
+- **Gravité** : 🟠 MAJEUR (calcul faux à l'affichage).
+- **Cause** : `epargneMois` est le TOTAL mis de côté dans le mois, versements
+  aux objectifs compris (ajouterFondsObjectif, versements mensuels
+  automatiques, montant initial d'un objectif). Le champ « Épargne par
+  mois » de la modale « Mis de côté » préremplissait et REMPLAÇAIT ce total :
+  avec 200 € versés à un objectif, saisir 400 € d'épargne fixait le total à
+  400 € (« 400 € immobilisés » au lieu de 600 €).
+- **Correction** (modèle de données inchangé) : le champ devient « Épargne
+  libre (hors objectifs) » — prérempli avec total − versements du mois,
+  enregistré saisie + versements, arrondi au centime, écrit seulement en cas
+  de changement réel. Versements de TOUS les objectifs, clôturés compris,
+  partout : modale, ventilation Épargne/Objectifs d'Aperçu et de Budget, taux
+  d'épargne de Stats (une version précédente excluait les clôturés à
+  Aperçu/Budget).
+- **Stats** : TAUX D'ÉPARGNE détaillé « Libre X % · Objectifs Y % » (les
+  deux s'additionnent au total), vue personnelle et mois en cours seulement.
+  Les mois archivés ne conservent que le total (séparer l'historique
+  demanderait d'archiver la part objectifs — modification du modèle de
+  données, non faite). Ton bilan → Santé sépare déjà « Capacité d'épargne »
+  et « Respect des objectifs ».
+- **Budget** : carte « Disponible maintenant » sous le chiffre principal =
+  revenus reçus ce mois (même calcul que le hero d'Aperçu) − dépenses
+  réelles ; ni budget prévu, ni épargne, ni entrées attendues.
+- **Limite connue** : les versements du mois d'un objectif SUPPRIMÉ restent
+  dans le total mais sortent de la somme des versements — ils apparaissent
+  alors comme de l'épargne libre.
+- **Statut** : ✅ corrigé. À vérifier sur device.
 
 ---
 

@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Alert, Modal, StyleSheet, TouchableOpacity, View } from "react-native";
 import { BarreProgression } from "./BarreProgression";
@@ -9,6 +10,8 @@ import { formaterMontant } from "../utils/montant";
 import { Text } from "./Texte";
 import { TextInput } from "./TexteInput";
 import { useTheme } from "./ThemeContext";
+import { useGuest } from "./GuestContext";
+import { bloquerSiInvite } from "./guestGate";
 import { styleModaleTablette, useEstTablette } from "./useTablette";
 import {
   categoriesDuMois,
@@ -45,7 +48,11 @@ export function VueMoisArchive({ mois, annee }: { mois: number; annee: number })
   const [nouveauNomTemp, setNouveauNomTemp] = useState("");
   const [renommageEnCours, setRenommageEnCours] = useState(false);
 
+  const router = useRouter();
+  const { isGuest } = useGuest();
   const ouvrirRenommage = (nom: string) => {
+    // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+    if (bloquerSiInvite(isGuest, router)) return;
     setRenommageAncienNom(nom);
     setNouveauNomTemp(nom);
   };

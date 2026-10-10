@@ -6,15 +6,18 @@ import {
 } from "expo-apple-authentication";
 import { GoogleSigninButton } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
     Image,
+    Keyboard,
     KeyboardAvoidingView,
     Platform,
+    ScrollView,
     StyleSheet,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -70,6 +73,8 @@ export default function Connexion() {
       .then(setAppleDisponible)
       .catch(() => setAppleDisponible(false));
   }, []);
+
+  const champMotDePasseRef = useRef<React.ElementRef<typeof TextInput>>(null);
 
   const seConnecterAvecApple = async () => {
     if (chargementApple) return;
@@ -160,6 +165,20 @@ export default function Connexion() {
           conteneur (KeyboardAvoidingView) garde son padding/fond pleine
           largeur, seul ce wrapper interne est capé (même pattern que
           ModaleDocumentLegal.tsx). */}
+      {/* RÈGLE (bug corrigé le 2026-10-10 : "le clavier bloque le bas de la
+          page") — contenu DÉFILANT : clavier ouvert, le KeyboardAvoidingView
+          réduit la hauteur disponible et le bas (bouton "Se connecter",
+          liens) sortait de l'écran sans pouvoir défiler. Un tap hors d'un
+          champ (keyboardShouldPersistTaps="handled" + TouchableWithoutFeedback)
+          ou un glissement (keyboardDismissMode) ferme le clavier. */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ flexGrow: 1 }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        showsVerticalScrollIndicator={false}
+      >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <View style={[{ flex: 1 }, styleModaleTablette(estTablette, 560)]}>
       <Image
         source={require("../../assets/images/vista-logo-mark.png")}
@@ -182,6 +201,9 @@ export default function Connexion() {
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
+          returnKeyType="next"
+          onSubmitEditing={() => champMotDePasseRef.current?.focus()}
+          blurOnSubmit={false}
           value={email}
           onChangeText={(v) => {
             setEmail(v);
@@ -193,9 +215,15 @@ export default function Connexion() {
         <Text style={[styles.label, { color: C.texte }]}>Mot de passe</Text>
         <TextInput
           style={[styles.input, { backgroundColor: C.carte, color: C.texte }]}
+          ref={champMotDePasseRef}
           placeholder="Ton mot de passe"
           placeholderTextColor={C.texteMuted}
           secureTextEntry
+          returnKeyType="go"
+          onSubmitEditing={() => {
+            Keyboard.dismiss();
+            if (formulaireValide && !chargement) seConnecter();
+          }}
           value={motDePasse}
           onChangeText={(v) => {
             setMotDePasse(v);
@@ -306,6 +334,8 @@ export default function Connexion() {
         </Text>
       </TouchableOpacity>
       </View>
+      </TouchableWithoutFeedback>
+      </ScrollView>
 
       <ModaleDocumentLegal
         visible={documentLegalOuvert === "confidentialite"}

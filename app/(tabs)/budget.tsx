@@ -54,6 +54,7 @@ import {
   calculerResteEstimeCourant,
   entreesAffichablesDuMois,
   estCategorieActiveCeMois,
+  revenusDuMoisHero,
 } from "../../utils/budget";
 import type { CategorieFusionnee } from "../../utils/espacePartage";
 import { InfoBulle } from "../InfoBulle";
@@ -827,6 +828,23 @@ export default function Budget() {
       MOIS_ACTUEL,
     );
   const totalEpargne = epargneMoisAffiche;
+  // RÈGLE (demande du 2026-10-10) : carte "Disponible maintenant" = cash
+  // restant À DATE = revenus déjà REÇUS ce mois − dépenses réelles déjà
+  // faites — ni budget prévu, ni épargne, ni entrées encore attendues.
+  // Revenus reçus calculés EXACTEMENT comme le hero d'Aperçu (mêmes lignes,
+  // entreesAffichablesDuMois + revenusDuMoisHero) et sur les mêmes
+  // catégories que totalDepenses (enveloppesAffichees) — jamais une source
+  // parallèle.
+  const { recu: revenusRecusCeMois } = revenusDuMoisHero(
+    entreesAffichablesDuMois(
+      enveloppesAffichees,
+      ANNEE_ACTUELLE,
+      MOIS_ACTUEL,
+      new Date(),
+    ),
+    new Date(),
+  );
+  const disponibleMaintenant = revenusRecusCeMois - totalDepenses;
   // ⚠️ Jauge "Dépenses et argent immobilisé" : UNIQUEMENT ces deux segments
   // (pctDepenses, pctEpargne/pctEpargneGenerique/pctObjectifs). Les entrées
   // d'argent (reçues/prévues) ne doivent jamais y apparaître — elles sont
@@ -878,8 +896,12 @@ export default function Budget() {
         .reverse()
     : [];
 
+  // Versements du mois de TOUS les objectifs, clôturés compris (revue du
+  // 2026-10-10) : leurs versements du mois sont dans epargneMois — les
+  // ignorer les comptait à tort en "Épargne" libre ; même définition que la
+  // modale "Mis de côté" et que le taux d'épargne de Stats.
   const objectifsAvecContribution = objStore.objectifs.filter(
-    (o) => !o.ferme && o.contributionMois > 0,
+    (o) => o.contributionMois > 0,
   );
   const contributionObjectifsTotal = objectifsAvecContribution.reduce(
     (acc, o) => acc + o.contributionMois,
@@ -1016,6 +1038,8 @@ export default function Budget() {
   };
 
   const confirmerSuppressionTransaction = (nom: string, montant: number, id: string) => {
+    // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+    if (bloquerSiInvite(isGuest, router)) return;
     Alert.alert(
       `Supprimer "${nom}" ?`,
       `Cette dépense de ${formaterMontant(montant)} € sera définitivement supprimée.`,
@@ -1042,6 +1066,8 @@ export default function Budget() {
   };
 
   const ouvrirCreationModele = (enveloppeId: string) => {
+    // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+    if (bloquerSiInvite(isGuest, router)) return;
     setNomModeleTemp("");
     setMontantModeleTemp("");
     setCreationModeleOuvertPour(enveloppeId);
@@ -1317,7 +1343,11 @@ export default function Budget() {
                           </Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                          onPress={() => objStore.supprimerModeleDepense(m.id)}
+                          onPress={() => {
+                            // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+                            if (bloquerSiInvite(isGuest, router)) return;
+                            objStore.supprimerModeleDepense(m.id);
+                          }}
                           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                           accessibilityRole="button"
                           accessibilityLabel={`Supprimer le modèle ${m.nom}`}
@@ -1694,6 +1724,38 @@ export default function Budget() {
             <NombreAnime valeur={budgetTotal} suffixe="" />
             {" € budget mensuel"}
           </Text>
+          {/* Demande du 2026-10-10 : seule la carte "Disponible maintenant"
+              (une carte "Dépenses actuelles" répétait le grand chiffre). */}
+          <View style={styles.cartesMaintenant}>
+            <View
+              style={[
+                styles.carteMaintenant,
+                {
+                  backgroundColor:
+                    theme === "sombre" ? "rgba(255,255,255,0.06)" : C.fondSecondaire,
+                },
+              ]}
+            >
+              <Text style={[styles.carteMaintenantLabel, { color: C.texteMuted }]}>
+                Disponible maintenant
+              </Text>
+              <Text
+                style={[
+                  styles.carteMaintenantMontant,
+                  {
+                    color:
+                      disponibleMaintenant < 0
+                        ? C.peachText
+                        : theme === "sombre"
+                          ? C.accent
+                          : "#1D9E75",
+                  },
+                ]}
+              >
+                {formaterMontant(disponibleMaintenant)} €
+              </Text>
+            </View>
+          </View>
           {deltaDepensesTotal !== null && (
             <>
               <View style={styles.envDeltaRow}>
@@ -2667,6 +2729,8 @@ export default function Budget() {
                   setGestionEvenement(null);
                   return;
                 }
+                // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+                if (bloquerSiInvite(isGuest, router)) return;
                 const cible = gestionEvenement;
                 Alert.alert(
                   "Supprimer cet événement ?",
@@ -2809,6 +2873,15 @@ const styles = StyleSheet.create({
   },
   heroAmount: { fontSize: 50, fontWeight: "700", marginBottom: 4 },
   heroSub: { fontSize: 14, marginBottom: 16 },
+  cartesMaintenant: { flexDirection: "row", gap: 10, marginBottom: 16 },
+  carteMaintenant: {
+    alignSelf: "flex-start",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  carteMaintenantLabel: { fontSize: 12, marginBottom: 2 },
+  carteMaintenantMontant: { fontSize: 17, fontWeight: "700" },
   progressBg: {
     height: 6,
     borderRadius: 3,

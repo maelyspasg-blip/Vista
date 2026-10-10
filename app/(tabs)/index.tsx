@@ -390,17 +390,25 @@ function SectionCollapsable({
         activeOpacity={0.7}
         accessibilityRole="button"
         accessibilityState={{ expanded: ouvert }}
+        hitSlop={{ top: 8, bottom: 8 }}
       >
         <Text
           style={[styles.sectionTitle, { color: C.texteMuted, marginBottom: 0 }]}
         >
           {titre}
         </Text>
-        <Ionicons
-          name={ouvert ? "chevron-down" : "chevron-forward"}
-          size={16}
-          color={C.texteMuted}
-        />
+        {/* Demande du 2026-10-10 : chevron trop discret — agrandi (20px) et
+            accompagné d'un libellé explicite, en teal. */}
+        <View style={styles.sectionCollapsableAction}>
+          <Text style={[styles.sectionCollapsableActionTexte, { color: "#1D9E75" }]}>
+            {ouvert ? "Masquer" : "Afficher"}
+          </Text>
+          <Ionicons
+            name={ouvert ? "chevron-down" : "chevron-forward"}
+            size={20}
+            color="#1D9E75"
+          />
+        </View>
       </TouchableOpacity>
       {ouvert && children}
     </>
@@ -981,7 +989,11 @@ export default function Dashboard() {
 
   const objectifsActifs = objStore.objectifs.filter((o) => !o.ferme);
   const objectifsClotures = objStore.objectifs.filter((o) => o.ferme);
-  const objectifsAvecContribution = objectifsActifs.filter(
+  // Versements du mois de TOUS les objectifs, clôturés compris (revue du
+  // 2026-10-10) : leurs versements du mois sont dans epargneMois — les
+  // ignorer les comptait à tort en "Épargne" libre ; même définition que la
+  // modale "Mis de côté" et que le taux d'épargne de Stats.
+  const objectifsAvecContribution = objStore.objectifs.filter(
     (o) => o.contributionMois > 0,
   );
   const contributionObjectifsTotal = objectifsAvecContribution.reduce(
@@ -1315,6 +1327,8 @@ export default function Dashboard() {
     nom: string,
     apresSuppression?: () => void,
   ) => {
+    // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+    if (bloquerSiInvite(isGuest, router)) return;
     Alert.alert(
       `Supprimer "${nom}" ?`,
       "Cette action est définitive — l'objectif et son historique de contributions seront supprimés.",
@@ -1521,15 +1535,49 @@ export default function Dashboard() {
     setModalAjoutEntreeBudgetVisible(true);
   };
 
+  // RÈGLE À NE JAMAIS CASSER — ÉPARGNE LIBRE ≠ OBJECTIFS (bug corrigé le
+  // 2026-10-10, "400 € épargne + 200 € objectif affichait 400 € immobilisés
+  // au lieu de 600 €") : `epargneMois` (store) est le TOTAL mis de côté ce
+  // mois, versements aux objectifs COMPRIS (ajouterFondsObjectif,
+  // verifierVersementsObjectifs et la création d'objectif l'incrémentent).
+  // Le champ de cette modale ne représente QUE l'épargne libre (hors
+  // objectifs) : prérempli avec total − versements du mois, et à
+  // l'enregistrement total = saisie + versements du mois. Saisir le total
+  // directement écrasait les versements aux objectifs. Versements de TOUS
+  // les objectifs (clôturés compris : leurs versements du mois sont dans le
+  // total). Modèle de données inchangé.
+  const versementsObjectifsDuMois = objStore.objectifs.reduce(
+    (acc, o) => acc + o.contributionMois,
+    0,
+  );
+  // Arrondi au centime (revue du 2026-10-10) : une soustraction de
+  // décimaux pouvait préremplir "100.04999999999998".
+  const epargneLibreActuelle = formaterMontant(
+    Math.max(0, objStore.epargneMois - versementsObjectifsDuMois),
+  );
   const ouvrirModalEpargne = () => {
-    setEpargneTemp(String(objStore.epargneMois));
+    setEpargneTemp(String(epargneLibreActuelle));
     setVueModal("liste");
     setModalEpargneVisible(true);
   };
 
+  // RÈGLE (revue sécurité du 2026-10-10) : la fermeture de cette modale
+  // n'écrit l'épargne QUE si elle a réellement changé — elle écrivait à
+  // chaque fermeture, même sans modification (écriture inutile pour tous,
+  // et écriture d'un compte invité en lecture seule). Un invité qui a
+  // modifié le montant voit "Créer mon compte" au lieu d'un enregistrement ;
+  // il garde l'accès en lecture à son épargne et ses objectifs.
   const sauvegarderEtFermerEpargne = () => {
-    objStore.modifierEpargneMois(parseMontant(epargneTemp) || 0);
+    const nouvelleEpargneLibre = formaterMontant(parseMontant(epargneTemp) || 0);
     setModalEpargneVisible(false);
+    // Changement réel de l'épargne LIBRE seulement (cf. RÈGLE ci-dessus) —
+    // comparer au total réécrirait sinon un total < versements (cas P013)
+    // sans aucune saisie de l'utilisateur.
+    if (nouvelleEpargneLibre === epargneLibreActuelle) return;
+    if (bloquerSiInvite(isGuest, router)) return;
+    objStore.modifierEpargneMois(
+      formaterMontant(nouvelleEpargneLibre + versementsObjectifsDuMois),
+    );
   };
 
   const fermerModalEpargneAvecSauvegarde = () => {
@@ -1560,6 +1608,8 @@ export default function Dashboard() {
   };
 
   const ouvrirEditionObjectif = (obj: Objectif) => {
+    // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+    if (bloquerSiInvite(isGuest, router)) return;
     setObjectifEnEdition(obj);
     setNomObjectif(obj.nom);
     setCibleObjectif(String(obj.cible));
@@ -1623,6 +1673,8 @@ export default function Dashboard() {
   };
 
   const ouvrirVersementPonctuel = (obj: Objectif) => {
+    // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+    if (bloquerSiInvite(isGuest, router)) return;
     setObjectifPourVersement(obj);
     setMontantVersementPonctuel("");
   };
@@ -2514,7 +2566,11 @@ export default function Dashboard() {
               </View>
               <Switch
                 value={objStore.argentDisponibleReportAuto}
-                onValueChange={(v) => objStore.modifierReportAutoBudget(v)}
+                onValueChange={(v) => {
+                  // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+                  if (bloquerSiInvite(isGuest, router)) return;
+                  objStore.modifierReportAutoBudget(v);
+                }}
                 {...couleursInterrupteur(C)}
               />
             </View>
@@ -4056,7 +4112,7 @@ export default function Dashboard() {
                       CE MOIS-CI
                     </Text>
                     <Text style={[styles.modalLabel, { color: C.texteMuted }]}>
-                      Épargne par mois
+                      Épargne libre (hors objectifs)
                     </Text>
                     <View style={styles.modalInputRow}>
                       <TextInput
@@ -4070,12 +4126,21 @@ export default function Dashboard() {
                         ]}
                         keyboardType="decimal-pad"
                         value={epargneTemp}
+                        // Compte invité : consultable, jamais modifiable (garde
+                        // à l'ouverture de l'édition, cf. RÈGLE de guestGate.ts).
+                        editable={!isGuest}
                         onChangeText={(text) => setEpargneTemp(sanitizeMontantInput(text))}
                         returnKeyType="done"
                         inputAccessoryViewID={ACCESSORY_ID}
                       />
                       <Text style={[styles.modalEuro, { color: C.texteMuted }]}>€</Text>
                     </View>
+                    {versementsObjectifsDuMois > 0 && (
+                      <Text style={[styles.messageMoisPasse, { color: C.texteMuted }]}>
+                        + {formaterMontant(versementsObjectifsDuMois)} € versés à tes
+                        objectifs ce mois-ci, comptés en plus.
+                      </Text>
+                    )}
 
                     <View style={[styles.separateur, { backgroundColor: C.separateur }]} />
 
@@ -4931,6 +4996,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 8,
   },
+  sectionCollapsableAction: { flexDirection: "row", alignItems: "center", gap: 4 },
+  sectionCollapsableActionTexte: { fontSize: 13, fontWeight: "600" },
   sectionTitreEtTri: { flexDirection: "row", alignItems: "center", gap: 10 },
   triBouton: { flexDirection: "row", alignItems: "center", gap: 3 },
   triTexte: { fontSize: 11, fontWeight: "600" },

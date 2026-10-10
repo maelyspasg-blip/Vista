@@ -285,7 +285,19 @@ function RootLayoutInterne() {
     // du questionnaire ; sans ce pont, cette copie locale ne l'apprendrait
     // jamais, et l'effet de redirection ci-dessous renverrait indéfiniment
     // vers /onboarding/preferences (boucle infinie).
-    ecouterOnboardingTermine(() => setOnboardingComplete(true));
+    // RÈGLE À NE JAMAIS CASSER (bug corrigé le 2026-10-10 : "le tutoriel ne
+    // se lance pas après l'onboarding") : terminerOnboarding
+    // (preferences.tsx) repasse les 4 flags tutoriel_*_vu à false EN BASE,
+    // mais cette copie locale avait été chargée en début de session (avec
+    // leur valeur par défaut true) et n'était jamais rafraîchie — le
+    // tutoriel d'Aperçu n'apparaissait donc qu'au lancement SUIVANT de
+    // l'app. On reflète ici la même écriture, au même moment : le tutoriel
+    // d'Aperçu démarre dès l'arrivée sur les onglets, puis enchaîne sur les
+    // autres pages (navigation automatique de fin de tutoriel).
+    ecouterOnboardingTermine(() => {
+      setOnboardingComplete(true);
+      setTutoriel({ apercu: false, budget: false, planning: false, stats: false });
+    });
 
     const { data: abonnement } = supabase.auth.onAuthStateChange(
       (event, nouvelleSession) => {

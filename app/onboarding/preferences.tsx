@@ -594,14 +594,21 @@ export default function Preferences() {
             </View>
           ))}
 
+          {/* RÈGLE (demande du 2026-10-10) : bouton PLEIN teal avec icône,
+              placé dans le contenu donc AVANT "Continuer" (pied de page) —
+              l'ancien lien texte passait inaperçu et les utilisateurs
+              continuaient sans voir qu'ils pouvaient en ajouter d'autres. */}
           {autres.length > 0 && (
             <TouchableOpacity
               onPress={ajouterLigneAutre}
-              style={styles.boutonAjouterLigne}
-              activeOpacity={0.7}
+              style={[styles.boutonAjouterLigne, { backgroundColor: "#1D9E75" }]}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Ajouter une autre dépense"
             >
-              <Text style={[styles.boutonAjouterLigneTexte, { color: C.purple }]}>
-                + Ajouter une dépense
+              <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.boutonAjouterLigneTexte}>
+                Ajouter une autre dépense
               </Text>
             </TouchableOpacity>
           )}
@@ -720,8 +727,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   chipTypeTexte: { fontSize: 13, fontWeight: "600" },
-  boutonAjouterLigne: { paddingVertical: 12, alignItems: "center" },
-  boutonAjouterLigneTexte: { fontSize: 14, fontWeight: "600" },
+  boutonAjouterLigne: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginTop: 8,
+  },
+  boutonAjouterLigneTexte: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
   resumeVide: { fontSize: 14, lineHeight: 20 },
   ligneResume: {
     flexDirection: "row",

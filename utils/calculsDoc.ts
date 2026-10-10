@@ -103,6 +103,11 @@ export const CALCULS_DOC: PageCalculs[] = [
           "Somme des dépenses réelles de tes catégories (hors catégories \"Entrée d'argent\"), plus l'argent immobilisé — l'épargne et les objectifs — que tu as mis de côté ce mois-ci. Cet argent reste à toi, mais n'est plus disponible immédiatement. Cette carte a remplacé l'ancien \"TOTAL DÉPENSÉ\" et vient d'Aperçu, où elle n'apparaît plus.",
       },
       {
+        titre: "Disponible maintenant",
+        explication:
+          "Petite carte sous le chiffre principal : l'argent qu'il te reste en ce moment, à date — tes revenus déjà reçus ce mois-ci (les entrées « reçues », calculées comme sur Aperçu) moins tes dépenses réelles déjà faites. Ni le budget encore prévu, ni l'épargne, ni les entrées encore attendues ne sont pris en compte. En rouge si tu as dépensé plus que ce que tu as reçu.",
+      },
+      {
         titre: "+X € vs mois dernier (au J)",
         explication:
           "Compare les dépenses cumulées de ce mois à celles du mois dernier au même jour du mois (cumul reconstruit depuis les transactions/paiements individuels, jamais purgés) — pas au mois dernier entier, pour ne pas comparer un mois en cours forcément partiel à un mois complet. Un \"Voir l'historique\" déplie les 6 derniers mois archivés avec le même cumul \"au même jour\".",
@@ -155,7 +160,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "TAUX D'ÉPARGNE",
         explication:
-          "Épargne du mois divisée par le Budget combiné du mois (même formule que BUDGET sur Aperçu), exprimée en pourcentage.",
+          "Argent mis de côté ce mois-ci (épargne libre + versements à tes objectifs) divisé par le Budget combiné du mois (même formule que BUDGET sur Aperçu), en pourcentage. Juste en dessous, le détail : « Libre » = épargne sans destination précise, « Objectifs » = versements à tes objectifs ce mois-ci ; les deux s'additionnent pour donner le taux total. Le détail porte sur le mois en cours et n'apparaît qu'en vue personnelle (en vue partagée, seul le taux consolidé est affiché).",
       },
       {
         titre: "Graphique \"Évolution\"",

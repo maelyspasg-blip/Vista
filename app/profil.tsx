@@ -62,6 +62,7 @@ import { RapportVisuelCarte } from "./RapportVisuelCarte";
 import { BoutonPrincipal } from "./BoutonPrincipal";
 import { GuestBanner } from "./GuestBanner";
 import { useGuest } from "./GuestContext";
+import { bloquerSiInvite } from "./guestGate";
 import { SyncErrorBanner } from "./SyncErrorBanner";
 import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { reinitialiserEtatUtilisateur, useObjectifs } from "./store";
@@ -353,15 +354,26 @@ export default function Profil() {
     });
   }, []);
 
+  // Compte invité en lecture seule (revue sécurité du 2026-10-10) : une
+  // modification du prénom/nom est annulée (champ remis à sa valeur) avec
+  // "Créer mon compte", jamais enregistrée.
   const enregistrerPrenom = () => {
     const valeur = prenomTemp.trim();
     if (!valeur || valeur === objStore.prenom) return;
+    if (bloquerSiInvite(isGuest, router)) {
+      setPrenomTemp(objStore.prenom);
+      return;
+    }
     objStore.modifierPrenom(valeur);
   };
 
   const enregistrerNom = () => {
     const valeur = nomTemp.trim();
     if (valeur === objStore.nom) return;
+    if (bloquerSiInvite(isGuest, router)) {
+      setNomTemp(objStore.nom);
+      return;
+    }
     objStore.modifierNom(valeur);
   };
 
@@ -555,6 +567,8 @@ export default function Profil() {
   // n'ouvre que la modale, il ne crée encore rien — "Créer" aurait laissé
   // croire à tort que l'espace existe déjà en base à ce stade.
   const confirmerOuvertureEspacePartage = () => {
+    // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+    if (bloquerSiInvite(isGuest, router)) return;
     Alert.alert(
       "Espace partagé",
       "Créez ou rejoignez un espace pour gérer votre budget à deux.",
@@ -928,6 +942,8 @@ export default function Profil() {
   };
 
   const toggleNotifications = async (valeur: boolean) => {
+    // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+    if (bloquerSiInvite(isGuest, router)) return;
     if (!valeur) {
       objStore.modifierNotificationsActives(false);
       return;
@@ -1194,6 +1210,8 @@ export default function Profil() {
             value={prenomTemp}
             onChangeText={setPrenomTemp}
             onBlur={enregistrerPrenom}
+            // Compte invité : lecture seule (cf. RÈGLE de guestGate.ts).
+            editable={!isGuest}
             placeholder="Ton prénom"
             placeholderTextColor={C.texteMuted}
             returnKeyType="done"
@@ -1212,6 +1230,8 @@ export default function Profil() {
             value={nomTemp}
             onChangeText={setNomTemp}
             onBlur={enregistrerNom}
+            // Compte invité : lecture seule (cf. RÈGLE de guestGate.ts).
+            editable={!isGuest}
             placeholder="Ton nom"
             placeholderTextColor={C.texteMuted}
             returnKeyType="done"
@@ -1231,7 +1251,11 @@ export default function Profil() {
               styles.btnSecondaire,
               { borderColor: C.separateur, marginTop: 18 },
             ]}
-            onPress={() => setModalMotDePasseVisible(true)}
+            onPress={() => {
+              // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+              if (bloquerSiInvite(isGuest, router)) return;
+              setModalMotDePasseVisible(true);
+            }}
             activeOpacity={0.7}
           >
             <Ionicons name="lock-closed-outline" size={16} color={C.texte} />
@@ -1298,7 +1322,11 @@ export default function Profil() {
             </View>
             <Switch
               value={objStore.alertesBudget}
-              onValueChange={objStore.modifierAlertesBudget}
+              onValueChange={(valeur) => {
+                // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+                if (bloquerSiInvite(isGuest, router)) return;
+                objStore.modifierAlertesBudget(valeur);
+              }}
               {...couleursInterrupteur(C)}
               accessibilityLabel="Alertes budget"
             />
@@ -1567,7 +1595,11 @@ export default function Profil() {
                   </View>
                   <Switch
                     value={objStore.masquerEvenementsPersonnels}
-                    onValueChange={objStore.modifierMasquerEvenementsPersonnels}
+                    onValueChange={(valeur) => {
+                      // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+                      if (bloquerSiInvite(isGuest, router)) return;
+                      objStore.modifierMasquerEvenementsPersonnels(valeur);
+                    }}
                     {...couleursInterrupteur(C)}
                   />
                 </View>

@@ -2387,6 +2387,8 @@ export default function Analytics() {
   });
 
   const ouvrirEditionSeuil = () => {
+    // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+    if (bloquerSiInvite(isGuest, router)) return;
     setSeuilEpargneTemp(
       objStore.seuilEpargneConstante !== null
         ? String(objStore.seuilEpargneConstante)
@@ -2951,6 +2953,25 @@ export default function Analytics() {
           disponible + getDisponibleMoisPartenaire(MOIS_ACTUEL, ANNEE_ACTUELLE),
         )
       : calculerTauxEpargne(epargne, disponible);
+  // RÈGLE (demande du 2026-10-10) : le taux d'épargne distingue l'ÉPARGNE
+  // LIBRE (sans destination) des versements aux OBJECTIFS — `epargneMois`
+  // est le total des deux (cf. RÈGLE "ÉPARGNE LIBRE ≠ OBJECTIFS",
+  // app/(tabs)/index.tsx). Versements du mois de TOUS les objectifs (même
+  // source que la modale "Mis de côté"), bornés au total (cas P013). La part
+  // objectifs est déduite du total arrondi (tauxEpargne − tauxLibre) pour
+  // que les deux affichés s'additionnent toujours exactement. Vue
+  // personnelle uniquement : les versements aux objectifs du partenaire ne
+  // sont pas chargés, la vue partagée garde le seul total consolidé.
+  // Mois en cours uniquement : les mois archivés ne conservent que le total.
+  const versementsObjectifsMois = Math.min(
+    epargne,
+    objStore.objectifs.reduce((acc, o) => acc + o.contributionMois, 0),
+  );
+  const tauxEpargneLibre = calculerTauxEpargne(
+    Math.max(0, epargne - versementsObjectifsMois),
+    disponible,
+  );
+  const tauxEpargneObjectifs = Math.max(0, tauxEpargne - tauxEpargneLibre);
 
   // RÈGLE À NE JAMAIS CASSER — SANTÉ DU COUPLE (refonte du 2026-09-06) :
   // remplace l'ancienne carte "Scores partagés" (MOI/PARTENAIRE/ENSEMBLE, 3
@@ -4698,7 +4719,9 @@ export default function Analytics() {
                   { color: theme === "sombre" ? C.peachText : C.texteMuted },
                 ]}
               >
-                Ce mois-ci
+                {estDansUnEspace && vueActive === "partage"
+                  ? "Ce mois-ci"
+                  : `Libre ${tauxEpargneLibre}% · Objectifs ${tauxEpargneObjectifs}%`}
               </Text>
             </View>
           </View>

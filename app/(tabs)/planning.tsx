@@ -1212,6 +1212,8 @@ export default function Planning() {
     ev: Evenement | EvenementPartenaire,
     estPartenaire = false,
   ) => {
+    // Compte invité en lecture seule (revue sécurité du 2026-10-10).
+    if (bloquerSiInvite(isGuest, router)) return;
     setEvenementEnEditionId(ev.id);
     setEvenementEnEditionEstPartenaire(estPartenaire);
     setNomEvent(ev.nom);

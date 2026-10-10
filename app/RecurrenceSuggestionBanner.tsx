@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
+import { useGuest } from "./GuestContext";
 import { useObjectifs } from "./store";
 import { Text } from "./Texte";
 import { useTheme } from "./ThemeContext";
@@ -9,8 +10,12 @@ export function RecurrenceSuggestionBanner() {
   const { couleurs: C } = useTheme();
   const { suggestionRecurrence, accepterSuggestionRecurrence, ignorerSuggestionRecurrence } =
     useObjectifs();
+  const { isGuest } = useGuest();
 
-  if (!suggestionRecurrence) return null;
+  // Compte invité en lecture seule (revue sécurité du 2026-10-10) : les deux
+  // boutons de cette bannière écrivent en base ("Automatiser" modifie une
+  // catégorie, "Ignorer" mémorise le refus) — jamais affichée à un invité.
+  if (!suggestionRecurrence || isGuest) return null;
 
   return (
     <View style={[styles.banniere, { backgroundColor: C.carte, borderColor: C.carteBorder }]}>
