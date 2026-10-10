@@ -23,24 +23,19 @@ export const CALCULS_DOC: PageCalculs[] = [
           "Sous-ligne dépliable sous BUDGET, qui liste les entrées du mois en cours avec leur nom, leur montant et leur date. Une entrée apparaît si de l'argent a été reçu (« reçu »), ou si rien n'a encore été reçu mais que sa date de réception est encore à venir (« à venir », couleur plus neutre). Une entrée sans montant reçu, sans date ou dont la date est passée n'est pas listée. Budget applique exactement la même règle à ses lignes vertes « reçues » et « à venir ».",
       },
       {
-        titre: "RESTE ACTUEL",
+        titre: "RESTE ESTIMÉ FIN DE MOIS",
         explication:
-          "Le chiffre principal : l'argent déjà reçu ce mois-ci (les entrées listées comme « reçu » ci-dessus) moins ce qui est déjà dépensé (Dépensé) moins l'argent immobilisé (épargne + objectifs mis de côté ce mois-ci). Le budget encore prévu mais pas dépensé dans tes catégories n'est pas retiré. Le libellé change selon un seuil sur ce même chiffre : « RESTE ACTUEL » au-dessus de 15 % de l'argent reçu ce mois-ci, « RESTE ACTUEL — BUDGET SERRÉ » en dessous, « DÉPASSEMENT ACTUEL » s'il est négatif (le montant affiché devient alors la valeur absolue, en rouge). En vue partagée, les entrées des deux comptes sont additionnées, chacune avec sa propre date.",
+          "Le chiffre principal, toujours sous ce titre : l'argent déjà reçu ce mois-ci (les entrées listées comme « reçu » ci-dessus), moins ce qui est déjà dépensé (Dépensé), moins l'argent immobilisé (épargne + objectifs mis de côté ce mois-ci), plus les entrées encore à recevoir dont la date de réception tombe plus tard dans le mois en cours (jamais une date d'un mois suivant). Le budget encore prévu mais pas dépensé dans tes catégories n'est pas retiré. Un dépassement estimé s'affiche en négatif, en rouge. En vue partagée, les entrées des deux comptes sont additionnées, chacune avec sa propre date.",
       },
       {
-        titre: "+X € à recevoir ce mois-ci",
+        titre: "En comptant…",
         explication:
-          "Ligne teal sous le chiffre principal : la somme des montants attendus des entrées pas encore reçues dont la date de réception tombe plus tard dans le mois en cours — jamais une date d'un mois suivant. N'apparaît pas s'il n'y a rien à recevoir ce mois-ci.",
-      },
-      {
-        titre: "Reste estimé en fin de mois",
-        explication:
-          "Ligne plus petite sous « à recevoir » : RESTE ACTUEL + à recevoir ce mois-ci. C'est la projection de fin de mois du hero. Elle devient « Dépassement estimé en fin de mois » si elle est négative.",
+          "Ligne teal sous le chiffre principal, affichée uniquement s'il reste de l'argent à recevoir ce mois-ci : « En comptant [Nom] du [jour] (+[montant] €) » pour une seule entrée, « En comptant [X] € à recevoir ce mois-ci » pour plusieurs. Rien n'est affiché s'il n'y a rien à recevoir.",
       },
       {
         titre: "Bandeau de projection (\"Il te restera environ...\")",
         explication:
-          "N'est pas un calcul séparé : ce bandeau met en phrase le « Reste estimé en fin de mois » du hero (aucune extrapolation du rythme de dépense). S'il est positif ou nul : \"Il te restera environ [X]€ à la fin du mois si tu continues comme ça.\" S'il est négatif : \"Si tu continues comme ça, tu risques d'être à environ [X]€ de dépassement en fin de mois.\"",
+          "N'est pas un calcul séparé : ce bandeau met en phrase le « RESTE ESTIMÉ FIN DE MOIS » du hero (aucune extrapolation du rythme de dépense). S'il est positif ou nul : \"Il te restera environ [X]€ à la fin du mois si tu continues comme ça.\" S'il est négatif : \"Si tu continues comme ça, tu risques d'être à environ [X]€ de dépassement en fin de mois.\"",
       },
       {
         titre: "Nos conseils",
@@ -50,7 +45,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "+X € / +X % vs mois dernier",
         explication:
-          "Écart entre le « Reste estimé en fin de mois » de ce mois et celui du mois dernier archivé, rejoué avec la même formule (revenus − dépensé − argent immobilisé, sans le budget prévu non dépensé) sur les valeurs figées du mois précédent. Un tap sur la valeur bascule l'affichage entre euros et pourcentage (pourcentage non disponible si le reste du mois dernier était nul).",
+          "Écart entre le « RESTE ESTIMÉ FIN DE MOIS » de ce mois et celui du mois dernier archivé, rejoué avec la même formule (revenus − dépensé − argent immobilisé, sans le budget prévu non dépensé) sur les valeurs figées du mois précédent. Un tap sur la valeur bascule l'affichage entre euros et pourcentage (pourcentage non disponible si le reste du mois dernier était nul).",
       },
       {
         titre: "Ordre des segments de la barre de progression et de sa légende",
@@ -95,7 +90,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Reporter le reste non dépensé",
         explication:
-          "Ce switch, affiché directement sur la carte BUDGET, détermine ce qui alimente le Budget du mois suivant. À la clôture du mois, le reste reporté est calculé uniquement à partir de ce qui a été réellement réalisé, jamais des dépenses encore prévues : BUDGET du mois − dépenses réelles − épargne mise de côté. Si le switch est activé, ce reste réalisé devient automatiquement une nouvelle entrée « Report du mois précédent » comptée pour le mois suivant. Séparément, chaque entrée de Budget marquée \"Répéter ce montant chaque mois\" est elle aussi reconduite pour le mois suivant sous forme d'une nouvelle entrée identique — les deux mécanismes s'additionnent, ils ne s'excluent pas. Comme BUDGET compte aussi les entrées encore attendues, ce total peut différer du « Reste estimé en fin de mois » du hero, qui ne compte que l'argent reçu et celui attendu plus tard dans le mois.",
+          "Ce switch, affiché directement sur la carte BUDGET, détermine ce qui alimente le Budget du mois suivant. À la clôture du mois, le reste reporté est calculé uniquement à partir de ce qui a été réellement réalisé, jamais des dépenses encore prévues : BUDGET du mois − dépenses réelles − épargne mise de côté. Si le switch est activé, ce reste réalisé devient automatiquement une nouvelle entrée « Report du mois précédent » comptée pour le mois suivant. Séparément, chaque entrée de Budget marquée \"Répéter ce montant chaque mois\" est elle aussi reconduite pour le mois suivant sous forme d'une nouvelle entrée identique — les deux mécanismes s'additionnent, ils ne s'excluent pas. Comme BUDGET compte aussi les entrées encore attendues, ce total peut différer du « RESTE ESTIMÉ FIN DE MOIS » du hero, qui ne compte que l'argent reçu et celui attendu plus tard dans le mois.",
       },
     ],
   },

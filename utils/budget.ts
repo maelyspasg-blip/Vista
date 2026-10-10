@@ -205,12 +205,40 @@ export function entreesAffichablesDuMois<T extends Enveloppe>(
   mois: number,
   aujourdhui: Date,
 ): { env: T; statut: Exclude<StatutAffichageEntree, "masquee"> }[] {
-  const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
+  // RÈGLE À NE JAMAIS CASSER — FILTRE MOIS + ANNÉE (vérifié le 2026-10-10) :
+  // comparaison des 7 premiers caractères "AAAA-MM" du mois de comptage
+  // (mois ET année), jamais `new Date(moisComptage)` : une date seule
+  // "AAAA-MM-JJ" est lue en UTC par `new Date`, et sur un appareil à
+  // décalage négatif le 1er du mois devient le dernier jour du mois
+  // précédent (cf. utils/dateOnly.ts). `.slice(0, 7)` tolère aussi un
+  // éventuel format horodaté ("2026-09-01T00:00:00").
+  const moisCible = `${annee}-${String(mois + 1).padStart(2, "0")}`;
+  // LOG TEMPORAIRE DE DIAGNOSTIC (demandé le 2026-10-10 : "des entrées de
+  // mois précédents s'affichent encore") — à retirer une fois le
+  // comportement confirmé sur device. `dateFixe` est loggée en plus : une
+  // ligne d'octobre peut porter une date de réception en septembre (date
+  // reconduite depuis une entrée reçue fin août et comptée pour
+  // septembre) et ressembler à une entrée de septembre.
+  console.log("[entreesAffichables] mois actuel:", mois, annee);
   const resultat: { env: T; statut: Exclude<StatutAffichageEntree, "masquee"> }[] =
     [];
   enveloppes.forEach((env) => {
-    if (env.type !== "Entrée" || moisComptageEffectif(env) !== moisISO) return;
-    const statut = statutAffichageEntree(env, aujourdhui);
+    if (env.type !== "Entrée") return;
+    const moisEntree = moisComptageEffectif(env)?.slice(0, 7);
+    const statut =
+      moisEntree === moisCible
+        ? statutAffichageEntree(env, aujourdhui)
+        : "masquee";
+    const incluse = statut !== "masquee";
+    console.log(
+      "[entreesAffichables] entrée:",
+      env.nom,
+      env.moisComptage,
+      "dateFixe:",
+      env.dateFixe,
+      "incluse:",
+      incluse,
+    );
     if (statut !== "masquee") resultat.push({ env, statut });
   });
   return resultat;
@@ -254,18 +282,27 @@ export function dateRepresentativeEntree(
 //   - recu       : somme des montants reçus (depense ≠ 0) ;
 //   - aRecevoir  : somme des montants attendus (budget) des parts non reçues
 //                  dont la date de réception est FUTURE et DANS le mois
-//                  civil de `aujourdhui` — jamais un mois suivant.
-// Seul usage voulu : le hero d'Aperçu (Reste actuel / À recevoir / Reste
-// estimé). Les autres totaux (entreesBudgetDuMois, calculerResteEstime-
+//                  civil de `aujourdhui` — jamais un mois suivant ;
+//   - aRecevoirDetail : ces mêmes parts une à une (nom de la ligne, date,
+//                  montant), dans l'ordre des dates — sert à la ligne de
+//                  précision du hero ("En comptant Salaire du 25 octobre").
+// Seul usage voulu : le hero d'Aperçu (RESTE ESTIMÉ FIN DE MOIS et sa
+// ligne de précision « En comptant… »). Les autres totaux (entreesBudgetDuMois, calculerResteEstime-
 // Courant, Stats, Budget) n'en dépendent pas.
 export function revenusDuMoisHero(
   lignes: { env: Enveloppe & { partsEntree?: PartEntree[] } }[],
   aujourdhui: Date,
-): { recu: number; aRecevoir: number } {
+): {
+  recu: number;
+  aRecevoir: number;
+  aRecevoirDetail: { nom: string; dateFixe: string; montant: number }[];
+} {
   const debutJour = new Date(aujourdhui);
   debutJour.setHours(0, 0, 0, 0);
   let recu = 0;
   let aRecevoir = 0;
+  const aRecevoirDetail: { nom: string; dateFixe: string; montant: number }[] =
+    [];
   lignes.forEach(({ env }) => {
     const parts: PartEntree[] = env.partsEntree ?? [
       { depense: env.depense, budget: env.budget, dateFixe: env.dateFixe },
@@ -283,10 +320,16 @@ export function revenusDuMoisHero(
         d.getMonth() === debutJour.getMonth()
       ) {
         aRecevoir += p.budget;
+        aRecevoirDetail.push({
+          nom: env.nom,
+          dateFixe: p.dateFixe,
+          montant: p.budget,
+        });
       }
     });
   });
-  return { recu, aRecevoir };
+  aRecevoirDetail.sort((a, b) => a.dateFixe.localeCompare(b.dateFixe));
+  return { recu, aRecevoir, aRecevoirDetail };
 }
 
 // RÈGLE À NE JAMAIS CASSER — GARDE-FOU ANTI-DOUBLON DE NOM (2026-10-09,

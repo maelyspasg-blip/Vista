@@ -43,7 +43,7 @@ describe("revenusDuMoisHero", () => {
       9,
       AUJOURDHUI,
     );
-    expect(revenusDuMoisHero(lignes, AUJOURDHUI)).toEqual({
+    expect(revenusDuMoisHero(lignes, AUJOURDHUI)).toMatchObject({
       recu: 1200,
       aRecevoir: 500,
     });
@@ -57,7 +57,7 @@ describe("revenusDuMoisHero", () => {
       9,
       AUJOURDHUI,
     );
-    expect(revenusDuMoisHero(lignes, AUJOURDHUI)).toEqual({
+    expect(revenusDuMoisHero(lignes, AUJOURDHUI)).toMatchObject({
       recu: 0,
       aRecevoir: 0,
     });
@@ -73,10 +73,39 @@ describe("revenusDuMoisHero", () => {
         ],
       },
     };
-    expect(revenusDuMoisHero([ligneFusionnee], AUJOURDHUI)).toEqual({
+    expect(revenusDuMoisHero([ligneFusionnee], AUJOURDHUI)).toMatchObject({
       recu: 1800,
       aRecevoir: 2000,
     });
+  });
+});
+
+describe("revenusDuMoisHero — détail de la ligne de précision (2026-10-10)", () => {
+  it("liste les entrées à recevoir ce mois-ci, triées par date", () => {
+    const lignes = entreesAffichablesDuMois(
+      [
+        entree({ id: "c", nom: "CAF", budget: 200, dateFixe: "2026-10-28" }),
+        entree({ id: "b", nom: "Prime", budget: 300, dateFixe: "2026-10-20" }),
+        entree({ id: "a", depense: 1200, budget: 1200, dateFixe: "2026-10-01" }),
+      ],
+      2026,
+      9,
+      AUJOURDHUI,
+    );
+    expect(revenusDuMoisHero(lignes, AUJOURDHUI).aRecevoirDetail).toEqual([
+      { nom: "Prime", dateFixe: "2026-10-20", montant: 300 },
+      { nom: "CAF", dateFixe: "2026-10-28", montant: 200 },
+    ]);
+  });
+
+  it("vide si rien n'est à recevoir ce mois-ci", () => {
+    const lignes = entreesAffichablesDuMois(
+      [entree({ budget: 1800, dateFixe: "2026-11-02" })],
+      2026,
+      9,
+      AUJOURDHUI,
+    );
+    expect(revenusDuMoisHero(lignes, AUJOURDHUI).aRecevoirDetail).toEqual([]);
   });
 });
 
@@ -144,7 +173,7 @@ describe("fusionnerCategoriesParNom — Entrées", () => {
       { depense: 1800, budget: 1800, dateFixe: "2026-10-01" },
       { depense: 0, budget: 2000, dateFixe: "2026-10-25" },
     ]);
-    expect(revenusDuMoisHero([{ env: ligne }], AUJOURDHUI)).toEqual({
+    expect(revenusDuMoisHero([{ env: ligne }], AUJOURDHUI)).toMatchObject({
       recu: 1800,
       aRecevoir: 2000,
     });

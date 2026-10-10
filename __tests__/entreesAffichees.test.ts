@@ -111,3 +111,31 @@ describe("statutAffichageEntree — catégorie supprimée (2026-10-10)", () => {
     ).toEqual([]);
   });
 });
+
+describe("entreesAffichablesDuMois — filtre mois ET année (2026-10-10)", () => {
+  it("exclut le même mois d'une autre année et le mois précédent", () => {
+    expect(
+      entreesAffichablesDuMois(
+        [
+          entree({ id: "an-passe", depense: 900, moisComptage: "2025-10-01" }),
+          entree({ id: "septembre", depense: 1800, moisComptage: "2026-09-01" }),
+          entree({ id: "octobre", depense: 1800, moisComptage: "2026-10-01" }),
+        ],
+        2026,
+        9,
+        AUJOURDHUI,
+      ).map((l) => l.env.id),
+    ).toEqual(["octobre"]);
+  });
+
+  it("tolère un mois de comptage horodaté", () => {
+    expect(
+      entreesAffichablesDuMois(
+        [entree({ depense: 1800, moisComptage: "2026-10-01T00:00:00" })],
+        2026,
+        9,
+        AUJOURDHUI,
+      ),
+    ).toHaveLength(1);
+  });
+});
