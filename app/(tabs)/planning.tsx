@@ -64,6 +64,7 @@ import {
   modifierEvenementPartenaire,
   supprimerEvenementPartenaire,
 } from "../../utils/espacePartage";
+import { couleursInterrupteur } from "../../utils/couleursInterrupteur";
 
 const JOURS_SEMAINE = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const HEURES = Array.from({ length: 24 }, (_, i) => `${i}h`);
@@ -2958,11 +2959,7 @@ export default function Planning() {
                           <Switch
                             value={journeeEntiereEvent}
                             onValueChange={setJourneeEntiereEvent}
-                            trackColor={{
-                              false: C.separateur,
-                              true: C.purpleLight,
-                            }}
-                            thumbColor={journeeEntiereEvent ? C.purple : "#FFF"}
+                            {...couleursInterrupteur(C)}
                           />
                         </View>
 
@@ -3030,8 +3027,7 @@ export default function Planning() {
                       <Switch
                         value={estFinancierEvent}
                         onValueChange={setEstFinancierEvent}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={estFinancierEvent ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
 
@@ -3283,8 +3279,7 @@ export default function Planning() {
                       <Switch
                         value={recurrentEvent}
                         onValueChange={setRecurrentEvent}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={recurrentEvent ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
 
@@ -3351,8 +3346,7 @@ export default function Planning() {
                           <Switch
                             value={notifierEvent}
                             onValueChange={setNotifierEvent}
-                            trackColor={{ false: C.separateur, true: C.purpleLight }}
-                            thumbColor={notifierEvent ? C.purple : "#FFF"}
+                            {...couleursInterrupteur(C)}
                           />
                         </View>
                       </>
@@ -3391,8 +3385,7 @@ export default function Planning() {
                             setVisibiliteEvent(val ? "commun" : "personnel")
                           }
                           disabled={evenementEnEditionEstPartenaire}
-                          trackColor={{ false: C.separateur, true: C.purpleLight }}
-                          thumbColor={visibiliteEvent === "commun" ? C.purple : "#FFF"}
+                          {...couleursInterrupteur(C)}
                         />
                       </View>
                     )}

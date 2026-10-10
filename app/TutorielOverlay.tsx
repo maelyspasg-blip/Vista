@@ -157,20 +157,6 @@ export function TutorielOverlay({
   const visible =
     estFocus && actif && etapes.length > 0 && toutesCiblesActivesMesurees;
 
-  // TEMPORAIRE — diagnostic du bug "l'overlay ne se déclenche pas" : à
-  // retirer une fois confirmé que `visible` passe bien à true et que les
-  // cibles listées sont toutes mesurées.
-  if (actif) {
-    console.log(
-      "[TutorielOverlay] visible=",
-      visible,
-      "estFocus=",
-      estFocus,
-      "cibles manquantes=",
-      etapes.filter((e) => e.id && positions[e.id] === undefined).map((e) => e.id),
-    );
-  }
-
   const [etapeIndex, setEtapeIndex] = useState(0);
   const [pret, setPret] = useState(false);
   const minuteurRef = useRef<ReturnType<typeof setTimeout> | null>(null);

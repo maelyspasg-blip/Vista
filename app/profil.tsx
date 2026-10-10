@@ -5,7 +5,14 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
@@ -78,6 +85,7 @@ import { useTutoriel } from "./TutorielContext";
 import { CibleTutoriel, useCiblesTutoriel } from "./CibleTutoriel";
 import { type EtapeTutoriel, TutorielOverlay } from "./TutorielOverlay";
 import { useEspacePartage } from "./EspacePartageContext";
+import { couleursInterrupteur } from "../utils/couleursInterrupteur";
 
 const OPTIONS_TAILLE_TEXTE: { valeur: TailleTexte; label: string }[] = [
   { valeur: "petit", label: "Petit" },
@@ -161,19 +169,6 @@ function styleCarte(
       };
 }
 
-// RÈGLE (demande du 2026-10-10) : TOUS les interrupteurs de Profil/
-// Paramètres ont la même apparence — piste teal Vista (#1D9E75) une fois
-// activés, piste grise sinon (y compris ios_backgroundColor, sans quoi iOS
-// garde sa couleur système à l'état désactivé), bouton blanc dans les deux
-// états. Ne jamais redéfinir trackColor/thumbColor au cas par cas.
-function couleursInterrupteur(C: { separateur: string }) {
-  return {
-    trackColor: { false: C.separateur, true: "#1D9E75" },
-    thumbColor: "#FFFFFF",
-    ios_backgroundColor: C.separateur,
-  };
-}
-
 export default function Profil() {
   const router = useRouter();
   const estTablette = useEstTablette();
@@ -250,18 +245,22 @@ export default function Profil() {
   // "haut OU bas" comme calculerScrollAutoTutoriel : une carte plus haute
   // que l'écran, ex. Paramètres, oscillerait entre les deux). Ne relance
   // une mesure (forcerRemesure) QUE si le défilement demandé change
-  // réellement — onAfficher est rappelé à chaque rendu de la page
-  // (TutorielOverlay), et une section collée en bas du ScrollView (Légal)
-  // ne peut pas monter plus haut : sans ce garde, scroll → mesure → rendu →
-  // scroll bouclerait.
+  // réellement : filet de sécurité si onAfficher venait à être rappelé
+  // pour une même étape (étapes recréées, ré-affichage de l'overlay) —
+  // une section collée en bas du ScrollView (Légal) ne peut pas monter
+  // plus haut, et scroll → mesure → rendu → scroll bouclerait.
   const dernierDefilementOnboardingRef = useRef<string | null>(null);
   // RÈGLE : positions lues via une ref (synchronisée ci-dessous) pour que
   // ETAPES_ONBOARDING_PROFIL reste STABLE d'un rendu à l'autre (useMemo) —
   // recréées à chaque rendu, chaque re-mesure relançait onAfficher et
   // prolongeait le verrou de 500 ms de TutorielOverlay, qui ignore alors
   // « Suivant » sans retour visuel (trouvé en revue, 2026-10-10).
+  // useLayoutEffect (pas useEffect) : tous les layout effects passent
+  // AVANT les effets passifs, dont celui de TutorielOverlay qui appelle
+  // onAfficher — sinon, au rendu où la dernière mesure rend l'overlay
+  // visible, la ref n'aurait pas encore cette mesure (trouvé en revue).
   const posCiblesProfilRef = useRef(posCiblesProfil);
-  useEffect(() => {
+  useLayoutEffect(() => {
     posCiblesProfilRef.current = posCiblesProfil;
   }, [posCiblesProfil]);
   const espacePartageVisibleProfil = estEspacePartageActif(objStore.isAdmin);
@@ -284,10 +283,12 @@ export default function Profil() {
       if (dernierDefilementOnboardingRef.current === cle) return;
       dernierDefilementOnboardingRef.current = cle;
       scrollProfilRef.current?.scrollTo({ y: nouveauY, animated: false });
-      // Mis à jour tout de suite (trouvé en revue) : si onScroll n'a pas
-      // encore été émis à la re-mesure (50 ms), un offset périmé ferait
-      // osciller une section plus haute que l'écran entre 0 et Y. En cas
-      // de défilement plafonné (Légal, en bas), onScroll le corrige ensuite.
+      // Mis à jour tout de suite (trouvé en revue) : l'étape suivante part
+      // ainsi du bon décalage même si onScroll n'a pas encore été émis.
+      // Limite connue : un scrollTo plafonné sans aucun mouvement réel
+      // peut ne jamais émettre onScroll et laisser cette valeur surestimée
+      // — sans effet aujourd'hui, seule la dernière étape (Légal, en bas)
+      // peut être plafonnée.
       scrollOffsetProfilRef.current = nouveauY;
       setTimeout(forcerRemesureProfil, 50);
     };

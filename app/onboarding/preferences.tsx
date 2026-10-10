@@ -21,6 +21,7 @@ import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { useTheme } from "../ThemeContext";
 import { OnboardingEtape } from "../../components/OnboardingEtape";
+import { couleursInterrupteur } from "../../utils/couleursInterrupteur";
 
 const ACCESSORY_ID = "onboardingNumericDone";
 const TOTAL_ETAPES = 6;
@@ -587,8 +588,7 @@ export default function Preferences() {
                 <Switch
                   value={ligne.repeteChaqueMois}
                   onValueChange={(v) => modifierRepeteChaqueMoisLigne(ligne.id, v)}
-                  trackColor={{ false: C.separateur, true: C.purpleLight }}
-                  thumbColor={ligne.repeteChaqueMois ? C.purple : "#FFF"}
+                  {...couleursInterrupteur(C)}
                 />
               </View>
             </View>

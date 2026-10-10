@@ -89,6 +89,7 @@ import { CibleTutoriel, useCiblesTutoriel } from "../CibleTutoriel";
 import { InsightVerrouille } from "../InsightVerrouille";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
+import { couleursInterrupteur } from "../../utils/couleursInterrupteur";
 
 function bgClair(couleur: string) {
   return couleur + "22";
@@ -2472,10 +2473,7 @@ export default function Dashboard() {
               <Switch
                 value={objStore.argentDisponibleReportAuto}
                 onValueChange={(v) => objStore.modifierReportAutoBudget(v)}
-                trackColor={{ false: C.separateur, true: C.purpleLight }}
-                thumbColor={
-                  objStore.argentDisponibleReportAuto ? C.purple : "#FFF"
-                }
+                {...couleursInterrupteur(C)}
               />
             </View>
           </View>
@@ -3011,8 +3009,7 @@ export default function Dashboard() {
                   <Switch
                     value={recurrenteEntreeBudget}
                     onValueChange={setRecurrenteEntreeBudget}
-                    trackColor={{ false: C.separateur, true: C.purpleLight }}
-                    thumbColor={recurrenteEntreeBudget ? C.purple : "#FFF"}
+                    {...couleursInterrupteur(C)}
                   />
                 </View>
 
@@ -3283,8 +3280,7 @@ export default function Dashboard() {
                     <Switch
                       value={recurrenteTemp}
                       onValueChange={setRecurrenteTemp}
-                      trackColor={{ false: C.separateur, true: C.purpleLight }}
-                      thumbColor={recurrenteTemp ? C.purple : "#FFF"}
+                      {...couleursInterrupteur(C)}
                     />
                   </View>
                 )}
@@ -3325,8 +3321,7 @@ export default function Dashboard() {
                       <Switch
                         value={repeteChaqueMoisTemp}
                         onValueChange={setRepeteChaqueMoisTemp}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={repeteChaqueMoisTemp ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
 
@@ -3379,8 +3374,7 @@ export default function Dashboard() {
                       <Switch
                         value={afficherPlanningTemp}
                         onValueChange={setAfficherPlanningTemp}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={afficherPlanningTemp ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
                   </>
@@ -3422,8 +3416,7 @@ export default function Dashboard() {
                       <Switch
                         value={repeteChaqueMoisTemp}
                         onValueChange={setRepeteChaqueMoisTemp}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={repeteChaqueMoisTemp ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
 
@@ -3439,8 +3432,7 @@ export default function Dashboard() {
                       <Switch
                         value={afficherPlanningTemp}
                         onValueChange={setAfficherPlanningTemp}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={afficherPlanningTemp ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
                   </>
@@ -3675,8 +3667,7 @@ export default function Dashboard() {
                     <Switch
                       value={estRecurrente}
                       onValueChange={setEstRecurrente}
-                      trackColor={{ false: C.separateur, true: C.purpleLight }}
-                      thumbColor={estRecurrente ? C.purple : "#FFF"}
+                      {...couleursInterrupteur(C)}
                     />
                   </View>
                 )}
@@ -3720,8 +3711,7 @@ export default function Dashboard() {
                       <Switch
                         value={nouveauRepeteChaqueMois}
                         onValueChange={setNouveauRepeteChaqueMois}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={nouveauRepeteChaqueMois ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
 
@@ -3772,8 +3762,7 @@ export default function Dashboard() {
                       <Switch
                         value={nouveauAfficherPlanning}
                         onValueChange={setNouveauAfficherPlanning}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={nouveauAfficherPlanning ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
                   </>
@@ -3818,8 +3807,7 @@ export default function Dashboard() {
                       <Switch
                         value={nouveauRepeteChaqueMois}
                         onValueChange={setNouveauRepeteChaqueMois}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={nouveauRepeteChaqueMois ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
 
@@ -3835,8 +3823,7 @@ export default function Dashboard() {
                       <Switch
                         value={nouveauAfficherPlanning}
                         onValueChange={setNouveauAfficherPlanning}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={nouveauAfficherPlanning ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
                   </>
@@ -4338,8 +4325,7 @@ export default function Dashboard() {
                       <Switch
                         value={recurrentObjectif}
                         onValueChange={setRecurrentObjectif}
-                        trackColor={{ false: C.separateur, true: C.purpleLight }}
-                        thumbColor={recurrentObjectif ? C.purple : "#FFF"}
+                        {...couleursInterrupteur(C)}
                       />
                     </View>
 
