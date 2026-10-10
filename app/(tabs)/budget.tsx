@@ -934,6 +934,9 @@ export default function Budget() {
   };
 
   const ouvrirEditionTransaction = (ligne: LigneDepense, enveloppeId: string) => {
+    // Compte invité en lecture seule (trouvé en revue le 2026-10-10 : le
+    // clic long ouvrait l'édition d'une dépense sans garde).
+    if (bloquerSiInvite(isGuest, router)) return;
     setNomTx(ligne.nom);
     setMontantTx(String(ligne.montant));
     setEnveloppeTx(enveloppeId);
@@ -1028,6 +1031,8 @@ export default function Budget() {
   };
 
   const utiliserModele = (modele: ModeleDepense) => {
+    // Compte invité en lecture seule (même correctif que ci-dessus).
+    if (bloquerSiInvite(isGuest, router)) return;
     setNomTx(modele.nom);
     setMontantTx(modele.montant !== null ? String(modele.montant) : "");
     setEnveloppeTx(modele.enveloppeId);

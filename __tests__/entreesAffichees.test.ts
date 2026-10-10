@@ -139,3 +139,23 @@ describe("entreesAffichablesDuMois — filtre mois ET année (2026-10-10)", () =
     ).toHaveLength(1);
   });
 });
+
+describe("P068 — entrée datée d'un mois antérieur à son mois de comptage (2026-10-10)", () => {
+  it("reste visible dans « À venir » tant que rien n'est reçu", () => {
+    expect(
+      statutAffichageEntree(
+        entree({ dateFixe: "2026-09-04", moisComptage: "2026-10-01" }),
+        AUJOURDHUI,
+      ),
+    ).toBe("a_venir");
+  });
+
+  it("une date déjà passée DANS le mois de comptage reste masquée", () => {
+    expect(
+      statutAffichageEntree(
+        entree({ dateFixe: "2026-10-02", moisComptage: "2026-10-01" }),
+        AUJOURDHUI,
+      ),
+    ).toBe("masquee");
+  });
+});

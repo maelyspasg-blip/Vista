@@ -2353,9 +2353,26 @@ alter table public.enveloppes
 - **Suivis de revue** : garde contre une date stockée malformée dans
   `memeJourMoisSuivantISO` (renvoyée telle quelle au lieu de
   "NaN-NaN-NaN").
+- **Suite (décisions de Maëlys du 2026-10-10, après revue)** :
+  1. Une entrée à 0 € datée d'un mois ANTÉRIEUR à son mois de comptage
+     s'affiche dans « À venir » avec sa date (au lieu d'être masquée comme
+     toute date déjà passée) et compte dans le « à recevoir » du hero
+     (`utils/budget.ts::statutAffichageEntree` / `revenusDuMoisHero`).
+     Une date passée DANS le mois de comptage reste masquée.
+  2. À la reconduction, la date de réception garde son jour mais est
+     recalée dans le NOUVEAU mois de comptage (`memeJourDansMoisISO`,
+     app/store.ts) au lieu de « +1 mois » : une entrée décalée d'un mois
+     est réalignée dès le mois suivant. Identique à « +1 mois » pour une
+     entrée normale. Conséquence assumée : le cas voulu « reçu le 28
+     juillet, compté pour août » est lui aussi réaligné (28 septembre pour
+     septembre) dès sa première reconduction.
+- **Garde invité (trouvé en revue sécurité)** : 4 ouvertures de
+  formulaire d'écriture sans `bloquerSiInvite` corrigées — boutons « + »
+  d'Aperçu (« + Ajouter une entrée », nouvelle catégorie), clic long
+  d'édition d'une dépense et ajout rapide depuis un modèle (Budget).
 - **Statut** : ✅ traité — mois courts corrigés, cas bloqué dans les
-  formulaires ; correction de données de Maëlys fournie (à exécuter
-  manuellement, non exécutée).
+  formulaires, entrées décalées visibles et réalignées ; correction de
+  données de Maëlys fournie (à exécuter manuellement, non exécutée).
 
 ---
 

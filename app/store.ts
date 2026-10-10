@@ -132,16 +132,31 @@ function memeJourMoisSuivantISO(dateIso: string): string {
   // Date stockée malformée : renvoyée telle quelle plutôt que "NaN-NaN-NaN"
   // (trouvé en revue sécurité, 2026-10-10).
   if (Number.isNaN(d.getTime())) return dateIso;
-  const premierMoisSuivant = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  return memeJourDansMoisISO(
+    dateIso,
+    dateVersISOInterne(new Date(d.getFullYear(), d.getMonth() + 1, 1)),
+  );
+}
+
+// Même jour que `dateIso`, placé dans le mois de `moisCibleIso`
+// ("AAAA-MM-01"), borné au dernier jour de ce mois — cf. RÈGLE sur
+// memeJourMoisSuivantISO ci-dessus (mêmes garanties : parseDateFixeLocale,
+// jamais new Date(iso), date malformée renvoyée telle quelle).
+function memeJourDansMoisISO(dateIso: string, moisCibleIso: string): string {
+  const d = parseDateFixeLocale(dateIso);
+  const cible = parseDateFixeLocale(moisCibleIso);
+  if (Number.isNaN(d.getTime()) || Number.isNaN(cible.getTime())) {
+    return dateIso;
+  }
   const dernierJour = new Date(
-    premierMoisSuivant.getFullYear(),
-    premierMoisSuivant.getMonth() + 1,
+    cible.getFullYear(),
+    cible.getMonth() + 1,
     0,
   ).getDate();
   return dateVersISOInterne(
     new Date(
-      premierMoisSuivant.getFullYear(),
-      premierMoisSuivant.getMonth(),
+      cible.getFullYear(),
+      cible.getMonth(),
       Math.min(d.getDate(), dernierJour),
     ),
   );
@@ -2013,10 +2028,17 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
   entreesDuMois
     .filter((e) => e.recurrente && !e.supprimeeLe)
     .forEach((e) => {
-      // Date de réception avancée au même jour du mois suivant (borné aux
-      // mois courts, cf. RÈGLE sur memeJourMoisSuivantISO).
+      // RÈGLE À NE JAMAIS CASSER — DATE RECALÉE SUR LE MOIS DE COMPTAGE
+      // (décision de Maëlys du 2026-10-10, P068) : la date de réception
+      // reconduite garde son JOUR mais est placée dans le NOUVEAU mois de
+      // comptage (borné aux mois courts) — jamais simplement "+1 mois" :
+      // une entrée datée d'un mois passé et comptée pour le mois suivant
+      // (ex. le 15 septembre, comptée pour octobre) restait sinon décalée
+      // d'un mois pour toujours, et donc masquée chaque mois. Pour une
+      // entrée normale (date dans son mois de comptage), résultat identique
+      // à "+1 mois".
       const dateFixeSuivante = e.dateFixe
-        ? memeJourMoisSuivantISO(e.dateFixe)
+        ? memeJourDansMoisISO(e.dateFixe, moisComptageSuivant)
         : moisComptageSuivant;
       // RÈGLE À NE JAMAIS CASSER — MONTANT HABITUEL (2026-10-02, demande
       // explicite) : `montantHabituel` non défini → comportement historique

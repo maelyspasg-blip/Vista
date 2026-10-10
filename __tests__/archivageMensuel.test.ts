@@ -263,6 +263,41 @@ describe("archivage mensuel — reconduction des Entrées (date de réception)",
   });
 });
 
+describe("archivage mensuel — date recalée sur le mois de comptage (P068, 2026-10-10)", () => {
+  it("une Entrée datée d'un mois antérieur à son mois de comptage est recalée à la reconduction", async () => {
+    __testArchivage.definirEtatPourTest({
+      userId: "test-user-id",
+      dernierMoisArchive: null,
+      epargneMois: 0,
+      objectifs: [],
+      historiquesMois: [],
+      transactions: [],
+      argentDisponibleReportAuto: false,
+      enveloppes: [
+        enveloppe({
+          id: "env-prime",
+          nom: "Prime",
+          type: "Entrée",
+          depense: 0,
+          budget: 300,
+          recurrente: true,
+          // Créée en octobre avec une date réelle au 15 septembre, comptée
+          // pour octobre.
+          dateFixe: "2026-09-15",
+          moisComptage: "2026-10-01",
+        }),
+      ],
+    });
+
+    await __testArchivage.archiverMoisActuelInterneCoeur(9, 2026);
+
+    const primeNovembre = __testArchivage
+      .obtenirEtatPourTest()
+      .enveloppes.find((e) => e.nom === "Prime" && e.moisComptage === "2026-11-01");
+    expect(primeNovembre?.dateFixe).toBe("2026-11-15");
+  });
+});
+
 describe("memeJourMoisSuivantISO — mois courts (bug corrigé le 2026-10-10)", () => {
   it("avance au même jour du mois suivant", () => {
     expect(__testArchivage.memeJourMoisSuivantISO("2026-09-04")).toBe("2026-10-04");

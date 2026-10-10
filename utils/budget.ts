@@ -170,7 +170,9 @@ export function estCategorieActiveCeMois(
 //   - depense > 0                    → "recue"
 //   - depense = 0, date future       → "a_venir" (section "À venir" seule)
 //   - depense = 0, pas de date       → masquée
-//   - depense = 0, date atteinte     → masquée (attendue mais non reçue)
+//   - depense = 0, date atteinte     → masquée (attendue mais non reçue),
+//     SAUF date dans un mois antérieur au mois de comptage → "a_venir"
+//     (P068, cf. RÈGLE dans statutAffichageEntree)
 // Écart assumé : `depense !== 0` plutôt que `> 0` pour "recue" — le seul
 // cas négatif est "Report du mois précédent" en déficit (archivage), un vrai
 // montant du mois qu'on ne doit pas cacher. Les totaux (entreesBudgetDuMois, calculerResteEstime-
@@ -194,7 +196,19 @@ export function statutAffichageEntree(
   dateReception.setHours(0, 0, 0, 0);
   const debutJour = new Date(aujourdhui);
   debutJour.setHours(0, 0, 0, 0);
-  return dateReception > debutJour ? "a_venir" : "masquee";
+  if (dateReception > debutJour) return "a_venir";
+  // RÈGLE (décision de Maëlys du 2026-10-10, P068) : une entrée dont la
+  // date de réception tombe dans un mois ANTÉRIEUR à son mois de comptage
+  // (créée avec une date passée, comptée pour le mois en cours) reste
+  // visible dans "À venir" avec sa date tant que rien n'est reçu —
+  // "l'utilisateur a créé cette entrée, il doit la voir quelque part".
+  // Une date déjà passée DANS le mois de comptage reste masquée (règle
+  // ci-dessus inchangée).
+  const moisComptageEntree = moisComptageEffectif(env)?.slice(0, 7);
+  if (moisComptageEntree && env.dateFixe.slice(0, 7) < moisComptageEntree) {
+    return "a_venir";
+  }
+  return "masquee";
 }
 
 // Entrées du mois `annee`/`mois` à afficher (Aperçu et Budget), avec leur
@@ -282,7 +296,9 @@ export function dateRepresentativeEntree(
 //   - recu       : somme des montants reçus (depense ≠ 0) ;
 //   - aRecevoir  : somme des montants attendus (budget) des parts non reçues
 //                  dont la date de réception est FUTURE et DANS le mois
-//                  civil de `aujourdhui` — jamais un mois suivant ;
+//                  civil de `aujourdhui` — jamais un mois suivant — ou
+//                  dans un mois ANTÉRIEUR (entrée créée avec une date passée
+//                  et comptée pour ce mois, P068) ;
 //   - aRecevoirDetail : ces mêmes parts une à une (nom de la ligne, date,
 //                  montant), dans l'ordre des dates — sert à la ligne de
 //                  précision du hero ("En comptant Salaire du 25 octobre").
@@ -314,11 +330,17 @@ export function revenusDuMoisHero(
       }
       if (!p.dateFixe) return;
       const d = parseDateFixeLocale(p.dateFixe);
-      if (
+      const dateFutureCeMois =
         d > debutJour &&
         d.getFullYear() === debutJour.getFullYear() &&
-        d.getMonth() === debutJour.getMonth()
-      ) {
+        d.getMonth() === debutJour.getMonth();
+      // P068 (2026-10-10) : part datée d'un mois ANTÉRIEUR au mois en cours
+      // mais comptée pour lui (les lignes reçues ici sont celles du mois
+      // affiché) — attendue ce mois-ci, comme dans "À venir".
+      const dateMoisAnterieur =
+        d.getFullYear() * 12 + d.getMonth() <
+        debutJour.getFullYear() * 12 + debutJour.getMonth();
+      if (dateFutureCeMois || dateMoisAnterieur) {
         aRecevoir += p.budget;
         aRecevoirDetail.push({
           nom: env.nom,

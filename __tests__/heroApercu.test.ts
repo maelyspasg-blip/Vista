@@ -109,6 +109,22 @@ describe("revenusDuMoisHero — détail de la ligne de précision (2026-10-10)",
   });
 });
 
+describe("revenusDuMoisHero — P068 (2026-10-10)", () => {
+  it("compte dans « à recevoir » une entrée datée d'un mois antérieur mais comptée pour ce mois", () => {
+    const lignes = entreesAffichablesDuMois(
+      [entree({ nom: "Salaire", budget: 1800, dateFixe: "2026-09-04" })],
+      2026,
+      9,
+      AUJOURDHUI,
+    );
+    expect(revenusDuMoisHero(lignes, AUJOURDHUI)).toMatchObject({
+      recu: 0,
+      aRecevoir: 1800,
+      aRecevoirDetail: [{ nom: "Salaire", dateFixe: "2026-09-04", montant: 1800 }],
+    });
+  });
+});
+
 describe("dateRepresentativeEntree", () => {
   it("prend la plus proche date future encore attendue", () => {
     expect(

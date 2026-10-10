@@ -2481,6 +2481,9 @@ export default function Dashboard() {
               style={styles.budgetAjouterBouton}
               activeOpacity={0.7}
               onPress={() => {
+                // Compte invité en lecture seule (trouvé en revue sécurité
+                // le 2026-10-10 : ce bouton ouvrait le formulaire sans garde).
+                if (bloquerSiInvite(isGuest, router)) return;
                 setDateEntreeBudget(dateVersISO(new Date()));
                 setMoisComptageEntreeBudget(premierJourMoisISO(new Date()));
                 setCouleurEntreeBudget(
@@ -2622,6 +2625,9 @@ export default function Dashboard() {
               { backgroundColor: C.purpleLight },
             ]}
             onPress={() => {
+              // Compte invité en lecture seule (trouvé en revue sécurité
+              // le 2026-10-10 : ce bouton ouvrait le formulaire sans garde).
+              if (bloquerSiInvite(isGuest, router)) return;
               setNouvelleDate(dateVersISO(new Date()));
               setNouvelleCouleur(
                 couleurLaPlusDistincte(
