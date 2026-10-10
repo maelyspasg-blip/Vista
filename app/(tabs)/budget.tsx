@@ -266,8 +266,9 @@ export default function Budget() {
   // tap sur le delta d'une catégorie pour basculer l'affichage.
   const [deltaPourcentagePourCategorie, setDeltaPourcentagePourCategorie] =
     useState<Record<string, boolean>>({});
-  const [historiqueTotalOuvert, setHistoriqueTotalOuvert] = useState(false);
-  const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(false);
+  // Cf. RÈGLE tiroirs ouverts par défaut (2026-10-10).
+  const [historiqueTotalOuvert, setHistoriqueTotalOuvert] = useState(true);
+  const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(true);
   const [deltaDepensesTotalPourcentage, setDeltaDepensesTotalPourcentage] =
     useState(false);
   const [triCategories, setTriCategories] = useState<

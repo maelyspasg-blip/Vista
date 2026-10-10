@@ -118,6 +118,32 @@ function dateVersISOInterne(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+// RÈGLE À NE JAMAIS CASSER — MÊME JOUR LE MOIS SUIVANT, BORNÉ (bug corrigé
+// le 2026-10-10) : seule façon d'avancer une date d'échéance/de réception
+// d'un mois (reconduction des Entrées, avancement des Fixe mensuelles).
+// `date.setMonth(+1)` débordait sur les mois courts (31 janvier → 3 mars,
+// 31 août → 1er octobre) ; le jour est ici borné au dernier jour du mois
+// suivant. Limite connue : 31 janvier → 28 février → 28 mars (le jour
+// d'origine n'est pas mémorisé, pas de retour au 31). Jamais `new Date(iso)`
+// (piège UTC, cf. utils/dateOnly.ts) : `dateIso` est relue via
+// parseDateFixeLocale.
+function memeJourMoisSuivantISO(dateIso: string): string {
+  const d = parseDateFixeLocale(dateIso);
+  const premierMoisSuivant = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  const dernierJour = new Date(
+    premierMoisSuivant.getFullYear(),
+    premierMoisSuivant.getMonth() + 1,
+    0,
+  ).getDate();
+  return dateVersISOInterne(
+    new Date(
+      premierMoisSuivant.getFullYear(),
+      premierMoisSuivant.getMonth(),
+      Math.min(d.getDate(), dernierJour),
+    ),
+  );
+}
+
 function premierJourMoisISO(annee: number, mois: number): string {
   return dateVersISOInterne(new Date(annee, mois, 1));
 }
@@ -1984,12 +2010,11 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
   entreesDuMois
     .filter((e) => e.recurrente && !e.supprimeeLe)
     .forEach((e) => {
-      let dateFixeSuivante = moisComptageSuivant;
-      if (e.dateFixe) {
-        const d = parseDateFixeLocale(e.dateFixe);
-        d.setMonth(d.getMonth() + 1);
-        dateFixeSuivante = dateVersISOInterne(d);
-      }
+      // Date de réception avancée au même jour du mois suivant (borné aux
+      // mois courts, cf. RÈGLE sur memeJourMoisSuivantISO).
+      const dateFixeSuivante = e.dateFixe
+        ? memeJourMoisSuivantISO(e.dateFixe)
+        : moisComptageSuivant;
       // RÈGLE À NE JAMAIS CASSER — MONTANT HABITUEL (2026-10-02, demande
       // explicite) : `montantHabituel` non défini → comportement historique
       // inchangé (depense=0, payee=false, l'utilisateur confirme et saisit
@@ -2666,9 +2691,8 @@ async function verifierEcheancesFixesInterneCoeur() {
           });
         }
         if (env.repeteChaqueMois) {
-          const prochaine = new Date(dateEcheance);
-          prochaine.setMonth(prochaine.getMonth() + 1);
-          const prochaineStr = `${prochaine.getFullYear()}-${String(prochaine.getMonth() + 1).padStart(2, "0")}-${String(prochaine.getDate()).padStart(2, "0")}`;
+          // Cf. RÈGLE sur memeJourMoisSuivantISO (mois courts bornés).
+          const prochaineStr = memeJourMoisSuivantISO(env.dateFixe);
           // RÈGLE À NE JAMAIS CASSER — payee: true ICI (bug corrigé le
           // 2026-09-06, ancien comportement : false) : une Fixe récurrente
           // dont l'échéance vient de passer doit afficher la coche "Payé"
@@ -4719,4 +4743,5 @@ export const __testArchivage = {
   },
   obtenirEtatPourTest: (): EtatStore => etat,
   archiverMoisActuelInterneCoeur,
+  memeJourMoisSuivantISO,
 };

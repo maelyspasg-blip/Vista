@@ -627,7 +627,8 @@ export default function Dashboard() {
     ? objStore.epargneMois + (epargneMoisPartenaireActuelle ?? 0)
     : objStore.epargneMois;
   const [deltaRestePourcentage, setDeltaRestePourcentage] = useState(false);
-  const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(false);
+  // Cf. RÈGLE tiroirs ouverts par défaut (2026-10-10).
+  const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(true);
   const [triCategories, setTriCategories] = useState<
     "alpha" | "montantAsc" | "montantDesc"
   >("montantDesc");
@@ -658,7 +659,8 @@ export default function Dashboard() {
     useState(false);
   const [creationEntreeBudgetEnCours, setCreationEntreeBudgetEnCours] =
     useState(false);
-  const [entreesBudgetOuvert, setEntreesBudgetOuvert] = useState(false);
+  // Cf. RÈGLE tiroirs ouverts par défaut (2026-10-10).
+  const [entreesBudgetOuvert, setEntreesBudgetOuvert] = useState(true);
 
   const [modalEnveloppeVisible, setModalEnveloppeVisible] = useState(false);
   const [enveloppeEnEdition, setEnveloppeEnEdition] =
@@ -2640,7 +2642,7 @@ export default function Dashboard() {
                     ? `vista_section_ouverte_entrees_${objStore.userId}`
                     : null
                 }
-                ouvertParDefaut={false}
+                ouvertParDefaut={true}
               >
                 <View style={estTablette ? styles.grilleTablette : undefined}>
                   {enveloppesTrieesEntrees.map(renderCarteEnveloppe)}

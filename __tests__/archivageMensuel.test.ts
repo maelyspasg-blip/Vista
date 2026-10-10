@@ -225,3 +225,56 @@ describe("archivage mensuel — passage au 1er du mois", () => {
     expect(etatApres2eAppel.historiquesMois.length).toBe(nbSnapshotsApres1erAppel);
   });
 });
+
+describe("archivage mensuel — reconduction des Entrées (date de réception)", () => {
+  it("avance la date de réception d'une Entrée récurrente au même jour du mois suivant", async () => {
+    __testArchivage.definirEtatPourTest({
+      userId: "test-user-id",
+      dernierMoisArchive: null,
+      epargneMois: 0,
+      objectifs: [],
+      historiquesMois: [],
+      transactions: [],
+      argentDisponibleReportAuto: false,
+      enveloppes: [
+        enveloppe({
+          id: "env-salaire",
+          nom: "Salaire",
+          type: "Entrée",
+          depense: 1800,
+          budget: 1800,
+          recurrente: true,
+          payee: true,
+          dateFixe: "2026-09-04",
+          moisComptage: "2026-09-01",
+        }),
+      ],
+    });
+
+    await __testArchivage.archiverMoisActuelInterneCoeur(8, 2026);
+
+    const salaireOctobre = __testArchivage
+      .obtenirEtatPourTest()
+      .enveloppes.find(
+        (e) => e.nom === "Salaire" && e.moisComptage === "2026-10-01",
+      );
+    expect(salaireOctobre).toBeDefined();
+    expect(salaireOctobre?.dateFixe).toBe("2026-10-04");
+  });
+});
+
+describe("memeJourMoisSuivantISO — mois courts (bug corrigé le 2026-10-10)", () => {
+  it("avance au même jour du mois suivant", () => {
+    expect(__testArchivage.memeJourMoisSuivantISO("2026-09-04")).toBe("2026-10-04");
+  });
+
+  it("borne au dernier jour d'un mois plus court (jamais de débordement)", () => {
+    expect(__testArchivage.memeJourMoisSuivantISO("2026-08-31")).toBe("2026-09-30");
+    expect(__testArchivage.memeJourMoisSuivantISO("2026-01-31")).toBe("2026-02-28");
+    expect(__testArchivage.memeJourMoisSuivantISO("2028-01-31")).toBe("2028-02-29");
+  });
+
+  it("passe à l'année suivante en décembre", () => {
+    expect(__testArchivage.memeJourMoisSuivantISO("2026-12-31")).toBe("2027-01-31");
+  });
+});

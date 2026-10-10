@@ -2291,6 +2291,62 @@ alter table public.enveloppes
 
 ---
 
+### P068 — Ligne d'Entrée d'octobre datée du 4 septembre (signalé le 2026-10-10)
+
+- **Gravité** : 🟡 MINEUR (affichage trompeur, aucun calcul faux).
+- **Hypothèse remontée** : la reconduction mensuelle n'avancerait pas
+  `dateFixe`. **Infirmée** : `archiverMoisActuelInterneCoeur` avançait déjà
+  la date d'un mois (`parseDateFixeLocale` + `setMonth(+1)`) — test ajouté
+  (`__tests__/archivageMensuel.test.ts`) : Entrée récurrente du 2026-09-04
+  → ligne d'octobre datée du 2026-10-04.
+- **Cause probable (non reproduite sur device)** : le formulaire « Ajouter
+  une entrée » d'Aperçu (restauré par le revert de P061) — choisir une
+  « Date réelle » dans un mois passé fixe « Compter pour le mois de » sur ce
+  mois, mais les puces ne proposent que le mois courant et les suivants :
+  toucher « octobre » après avoir choisi le 4 septembre crée une ligne
+  comptée pour octobre et datée du 4 septembre. Fonctionnalité voulue
+  (« reçu le 28 juillet, compté pour août »), mais facile à déclencher par
+  erreur. Reconduite ensuite, l'écart d'un mois se conserve (novembre
+  daté du 4 octobre…). Question pour Maëlys : faut-il garder cette
+  possibilité ?
+- **Corrigé au passage (certain)** : débordement des mois courts —
+  `setMonth(+1)` sur un 31 donnait le 1er/3 du mois d'après (31 août →
+  1er octobre). Nouvelle fonction `memeJourMoisSuivantISO` (app/store.ts),
+  jour borné au dernier jour du mois suivant, utilisée par la reconduction
+  des Entrées ET l'avancement des Fixe mensuelles
+  (`verifierEcheancesFixesInterneCoeur`). Limite : 31 janv. → 28 févr. →
+  28 mars (jour d'origine non mémorisé). Tests ajoutés.
+- **Correction de données pour le compte de Maëlys — à exécuter
+  manuellement dans le dashboard, jamais depuis cet environnement.** Le SQL
+  initialement proposé (`and date_fixe = '2026-09-04'` sans filtre de mois)
+  aurait aussi modifié la ligne de SEPTEMBRE si elle porte cette date ;
+  filtre `mois_comptage` ajouté pour ne viser que la ligne d'octobre.
+  Vérifier d'abord avec le SELECT :
+
+  ```sql
+  select id, nom, date_fixe, mois_comptage, depense, budget
+  from public.enveloppes
+  where user_id = 'c80c78f3-fd9e-4d85-a4e5-c49bf0a624fa'
+    and type = 'Entrée'
+    and date_fixe = '2026-09-04'
+    and mois_comptage = '2026-10-01'
+    and supprimee_le is null;
+
+  -- Puis, si UNE seule ligne (celle d'octobre) est renvoyée :
+  update public.enveloppes
+  set date_fixe = '2026-10-04'
+  where user_id = 'c80c78f3-fd9e-4d85-a4e5-c49bf0a624fa'
+    and type = 'Entrée'
+    and date_fixe = '2026-09-04'
+    and mois_comptage = '2026-10-01'
+    and supprimee_le is null;
+  ```
+- **Statut** : 🟡 partiellement traité — mois courts corrigés ; correction
+  de données fournie (non exécutée) ; question produit ouverte sur le
+  formulaire.
+
+---
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 

@@ -22,7 +22,9 @@ export function TiroirStats({
   titre,
   labelTemporel,
   indicateurFiltre,
-  ouvertParDefaut = false,
+  // Ouvert par défaut (demande du 2026-10-10 : tous les tiroirs de contenu
+  // de l'app s'affichent ouverts au premier affichage).
+  ouvertParDefaut = true,
   forcerOuvert = false,
   children,
 }: {

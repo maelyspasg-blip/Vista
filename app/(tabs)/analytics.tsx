@@ -1504,8 +1504,9 @@ export default function Analytics() {
   const [modeEntreesCategorie, setModeEntreesCategorie] = useState<
     "pct" | "euro"
   >("pct");
+  // Cf. RÈGLE tiroirs ouverts par défaut (2026-10-10).
   const [categoriesInchangeesOuvert, setCategoriesInchangeesOuvert] =
-    useState(false);
+    useState(true);
   const [vue, setVue] = useState<Vue>("global");
   const [titoirOuvert, setTiroirOuvert] = useState(false);
   const [categoriesSelectionnees, setCategoriesSelectionnees] = useState<
