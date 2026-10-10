@@ -56,7 +56,6 @@ import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
 import { FrequenceEvenement, genererOccurrencesEvenement } from "../../utils/evenements";
 import { getJoursFeries } from "../../utils/joursFeries";
-import { useJoursFeries } from "../JoursFeriesContext";
 import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
 import { useEspacePartage } from "../EspacePartageContext";
 import {
@@ -279,7 +278,6 @@ export default function Planning() {
   const { reduireAnimations } = useAccessibilite();
   const router = useRouter();
   const { isGuest } = useGuest();
-  const { afficherJoursFeries } = useJoursFeries();
   const {
     estDansUnEspace,
     vueActive,
@@ -499,15 +497,17 @@ export default function Planning() {
   // toutes les années couvertes par la fenêtre affichée (celle-ci peut
   // chevaucher deux années civiles, ex: vue de décembre à mars) — jamais
   // persistés, jamais envoyés à Supabase (cf. RÈGLE dans
-  // utils/joursFeries.ts). Masqués entièrement si l'utilisateur a désactivé
-  // le réglage "Afficher les jours fériés français" (Profil → Paramètres).
+  // utils/joursFeries.ts). TOUJOURS affichés depuis le 2026-10-10 (demande
+  // explicite) : l'ancien réglage "Jours fériés français" de Profil a été
+  // supprimé — ne jamais réintroduire de condition ici (une ancienne
+  // préférence "false" restée en AsyncStorage est volontairement ignorée).
   const anneesFenetreFeries = new Set([
     debutFenetreRecurrence.getFullYear(),
     finFenetreRecurrence.getFullYear(),
   ]);
-  const joursFeries = afficherJoursFeries
-    ? [...anneesFenetreFeries].flatMap((annee) => getJoursFeries(annee))
-    : [];
+  const joursFeries = [...anneesFenetreFeries].flatMap((annee) =>
+    getJoursFeries(annee),
+  );
   // RÈGLE À NE JAMAIS CASSER — PLANNING PARTAGÉ : evenementsPartenaire
   // (EvenementPartenaire[], cf. EspacePartageContext) rejoint le MÊME
   // pipeline de construction que jours fériés/événements réels (jamais un

@@ -41,6 +41,9 @@ export type EtapeTutoriel = {
 const MARGE_ECRAN = 16;
 const LARGEUR_BULLE = 300;
 const HAUTEUR_BULLE_ESTIMEE = 160; // heuristique de positionnement, cf. plus bas
+// Bulle plus haute en modeBoutons (compteur + rangée Passer/Suivant).
+const HAUTEUR_BULLE_ESTIMEE_BOUTONS = 210;
+const TEAL = "#1D9E75";
 const PADDING_TROU = 8;
 // Marge de sécurité SUPPLÉMENTAIRE (en plus de insets.bottom + MARGE_ECRAN)
 // réservée uniquement pour le clamp bas de la bulle — HAUTEUR_BULLE_ESTIMEE
@@ -72,6 +75,7 @@ export function TutorielOverlay({
   scrollOffset = 0,
   onTerminer,
   onFermer,
+  modeBoutons = false,
 }: {
   // Vrai si CETTE page doit potentiellement montrer son tutoriel (typiquement
   // `!tutorielXVu`, le flag de la page appelante). Ne PAS pré-calculer ici
@@ -107,6 +111,12 @@ export function TutorielOverlay({
   // validation naturelle de la dernière étape doit enchaîner sur la page
   // suivante, pas une fermeture anticipée.
   onFermer?: () => void;
+  // Ajout du 2026-10-10 (onboarding de Profil) : navigation par boutons
+  // dans la bulle — "Passer" (= onFermer) et "Suivant"/"Terminer" (teal),
+  // avec un compteur d'étape — au lieu des zones tapables gauche/droite et
+  // de la croix. Désactivé par défaut : les tutoriels des 4 onglets restent
+  // strictement inchangés.
+  modeBoutons?: boolean;
 }) {
   const { couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
@@ -265,6 +275,10 @@ export function TutorielOverlay({
 
   const { width: largeurEcran, height: hauteurEcran } = tailleEcran;
   const fermer = onFermer ?? onTerminer;
+  const hauteurBulleEstimee = modeBoutons
+    ? HAUTEUR_BULLE_ESTIMEE_BOUTONS
+    : HAUTEUR_BULLE_ESTIMEE;
+  const derniereEtape = etapeIndex >= etapes.length - 1;
 
   const avancer = () => {
     if (scrollEnCoursRef.current) return;
@@ -285,9 +299,40 @@ export function TutorielOverlay({
       <Text style={[styles.texteBulle, { color: C.texte }]}>
         {etape.texte}
       </Text>
-      <Text style={[styles.indice, { color: C.texteMuted }]}>
-        ← Retour | Continuer →
-      </Text>
+      {modeBoutons ? (
+        <>
+          <Text style={[styles.indice, { color: C.texteMuted }]}>
+            {etapeIndex + 1} / {etapes.length}
+          </Text>
+          <View style={styles.rangeeBoutons}>
+            <Pressable
+              onPress={fermer}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.btnPasser}
+              accessibilityRole="button"
+              accessibilityLabel="Passer la découverte"
+            >
+              <Text style={[styles.btnPasserTexte, { color: TEAL }]}>
+                Passer
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={avancer}
+              style={[styles.btnSuivant, { backgroundColor: TEAL }]}
+              accessibilityRole="button"
+              accessibilityLabel={derniereEtape ? "Terminer" : "Étape suivante"}
+            >
+              <Text style={styles.btnSuivantTexte}>
+                {derniereEtape ? "Terminer" : "Suivant"}
+              </Text>
+            </Pressable>
+          </View>
+        </>
+      ) : (
+        <Text style={[styles.indice, { color: C.texteMuted }]}>
+          ← Retour | Continuer →
+        </Text>
+      )}
     </>
   );
 
@@ -351,8 +396,11 @@ export function TutorielOverlay({
               { backgroundColor: "rgba(0,0,0,0.6)" },
             ]}
           />
-          {zonesNavigation}
-          <View style={styles.centreWrap} pointerEvents="none">
+          {!modeBoutons && zonesNavigation}
+          <View
+            style={styles.centreWrap}
+            pointerEvents={modeBoutons ? "box-none" : "none"}
+          >
             <View
               style={[
                 styles.bulleBase,
@@ -362,7 +410,7 @@ export function TutorielOverlay({
               {contenuBulle}
             </View>
           </View>
-          {btnFermer}
+          {!modeBoutons && btnFermer}
         </View>
       </Modal>
     );
@@ -392,7 +440,7 @@ export function TutorielOverlay({
   const placerSous = espaceEnDessous >= espaceAuDessus;
   const bulleTopBrut = placerSous
     ? trouY + trouHauteur + 12
-    : trouY - HAUTEUR_BULLE_ESTIMEE - 12;
+    : trouY - hauteurBulleEstimee - 12;
   // Toujours dans la zone visible, même si `rect` lui-même est hors-écran
   // (ex: carte plus bas dans un ScrollView, mesurée alors qu'elle n'est pas
   // affichée à l'écran au moment du tutoriel) — la bulle de texte doit
@@ -401,7 +449,7 @@ export function TutorielOverlay({
   const bulleTop = Math.min(
     Math.max(bulleTopBrut, insets.top + MARGE_ECRAN),
     hauteurEcran -
-      HAUTEUR_BULLE_ESTIMEE -
+      hauteurBulleEstimee -
       insets.bottom -
       MARGE_ECRAN -
       MARGE_SECURITE_BAS,
@@ -442,7 +490,7 @@ export function TutorielOverlay({
           />
         </Svg>
 
-        {zonesNavigation}
+        {!modeBoutons && zonesNavigation}
 
         <View
           style={[
@@ -455,12 +503,12 @@ export function TutorielOverlay({
               borderColor: C.carteBorder,
             },
           ]}
-          pointerEvents="none"
+          pointerEvents={modeBoutons ? "auto" : "none"}
         >
           {contenuBulle}
         </View>
 
-        {btnFermer}
+        {!modeBoutons && btnFermer}
       </View>
     </Modal>
   );
@@ -490,6 +538,30 @@ const styles = StyleSheet.create({
   indice: {
     fontSize: 12,
     marginTop: 10,
+  },
+  rangeeBoutons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 14,
+  },
+  btnPasser: {
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  btnPasserTexte: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  btnSuivant: {
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  btnSuivantTexte: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
   },
   // RÈGLE À NE JAMAIS CASSER : zoneGauche + zoneDroite doivent couvrir 100%
   // de la largeur ET de la hauteur de l'écran à elles deux, sans zone

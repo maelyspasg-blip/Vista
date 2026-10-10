@@ -5,14 +5,18 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   Alert,
   Clipboard,
+  Dimensions,
   KeyboardAvoidingView,
   Linking,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   ScrollView,
   Share,
@@ -51,7 +55,6 @@ import { RapportVisuelCarte } from "./RapportVisuelCarte";
 import { BoutonPrincipal } from "./BoutonPrincipal";
 import { GuestBanner } from "./GuestBanner";
 import { useGuest } from "./GuestContext";
-import { useJoursFeries } from "./JoursFeriesContext";
 import { SyncErrorBanner } from "./SyncErrorBanner";
 import { TailleTexte, useAccessibilite } from "./AccessibiliteContext";
 import { reinitialiserEtatUtilisateur, useObjectifs } from "./store";
@@ -72,6 +75,8 @@ import {
 } from "../utils/espacePartage";
 import { Theme, useTheme } from "./ThemeContext";
 import { useTutoriel } from "./TutorielContext";
+import { CibleTutoriel, useCiblesTutoriel } from "./CibleTutoriel";
+import { type EtapeTutoriel, TutorielOverlay } from "./TutorielOverlay";
 import { useEspacePartage } from "./EspacePartageContext";
 
 const OPTIONS_TAILLE_TEXTE: { valeur: TailleTexte; label: string }[] = [
@@ -156,6 +161,19 @@ function styleCarte(
       };
 }
 
+// RÈGLE (demande du 2026-10-10) : TOUS les interrupteurs de Profil/
+// Paramètres ont la même apparence — piste teal Vista (#1D9E75) une fois
+// activés, piste grise sinon (y compris ios_backgroundColor, sans quoi iOS
+// garde sa couleur système à l'état désactivé), bouton blanc dans les deux
+// états. Ne jamais redéfinir trackColor/thumbColor au cas par cas.
+function couleursInterrupteur(C: { separateur: string }) {
+  return {
+    trackColor: { false: C.separateur, true: "#1D9E75" },
+    thumbColor: "#FFFFFF",
+    ios_backgroundColor: C.separateur,
+  };
+}
+
 export default function Profil() {
   const router = useRouter();
   const estTablette = useEstTablette();
@@ -172,7 +190,6 @@ export default function Profil() {
   } = useAccessibilite();
   const objStore = useObjectifs();
   const { isGuest } = useGuest();
-  const { afficherJoursFeries, setAfficherJoursFeries } = useJoursFeries();
   const { estPremium, definirPremium, simulerNonPremium, definirSimulerNonPremium } =
     usePremium();
   const { rafraichirEspace } = useEspacePartage();
@@ -180,6 +197,141 @@ export default function Profil() {
   // voir estComptePremium (utils/premium.ts) pour ce qu'il combine.
   const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
   const scrollProfilRef = useRef<ScrollView>(null);
+
+  // RÈGLE (demande du 2026-10-10) : ONBOARDING DE DÉCOUVERTE DE PROFIL —
+  // 4 bulles au tout premier accès à Profil, une seule fois PAR UTILISATEUR
+  // ET PAR APPAREIL : mémorisé localement (AsyncStorage,
+  // vista_profil_onboarding_vu_[userId]), jamais en base — distinct des
+  // tutoriels des 4 onglets (colonnes profils.tutoriel_*_vu, cf.
+  // TutorielContext). Réutilise TutorielOverlay en modeBoutons
+  // (Passer/Suivant), jamais un second overlay. `null` = pas encore lu :
+  // rien ne s'affiche tant que la valeur locale n'est pas connue (jamais de
+  // flash pour quelqu'un qui l'a déjà vu). Lecture impossible → considéré
+  // comme vu (une découverte manquée vaut mieux qu'une découverte répétée).
+  const cleOnboardingProfil = objStore.userId
+    ? `vista_profil_onboarding_vu_${objStore.userId}`
+    : null;
+  const [onboardingProfilVu, setOnboardingProfilVu] = useState<
+    boolean | null
+  >(null);
+  useEffect(() => {
+    if (!cleOnboardingProfil) return;
+    let annule = false;
+    AsyncStorage.getItem(cleOnboardingProfil)
+      .then((valeur) => {
+        if (!annule) setOnboardingProfilVu(valeur === "true");
+      })
+      .catch(() => {
+        if (!annule) setOnboardingProfilVu(true);
+      });
+    return () => {
+      annule = true;
+    };
+  }, [cleOnboardingProfil]);
+  const marquerOnboardingProfilVu = () => {
+    setOnboardingProfilVu(true);
+    if (!cleOnboardingProfil) return;
+    AsyncStorage.setItem(cleOnboardingProfil, "true").catch(() => {
+      // Best-effort : au pire, la découverte se réaffichera une fois.
+    });
+  };
+  const {
+    positions: posCiblesProfil,
+    mesurer: mesurerCibleProfil,
+    cleFocus: cleFocusProfil,
+    forcerRemesure: forcerRemesureProfil,
+  } = useCiblesTutoriel();
+  const scrollOffsetProfilRef = useRef(0);
+  const gererScrollProfil = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollOffsetProfilRef.current = e.nativeEvent.contentOffset.y;
+  };
+  // RÈGLE À NE JAMAIS CASSER — DÉFILEMENT IDEMPOTENT : aligne le HAUT de la
+  // section sous l'en-tête si elle n'est pas entièrement visible (jamais
+  // "haut OU bas" comme calculerScrollAutoTutoriel : une carte plus haute
+  // que l'écran, ex. Paramètres, oscillerait entre les deux). Ne relance
+  // une mesure (forcerRemesure) QUE si le défilement demandé change
+  // réellement — onAfficher est rappelé à chaque rendu de la page
+  // (TutorielOverlay), et une section collée en bas du ScrollView (Légal)
+  // ne peut pas monter plus haut : sans ce garde, scroll → mesure → rendu →
+  // scroll bouclerait.
+  const dernierDefilementOnboardingRef = useRef<string | null>(null);
+  // RÈGLE : positions lues via une ref (synchronisée ci-dessous) pour que
+  // ETAPES_ONBOARDING_PROFIL reste STABLE d'un rendu à l'autre (useMemo) —
+  // recréées à chaque rendu, chaque re-mesure relançait onAfficher et
+  // prolongeait le verrou de 500 ms de TutorielOverlay, qui ignore alors
+  // « Suivant » sans retour visuel (trouvé en revue, 2026-10-10).
+  const posCiblesProfilRef = useRef(posCiblesProfil);
+  useEffect(() => {
+    posCiblesProfilRef.current = posCiblesProfil;
+  }, [posCiblesProfil]);
+  const espacePartageVisibleProfil = estEspacePartageActif(objStore.isAdmin);
+  const margeHautProfil = insets.top + 70;
+  const margeBasProfil = insets.bottom + 220;
+  const ETAPES_ONBOARDING_PROFIL: EtapeTutoriel[] = useMemo(() => {
+    const faireDefilerVersSectionProfil = (id: string) => {
+      const rect = posCiblesProfilRef.current[id];
+      if (!rect) return;
+      const { height: hauteurEcran } = Dimensions.get("window");
+      const limiteBas = hauteurEcran - margeBasProfil;
+      if (rect.y >= margeHautProfil && rect.y + rect.height <= limiteBas) {
+        return;
+      }
+      const nouveauY = Math.max(
+        0,
+        Math.round(scrollOffsetProfilRef.current + rect.y - margeHautProfil),
+      );
+      const cle = `${id}:${nouveauY}`;
+      if (dernierDefilementOnboardingRef.current === cle) return;
+      dernierDefilementOnboardingRef.current = cle;
+      scrollProfilRef.current?.scrollTo({ y: nouveauY, animated: false });
+      // Mis à jour tout de suite (trouvé en revue) : si onScroll n'a pas
+      // encore été émis à la re-mesure (50 ms), un offset périmé ferait
+      // osciller une section plus haute que l'écran entre 0 et Y. En cas
+      // de défilement plafonné (Légal, en bas), onScroll le corrige ensuite.
+      scrollOffsetProfilRef.current = nouveauY;
+      setTimeout(forcerRemesureProfil, 50);
+    };
+    return [
+      {
+        id: "profil_infos",
+        texte:
+          "Personnalise ton profil et choisis ton prénom affiché dans l'app",
+        onAfficher: () => faireDefilerVersSectionProfil("profil_infos"),
+      },
+      // Section absente si l'espace partagé n'est pas accessible à ce
+      // compte (estEspacePartageActif) : l'étape est alors sautée, jamais
+      // une bulle pointant dans le vide (TutorielOverlay attend que TOUTES
+      // les cibles listées soient mesurées). Ordre des étapes = ordre
+      // demandé (infos, espace, paramètres, légal), pas l'ordre visuel.
+      ...(espacePartageVisibleProfil
+        ? [
+            {
+              id: "profil_espace",
+              texte:
+                "Invite ton partenaire pour gérer votre budget à deux. Un simple code suffit pour lier vos comptes.",
+              onAfficher: () => faireDefilerVersSectionProfil("profil_espace"),
+            },
+          ]
+        : []),
+      {
+        id: "profil_parametres",
+        texte:
+          "Configure les notifications et personnalise ton expérience Vista",
+        onAfficher: () => faireDefilerVersSectionProfil("profil_parametres"),
+      },
+      {
+        id: "profil_legal",
+        texte:
+          "Retrouve nos conditions d'utilisation et contacte-nous si besoin",
+        onAfficher: () => faireDefilerVersSectionProfil("profil_legal"),
+      },
+    ];
+  }, [
+    espacePartageVisibleProfil,
+    margeHautProfil,
+    margeBasProfil,
+    forcerRemesureProfil,
+  ]);
 
   const [email, setEmail] = useState("");
   const [prenomTemp, setPrenomTemp] = useState(objStore.prenom);
@@ -938,10 +1090,17 @@ export default function Profil() {
 
       <ScrollView
         ref={scrollProfilRef}
+        onScroll={gererScrollProfil}
+        scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled"
       >
+        <CibleTutoriel
+          id="profil_infos"
+          onMesure={mesurerCibleProfil}
+          cleFocus={cleFocusProfil}
+        >
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           INFORMATIONS
         </Text>
@@ -1081,6 +1240,13 @@ export default function Profil() {
           </TouchableOpacity>
         </View>
 
+        </CibleTutoriel>
+
+        <CibleTutoriel
+          id="profil_parametres"
+          onMesure={mesurerCibleProfil}
+          cleFocus={cleFocusProfil}
+        >
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           PARAMÈTRES DE L'APP
         </Text>
@@ -1097,8 +1263,7 @@ export default function Profil() {
             <Switch
               value={theme === "sombre"}
               onValueChange={toggleTheme}
-              trackColor={{ false: C.separateur, true: C.purpleLight }}
-              thumbColor={theme === "sombre" ? C.purple : "#FFF"}
+              {...couleursInterrupteur(C)}
               accessibilityLabel="Mode sombre"
             />
           </View>
@@ -1115,8 +1280,7 @@ export default function Profil() {
             <Switch
               value={objStore.notificationsActives}
               onValueChange={toggleNotifications}
-              trackColor={{ false: C.separateur, true: C.purpleLight }}
-              thumbColor={objStore.notificationsActives ? C.purple : "#FFF"}
+              {...couleursInterrupteur(C)}
               accessibilityLabel="Notifications"
             />
           </View>
@@ -1134,27 +1298,8 @@ export default function Profil() {
             <Switch
               value={objStore.alertesBudget}
               onValueChange={objStore.modifierAlertesBudget}
-              trackColor={{ false: C.separateur, true: C.purpleLight }}
-              thumbColor={objStore.alertesBudget ? C.purple : "#FFF"}
+              {...couleursInterrupteur(C)}
               accessibilityLabel="Alertes budget"
-            />
-          </View>
-
-          <View style={[styles.switchRow, { marginTop: 18 }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.switchLabel, { color: C.texte }]}>
-                Jours fériés français
-              </Text>
-              <Text style={[styles.switchSub, { color: C.texteMuted }]}>
-                Afficher les jours fériés dans le Planning
-              </Text>
-            </View>
-            <Switch
-              value={afficherJoursFeries}
-              onValueChange={setAfficherJoursFeries}
-              trackColor={{ false: C.separateur, true: C.purpleLight }}
-              thumbColor={afficherJoursFeries ? C.purple : "#FFF"}
-              accessibilityLabel="Jours fériés français"
             />
           </View>
 
@@ -1162,6 +1307,15 @@ export default function Profil() {
             style={[styles.btnSecondaire, { borderColor: C.separateur, marginTop: 18 }]}
             onPress={() => {
               reinitialiserTutoriel();
+              // Relance aussi la découverte de Profil (demande du
+              // 2026-10-10) : la mémoire locale est effacée, elle se
+              // réaffichera à la prochaine ouverture de Profil — jamais
+              // par-dessus la navigation vers Aperçu qui suit.
+              if (cleOnboardingProfil) {
+                AsyncStorage.removeItem(cleOnboardingProfil).catch(() => {
+                  // Best-effort : au pire, la découverte ne se relance pas.
+                });
+              }
               router.replace("/(tabs)");
             }}
             activeOpacity={0.7}
@@ -1224,8 +1378,7 @@ export default function Profil() {
             <Switch
               value={contrasteRenforce}
               onValueChange={setContrasteRenforce}
-              trackColor={{ false: C.separateur, true: C.purpleLight }}
-              thumbColor={contrasteRenforce ? C.purple : "#FFF"}
+              {...couleursInterrupteur(C)}
               accessibilityLabel="Contraste renforcé"
             />
           </View>
@@ -1242,12 +1395,13 @@ export default function Profil() {
             <Switch
               value={reduireAnimations}
               onValueChange={setReduireAnimations}
-              trackColor={{ false: C.separateur, true: C.purpleLight }}
-              thumbColor={reduireAnimations ? C.purple : "#FFF"}
+              {...couleursInterrupteur(C)}
               accessibilityLabel="Réduire les animations"
             />
           </View>
         </View>
+
+        </CibleTutoriel>
 
         {/* RÈGLE À NE JAMAIS CASSER — FONDATIONS ESPACE PARTAGÉ : cf.
             utils/premium.ts::ESPACE_PARTAGE_ACTIF (passé à `true` le
@@ -1261,7 +1415,11 @@ export default function Profil() {
             d'entrée qui doit décider si cette section est visible,
             jamais un second gardien local à ce fichier. */}
         {estEspacePartageActif(objStore.isAdmin) && (
-          <>
+          <CibleTutoriel
+            id="profil_espace"
+            onMesure={mesurerCibleProfil}
+            cleFocus={cleFocusProfil}
+          >
             <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
               ESPACE PARTAGÉ
             </Text>
@@ -1409,12 +1567,7 @@ export default function Profil() {
                   <Switch
                     value={objStore.masquerEvenementsPersonnels}
                     onValueChange={objStore.modifierMasquerEvenementsPersonnels}
-                    trackColor={{ false: C.separateur, true: C.purpleLight }}
-                    thumbColor={
-                      objStore.masquerEvenementsPersonnels
-                        ? C.purple
-                        : "#FFF"
-                    }
+                    {...couleursInterrupteur(C)}
                   />
                 </View>
                 {/* RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE DE couleurMoi :
@@ -1455,7 +1608,7 @@ export default function Profil() {
                 </TouchableOpacity>
               </View>
             )}
-          </>
+          </CibleTutoriel>
         )}
 
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
@@ -1528,8 +1681,7 @@ export default function Profil() {
                 <Switch
                   value={estPremium}
                   onValueChange={definirPremium}
-                  trackColor={{ false: C.separateur, true: "#FFF0C2" }}
-                  thumbColor={estPremium ? "#C9A84C" : "#FFF"}
+                  {...couleursInterrupteur(C)}
                   accessibilityLabel="Simuler Premium"
                 />
               </View>
@@ -1548,8 +1700,7 @@ export default function Profil() {
                 <Switch
                   value={simulerNonPremium}
                   onValueChange={definirSimulerNonPremium}
-                  trackColor={{ false: C.separateur, true: C.purpleLight }}
-                  thumbColor={simulerNonPremium ? C.purple : "#FFF"}
+                  {...couleursInterrupteur(C)}
                   accessibilityLabel="Simuler compte non-premium"
                 />
               </View>
@@ -1583,6 +1734,11 @@ export default function Profil() {
           </>
         )}
 
+        <CibleTutoriel
+          id="profil_legal"
+          onMesure={mesurerCibleProfil}
+          cleFocus={cleFocusProfil}
+        >
         <Text style={[styles.sectionLabel, { color: C.texteMuted }]}>
           LÉGAL
         </Text>
@@ -1639,6 +1795,8 @@ export default function Profil() {
             </Text>
           </TouchableOpacity>
         </View>
+
+        </CibleTutoriel>
 
         {/* RÈGLE À NE JAMAIS CASSER : visible uniquement pour les comptes
             non-premium (jamais affiché à quelqu'un qui a déjà accès à
@@ -2570,6 +2728,17 @@ export default function Profil() {
         </TouchableOpacity>
       </Modal>
 
+      {/* Onboarding de découverte de Profil — cf. RÈGLE sur
+          onboardingProfilVu. "Passer" et "Terminer" le marquent vu tous
+          les deux : il ne se réaffiche jamais. */}
+      <TutorielOverlay
+        actif={onboardingProfilVu === false}
+        etapes={ETAPES_ONBOARDING_PROFIL}
+        positions={posCiblesProfil}
+        onTerminer={marquerOnboardingProfilVu}
+        onFermer={marquerOnboardingProfilVu}
+        modeBoutons
+      />
       <ModaleDocumentLegal
         visible={documentLegalOuvert === "confidentialite"}
         onClose={() => setDocumentLegalOuvert(null)}

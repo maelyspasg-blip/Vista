@@ -14,7 +14,6 @@ import {
 import { ErrorBoundary } from "./ErrorBoundary";
 import { EspacePartageProvider } from "./EspacePartageContext";
 import { GuestContext } from "./GuestContext";
-import { JoursFeriesProvider } from "./JoursFeriesContext";
 import { PremiumProvider } from "./PremiumContext";
 import { supabase } from "../supabaseClient";
 import { estEspacePartageActif } from "../utils/premium";
@@ -522,21 +521,19 @@ function RootLayoutInterne() {
               }}
             >
               <PremiumProvider>
-                <JoursFeriesProvider>
-                  {/* RÈGLE À NE JAMAIS CASSER — MONTÉ SI
-                      estEspacePartageActif(isAdmin) : tant qu'un compte
-                      n'est ni admin ni couvert par ESPACE_PARTAGE_ACTIF
-                      (bêta TestFlight), EspacePartageProvider n'existe même
-                      pas dans l'arbre — cf. utils/premium.ts. Un admin voit
-                      toujours la fonctionnalité, même bêta. */}
-                  {estEspacePartageActif(isAdmin) ? (
-                    <EspacePartageProvider userId={session?.user?.id ?? null}>
-                      <Navigateur />
-                    </EspacePartageProvider>
-                  ) : (
+                {/* RÈGLE À NE JAMAIS CASSER — MONTÉ SI
+                    estEspacePartageActif(isAdmin) : tant qu'un compte
+                    n'est ni admin ni couvert par ESPACE_PARTAGE_ACTIF
+                    (bêta TestFlight), EspacePartageProvider n'existe même
+                    pas dans l'arbre — cf. utils/premium.ts. Un admin voit
+                    toujours la fonctionnalité, même bêta. */}
+                {estEspacePartageActif(isAdmin) ? (
+                  <EspacePartageProvider userId={session?.user?.id ?? null}>
                     <Navigateur />
-                  )}
-                </JoursFeriesProvider>
+                  </EspacePartageProvider>
+                ) : (
+                  <Navigateur />
+                )}
               </PremiumProvider>
             </TutorielContext.Provider>
           </GuestContext.Provider>
