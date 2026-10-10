@@ -89,3 +89,25 @@ describe("entreesAffichablesDuMois", () => {
     ]);
   });
 });
+
+describe("statutAffichageEntree — catégorie supprimée (2026-10-10)", () => {
+  it("une entrée supprimée disparaît du listing, même avec un montant reçu", () => {
+    expect(
+      statutAffichageEntree(
+        entree({ depense: 1800, dateFixe: "2026-10-01", supprimeeLe: "2026-10-05T10:00:00Z" }),
+        AUJOURDHUI,
+      ),
+    ).toBe("masquee");
+  });
+
+  it("une entrée d'un autre mois n'est jamais listée", () => {
+    expect(
+      entreesAffichablesDuMois(
+        [entree({ depense: 1800, dateFixe: "2026-09-01", moisComptage: "2026-09-01" })],
+        2026,
+        9,
+        AUJOURDHUI,
+      ),
+    ).toEqual([]);
+  });
+});

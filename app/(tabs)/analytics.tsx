@@ -7005,15 +7005,46 @@ export default function Analytics() {
                     >
                       <Ionicons name="flask-outline" size={18} color={C.purple} />
                     </View>
-                    <Text style={[styles.serieTitre, { color: C.texte }]}>
-                      Et si...
-                    </Text>
-                    <InfoBulle
-                      titre="Comment ce simulateur fonctionne"
-                      texte="Choisis une catégorie et ajuste le curseur pour voir l'impact sur ton budget. Ex : si tu réduis tes sorties de 30€/mois, tu économises 360€ sur un an."
-                      taille={18}
-                      couleur={C.texteMuted}
-                    />
+                    {/* Titre sur 2 lignes alignées à gauche + info en Alert
+                        (demandes du 2026-10-10) — remplace l'ancien "Et
+                        si..." et son InfoBulle, pour ne jamais afficher
+                        deux icônes d'information côte à côte. L'icône est
+                        centrée verticalement sur le bloc titre
+                        (serieEnTete : alignItems center). */}
+                    <View style={styles.simulationTitreBloc}>
+                      <Text
+                        style={[
+                          styles.simulationTitreEtSi,
+                          { color: C.texteMuted },
+                        ]}
+                      >
+                        Et si...
+                      </Text>
+                      <Text
+                        style={[styles.simulationTitrePrincipal, { color: C.texte }]}
+                      >
+                        on modifiait ta capacité d&apos;épargne ?
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() =>
+                        Alert.alert(
+                          "Comment fonctionne la simulation ?",
+                          "Nous simulons l'impact d'un changement de budget sur ton épargne mensuelle. Si tu réduis tes dépenses dans une catégorie, la différence vient s'ajouter à ce que tu mets de côté. Si tu les augmentes, elle est déduite. C'est une projection : les résultats réels dépendent de tes habitudes.",
+                          [{ text: "Compris" }],
+                        )
+                      }
+                      activeOpacity={0.6}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Comment fonctionne la simulation ?"
+                    >
+                      <Ionicons
+                        name="information-circle-outline"
+                        size={16}
+                        color={C.texteMuted}
+                      />
+                    </TouchableOpacity>
                   </View>
 
                   {categoriesSimulables.length === 0 ? (
@@ -8012,6 +8043,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   serieTitre: { fontSize: 15, fontWeight: "700", flex: 1 },
+  simulationTitreBloc: { flex: 1, alignItems: "flex-start", gap: 2 },
+  simulationTitreEtSi: { fontSize: 13, fontStyle: "italic" },
+  simulationTitrePrincipal: { fontSize: 17, fontWeight: "700" },
   tabsRow: {
     flexDirection: "row",
     borderRadius: 14,

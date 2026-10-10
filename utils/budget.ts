@@ -161,15 +161,19 @@ export function estCategorieActiveCeMois(
 // l'un ne doit jamais apparaître dans l'autre, donc jamais de filtre
 // réinventé localement dans l'un des deux écrans. (En vue partagée, Aperçu
 // passe ses catégories fusionnées et Budget les siennes : divergence de
-// SOURCE antérieure à cette règle, pas de filtre.) Règle exacte demandée :
-//   - depense > 0                    → "recue"   (toujours affichée)
+// SOURCE antérieure à cette règle, pas de filtre.) Règle exacte demandée,
+// conditions cumulatives :
+//   - mois de comptage = mois affiché (entreesAffichablesDuMois)
+//   - catégorie NON supprimée (supprimeeLe null) → sinon masquée, même avec
+//     un montant reçu (demande du 2026-10-10 : elle disparaît
+//     immédiatement du listing)
+//   - depense > 0                    → "recue"
 //   - depense = 0, date future       → "a_venir" (section "À venir" seule)
 //   - depense = 0, pas de date       → masquée
 //   - depense = 0, date atteinte     → masquée (attendue mais non reçue)
 // Écart assumé : `depense !== 0` plutôt que `> 0` pour "recue" — le seul
 // cas négatif est "Report du mois précédent" en déficit (archivage), un vrai
-// montant du mois qu'on ne doit pas cacher. Une catégorie supprimée n'est
-// jamais "à venir". Les totaux (entreesBudgetDuMois, calculerResteEstime-
+// montant du mois qu'on ne doit pas cacher. Les totaux (entreesBudgetDuMois, calculerResteEstime-
 // Courant, Stats, Budget) ne sont pas filtrés par cette fonction — SEULE
 // exception voulue : les chiffres du hero d'Aperçu (demande du 2026-10-09),
 // calculés à partir de ces mêmes lignes via revenusDuMoisHero, pour que le
@@ -183,8 +187,9 @@ export function statutAffichageEntree(
   env: Enveloppe,
   aujourdhui: Date,
 ): StatutAffichageEntree {
+  if (env.supprimeeLe) return "masquee";
   if (env.depense !== 0) return "recue";
-  if (env.supprimeeLe || !env.dateFixe) return "masquee";
+  if (!env.dateFixe) return "masquee";
   const dateReception = parseDateFixeLocale(env.dateFixe);
   dateReception.setHours(0, 0, 0, 0);
   const debutJour = new Date(aujourdhui);
