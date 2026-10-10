@@ -1504,7 +1504,7 @@ export default function Analytics() {
   const [modeEntreesCategorie, setModeEntreesCategorie] = useState<
     "pct" | "euro"
   >("pct");
-  // Cf. RÈGLE tiroirs ouverts par défaut (2026-10-10).
+  // Cf. RÈGLE "TIROIRS OUVERTS PAR DÉFAUT" (app/TiroirStats.tsx).
   const [categoriesInchangeesOuvert, setCategoriesInchangeesOuvert] =
     useState(true);
   const [vue, setVue] = useState<Vue>("global");
@@ -1593,9 +1593,14 @@ export default function Analytics() {
     if (categorieId) setCategorieSimulee(categorieId);
     changerVueModalStats("simulateur");
   };
+  // Absent = ouvert (cf. RÈGLE "TIROIRS OUVERTS PAR DÉFAUT",
+  // app/TiroirStats.tsx) — seul un repli explicite de l'utilisateur
+  // enregistre `false`.
   const [historiqueOuvert, setHistoriqueOuvert] = useState<
     Partial<Record<TypeSerie, boolean>>
   >({});
+  const historiqueSerieOuvert = (type: TypeSerie) =>
+    historiqueOuvert[type] ?? true;
   const [editionSeuilOuverte, setEditionSeuilOuverte] = useState(false);
   const [seuilEpargneTemp, setSeuilEpargneTemp] = useState("");
 
@@ -6868,7 +6873,7 @@ export default function Analytics() {
                             onPress={() =>
                               setHistoriqueOuvert((prev) => ({
                                 ...prev,
-                                [serie.type]: !prev[serie.type],
+                                [serie.type]: !(prev[serie.type] ?? true),
                               }))
                             }
                             activeOpacity={0.7}
@@ -6879,7 +6884,7 @@ export default function Analytics() {
                                 { color: C.texteMuted },
                               ]}
                             >
-                              {historiqueOuvert[serie.type]
+                              {historiqueSerieOuvert(serie.type)
                                 ? "Séries précédentes : " +
                                   serie.historique.join(", ") +
                                   " mois"
@@ -6887,7 +6892,7 @@ export default function Analytics() {
                             </Text>
                             <Ionicons
                               name={
-                                historiqueOuvert[serie.type]
+                                historiqueSerieOuvert(serie.type)
                                   ? "chevron-up"
                                   : "chevron-down"
                               }

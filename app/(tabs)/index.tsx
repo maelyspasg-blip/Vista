@@ -121,6 +121,28 @@ function montantHabituelDepuisTexte(texte: string): number | undefined {
   return Number.isFinite(valeur) && valeur >= 0 ? valeur : undefined;
 }
 
+// RÈGLE À NE JAMAIS CASSER — PAS D'ENTRÉE COMPTÉE POUR UN MOIS PASSÉ
+// (décision de Maëlys du 2026-10-10, P068) : une Entrée créée avec une date
+// réelle dans un mois déjà passé est TOUJOURS comptée pour le mois en cours
+// (mois_comptage forcé), avec un message discret sous le calendrier —
+// jamais pour le mois passé (déjà archivé : la ligne n'apparaîtrait nulle
+// part). Vaut pour les DEUX chemins de création (formulaire dédié
+// "Ajouter une entrée" et modale générique "Nouvelle catégorie").
+function estDansUnMoisPasse(dateISO: string): boolean {
+  const d = parseDateFixeLocale(dateISO);
+  if (Number.isNaN(d.getTime())) return false;
+  const maintenant = new Date();
+  return (
+    d.getFullYear() * 12 + d.getMonth() <
+    maintenant.getFullYear() * 12 + maintenant.getMonth()
+  );
+}
+
+function messageMoisPasse(): string {
+  const libelleMois = new Date().toLocaleDateString("fr-FR", { month: "long" });
+  return `Date dans un mois déjà passé : cette entrée sera comptée pour ${libelleMois}.`;
+}
+
 function formaterDateLongue(dateISO: string): string {
   const d = parseDateFixeLocale(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
@@ -627,7 +649,7 @@ export default function Dashboard() {
     ? objStore.epargneMois + (epargneMoisPartenaireActuelle ?? 0)
     : objStore.epargneMois;
   const [deltaRestePourcentage, setDeltaRestePourcentage] = useState(false);
-  // Cf. RÈGLE tiroirs ouverts par défaut (2026-10-10).
+  // Cf. RÈGLE "TIROIRS OUVERTS PAR DÉFAUT" (app/TiroirStats.tsx).
   const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(true);
   const [triCategories, setTriCategories] = useState<
     "alpha" | "montantAsc" | "montantDesc"
@@ -659,7 +681,7 @@ export default function Dashboard() {
     useState(false);
   const [creationEntreeBudgetEnCours, setCreationEntreeBudgetEnCours] =
     useState(false);
-  // Cf. RÈGLE tiroirs ouverts par défaut (2026-10-10).
+  // Cf. RÈGLE "TIROIRS OUVERTS PAR DÉFAUT" (app/TiroirStats.tsx).
   const [entreesBudgetOuvert, setEntreesBudgetOuvert] = useState(true);
 
   const [modalEnveloppeVisible, setModalEnveloppeVisible] = useState(false);
@@ -1384,8 +1406,14 @@ export default function Dashboard() {
       // explicitement à son mois de création pour qu'elle expire
       // correctement de "Tes catégories" une fois ce mois passé si elle
       // n'est pas récurrente (cf. utils/budget.ts:estCategorieActiveCeMois).
+      // Entrée datée d'un mois passé : comptée pour le mois en cours, cf.
+      // RÈGLE "PAS D'ENTRÉE COMPTÉE POUR UN MOIS PASSÉ" (sinon son mois de
+      // comptage serait déduit de cette date passée).
       moisComptage:
-        nouveauType === "Variable" ? premierJourMoisISO(new Date()) : undefined,
+        nouveauType === "Variable" ||
+        (nouveauType === "Entrée" && estDansUnMoisPasse(nouvelleDate))
+          ? premierJourMoisISO(new Date())
+          : undefined,
       // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts).
       montantHabituel:
         nouveauType === "Entrée" && nouveauRepeteChaqueMois
@@ -1440,7 +1468,11 @@ export default function Dashboard() {
       // RÈGLE (2026-10-09) : une Entrée datée apparaît dans Planning à sa
       // date de réception (ce formulaire n'a pas d'interrupteur dédié).
       afficherDansPlanning: true,
-      moisComptage: moisComptageEntreeBudget,
+      // Filet de sécurité, cf. RÈGLE "PAS D'ENTRÉE COMPTÉE POUR UN MOIS
+      // PASSÉ" : jamais un mois de comptage antérieur au mois en cours.
+      moisComptage: estDansUnMoisPasse(moisComptageEntreeBudget)
+        ? premierJourMoisISO(new Date())
+        : moisComptageEntreeBudget,
       // RÈGLE : cf. RÈGLE sur Enveloppe.montantHabituel (app/store.ts).
       montantHabituel: recurrenteEntreeBudget
         ? montantHabituelDepuisTexte(montantHabituelEntreeBudget)
@@ -2901,8 +2933,13 @@ export default function Dashboard() {
                     current={dateEntreeBudget}
                     onDayPress={(day) => {
                       setDateEntreeBudget(day.dateString);
+                      // Cf. RÈGLE "PAS D'ENTRÉE COMPTÉE POUR UN MOIS PASSÉ".
                       setMoisComptageEntreeBudget(
-                        premierJourMoisISO(parseDateFixeLocale(day.dateString)),
+                        premierJourMoisISO(
+                          estDansUnMoisPasse(day.dateString)
+                            ? new Date()
+                            : parseDateFixeLocale(day.dateString),
+                        ),
                       );
                     }}
                     markedDates={{
@@ -2921,6 +2958,11 @@ export default function Dashboard() {
                     }}
                   />
                 </View>
+                {estDansUnMoisPasse(dateEntreeBudget) && (
+                  <Text style={[styles.messageMoisPasse, { color: C.texteMuted }]}>
+                    {messageMoisPasse()}
+                  </Text>
+                )}
 
                 <View style={styles.switchLabelLigne}>
                   <Text style={[styles.modalLabel, { color: C.texteMuted, marginBottom: 0 }]}>
@@ -3705,6 +3747,13 @@ export default function Dashboard() {
                         }}
                       />
                     </View>
+                    {estDansUnMoisPasse(nouvelleDate) && (
+                      <Text
+                        style={[styles.messageMoisPasse, { color: C.texteMuted }]}
+                      >
+                        {messageMoisPasse()}
+                      </Text>
+                    )}
 
                     <View style={styles.switchRow}>
                       <View>
@@ -4639,6 +4688,12 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 26,
     marginBottom: 18,
+  },
+  messageMoisPasse: {
+    fontSize: 12,
+    fontStyle: "italic",
+    marginTop: -4,
+    marginBottom: 12,
   },
   heroLabelLigne: {
     flexDirection: "row",

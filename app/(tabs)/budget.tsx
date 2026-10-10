@@ -266,7 +266,7 @@ export default function Budget() {
   // tap sur le delta d'une catégorie pour basculer l'affichage.
   const [deltaPourcentagePourCategorie, setDeltaPourcentagePourCategorie] =
     useState<Record<string, boolean>>({});
-  // Cf. RÈGLE tiroirs ouverts par défaut (2026-10-10).
+  // Cf. RÈGLE "TIROIRS OUVERTS PAR DÉFAUT" (app/TiroirStats.tsx).
   const [historiqueTotalOuvert, setHistoriqueTotalOuvert] = useState(true);
   const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(true);
   const [deltaDepensesTotalPourcentage, setDeltaDepensesTotalPourcentage] =
@@ -1743,7 +1743,7 @@ export default function Budget() {
                   />
                 </TouchableOpacity>
               )}
-              {historiqueTotalOuvert && (
+              {historiqueTotalOuvert && historiqueDepensesTotal.length > 0 && (
                 <View style={styles.envHistoriqueListe}>
                   {historiqueDepensesTotal.map((h) => (
                     <Text

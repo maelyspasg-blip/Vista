@@ -129,6 +129,9 @@ function dateVersISOInterne(date: Date): string {
 // parseDateFixeLocale.
 function memeJourMoisSuivantISO(dateIso: string): string {
   const d = parseDateFixeLocale(dateIso);
+  // Date stockée malformée : renvoyée telle quelle plutôt que "NaN-NaN-NaN"
+  // (trouvé en revue sécurité, 2026-10-10).
+  if (Number.isNaN(d.getTime())) return dateIso;
   const premierMoisSuivant = new Date(d.getFullYear(), d.getMonth() + 1, 1);
   const dernierJour = new Date(
     premierMoisSuivant.getFullYear(),

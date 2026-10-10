@@ -2341,9 +2341,21 @@ alter table public.enveloppes
     and mois_comptage = '2026-10-01'
     and supprimee_le is null;
   ```
-- **Statut** : 🟡 partiellement traité — mois courts corrigés ; correction
-  de données fournie (non exécutée) ; question produit ouverte sur le
-  formulaire.
+- **Décision de Maëlys (2026-10-10)** : bloquer le cas — une Entrée créée
+  avec une date réelle dans un mois passé est TOUJOURS comptée pour le mois
+  en cours (mois_comptage forcé) avec un message discret sous le
+  calendrier (« Date dans un mois déjà passé : cette entrée sera comptée
+  pour [mois] »). Appliqué aux deux chemins de création (formulaire dédié
+  « Ajouter une entrée » — choix de date + filet à l'enregistrement — et
+  modale générique « Nouvelle catégorie », chip Entrée, dont le mois de
+  comptage était sinon déduit de la date). La date réelle choisie reste
+  enregistrée telle quelle (dateFixe), donc affichée comme telle.
+- **Suivis de revue** : garde contre une date stockée malformée dans
+  `memeJourMoisSuivantISO` (renvoyée telle quelle au lieu de
+  "NaN-NaN-NaN").
+- **Statut** : ✅ traité — mois courts corrigés, cas bloqué dans les
+  formulaires ; correction de données de Maëlys fournie (à exécuter
+  manuellement, non exécutée).
 
 ---
 

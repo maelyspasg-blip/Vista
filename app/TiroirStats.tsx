@@ -18,12 +18,24 @@ import { useTheme } from "./ThemeContext";
 // <CibleTutoriel> depuis l'extérieur (exactement comme n'importe quelle
 // autre cible de tutoriel dans l'app — voir budget.tsx). Pas d'indirection
 // via une prop passée à travers ce composant.
+//
+// RÈGLE À NE JAMAIS CASSER — TIROIRS OUVERTS PAR DÉFAUT (demande du
+// 2026-10-10) : dans TOUTE l'app, un tiroir/accordéon de CONTENU
+// (TiroirStats, sections repliables d'Aperçu, détails "Argent immobilisé",
+// historiques, catégories inchangées, historique des séries de Ton
+// bilan...) s'affiche OUVERT au premier affichage. Restent fermés par
+// défaut, volontairement : modales et popups (y compris les accordéons du
+// "Détail des calculs", dans une modale), menus (bouton "+"), pickers de
+// formulaire (palettes, calendriers), modes d'édition, sélecteurs de
+// catégories, et le détail d'une catégorie au tap (un seul ouvert à la
+// fois). Une préférence déjà mémorisée par l'utilisateur (AsyncStorage,
+// SectionCollapsable d'Aperçu) reste prioritaire. Tout nouveau tiroir de
+// contenu suit cette règle.
 export function TiroirStats({
   titre,
   labelTemporel,
   indicateurFiltre,
-  // Ouvert par défaut (demande du 2026-10-10 : tous les tiroirs de contenu
-  // de l'app s'affichent ouverts au premier affichage).
+  // Cf. RÈGLE "TIROIRS OUVERTS PAR DÉFAUT" ci-dessus.
   ouvertParDefaut = true,
   forcerOuvert = false,
   children,

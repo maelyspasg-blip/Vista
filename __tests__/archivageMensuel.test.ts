@@ -277,4 +277,8 @@ describe("memeJourMoisSuivantISO — mois courts (bug corrigé le 2026-10-10)", 
   it("passe à l'année suivante en décembre", () => {
     expect(__testArchivage.memeJourMoisSuivantISO("2026-12-31")).toBe("2027-01-31");
   });
+
+  it("renvoie telle quelle une date stockée malformée (jamais NaN-NaN-NaN)", () => {
+    expect(__testArchivage.memeJourMoisSuivantISO("pas-une-date")).toBe("pas-une-date");
+  });
 });
