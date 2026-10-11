@@ -57,24 +57,23 @@ export function entreesBudgetDuMois<T extends EnveloppeComptable>(
   mois: number,
 ): EntreesBudgetMois<T> {
   const moisISO = `${annee}-${String(mois + 1).padStart(2, "0")}-01`;
-  // RÈGLE À NE JAMAIS CASSER — CATÉGORIE "ENTRÉE" SUPPRIMÉE (bug corrigé le
-  // 2026-09-18, même principe que calculerResteEstimeCourant/
-  // estSupprimeeCeMois plus bas pour les dépenses) : une catégorie
-  // "Entrée" supprimée ne doit plus jamais compter comme "attendue" — on ne
-  // peut pas attendre un revenu d'une catégorie qui n'existe plus, c'est
-  // exactement le bug remonté (catégorie supprimée dans Aperçu, encore
-  // visible dans Budget → "Entrées à venir" et comptée dans "Reste estimé
-  // fin de mois"). Son montant déjà REÇU (payee=true) CE MOIS-LÀ, lui, reste
-  // comptabilisé : l'argent a réellement été perçu, le retirer
-  // rétroactivement fausserait le budget disponible du mois (même logique
-  // que le total dépensé pour les enveloppes de dépense). Un mois plus
-  // tard, cette catégorie devient "vestigiale" et ne compte plus nulle part
-  // (estSupprimeeCeMois redevient false).
-  const entrees = enveloppes.filter((e) => {
-    if (e.type !== "Entrée" || moisComptageEffectif(e) !== moisISO) return false;
-    if (!e.supprimeeLe) return true;
-    return !!e.payee && estSupprimeeCeMois(e, annee, mois);
-  });
+  // RÈGLE À NE JAMAIS CASSER — CATÉGORIE "ENTRÉE" SUPPRIMÉE = NE COMPTE PLUS
+  // DU TOUT (décision de Maëlys du 2026-10-11, P075 — remplace l'exception
+  // du 2026-09-18 qui gardait le montant déjà REÇU d'une entrée supprimée
+  // ce mois-ci) : supprimer une entrée, c'est le plus souvent retirer un
+  // doublon (ex. salaire saisi deux fois) — la garder dans le total
+  // affichait ~4000 € au lieu de ~2000 €, alors que la liste (statut
+  // "masquee", cf. statutAffichageEntree) ne la montrait déjà plus. Le
+  // total suit donc exactement la liste. NE S'APPLIQUE QU'AUX ENTRÉES : la
+  // dépense réelle d'une catégorie Fixe/Variable supprimée ce mois-ci reste
+  // comptée (P052, calculerResteEstimeCourant) — de l'argent réellement
+  // sorti, lui.
+  const entrees = enveloppes.filter(
+    (e) =>
+      e.type === "Entrée" &&
+      !e.supprimeeLe &&
+      moisComptageEffectif(e) === moisISO,
+  );
   const recu = entrees
     .filter((e) => e.payee)
     .reduce((acc, e) => acc + e.depense, 0);

@@ -1861,7 +1861,9 @@ export function genererConseils(params: {
           genererConseilDemarrage({
             nbTransactions: params.transactions.length,
             nbEnveloppes: nbEnveloppesHorsEntree,
-            aAuMoinsUneEntree: params.enveloppes.some((e) => e.type === "Entrée"),
+            aAuMoinsUneEntree: params.enveloppes.some(
+              (e) => e.type === "Entrée" && !e.supprimeeLe,
+            ),
             seuilEpargneConstante: params.seuilEpargneConstante,
           }),
         ],

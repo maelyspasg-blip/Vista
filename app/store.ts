@@ -1846,7 +1846,14 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
     };
     const enveloppesSnapshot: SnapshotEnveloppe[] = enveloppesReconciliees
       .filter((e) => e.type !== "Entrée" || estDuMoisArchive(e))
-      .filter((e) => !e.supprimeeLe || estSupprimeeCeMoisArchive(e))
+      // Entrée supprimée : jamais dans le snapshot (P075, cf. RÈGLE dans
+      // utils/budget.ts::entreesBudgetDuMois) ; dépense supprimée ce mois-ci :
+      // conservée (P052).
+      .filter(
+        (e) =>
+          !e.supprimeeLe ||
+          (e.type !== "Entrée" && estSupprimeeCeMoisArchive(e)),
+      )
       .map((e) => ({
         id: e.id,
         nom: e.nom,
@@ -1891,10 +1898,15 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
     // Budget du mois = entrées déjà reçues (depense) + entrées encore
     // attendues (budget), mêmes semantics que le total affiché pour le mois
     // en cours ailleurs dans l'app.
-    const budgetDuMois = entreesDuMois.reduce(
-      (acc, e) => acc + (e.payee ? e.depense : e.budget),
-      0,
-    );
+    // RÈGLE (P075, 2026-10-11) : `!e.supprimeeLe` — une Entrée supprimée ne
+    // compte jamais dans le budget figé du mois, ni reçue ni attendue (même
+    // règle que utils/budget.ts::entreesBudgetDuMois). Avant, elle y entrait
+    // même jamais reçue, à son montant prévu. Filtre posé sur ce calcul
+    // seulement : entreesDuMois sert aussi à la remise à zéro et à la
+    // reconduction, qui ont leurs propres règles.
+    const budgetDuMois = entreesDuMois
+      .filter((e) => !e.supprimeeLe)
+      .reduce((acc, e) => acc + (e.payee ? e.depense : e.budget), 0);
     const totalDepense = depenseReelle + etat.epargneMois;
 
     // RÈGLE À NE JAMAIS CASSER — REMISE À ZÉRO UNIQUEMENT POUR LES CATÉGORIES

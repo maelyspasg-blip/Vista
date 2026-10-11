@@ -3285,7 +3285,10 @@ export default function Analytics() {
                   .filter(
                     (e) =>
                       estCategorieActiveCeMois(e, annee, mois) ||
-                      estSupprimeeCeMois(e, annee, mois),
+                      // Jamais une Entrée supprimée (P075, cf. RÈGLE dans
+                      // utils/budget.ts::entreesBudgetDuMois) — seules les
+                      // dépenses supprimées ce mois-ci restent comptées.
+                      (e.type !== "Entrée" && estSupprimeeCeMois(e, annee, mois)),
                   )
                   .map((e) => [e.id, e]),
               ).values(),

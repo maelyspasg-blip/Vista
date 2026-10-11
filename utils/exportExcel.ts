@@ -28,6 +28,8 @@ export type CategorieExport = {
   dateFixe?: string;
   payee?: boolean;
   moisComptage?: string;
+  // Suppression douce (P052/P075) — absent des snapshots archivés.
+  supprimeeLe?: string | null;
 };
 
 export type TransactionExport = {
@@ -144,7 +146,14 @@ export function categoriesDuMois(
   mois: number,
   annee: number,
 ): CategorieExport[] | null {
-  if (estMoisActuel(mois, annee)) return donnees.enveloppes;
+  // P075 : jamais une Entrée supprimée dans les lignes du mois courant —
+  // même règle que le total (utils/budget.ts::entreesBudgetDuMois), sinon la
+  // feuille "Entrées" listait un doublon que le total excluait.
+  if (estMoisActuel(mois, annee)) {
+    return donnees.enveloppes.filter(
+      (e) => !(e.type === "Entrée" && e.supprimeeLe),
+    );
+  }
   const snap = donnees.historiquesMois.find(
     (s) => s.mois === mois && s.annee === annee,
   );

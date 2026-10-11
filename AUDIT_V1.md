@@ -3513,6 +3513,28 @@ Gabarit :
   prénom, et le plafond n'est pas appliqué.
 - **Statut** : **CORRIGÉ (2026-10-11)**, SQL à exécuter.
 
+### P075 — Entrées supprimées encore comptées dans le budget (signalé le 2026-10-11)
+
+- **Gravité** : 🔴 CRITIQUE (calcul fondamental faux : budget ~4000 € au
+  lieu de ~2000 € après suppression de doublons de salaire).
+- **Cause** : `entreesBudgetDuMois` (`utils/budget.ts`) gardait
+  volontairement une Entrée supprimée ce mois-ci si elle avait été reçue
+  (exception du 2026-09-18, « l'argent a été perçu »), alors que la liste
+  la masquait déjà (2026-10-10). Même exception dans la répartition/flux de
+  Stats (`analytics.tsx`). Plus grave, à l'archivage :
+  `budgetDuMois` (= `SnapshotMois.disponible`) comptait TOUTES les entrées
+  du mois, supprimées et jamais reçues comprises, à leur montant prévu.
+- **Correction** (décision de Maëlys) : une Entrée supprimée ne compte
+  plus nulle part — `entreesBudgetDuMois` (source unique d'Aperçu, Budget,
+  hero, Reste estimé, total Stats), répartition/flux de Stats, budget figé
+  et snapshot de l'archivage. Les dépenses Fixe/Variable supprimées ce
+  mois-ci restent comptées (P052, inchangé). Test :
+  `__tests__/entreesBudgetSupprimees.test.ts`.
+- **Limite** : les mois DÉJÀ archivés gardent leur `disponible` d'origine
+  (aucune donnée modifiée) ; seul l'archivage de ce mois et des suivants
+  applique la règle.
+- **Statut** : **CORRIGÉ (2026-10-11)**.
+
 ## 3. Vision individuelle — parcours principaux
 
 ### 3.1 Aperçu (`app/(tabs)/index.tsx`)
