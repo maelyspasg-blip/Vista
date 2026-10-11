@@ -227,13 +227,6 @@ export function entreesAffichablesDuMois<T extends Enveloppe>(
   // précédent (cf. utils/dateOnly.ts). `.slice(0, 7)` tolère aussi un
   // éventuel format horodaté ("2026-09-01T00:00:00").
   const moisCible = `${annee}-${String(mois + 1).padStart(2, "0")}`;
-  // LOG TEMPORAIRE DE DIAGNOSTIC (demandé le 2026-10-10 : "des entrées de
-  // mois précédents s'affichent encore") — à retirer une fois le
-  // comportement confirmé sur device. `dateFixe` est loggée en plus : une
-  // ligne d'octobre peut porter une date de réception en septembre (date
-  // reconduite depuis une entrée reçue fin août et comptée pour
-  // septembre) et ressembler à une entrée de septembre.
-  console.log("[entreesAffichables] mois actuel:", mois, annee);
   const resultat: { env: T; statut: Exclude<StatutAffichageEntree, "masquee"> }[] =
     [];
   enveloppes.forEach((env) => {
@@ -243,16 +236,6 @@ export function entreesAffichablesDuMois<T extends Enveloppe>(
       moisEntree === moisCible
         ? statutAffichageEntree(env, aujourdhui)
         : "masquee";
-    const incluse = statut !== "masquee";
-    console.log(
-      "[entreesAffichables] entrée:",
-      env.nom,
-      env.moisComptage,
-      "dateFixe:",
-      env.dateFixe,
-      "incluse:",
-      incluse,
-    );
     if (statut !== "masquee") resultat.push({ env, statut });
   });
   return resultat;

@@ -318,8 +318,11 @@ export default function Planning() {
     editEventId?: string;
     dateNotif?: string;
   }>();
-  const { planning: tutorielPlanningVu, marquerVu: marquerTutorielVu } =
-    useTutoriel();
+  const {
+    planning: tutorielPlanningVu,
+    marquerVu: marquerTutorielVu,
+    toutMarquerVu: toutMarquerTutorielsVus,
+  } = useTutoriel();
   const {
     positions: posCiblesTutoriel,
     mesurer: mesurerCibleTutoriel,
@@ -3470,7 +3473,9 @@ export default function Planning() {
           marquerTutorielVu("planning");
           router.push("/(tabs)/analytics");
         }}
-        onFermer={() => marquerTutorielVu("planning")}
+        // Croix = "non merci" : tous les tutoriels marqués vus (cf. RÈGLE
+        // sur toutMarquerVu, TutorielContext.tsx).
+        onFermer={toutMarquerTutorielsVus}
       />
     </View>
   );

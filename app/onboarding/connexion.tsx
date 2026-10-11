@@ -35,6 +35,7 @@ import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useTheme } from "../ThemeContext";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
+import { remplacerSansHistorique } from "../../utils/navigationRacine";
 
 export default function Connexion() {
   const router = useRouter();
@@ -90,7 +91,7 @@ export default function Connexion() {
       if (!resultat.annule) setErreur(resultat.message ?? "");
       return;
     }
-    router.replace("/(tabs)");
+    remplacerSansHistorique(router, "/(tabs)");
   };
 
   // RÈGLE À NE JAMAIS CASSER — GOOGLE SIGN-IN (ajouté le 2026-09-18) : iOS
@@ -112,7 +113,7 @@ export default function Connexion() {
       if (!resultat.annule) setErreur(resultat.message ?? "");
       return;
     }
-    router.replace("/(tabs)");
+    remplacerSansHistorique(router, "/(tabs)");
   };
 
   const ouvrirMentionsLegales = () => {
@@ -149,7 +150,7 @@ export default function Connexion() {
     }
 
     if (data.session) {
-      router.replace("/(tabs)");
+      remplacerSansHistorique(router, "/(tabs)");
     }
   };
 

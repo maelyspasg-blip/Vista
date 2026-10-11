@@ -1287,8 +1287,11 @@ export default function Analytics() {
   const premium = estComptePremium(objStore.isAdmin, estPremium, simulerNonPremium, isGuest);
   const { theme, couleurs: C } = useTheme();
   const { reduireAnimations } = useAccessibilite();
-  const { stats: tutorielStatsVu, marquerVu: marquerTutorielVu } =
-    useTutoriel();
+  const {
+    stats: tutorielStatsVu,
+    marquerVu: marquerTutorielVu,
+    toutMarquerVu: toutMarquerTutorielsVus,
+  } = useTutoriel();
   const {
     positions: posCiblesTutoriel,
     mesurer: mesurerCibleTutoriel,
@@ -7772,7 +7775,9 @@ export default function Analytics() {
           setScrollOffsetStats(0);
         }}
         onFermer={() => {
-          marquerTutorielVu("stats");
+          // Croix = "non merci" : tous les tutoriels marqués vus (cf. RÈGLE
+          // sur toutMarquerVu, TutorielContext.tsx).
+          toutMarquerTutorielsVus();
           tiroirsOuvertsPourTutorielRef.current = false;
           setScrollOffsetStats(0);
         }}

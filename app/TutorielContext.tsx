@@ -22,6 +22,14 @@ export type TutorielStatus = {
   // (sans re-fetch), pour que l'overlay se ferme immédiatement et ne
   // réapparaisse plus tant que "Revoir le tutoriel" n'est pas utilisé.
   marquerVu: (page: PageTutoriel) => void;
+  // RÈGLE (bug corrigé le 2026-10-10) : fermeture EXPLICITE d'un tutoriel
+  // (croix d'un onglet, "Passer" de la découverte de Profil) = l'utilisateur
+  // ne veut pas être guidé du tout → TOUS les tutoriels marqués vus en une
+  // fois (les 4 onglets + la découverte de Profil). Avant, seul celui de
+  // l'onglet courant l'était et le suivant se relançait à la visite
+  // suivante. La validation NATURELLE de la dernière étape garde marquerVu
+  // (page seule) et l'enchaînement vers l'onglet suivant.
+  toutMarquerVu: () => void;
   // "Revoir le tutoriel" (profil.tsx) : repasse les 4 flags à false, comme
   // au tout premier lancement — chaque page réaffichera alors son tutoriel
   // à son prochain focus.
@@ -37,6 +45,7 @@ export const TutorielContext = createContext<TutorielStatus>({
   planning: true,
   stats: true,
   marquerVu: () => {},
+  toutMarquerVu: () => {},
   reinitialiser: () => {},
 });
 

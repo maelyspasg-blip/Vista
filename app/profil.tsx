@@ -87,6 +87,7 @@ import { CibleTutoriel, useCiblesTutoriel } from "./CibleTutoriel";
 import { type EtapeTutoriel, TutorielOverlay } from "./TutorielOverlay";
 import { useEspacePartage } from "./EspacePartageContext";
 import { couleursInterrupteur } from "../utils/couleursInterrupteur";
+import { remplacerSansHistorique } from "../utils/navigationRacine";
 
 const OPTIONS_TAILLE_TEXTE: { valeur: TailleTexte; label: string }[] = [
   { valeur: "petit", label: "Petit" },
@@ -175,7 +176,10 @@ export default function Profil() {
   const estTablette = useEstTablette();
   const insets = useSafeAreaInsets();
   const { theme, couleurs: C, toggleTheme } = useTheme();
-  const { reinitialiser: reinitialiserTutoriel } = useTutoriel();
+  const {
+    reinitialiser: reinitialiserTutoriel,
+    toutMarquerVu: toutMarquerTutorielsVus,
+  } = useTutoriel();
   const {
     tailleTexte,
     contrasteRenforce,
@@ -967,7 +971,7 @@ export default function Profil() {
     // nom d'un compte précédent survivre à une déconnexion, même dans
     // l'hypothèse où le listener tarderait à se déclencher.
     reinitialiserEtatUtilisateur();
-    router.replace("/onboarding/connexion");
+    remplacerSansHistorique(router, "/onboarding/connexion");
   };
 
   const demanderPassagePremium = () => {
@@ -1067,7 +1071,7 @@ export default function Profil() {
     Alert.alert(
       "Compte supprimé",
       "Ton compte et toutes tes données ont bien été supprimés.",
-      [{ text: "OK", onPress: () => router.replace("/onboarding/connexion") }],
+      [{ text: "OK", onPress: () => remplacerSansHistorique(router, "/onboarding/connexion") }],
     );
   };
 
@@ -2769,7 +2773,13 @@ export default function Profil() {
         etapes={ETAPES_ONBOARDING_PROFIL}
         positions={posCiblesProfil}
         onTerminer={marquerOnboardingProfilVu}
-        onFermer={marquerOnboardingProfilVu}
+        // "Passer" = "non merci" : la découverte de Profil ET tous les
+        // tutoriels des onglets marqués vus (cf. RÈGLE sur toutMarquerVu,
+        // TutorielContext.tsx).
+        onFermer={() => {
+          marquerOnboardingProfilVu();
+          toutMarquerTutorielsVus();
+        }}
         modeBoutons
       />
       <ModaleDocumentLegal

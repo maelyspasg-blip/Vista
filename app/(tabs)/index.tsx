@@ -581,8 +581,11 @@ export default function Dashboard() {
       }
     })();
   }, [userIdInsights, objStore.enveloppes, etatsInsights]);
-  const { apercu: tutorielApercuVu, marquerVu: marquerTutorielVu } =
-    useTutoriel();
+  const {
+    apercu: tutorielApercuVu,
+    marquerVu: marquerTutorielVu,
+    toutMarquerVu: toutMarquerTutorielsVus,
+  } = useTutoriel();
   const {
     positions: posCiblesTutoriel,
     mesurer: mesurerCibleTutoriel,
@@ -2934,7 +2937,9 @@ export default function Dashboard() {
           marquerTutorielVu("apercu");
           router.push("/(tabs)/budget");
         }}
-        onFermer={() => marquerTutorielVu("apercu")}
+        // Croix = "non merci" : tous les tutoriels marqués vus (cf. RÈGLE
+        // sur toutMarquerVu, TutorielContext.tsx).
+        onFermer={toutMarquerTutorielsVus}
       />
 
       {Platform.OS === "ios" && (
@@ -3474,6 +3479,16 @@ export default function Dashboard() {
                         }}
                       />
                     </View>
+                    {/* Demande du 2026-10-10 : la date affichée est une
+                        projection (cf. dateAffichageCalendrierEdition) — on
+                        rappelle la date réellement enregistrée. */}
+                    {dateAffichageCalendrierEdition(dateTemp) !== dateTemp && (
+                      <Text style={[styles.messageMoisPasse, { color: C.texteMuted }]}>
+                        La réception est enregistrée le{" "}
+                        {formaterDateLongue(dateTemp)}. Touche un jour pour la
+                        modifier.
+                      </Text>
+                    )}
 
                     <View style={styles.switchRow}>
                       <View>
@@ -3572,6 +3587,16 @@ export default function Dashboard() {
                         }}
                       />
                     </View>
+                    {/* Demande du 2026-10-10 : la date affichée est une
+                        projection (cf. dateAffichageCalendrierEdition) — on
+                        rappelle la date réellement enregistrée. */}
+                    {dateAffichageCalendrierEdition(dateTemp) !== dateTemp && (
+                      <Text style={[styles.messageMoisPasse, { color: C.texteMuted }]}>
+                        Le prélèvement est enregistré le{" "}
+                        {formaterDateLongue(dateTemp)}. Touche un jour pour le
+                        modifier.
+                      </Text>
+                    )}
 
                     <View style={styles.switchRow}>
                       <View>

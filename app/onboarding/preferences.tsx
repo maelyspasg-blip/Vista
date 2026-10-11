@@ -24,6 +24,7 @@ import { TextInput } from "../TexteInput";
 import { useTheme } from "../ThemeContext";
 import { OnboardingEtape } from "../../components/OnboardingEtape";
 import { couleursInterrupteur } from "../../utils/couleursInterrupteur";
+import { remplacerSansHistorique } from "../../utils/navigationRacine";
 
 const ACCESSORY_ID = "onboardingNumericDone";
 // Barre iOS du champ "Montant" de la saisie des autres dépenses : son bouton
@@ -466,7 +467,7 @@ export default function Preferences() {
     // aussitôt vers ce même écran (boucle infinie).
     signalerOnboardingTermine();
     setChargement(false);
-    router.replace("/(tabs)");
+    remplacerSansHistorique(router, "/(tabs)");
   };
 
   const accessoryBar = Platform.OS === "ios" && (

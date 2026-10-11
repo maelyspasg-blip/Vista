@@ -15,6 +15,7 @@ import { Text } from "../Texte";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useTheme } from "../ThemeContext";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
+import { remplacerSansHistorique } from "../../utils/navigationRacine";
 
 // RÈGLE À NE JAMAIS CASSER — PAS DE SAISIE DE PRÉNOM POUR UN INVITÉ :
 // décision explicite de l'utilisateur — un compte test/démo n'a pas besoin
@@ -61,7 +62,7 @@ export default function Invite() {
     }
 
     setChargement(false);
-    router.replace("/(tabs)");
+    remplacerSansHistorique(router, "/(tabs)");
   };
 
   return (

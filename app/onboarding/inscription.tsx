@@ -26,6 +26,7 @@ import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useTheme } from "../ThemeContext";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
+import { remplacerSansHistorique } from "../../utils/navigationRacine";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -84,7 +85,7 @@ export default function Inscription() {
       if (!resultat.annule) setErreur(resultat.message ?? "");
       return;
     }
-    router.replace("/(tabs)");
+    remplacerSansHistorique(router, "/(tabs)");
   };
 
   // RÈGLE À NE JAMAIS CASSER — GOOGLE SIGN-IN (ajouté le 2026-09-18) : même
@@ -104,7 +105,7 @@ export default function Inscription() {
       if (!resultat.annule) setErreur(resultat.message ?? "");
       return;
     }
-    router.replace("/(tabs)");
+    remplacerSansHistorique(router, "/(tabs)");
   };
 
   const emailValide = EMAIL_REGEX.test(email.trim());
@@ -145,7 +146,10 @@ export default function Inscription() {
     }
 
     if (data.session) {
-      router.push("/onboarding/preferences");
+      // Compte créé : slides de présentation, puis configuration (cf.
+      // RÈGLE dans app/onboardingStorage.ts) — sans historique, pour qu'un
+      // retour arrière ne ramène jamais sur l'inscription.
+      remplacerSansHistorique(router, "/onboarding");
       return;
     }
 

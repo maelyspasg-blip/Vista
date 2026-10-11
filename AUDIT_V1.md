@@ -2441,6 +2441,33 @@ alter table public.enveloppes
 
 ---
 
+### P070 — Slides de présentation introuvables / affichées au hasard (signalé le 2026-10-10)
+
+- **Gravité** : 🟠 MAJEUR (parcours de découverte cassé).
+- **Constat** : les slides (`app/onboarding/index.tsx`, route `/onboarding`)
+  n'étaient atteintes par AUCUNE navigation : l'app démarre sur `/`
+  (Aperçu), et sans session `_layout.tsx` renvoie à la connexion. Un nouvel
+  utilisateur ne les voyait donc jamais. Mémoire globale à l'appareil
+  (`vista_onboarding_vu`, jamais effacée). Apparitions « au hasard » :
+  hypothèse la plus probable (non reproduite sur device) — écrans
+  d'onboarding restés dans la pile de navigation (`push` puis `replace`
+  du seul écran du dessus), réaffichés par un retour arrière.
+- **Correction (décisions de Maëlys)** : flux création du compte →
+  slides → onboarding de configuration → Aperçu avec tutoriel.
+  `_layout.tsx` envoie un compte non configuré vers les slides tant
+  qu'elles n'ont pas été vues POUR CE COMPTE SUR CET APPAREIL
+  (`vista_presentation_vue_[userId]`, `app/onboardingStorage.ts`), sinon
+  vers la configuration ; sans session, jamais de slides. Un compte jamais
+  configuré qui se reconnecte sur un nouvel appareil revoit les slides
+  (voulu). Slides → configuration en `replace` ; pile vidée
+  (`utils/navigationRacine.ts::remplacerSansHistorique`) à l'arrivée sur les
+  onglets (connexion, inscription, invité, fin d'onboarding) et au retour
+  à la connexion (déconnexion, suppression de compte). Invité et
+  conversion d'un compte d'essai : jamais de slides.
+- **Statut** : ✅ corrigé — à vérifier sur device (dont le retour arrière).
+
+---
+
 Une fois qu'un problème est confirmé (reproduit, pas seulement suspecté à la
 lecture), il est ajouté ci-dessus avec ce gabarit :
 

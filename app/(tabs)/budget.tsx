@@ -224,8 +224,11 @@ export default function Budget() {
   }>();
   const router = useRouter();
 
-  const { budget: tutorielBudgetVu, marquerVu: marquerTutorielVu } =
-    useTutoriel();
+  const {
+    budget: tutorielBudgetVu,
+    marquerVu: marquerTutorielVu,
+    toutMarquerVu: toutMarquerTutorielsVus,
+  } = useTutoriel();
   const {
     positions: posCiblesTutoriel,
     mesurer: mesurerCibleTutoriel,
@@ -2847,7 +2850,9 @@ export default function Budget() {
           marquerTutorielVu("budget");
           router.push("/(tabs)/planning");
         }}
-        onFermer={() => marquerTutorielVu("budget")}
+        // Croix = "non merci" : tous les tutoriels marqués vus (cf. RÈGLE
+        // sur toutMarquerVu, TutorielContext.tsx).
+        onFermer={toutMarquerTutorielsVus}
       />
     </View>
   );

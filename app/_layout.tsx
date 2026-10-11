@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Session } from "@supabase/supabase-js";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as ExpoSplashScreen from "expo-splash-screen";
@@ -19,8 +20,11 @@ import { supabase } from "../supabaseClient";
 import { estEspacePartageActif } from "../utils/premium";
 import { reinitialiserEtatUtilisateur } from "./store";
 import "./calendarLocale";
-import { ecouterOnboardingTermine } from "./onboardingCompletion";
-import { getOnboardingVu } from "./onboardingStorage";
+import {
+  ecouterOnboardingTermine,
+  ecouterPresentationVue,
+} from "./onboardingCompletion";
+import { getPresentationVue, marquerPresentationVue } from "./onboardingStorage";
 import { enregistrerPushToken } from "./notifications";
 import { SplashScreen } from "./SplashScreen";
 import { Theme, ThemeProvider } from "./ThemeContext";
@@ -93,7 +97,14 @@ function RootLayoutInterne() {
   const router = useRouter();
   const segments = useSegments();
   const [session, setSession] = useState<Session | null>(null);
-  const [onboardingVu, setOnboardingVu] = useState(false);
+  // RÈGLE (2026-10-10) : présentation de Vista vue par le compte connecté
+  // (cf. RÈGLE dans app/onboardingStorage.ts). Mémorisée AVEC son userId :
+  // une valeur lue pour un autre compte n'est jamais réutilisée (null =
+  // inconnue → aucune redirection tant qu'elle n'est pas lue).
+  const [presentation, setPresentation] = useState<{
+    userId: string;
+    vue: boolean;
+  } | null>(null);
   const [chargement, setChargement] = useState(true);
   const [themeInitial, setThemeInitial] = useState<Theme | undefined>(
     undefined,
@@ -120,7 +131,7 @@ function RootLayoutInterne() {
   const [msRestantsEssai, setMsRestantsEssai] = useState<number | null>(null);
   const [estGuestExpire, setEstGuestExpire] = useState(false);
   const [tutoriel, setTutoriel] = useState<
-    Omit<TutorielStatus, "marquerVu" | "reinitialiser">
+    Omit<TutorielStatus, "marquerVu" | "toutMarquerVu" | "reinitialiser">
   >({
     apercu: true,
     budget: true,
@@ -179,13 +190,41 @@ function RootLayoutInterne() {
       });
   };
 
+  // Cf. RÈGLE sur toutMarquerVu (TutorielContext.tsx) : les 4 flags en une
+  // seule écriture `profils` (filtre user_id), plus la découverte de Profil
+  // (clé locale, même nom que dans app/profil.tsx).
+  const toutMarquerTutorielsVus = () => {
+    setTutoriel({ apercu: true, budget: true, planning: true, stats: true });
+    const userId = dernierUserIdRef.current;
+    if (!userId) return;
+    AsyncStorage.setItem(`vista_profil_onboarding_vu_${userId}`, "true").catch(
+      () => {
+        // Best-effort : au pire, la découverte de Profil s'affichera une fois.
+      },
+    );
+    supabase
+      .from("profils")
+      .update({
+        tutoriel_apercu_vu: true,
+        tutoriel_budget_vu: true,
+        tutoriel_planning_vu: true,
+        tutoriel_stats_vu: true,
+      })
+      .eq("user_id", userId)
+      .then(({ error }) => {
+        if (error) console.error("Supabase update tutoriel a échoué :", error);
+      });
+  };
+
   // RÈGLE À NE JAMAIS CASSER : "Revoir le tutoriel" (profil.tsx) doit
   // remettre les 4 flags à false À LA FOIS en local (setTutoriel, pour que
   // l'UI reflète le changement immédiatement, sans attendre un aller-retour
   // réseau) ET côté Supabase (pour que ça survive à un refresh/reconnexion).
   // Les deux updates ci-dessous doivent toujours porter sur les 4 mêmes
   // pages — en ajouter une cinquième (nouvelle page avec tutoriel) sans
-  // l'ajouter ICI AUSSI la laisserait invisible à "Revoir le tutoriel".
+  // l'ajouter ICI AUSSI la laisserait invisible à "Revoir le tutoriel" (même
+  // chose pour toutMarquerTutorielsVus ci-dessus et pour le passage à false
+  // de fin d'onboarding, ecouterOnboardingTermine).
   const reinitialiserTutoriel = () => {
     setTutoriel({ apercu: false, budget: false, planning: false, stats: false });
     const userId = dernierUserIdRef.current;
@@ -210,12 +249,10 @@ function RootLayoutInterne() {
       // au splash JS d'afficher la bonne couleur dès le premier rendu, sans
       // attendre la requête réseau vers `profils` (cf. RÈGLE dans
       // app/themeStorage.ts).
-      const [{ data }, vu, themeCache] = await Promise.all([
+      const [{ data }, themeCache] = await Promise.all([
         supabase.auth.getSession(),
-        getOnboardingVu(),
         getThemeCache(),
       ]);
-      setOnboardingVu(vu);
       setThemeSplash(themeCache);
 
       if (data.session) {
@@ -294,6 +331,16 @@ function RootLayoutInterne() {
     // l'app. On reflète ici la même écriture, au même moment : le tutoriel
     // d'Aperçu démarre dès l'arrivée sur les onglets, puis enchaîne sur les
     // autres pages (navigation automatique de fin de tutoriel).
+    // Fin des slides de présentation : mémorisée pour CE compte, en local
+    // et sur l'appareil (cf. RÈGLE dans app/onboardingStorage.ts).
+    ecouterPresentationVue(() => {
+      const userId = dernierUserIdRef.current;
+      if (!userId) return;
+      setPresentation({ userId, vue: true });
+      marquerPresentationVue(userId).catch(() => {
+        // Best-effort : au pire, les slides s'afficheront une fois de plus.
+      });
+    });
     ecouterOnboardingTermine(() => {
       setOnboardingComplete(true);
       setTutoriel({ apercu: false, budget: false, planning: false, stats: false });
@@ -388,6 +435,7 @@ function RootLayoutInterne() {
 
     return () => {
       ecouterOnboardingTermine(null);
+    ecouterPresentationVue(null);
       abonnement.subscription.unsubscribe();
     };
   }, []);
@@ -461,6 +509,28 @@ function RootLayoutInterne() {
     };
   }, [isGuest, guestExpiresAt]);
 
+  const userIdSession = session?.user?.id ?? null;
+  useEffect(() => {
+    if (!userIdSession) return;
+    let annule = false;
+    getPresentationVue(userIdSession)
+      .then((vue) => {
+        if (!annule) setPresentation({ userId: userIdSession, vue });
+      })
+      .catch(() => {
+        // Lecture impossible : considérée comme vue (jamais de slides
+        // imposées en boucle sur une erreur de stockage).
+        if (!annule) setPresentation({ userId: userIdSession, vue: true });
+      });
+    return () => {
+      annule = true;
+    };
+  }, [userIdSession]);
+  const presentationVue =
+    presentation && presentation.userId === userIdSession
+      ? presentation.vue
+      : null;
+
   useEffect(() => {
     if (chargement) return;
 
@@ -491,19 +561,31 @@ function RootLayoutInterne() {
       // appelant (inscription.tsx, connexion.tsx) avec une valeur inconnue.
       if (onboardingComplete === null) return;
       if (!onboardingComplete) {
-        if (!dansPreferences) router.replace("/onboarding/preferences");
+        // RÈGLE (2026-10-10) : compte pas encore configuré → slides de
+        // présentation d'abord (une fois par compte et par appareil), puis
+        // l'onboarding de configuration. Rien tant que l'état "vue" de CE
+        // compte n'est pas lu.
+        if (presentationVue === null) return;
+        if (!presentationVue) {
+          if (!surSlides) router.replace("/onboarding");
+        } else if (!dansPreferences) {
+          router.replace("/onboarding/preferences");
+        }
       } else if (dansOnboarding && !(isGuest && dansInscription)) {
         router.replace("/(tabs)");
       }
     } else if (dansTabs) {
       router.replace("/onboarding/connexion");
-    } else if (surSlides && onboardingVu) {
+    } else if (surSlides) {
+      // RÈGLE (2026-10-10) : sans session, les slides ne s'affichent jamais
+      // (elles suivent la création du compte) — déconnexion, reconnexion ou
+      // suppression de compte mènent toujours à la connexion.
       router.replace("/onboarding/connexion");
     }
   }, [
     session,
     chargement,
-    onboardingVu,
+    presentationVue,
     onboardingComplete,
     estGuestExpire,
     isGuest,
@@ -529,6 +611,7 @@ function RootLayoutInterne() {
               value={{
                 ...tutoriel,
                 marquerVu: marquerTutorielVu,
+                toutMarquerVu: toutMarquerTutorielsVus,
                 reinitialiser: reinitialiserTutoriel,
               }}
             >

@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import Svg, { Rect } from "react-native-svg";
 import { useGuest } from "../GuestContext";
-import { marquerOnboardingVu } from "../onboardingStorage";
+import { signalerPresentationVue } from "../onboardingCompletion";
 import { Text } from "../Texte";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useTheme } from "../ThemeContext";
@@ -288,19 +288,25 @@ export default function Onboarding() {
         : SLIDES_PRESENTATION,
     [isGuest],
   );
+  // RÈGLE (2026-10-10) : ces slides suivent la CRÉATION du compte (cf.
+  // RÈGLE dans app/onboardingStorage.ts) — fin ou "Passer" : présentation
+  // mémorisée comme vue pour ce compte (via _layout.tsx), puis onboarding
+  // de configuration en `replace` (jamais `push` : les slides ne doivent
+  // pas rester dans l'historique de navigation).
+  const terminerPresentation = () => {
+    signalerPresentationVue();
+    router.replace("/onboarding/preferences");
+  };
+
   const suivant = () => {
     if (slideActuel < slides.length - 1) {
       setSlideActuel(slideActuel + 1);
     } else {
-      marquerOnboardingVu();
-      router.push("/onboarding/inscription");
+      terminerPresentation();
     }
   };
 
-  const passer = () => {
-    marquerOnboardingVu();
-    router.push("/onboarding/inscription");
-  };
+  const passer = terminerPresentation;
 
   const slide = slides[slideActuel];
   const estDernierSlide = slideActuel === slides.length - 1;

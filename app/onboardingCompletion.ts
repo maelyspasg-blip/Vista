@@ -17,3 +17,17 @@ export function ecouterOnboardingTermine(fn: Rappel | null) {
 export function signalerOnboardingTermine() {
   rappel?.();
 }
+
+// Même pont pour la fin des slides de présentation (app/onboarding/index.tsx)
+// : _layout.tsx mémorise la présentation comme vue pour le compte connecté
+// (cf. RÈGLE dans app/onboardingStorage.ts) et met à jour sa copie locale
+// utilisée par les redirections.
+let rappelPresentation: Rappel | null = null;
+
+export function ecouterPresentationVue(fn: Rappel | null) {
+  rappelPresentation = fn;
+}
+
+export function signalerPresentationVue() {
+  rappelPresentation?.();
+}
