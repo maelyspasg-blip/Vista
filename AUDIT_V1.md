@@ -3403,6 +3403,36 @@ Gabarit :
   échoue avec un message d'erreur (colonne absente) — rien n'est perdu.
 - **Statut** : **CORRIGÉ (2026-10-11)**, SQL à exécuter.
 
+### P072 — Page de confirmation d'email illisible : caractères corrompus (signalé le 2026-10-11)
+
+- **Gravité** : 🟠 MAJEUR (première impression de tout nouvel utilisateur).
+- **Constat** : la page affichée après le clic sur le lien de confirmation
+  montrait « Ã© » au lieu de « é » et « â€" » au lieu de « — ».
+- **Cause** (vérifiée par `curl` sur la fonction déployée) : le fichier
+  était bien en UTF-8, avec `<meta charset="utf-8" />` en première balise
+  et l'en-tête `Content-Type: text/html; charset=utf-8`. Mais sur le
+  domaine par défaut `*.supabase.co`, la passerelle Supabase réécrit toute
+  réponse HTML d'une Edge Function en `content-type: text/plain` (sans
+  charset), avec `content-security-policy: default-src 'none'; sandbox`.
+  Le navigateur affichait donc le code source brut, sans styles ni script,
+  et le décodait en Latin-1. Aucune correction possible dans la fonction
+  elle-même.
+- **Correction** (choix de Maëlys : page statique hébergée ailleurs) :
+  page déplacée telle quelle dans `docs/confirmation/index.html`, servie
+  par GitHub Pages. La fonction `confirmation-compte` renvoie désormais une
+  redirection 302 vers cette page : les liens déjà envoyés restent valides.
+- **Actions manuelles requises** :
+  1. GitHub → Settings → Pages → Source « Deploy from a branch », branche
+     `main`, dossier `/docs`.
+  2. Redéployer la fonction `confirmation-compte` (dashboard Supabase), en
+     gardant **« Verify JWT » désactivé** (sinon 401 au clic depuis l'email).
+     L'activation de Pages (étape 1) doit précéder ce redéploiement.
+  3. Supabase → Authentication → URL Configuration : ajouter
+     `https://maelyspasg-blip.github.io/Vista/confirmation/` aux Redirect
+     URLs. Optionnel : la mettre comme Site URL ou dans le modèle
+     « Confirm signup » à la place de l'URL de la fonction.
+- **Statut** : **CORRIGÉ CÔTÉ CODE (2026-10-11)**, actions manuelles à faire.
+
 ## 3. Vision individuelle — parcours principaux
 
 ### 3.1 Aperçu (`app/(tabs)/index.tsx`)
