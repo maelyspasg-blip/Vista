@@ -4,7 +4,6 @@ import {
   AppleAuthenticationButtonType,
   isAvailableAsync as appleSignInDisponible,
 } from "expo-apple-authentication";
-import { GoogleSigninButton } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -36,6 +35,7 @@ import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useTheme } from "../ThemeContext";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { remplacerSansHistorique } from "../../utils/navigationRacine";
+import { BoutonGoogle } from "../BoutonGoogle";
 
 export default function Connexion() {
   const router = useRouter();
@@ -259,10 +259,13 @@ export default function Connexion() {
         </BoutonPrincipal>
 
         {/* RÈGLE À NE JAMAIS CASSER — CONNEXION ALTERNATIVE (Apple/Google,
-            2026-09-18) : chaque bouton est le composant OFFICIEL du
-            fournisseur (design/libellé imposés), jamais un bouton custom
-            même visuellement identique. Séparateur "ou" partagé, affiché
-            dès qu'AU MOINS un des deux boutons peut apparaître — jamais
+            2026-09-18, révisée le 2026-10-11) : Apple reste le composant
+            OFFICIEL (AppleAuthenticationButton, imposé par Apple) ; Google
+            est un bouton sur mesure conforme à la charte Google
+            (app/BoutonGoogle.tsx, décision de Maëlys), au même gabarit que
+            le bouton Apple (hauteur 50, rayon 16, pleine largeur) — jamais
+            un autre bouton custom. Séparateur "ou" partagé, affiché dès
+            qu'AU MOINS un des deux boutons peut apparaître — jamais
             affiché seul sans bouton en dessous. */}
         {(appleDisponible || Platform.OS === "ios") && (
           <>
@@ -287,12 +290,10 @@ export default function Connexion() {
             {/* Gated par Platform.OS === "ios" — cf. RÈGLE dans
                 app/googleSignIn.ts (aucun Client ID Android fourni). */}
             {Platform.OS === "ios" && (
-              <GoogleSigninButton
-                size={GoogleSigninButton.Size.Wide}
-                color={GoogleSigninButton.Color.Light}
-                style={[styles.boutonGoogle, { opacity: chargementGoogle ? 0.6 : 1 }]}
-                disabled={chargementGoogle}
+              <BoutonGoogle
+                libelle="Continuer avec Google"
                 onPress={seConnecterAvecGoogle}
+                chargement={chargementGoogle}
               />
             )}
           </>
@@ -418,15 +419,6 @@ const styles = StyleSheet.create({
   boutonApple: {
     height: 50,
     marginTop: 16,
-  },
-  // RÈGLE : width "100%" écrase volontairement la taille "Wide" (312x48)
-  // recommandée par GoogleSigninButton — choix délibéré pour aligner sa
-  // largeur sur boutonApple/BoutonPrincipal (pleine largeur du conteneur),
-  // jamais une taille par défaut oubliée.
-  boutonGoogle: {
-    width: "100%",
-    height: 50,
-    marginTop: 12,
   },
   btnTexte: {
     fontSize: 16,

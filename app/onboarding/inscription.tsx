@@ -4,7 +4,6 @@ import {
   AppleAuthenticationButtonType,
   isAvailableAsync as appleSignInDisponible,
 } from "expo-apple-authentication";
-import { GoogleSigninButton } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -27,6 +26,7 @@ import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useTheme } from "../ThemeContext";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { remplacerSansHistorique } from "../../utils/navigationRacine";
+import { BoutonGoogle } from "../BoutonGoogle";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -283,7 +283,11 @@ export default function Inscription() {
             {/* RÈGLE À NE JAMAIS CASSER — CONNEXION ALTERNATIVE (Apple/Google,
                 2026-09-18) : toutes deux masquées en conversion d'essai, cf.
                 RÈGLE sur seConnecterAvecApple/seConnecterAvecGoogle plus
-                haut — jamais retirées pour une inscription normale.
+                haut — jamais retirées pour une inscription normale. Apple :
+                composant officiel ; Google : bouton sur mesure conforme à la
+                charte (app/BoutonGoogle.tsx), même gabarit (cf. RÈGLE
+                "CONNEXION ALTERNATIVE" de connexion.tsx, révisée le
+                2026-10-11).
                 Séparateur "ou" partagé, affiché dès qu'au moins un bouton
                 peut apparaître. */}
             {!conversionEssai && (appleDisponible || Platform.OS === "ios") && (
@@ -304,12 +308,10 @@ export default function Inscription() {
                   />
                 )}
                 {Platform.OS === "ios" && (
-                  <GoogleSigninButton
-                    size={GoogleSigninButton.Size.Wide}
-                    color={GoogleSigninButton.Color.Light}
-                    style={[styles.boutonGoogle, { opacity: chargementGoogle ? 0.6 : 1 }]}
-                    disabled={chargementGoogle}
+                  <BoutonGoogle
+                    libelle="S'inscrire avec Google"
                     onPress={seConnecterAvecGoogle}
+                    chargement={chargementGoogle}
                   />
                 )}
               </>
@@ -410,15 +412,6 @@ const styles = StyleSheet.create({
   boutonApple: {
     height: 50,
     marginTop: 16,
-  },
-  // RÈGLE : width "100%" écrase volontairement la taille "Wide" (312x48)
-  // recommandée par GoogleSigninButton — choix délibéré pour aligner sa
-  // largeur sur boutonApple/BoutonPrincipal (pleine largeur du conteneur),
-  // jamais une taille par défaut oubliée.
-  boutonGoogle: {
-    width: "100%",
-    height: 50,
-    marginTop: 12,
   },
   btnTexte: {
     fontSize: 16,
