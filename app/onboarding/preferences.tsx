@@ -50,6 +50,23 @@ function premierJourMoisISO(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
+// RÈGLE À NE JAMAIS CASSER — ÉCHÉANCE DES FIXE CRÉÉES À L'ONBOARDING
+// (demande du 2026-10-10) : toute catégorie Fixe créée ici (Loyer, et toute
+// "autre dépense" de type Fixe, récurrente ou ponctuelle) reçoit
+// date_fixe = le 3 du mois en cours, payee = false, depense = 0. Ce n'est
+// PAS ici qu'on la marque prélevée : verifierEcheancesFixesInterneCoeur
+// (app/store.ts), qui tourne dès l'arrivée sur les onglets, applique la
+// mécanique commune à toutes les Fixe — 3 déjà atteint → depense = budget,
+// payee = true, paiement ajouté à l'historique et échéance avancée au 3 du
+// mois suivant (si récurrente) ; avant le 3 → "À venir" jusqu'au 3. Écrire
+// depense = budget directement laisserait date_fixe au 3 de CE mois : au
+// changement de mois, la Fixe serait re-confirmée dès le 1er (avant son
+// échéance). Modifiable ensuite depuis l'édition de la catégorie. Les
+// Variable n'ont pas de date (comportement inchangé).
+function dateEcheanceFixeOnboarding(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-03`;
+}
+
 // Catégorie déjà persistée en base pour une étape à réponse unique (Salaire/
 // Loyer/Courses) : permet, en cas de retour arrière + modification, de
 // supprimer proprement l'ancienne ligne avant d'en recréer une plutôt que
@@ -198,6 +215,9 @@ export default function Preferences() {
           type: "Fixe",
           recurrente: true,
           repeteChaqueMois: true,
+          // Cf. RÈGLE "ÉCHÉANCE DES FIXE CRÉÉES À L'ONBOARDING".
+          dateFixe: dateEcheanceFixeOnboarding(new Date()),
+          payee: false,
         });
         if (!nouvelle) {
           setChargement(false);
@@ -380,10 +400,14 @@ export default function Preferences() {
           type: ligne.type,
           recurrente: ligne.repeteChaqueMois,
           repeteChaqueMois: ligne.repeteChaqueMois,
-          ...(ligne.repeteChaqueMois
-            ? {}
-            : ligne.type === "Fixe"
-              ? { dateFixe: premierJour }
+          // Fixe (récurrente ou ponctuelle) : échéance au 3 du mois, cf.
+          // RÈGLE "ÉCHÉANCE DES FIXE CRÉÉES À L'ONBOARDING" — pour une
+          // ponctuelle, cette date la rattache aussi au mois en cours.
+          // Variable ponctuelle : mois de comptage (pas de date naturelle).
+          ...(ligne.type === "Fixe"
+            ? { dateFixe: dateEcheanceFixeOnboarding(new Date()), payee: false }
+            : ligne.repeteChaqueMois
+              ? {}
               : { moisComptage: premierJour }),
         });
         if (!nouvelle) {

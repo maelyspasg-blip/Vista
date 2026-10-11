@@ -143,6 +143,36 @@ function messageMoisPasse(): string {
   return `Date dans un mois déjà passé : cette entrée sera comptée pour ${libelleMois}.`;
 }
 
+// RÈGLE (demande du 2026-10-10) : le calendrier de la modale d'édition
+// d'une catégorie s'ouvre TOUJOURS sur le mois en cours ou plus tard —
+// jamais sur un mois passé. Une date enregistrée dans un mois passé est
+// projetée au même jour du mois en cours (borné aux mois courts), mise en
+// évidence. AFFICHAGE UNIQUEMENT : la date enregistrée (dateTemp) ne change
+// que si l'utilisateur touche un jour.
+function dateAffichageCalendrierEdition(dateISO: string): string {
+  const d = parseDateFixeLocale(dateISO);
+  if (Number.isNaN(d.getTime())) return dateISO;
+  const maintenant = new Date();
+  if (
+    d.getFullYear() * 12 + d.getMonth() >=
+    maintenant.getFullYear() * 12 + maintenant.getMonth()
+  ) {
+    return dateISO;
+  }
+  const dernierJour = new Date(
+    maintenant.getFullYear(),
+    maintenant.getMonth() + 1,
+    0,
+  ).getDate();
+  return dateVersISO(
+    new Date(
+      maintenant.getFullYear(),
+      maintenant.getMonth(),
+      Math.min(d.getDate(), dernierJour),
+    ),
+  );
+}
+
 function formaterDateLongue(dateISO: string): string {
   const d = parseDateFixeLocale(dateISO);
   if (Number.isNaN(d.getTime())) return dateISO;
@@ -1123,7 +1153,16 @@ export default function Dashboard() {
     setTypeTemp(env.type);
     setRecurrenteTemp(env.recurrente);
     setDateTemp(env.dateFixe || dateVersISO(new Date()));
-    setRepeteChaqueMoisTemp(env.repeteChaqueMois || false);
+    // Entrée : sa récurrence se lit aussi sur `recurrente` (bug corrigé le
+    // 2026-10-10) — les lignes reconduites avant le 2026-10-09 n'ont pas
+    // repete_chaque_mois ; lu seul, l'interrupteur s'ouvrait coupé et un
+    // simple enregistrement (recurrente = repeteChaqueMoisTemp, cf.
+    // sauvegarderEnveloppe) supprimait la récurrence de l'entrée.
+    setRepeteChaqueMoisTemp(
+      env.type === "Entrée"
+        ? (env.repeteChaqueMois ?? env.recurrente)
+        : env.repeteChaqueMois || false,
+    );
     // RÈGLE (2026-10-09) : champ absent sur une Entrée = affichée dans
     // Planning (cf. RÈGLE "ENTRÉES DANS PLANNING", planning.tsx) — ne jamais
     // le transformer en `false` explicite par une simple édition.
@@ -3265,6 +3304,19 @@ export default function Dashboard() {
                   onChangeText={setNomTemp}
                   returnKeyType="done"
                 />
+                {/* RÈGLE (demande du 2026-10-10) : jour de prélèvement /
+                    réception toujours visible pour une catégorie récurrente,
+                    calculé EN DIRECT depuis la date choisie (dateTemp) —
+                    suit la modification, ne disparaît jamais tant que la
+                    catégorie se répète chaque mois. */}
+                {(typeTemp === "Fixe" || typeTemp === "Entrée") &&
+                  repeteChaqueMoisTemp &&
+                  !Number.isNaN(parseDateFixeLocale(dateTemp).getTime()) && (
+                    <Text style={[styles.jourRecurrenceTexte, { color: C.texteMuted }]}>
+                      {typeTemp === "Fixe" ? "Prélevé" : "Reçu"} le{" "}
+                      {parseDateFixeLocale(dateTemp).getDate()} de chaque mois
+                    </Text>
+                  )}
 
                 <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Type</Text>
                 <View style={styles.typeRow}>
@@ -3401,10 +3453,13 @@ export default function Dashboard() {
                     <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Date prévue</Text>
                     <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
                       <Calendar
-                        current={dateTemp}
+                        current={dateAffichageCalendrierEdition(dateTemp)}
                         onDayPress={(day) => setDateTemp(day.dateString)}
                         markedDates={{
-                          [dateTemp]: { selected: true, selectedColor: C.vert },
+                          [dateAffichageCalendrierEdition(dateTemp)]: {
+                            selected: true,
+                            selectedColor: C.vert,
+                          },
                         }}
                         theme={{
                           calendarBackground: C.carte,
@@ -3496,10 +3551,13 @@ export default function Dashboard() {
                     <Text style={[styles.modalLabel, { color: C.texteMuted }]}>Date de paiement</Text>
                     <View style={[styles.calendarWrap, { borderColor: C.separateur }]}>
                       <Calendar
-                        current={dateTemp}
+                        current={dateAffichageCalendrierEdition(dateTemp)}
                         onDayPress={(day) => setDateTemp(day.dateString)}
                         markedDates={{
-                          [dateTemp]: { selected: true, selectedColor: C.purple },
+                          [dateAffichageCalendrierEdition(dateTemp)]: {
+                            selected: true,
+                            selectedColor: C.purple,
+                          },
                         }}
                         theme={{
                           calendarBackground: C.carte,
@@ -4760,6 +4818,7 @@ const styles = StyleSheet.create({
     padding: 26,
     marginBottom: 18,
   },
+  jourRecurrenceTexte: { fontSize: 13, marginTop: -4, marginBottom: 12 },
   messageMoisPasse: {
     fontSize: 12,
     fontStyle: "italic",
