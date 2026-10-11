@@ -3433,6 +3433,37 @@ Gabarit :
      « Confirm signup » à la place de l'URL de la fonction.
 - **Statut** : **CORRIGÉ CÔTÉ CODE (2026-10-11)**, actions manuelles à faire.
 
+### P073 — Notifications push des événements communs : finitions (2026-10-11)
+
+- **Gravité** : 🟠 MAJEUR (tap sur notification sans effet app fermée ;
+  notifications reçues par un autre compte sur le même téléphone).
+- **Corrections** :
+  - titre « [Prénom] t'a invité à un événement » (repli « Ton partenaire ») ;
+  - `app/_layout.tsx` : `useLastNotificationResponse` (tap qui lance l'app
+    fermée enfin pris en compte, navigation seulement une fois l'app prête,
+    désactivé sur web) ;
+  - Planning : date lue en local (`parseDateFixeLocale`), plus de veille
+    ouverte sur un fuseau en retard sur UTC ;
+  - `effacerPushToken()` avant la déconnexion manuelle (`profil.tsx`).
+- **Exception documentée** : `effacerPushToken` n'écrit pas dans
+  `audit_operations` — un token push est une donnée technique de
+  l'appareil, jamais une donnée financière (même logique que
+  `supprimerModeleDepense`, P001).
+- **Questions pour Maëlys (revue sécurité, non implémentées)** :
+  1. Le token du partenaire arrive en clair dans l'app (RPC
+     `push_token_partenaire`), puis l'envoi part du téléphone vers
+     exp.host. Un partenaire, ou un ex-partenaire qui a gardé le token,
+     peut envoyer des notifications arbitraires, sans trace. Mitigation :
+     Edge Function d'envoi côté serveur + « Enhanced Push Security » Expo,
+     puis retrait de la RPC aux clients.
+  2. Si la déconnexion n'a pas pu effacer le token (hors ligne, session
+     expirée), un autre compte connecté sur le même téléphone partage ce
+     token. Mitigation : RPC `revendiquer_push_token` qui retire ce token
+     des autres profils à l'enregistrement.
+  3. Défense en profondeur : `revoke execute ... from anon` sur
+     `push_token_partenaire`.
+- **Statut** : **CORRIGÉ (2026-10-11)**, questions 1-3 ouvertes.
+
 ## 3. Vision individuelle — parcours principaux
 
 ### 3.1 Aperçu (`app/(tabs)/index.tsx`)

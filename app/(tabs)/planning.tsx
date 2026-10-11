@@ -1262,7 +1262,9 @@ export default function Planning() {
   useFocusEffect(
     useCallback(() => {
       if (!params.dateNotif) return;
-      const date = new Date(params.dateNotif);
+      // parseDateFixeLocale, jamais new Date("YYYY-MM-DD") : ce dernier lit
+      // la date en UTC et ouvrait la veille sur un fuseau en retard sur UTC.
+      const date = parseDateFixeLocale(params.dateNotif);
       if (!Number.isNaN(date.getTime())) ouvrirJour(date);
       router.setParams({ dateNotif: undefined });
       // eslint-disable-next-line react-hooks/exhaustive-deps -- même geste que l'effet params.editEventId juste au-dessus : ne réagir QU'au changement de dateNotif, jamais à router/ouvrirJour qui changeraient de référence sans rapport avec l'arrivée d'une notification.

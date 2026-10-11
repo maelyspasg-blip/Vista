@@ -56,7 +56,7 @@ import {
 } from "../utils/documentsLegaux";
 import { ModaleDocumentLegal } from "./ModaleDocumentLegal";
 import { messageErreurAuth } from "./authErrors";
-import { demanderPermissionNotifications } from "./notifications";
+import { demanderPermissionNotifications, effacerPushToken } from "./notifications";
 import { AccordionItem } from "./AccordionItem";
 import { RapportVisuelCarte } from "./RapportVisuelCarte";
 import { BoutonPrincipal } from "./BoutonPrincipal";
@@ -964,6 +964,8 @@ export default function Profil() {
   };
 
   const confirmerDeconnexion = async () => {
+    // Cf. RÈGLE dans app/notifications.ts::effacerPushToken — avant signOut.
+    await effacerPushToken();
     await supabase.auth.signOut();
     // RÈGLE À NE JAMAIS CASSER — DÉFENSE EN PROFONDEUR : le listener
     // onAuthStateChange dans app/store.ts fait déjà cette réinitialisation

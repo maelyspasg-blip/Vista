@@ -56,6 +56,41 @@ export async function enregistrerPushToken(userId: string): Promise<void> {
   }
 }
 
+// RÈGLE À NE JAMAIS CASSER — TOKEN EFFACÉ À LA DÉCONNEXION (2026-10-11) :
+// sans ça, profils.push_token gardait le token de l'appareil après la
+// déconnexion — un autre compte connecté ensuite sur le même téléphone
+// recevait les notifications (nom + date d'événement) de l'espace partagé
+// du compte précédent. Appelé AVANT supabase.auth.signOut() (après, plus
+// aucun droit d'écriture sur profils). Best-effort, borné à 3 s : une
+// déconnexion ne doit jamais rester bloquée par le réseau — d'où
+// getSession() (lecture locale), jamais getUser() (appel réseau hors borne).
+// Pas de journaliserOperationAudit : exception documentée (AUDIT_V1.md,
+// P073) — un token push est une donnée technique, jamais financière.
+export async function effacerPushToken(): Promise<void> {
+  const effacement = (async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    if (!userId) return;
+    const { error } = await supabase
+      .from("profils")
+      .update({ push_token: null })
+      .eq("user_id", userId);
+    if (error) {
+      console.error("[effacerPushToken] échec (best-effort, ignoré) :", error.message);
+    }
+  })().catch((e) => {
+    console.error("[effacerPushToken] échec (best-effort, ignoré) :", e);
+  });
+  // Borne TOUT le travail (lecture de session comprise : elle peut
+  // rafraîchir un jeton expiré par le réseau).
+  await Promise.race([
+    effacement,
+    new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+  ]);
+}
+
 // RÈGLE : jour+mois sans année, même formatage que la bannière in-app
 // équivalente (app/(tabs)/planning.tsx, "vous a ajouté à un événement") —
 // notification proche dans le temps, jamais recalculé différemment.
@@ -110,7 +145,8 @@ export async function envoyerNotificationEvenementCommun(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         to: token,
-        title: `${prenomMoi} vous a invité à un événement`,
+        // Libellé demandé le 2026-10-11 (tutoiement, comme le reste de l'app).
+        title: `${prenomMoi.trim() || "Ton partenaire"} t'a invité à un événement`,
         body: `${evenement.nom} · ${formaterDateNotifPush(evenement)}`,
         data: { type: "evenement_commun", date: evenement.date },
       }),

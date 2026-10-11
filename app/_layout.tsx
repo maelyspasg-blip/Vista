@@ -4,7 +4,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import * as ExpoSplashScreen from "expo-splash-screen";
 import * as Notifications from "expo-notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Animated, StyleSheet } from "react-native";
+import { AppState, Animated, Platform, StyleSheet } from "react-native";
 import "react-native-gesture-handler";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
@@ -41,6 +41,13 @@ import { PageTutoriel, TutorielContext, TutorielStatus } from "./TutorielContext
 // disparaître tout seul avant que notre splash JS (SplashScreen.tsx) soit
 // prêt à prendre le relais, laissant un flash d'écran blanc/noir natif nu.
 ExpoSplashScreen.preventAutoHideAsync().catch(() => {});
+
+// RÈGLE : sur web, le module natif des notifications n'existe pas —
+// useLastNotificationResponse lèverait une UnavailabilityError au montage
+// et ferait planter tout le layout racine. Choisi une fois au chargement du
+// module (jamais conditionnellement dans le rendu : règles des hooks).
+const useDerniereReponseNotification =
+  Platform.OS === "web" ? () => null : Notifications.useLastNotificationResponse;
 
 const DUREE_MIN_SPLASH_MS = 1000;
 const DUREE_FADE_SPLASH_MS = 300;
@@ -457,29 +464,49 @@ function RootLayoutInterne() {
   }, [session?.user?.id]);
 
   // RÈGLE À NE JAMAIS CASSER — TAP SUR UNE NOTIFICATION PUSH → PLANNING
-  // (demande du 2026-09-13) : monté une seule fois ([] volontaire), pas
-  // conditionné à `session` — addNotificationResponseReceivedListener capte
-  // aussi bien un tap pendant que l'app est déjà ouverte qu'un tap qui vient
-  // de RELANCER l'app (auquel cas ce composant est de toute façon remonté
-  // avec un nouvel effet). `dateNotif` est consommé une seule fois côté
-  // Planning (cf. RÈGLE dans app/(tabs)/planning.tsx), jamais besoin de le
-  // nettoyer ici.
+  // (demande du 2026-09-13, corrigé le 2026-10-11) : useLastNotificationResponse
+  // couvre le tap app ouverte ET le tap qui LANCE l'app fermée (l'ancien
+  // addNotificationResponseReceivedListener ratait ce second cas, et
+  // naviguait avant la restauration de session). On ne navigue qu'une fois
+  // l'app prête (chargement fini, session, onboarding terminé, essai non
+  // expiré) — sinon l'effet de redirection ci-dessous écraserait la
+  // navigation. La réponse est effacée après usage : jamais rejouée.
+  // `dateNotif` est consommé une seule fois côté Planning (cf. RÈGLE dans
+  // app/(tabs)/planning.tsx).
+  const derniereReponseNotif = useDerniereReponseNotification();
   useEffect(() => {
-    const abonnement = Notifications.addNotificationResponseReceivedListener(
-      (reponse) => {
-        const donnees = reponse.notification.request.content.data as
-          | { type?: string; date?: string }
-          | undefined;
-        if (donnees?.type === "evenement_commun" && donnees.date) {
-          router.push({
-            pathname: "/(tabs)/planning",
-            params: { dateNotif: donnees.date },
-          });
-        }
-      },
-    );
-    return () => abonnement.remove();
-  }, [router]);
+    if (chargement || !session || onboardingComplete !== true || estGuestExpire) {
+      return;
+    }
+    // Encore sur un écran d'onboarding (ex. tap puis connexion) : l'effet de
+    // redirection va faire replace("/(tabs)") — on attend qu'il ait eu lieu,
+    // sinon il écraserait la navigation vers Planning.
+    if (segments[0] === "onboarding") return;
+    if (
+      !derniereReponseNotif ||
+      derniereReponseNotif.actionIdentifier !==
+        Notifications.DEFAULT_ACTION_IDENTIFIER
+    ) {
+      return;
+    }
+    const donnees = derniereReponseNotif.notification.request.content.data as
+      | { type?: string; date?: string }
+      | undefined;
+    if (donnees?.type !== "evenement_commun" || !donnees.date) return;
+    Notifications.clearLastNotificationResponse();
+    router.push({
+      pathname: "/(tabs)/planning",
+      params: { dateNotif: donnees.date },
+    });
+  }, [
+    derniereReponseNotif,
+    chargement,
+    session,
+    onboardingComplete,
+    estGuestExpire,
+    segments,
+    router,
+  ]);
 
   // Recalcule le temps restant de l'essai régulièrement pendant que l'app
   // reste ouverte (sinon seul le montage initial le connaît, cf. bug où
