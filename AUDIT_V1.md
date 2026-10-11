@@ -3182,6 +3182,31 @@ fournisseur OAuth dans Authentication → Providers du dashboard Supabase,
 avec ce Client ID iOS ajouté à la liste "Authorized Client IDs". Documenté
 en RÈGLE dans `app/googleSignIn.ts`.
 
+**Mises à jour ultérieures** :
+- **2026-10-11 — bouton sur mesure** : `GoogleSigninButton` remplacé par
+  `app/BoutonGoogle.tsx` (charte Google, même gabarit que le bouton Apple
+  officiel), décision de Maëlys — la description du bouton ci-dessus est
+  obsolète.
+- **2026-10-11 — Client ID Web** : `webClientId`
+  (`834270415111-c1noqr1ufd7vvo04l39fk966t6m763d1.apps.googleusercontent.com`)
+  ajouté à `GoogleSignin.configure()`. L'idToken a désormais ce Client ID
+  Web pour audience : dans Supabase → Authentication → Providers → Google,
+  le champ « Client ID » doit contenir ce Client ID Web, son Client Secret
+  le champ « Client Secret » (UNIQUEMENT dans Supabase, jamais dans le
+  repo), et le Client ID iOS rester dans « Authorized Client IDs ».
+  Option « Skip nonce checks » à activer (iOS) — piste n°1 du bug « la
+  connexion Google ne fonctionne pas » (2026-10-11), à confirmer sur device.
+  **Compromis de sécurité (revue du 2026-10-11)** : cette option désactive
+  la protection anti-rejeu de l'idToken Google — quelqu'un qui obtiendrait
+  un idToken valide émis pour les Client IDs de Vista pourrait l'échanger
+  contre une session pendant sa durée de vie (~1 h). Accepté : jeton signé
+  par Google et lié à l'audience de Vista, courte durée, et jamais journalisé
+  ni persisté par l'app (RÈGLE dans `app/googleSignIn.ts`). Nécessaire car la
+  librairie (v16) ne permet pas de fournir le nonce à `signIn()` alors que le
+  SDK iOS en place un dans le jeton. Si l'option ne résout pas le bug sur
+  device, la désactiver de nouveau.
+  Android toujours désactivé (client OAuth Android + SHA-1 non créés).
+
 `npm audit` : 1 nouvelle entrée moderate pour
 `@react-native-google-signin/google-signin` — vérifiée, elle remonte
 entièrement à la même chaîne `expo`/`@expo/*` déjà présente avant ce

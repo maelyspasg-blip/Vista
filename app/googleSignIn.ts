@@ -11,22 +11,35 @@ import { messageErreurAuth } from "./authErrors";
 // chaque écran appelant navigue vers "/(tabs)" après un succès, jamais de
 // logique de routage ici).
 //
-// RÈGLE À NE JAMAIS CASSER — IOS UNIQUEMENT POUR L'INSTANT : seul un Client
-// ID iOS a été fourni (Google Cloud Console, OAuth 2.0 Client IDs). Android
-// nécessiterait un Client ID distinct (Web Client ID / `webClientId`, utilisé
-// aussi bien pour produire un idToken valide sur Android que comme
-// "Authorized Client ID" côté Supabase) — non fourni, donc pas configuré.
-// Les écrans appelants gated ce bouton par `Platform.OS === "ios"` : ne
-// jamais l'activer sur Android sans configurer un `webClientId` d'abord
-// (l'appel échouerait proprement, mais autant ne pas afficher un bouton
-// non fonctionnel).
+// RÈGLE À NE JAMAIS CASSER — IOS UNIQUEMENT POUR L'INSTANT : le bouton reste
+// affiché sur iOS seulement (écrans appelants gated par
+// `Platform.OS === "ios"`). Client ID Web (`webClientId`) ajouté le
+// 2026-10-11 : avec lui, l'idToken renvoyé par Google a ce Client ID Web
+// pour audience — c'est lui que Supabase (Authentication → Providers →
+// Google, champ "Client ID") vérifie ; le Client ID iOS reste dans
+// "Authorized Client IDs". Android demanderait EN PLUS un client OAuth
+// Android déclaré dans Google Cloud Console (empreinte SHA-1 du certificat
+// de signature) avant d'afficher le bouton — non fait.
+//
+// RÈGLE À NE JAMAIS CASSER — JAMAIS DE CLIENT SECRET ICI : les Client IDs
+// sont publics (ils finissent dans l'app de toute façon) ; le Client Secret
+// du client Web n'existe QUE dans le dashboard Supabase (configuration du
+// provider Google) — ne jamais le committer, ni ici ni ailleurs dans le
+// repo.
 //
 // RÈGLE À NE JAMAIS CASSER — CONFIGURATION DASHBOARD REQUISE, HORS DE
 // PORTÉE DE CET ENVIRONNEMENT : `supabase.auth.signInWithIdToken({provider:
 // "google", ...})` échoue tant que Google n'est pas activé comme
 // fournisseur OAuth dans Authentication → Providers du dashboard Supabase,
-// avec ce Client ID iOS ajouté à la liste "Authorized Client IDs" — aucun
-// accès CLI/dashboard Supabase depuis cet environnement pour le faire. Ce
+// configuré ainsi (mise à jour du 2026-10-11, cf. RÈGLE "IOS UNIQUEMENT"
+// plus haut) : "Client ID" = le Client ID Web, "Client Secret" = son secret
+// (uniquement là), "Authorized Client IDs" = le Client ID iOS, et "Skip
+// nonce checks" ACTIVÉ — le SDK Google iOS place son propre nonce dans
+// l'idToken sans exposer la valeur brute, que signInWithIdToken ne peut
+// donc pas transmettre. Compromis accepté (protection anti-rejeu de
+// l'idToken perdue, cf. AUDIT_V1.md) : ne JAMAIS logger ni persister
+// l'idToken. Aucun accès CLI/dashboard Supabase depuis cet environnement
+// pour le faire. Ce
 // correctif reste donc INERTE (bouton affiché mais toute tentative échoue
 // proprement avec un message d'erreur) tant que cette configuration
 // manuelle n'a pas été faite — même limite que Sign in with Apple.
@@ -41,13 +54,20 @@ import { messageErreurAuth } from "./authErrors";
 // pas un vrai GoogleService-Info.plist Firebase) — le copier tel quel et
 // activer le mode Firebase du plugin aurait échoué (clés manquantes). Le
 // mode `iosUrlScheme` (app.json) est donc le bon choix ici, pas un
-// contournement : aucun fichier .plist à committer, `iosClientId` seul
-// (configure() ci-dessous) suffit à produire un idToken valide.
+// contournement : aucun fichier .plist à committer, `iosClientId` +
+// `webClientId` (configure() ci-dessous) suffisent à produire un idToken
+// valide pour Supabase.
 const GOOGLE_IOS_CLIENT_ID =
   "834270415111-4cjeb5ftski3h5cdmdg61c8rpcm5nuif.apps.googleusercontent.com";
+// Client ID Web (Google Cloud Console → OAuth 2.0 Client IDs, type
+// "Application Web"), fourni le 2026-10-11 — cf. RÈGLE "IOS UNIQUEMENT"
+// ci-dessus pour son rôle côté Supabase.
+const GOOGLE_WEB_CLIENT_ID =
+  "834270415111-c1noqr1ufd7vvo04l39fk966t6m763d1.apps.googleusercontent.com";
 
 GoogleSignin.configure({
   iosClientId: GOOGLE_IOS_CLIENT_ID,
+  webClientId: GOOGLE_WEB_CLIENT_ID,
 });
 
 export type ResultatConnexionGoogle =
