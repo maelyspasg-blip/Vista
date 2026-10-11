@@ -279,11 +279,9 @@ export async function rejoindreEspacePartage(
     if (!user) return { succes: false, raison: "erreur_reseau" };
 
     const codeNormalise = code.trim().toUpperCase();
-    console.log("[espacePartage] recherche code:", codeNormalise);
     const { data, error } = await supabase.rpc("rejoindre_espace_par_code", {
       p_code: codeNormalise,
     });
-    console.log("[espacePartage] résultat:", data, error);
 
     if (error) {
       console.error(

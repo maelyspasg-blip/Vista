@@ -21,3 +21,12 @@ export async function getPresentationVue(userId: string): Promise<boolean> {
   const valeur = await AsyncStorage.getItem(cleePresentation(userId));
   return valeur === "1";
 }
+
+// RÈGLE À NE JAMAIS CASSER — SOURCE UNIQUE de la clé de la découverte de
+// Profil (bulles au premier accès à Profil, app/profil.tsx) : lue/écrite par
+// Profil ET marquée vue par app/_layout.tsx (croix/"Passer" d'un tutoriel =
+// tous les tutoriels vus). Écrite en dur à deux endroits, elle pouvait
+// diverger silencieusement — toujours passer par cette fonction.
+export function cleDecouverteProfil(userId: string): string {
+  return `vista_profil_onboarding_vu_${userId}`;
+}

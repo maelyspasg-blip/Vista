@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
-import { useIsFocused, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -1213,7 +1213,6 @@ function GraphiqueRepartitionCategoriePersonne({
 export default function Analytics() {
   const router = useRouter();
   const estTablette = useEstTablette();
-  const estFocusDebug = useIsFocused();
   const objStore = useObjectifs();
   const { estPremium, simulerNonPremium } = usePremium();
   const { isGuest } = useGuest();
@@ -4243,13 +4242,6 @@ export default function Analytics() {
       </TouchableOpacity>
     );
   };
-
-  console.log("[TUTORIEL Stats]", {
-    tutorielStatsVu,
-    estFocus: estFocusDebug,
-    nbCibles: Object.keys(posCiblesTutoriel).length,
-    ciblesPresentes: Object.keys(posCiblesTutoriel),
-  });
 
   return (
     <View

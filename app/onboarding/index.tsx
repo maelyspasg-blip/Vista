@@ -1,13 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
     StyleSheet,
     TouchableOpacity,
     View,
 } from "react-native";
 import Svg, { Rect } from "react-native-svg";
-import { useGuest } from "../GuestContext";
 import { signalerPresentationVue } from "../onboardingCompletion";
 import { Text } from "../Texte";
 import { BoutonPrincipal } from "../BoutonPrincipal";
@@ -101,9 +100,10 @@ const SLIDES_PRESENTATION: SlideStandard[] = [
 // de `slides` plus bas, jamais ajouté ailleurs dans le tableau. Présente
 // l'espace partagé comme une extension naturelle d'Aperçu, pas comme un
 // écran à part détaché du reste de la présentation. Visible UNIQUEMENT si
-// ESPACE_PARTAGE_ACTIF === true (feature encore désactivée en bêta, cf.
-// utils/premium.ts) et jamais pour un compte invité (un essai de
-// découverte n'a pas de partenaire à inviter).
+// ESPACE_PARTAGE_ACTIF === true (cf. utils/premium.ts). Un compte invité ne
+// voit jamais ces slides (créé déjà configuré, cf. RÈGLE dans
+// app/onboardingStorage.ts) : plus de variante "invité" ici (retirée le
+// 2026-10-11, code devenu inaccessible).
 const SLIDE_COUPLE: SlideCouple = {
   id: 2,
   type: "couple",
@@ -274,20 +274,14 @@ function CarrouselVistaADeux() {
 export default function Onboarding() {
   const router = useRouter();
   const estTablette = useEstTablette();
-  const { isGuest } = useGuest();
   const [slideActuel, setSlideActuel] = useState(0);
 
-  // RÈGLE : recalculé uniquement quand isGuest change — ESPACE_PARTAGE_ACTIF
-  // est une constante de module, jamais besoin de la revalider ici.
   // RÈGLE : SLIDE_COUPLE inséré en position 1 (juste après SLIDE_APERCU),
   // jamais ajouté à la fin — cf. RÈGLE sur SLIDE_COUPLE plus haut.
-  const slides = useMemo<Slide[]>(
-    () =>
-      ESPACE_PARTAGE_ACTIF && !isGuest
-        ? [SLIDE_APERCU, SLIDE_COUPLE, SLIDE_BUDGET, SLIDE_PLANNING]
-        : SLIDES_PRESENTATION,
-    [isGuest],
-  );
+  // ESPACE_PARTAGE_ACTIF est une constante de module : pas de recalcul.
+  const slides: Slide[] = ESPACE_PARTAGE_ACTIF
+    ? [SLIDE_APERCU, SLIDE_COUPLE, SLIDE_BUDGET, SLIDE_PLANNING]
+    : SLIDES_PRESENTATION;
   // RÈGLE (2026-10-10) : ces slides suivent la CRÉATION du compte (cf.
   // RÈGLE dans app/onboardingStorage.ts) — fin ou "Passer" : présentation
   // mémorisée comme vue pour ce compte (via _layout.tsx), puis onboarding

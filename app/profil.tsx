@@ -86,6 +86,7 @@ import { useTutoriel } from "./TutorielContext";
 import { CibleTutoriel, useCiblesTutoriel } from "./CibleTutoriel";
 import { type EtapeTutoriel, TutorielOverlay } from "./TutorielOverlay";
 import { useEspacePartage } from "./EspacePartageContext";
+import { cleDecouverteProfil } from "./onboardingStorage";
 import { couleursInterrupteur } from "../utils/couleursInterrupteur";
 import { remplacerSansHistorique } from "../utils/navigationRacine";
 
@@ -209,7 +210,7 @@ export default function Profil() {
   // flash pour quelqu'un qui l'a déjà vu). Lecture impossible → considéré
   // comme vu (une découverte manquée vaut mieux qu'une découverte répétée).
   const cleOnboardingProfil = objStore.userId
-    ? `vista_profil_onboarding_vu_${objStore.userId}`
+    ? cleDecouverteProfil(objStore.userId)
     : null;
   const [onboardingProfilVu, setOnboardingProfilVu] = useState<
     boolean | null
@@ -1012,32 +1013,7 @@ export default function Profil() {
     setSuppressionEnCours(true);
 
     try {
-      // TEMPORAIRE — diagnostic "impossible de supprimer" : log le résultat
-      // complet de l'appel (data/error/status), et le corps de la réponse
-      // d'erreur si disponible (error.context est le Response brut pour un
-      // FunctionsHttpError — c'est là que se trouve le message JSON
-      // {error: "..."} réellement renvoyé par la fonction). À retirer une
-      // fois le vrai message d'erreur identifié.
-      const resultat = await supabase.functions.invoke("delete-account");
-      const { data, error } = resultat;
-      console.log("[delete-account] résultat complet :", {
-        data,
-        error,
-        status: (error as { context?: { status?: number } })?.context?.status,
-      });
-      if (
-        error &&
-        (error as { context?: unknown }).context instanceof Response
-      ) {
-        try {
-          const corps = await (
-            error as { context: Response }
-          ).context.clone().text();
-          console.log("[delete-account] corps de la réponse d'erreur :", corps);
-        } catch (e) {
-          console.log("[delete-account] corps de l'erreur illisible :", e);
-        }
-      }
+      const { error } = await supabase.functions.invoke("delete-account");
       if (error) {
         console.error("Supabase delete-account a échoué :", error);
         Alert.alert(

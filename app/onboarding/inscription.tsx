@@ -196,8 +196,13 @@ export default function Inscription() {
             </Text>
             <BoutonPrincipal
               style={[styles.btnPrincipal, { backgroundColor: C.purple }]}
+              // Sans historique (2026-10-11), comme les autres sorties
+              // d'onboarding — cf. RÈGLE dans utils/navigationRacine.ts.
               onPress={() =>
-                router.push(conversionEssai ? "/(tabs)" : "/onboarding/connexion")
+                remplacerSansHistorique(
+                  router,
+                  conversionEssai ? "/(tabs)" : "/onboarding/connexion",
+                )
               }
               activeOpacity={0.8}
             >

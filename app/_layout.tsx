@@ -24,7 +24,11 @@ import {
   ecouterOnboardingTermine,
   ecouterPresentationVue,
 } from "./onboardingCompletion";
-import { getPresentationVue, marquerPresentationVue } from "./onboardingStorage";
+import {
+  cleDecouverteProfil,
+  getPresentationVue,
+  marquerPresentationVue,
+} from "./onboardingStorage";
 import { enregistrerPushToken } from "./notifications";
 import { SplashScreen } from "./SplashScreen";
 import { Theme, ThemeProvider } from "./ThemeContext";
@@ -192,12 +196,12 @@ function RootLayoutInterne() {
 
   // Cf. RÈGLE sur toutMarquerVu (TutorielContext.tsx) : les 4 flags en une
   // seule écriture `profils` (filtre user_id), plus la découverte de Profil
-  // (clé locale, même nom que dans app/profil.tsx).
+  // (clé locale partagée, cleDecouverteProfil — app/onboardingStorage.ts).
   const toutMarquerTutorielsVus = () => {
     setTutoriel({ apercu: true, budget: true, planning: true, stats: true });
     const userId = dernierUserIdRef.current;
     if (!userId) return;
-    AsyncStorage.setItem(`vista_profil_onboarding_vu_${userId}`, "true").catch(
+    AsyncStorage.setItem(cleDecouverteProfil(userId), "true").catch(
       () => {
         // Best-effort : au pire, la découverte de Profil s'affichera une fois.
       },
@@ -331,6 +335,10 @@ function RootLayoutInterne() {
     // l'app. On reflète ici la même écriture, au même moment : le tutoriel
     // d'Aperçu démarre dès l'arrivée sur les onglets, puis enchaîne sur les
     // autres pages (navigation automatique de fin de tutoriel).
+    ecouterOnboardingTermine(() => {
+      setOnboardingComplete(true);
+      setTutoriel({ apercu: false, budget: false, planning: false, stats: false });
+    });
     // Fin des slides de présentation : mémorisée pour CE compte, en local
     // et sur l'appareil (cf. RÈGLE dans app/onboardingStorage.ts).
     ecouterPresentationVue(() => {
@@ -340,10 +348,6 @@ function RootLayoutInterne() {
       marquerPresentationVue(userId).catch(() => {
         // Best-effort : au pire, les slides s'afficheront une fois de plus.
       });
-    });
-    ecouterOnboardingTermine(() => {
-      setOnboardingComplete(true);
-      setTutoriel({ apercu: false, budget: false, planning: false, stats: false });
     });
 
     const { data: abonnement } = supabase.auth.onAuthStateChange(
@@ -435,7 +439,7 @@ function RootLayoutInterne() {
 
     return () => {
       ecouterOnboardingTermine(null);
-    ecouterPresentationVue(null);
+      ecouterPresentationVue(null);
       abonnement.subscription.unsubscribe();
     };
   }, []);

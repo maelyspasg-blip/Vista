@@ -3469,7 +3469,6 @@ export default function Planning() {
         etapes={ETAPES_PLANNING_ACTIVES}
         positions={posCiblesTutoriel}
         onTerminer={() => {
-          console.log("[TUTORIEL] Planning terminé, navigation vers Stats");
           marquerTutorielVu("planning");
           router.push("/(tabs)/analytics");
         }}
