@@ -391,9 +391,9 @@ export async function synchroniserWidgetAjoutRapide(
       AjoutRapideWidget.updateSnapshot(props);
     } catch (e) {
       console.error(
-        "[widgetsSync] AjoutRapideWidget.updateSnapshot a planté — props envoyées :",
-        JSON.stringify(props),
-        "erreur :",
+        // Jamais les props ici (nom/montant de la dernière dépense) : ce
+        // console.error part aussi en production.
+        "[widgetsSync] AjoutRapideWidget.updateSnapshot a planté :",
         e,
       );
     }

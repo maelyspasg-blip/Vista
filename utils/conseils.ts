@@ -1755,7 +1755,7 @@ export function validerConseil(
       }
       if (Math.abs(conseil.resteEstimeMentionne - params.resteEstime) > 5) {
         console.warn(
-          `[conseils] Conseil retiré : reste estimé incohérent (${conseil.resteEstimeMentionne}€ affiché vs ${params.resteEstime}€ attendu).`,
+          "[conseils] Conseil retiré : reste estimé incohérent (écart > 5 € entre le montant affiché et le montant attendu).",
         );
         return false;
       }
@@ -1767,7 +1767,7 @@ export function validerConseil(
       );
       if (invalide) {
         console.warn(
-          `[conseils] Conseil retiré : pourcentage hors plage 0-300% (${JSON.stringify(conseil.pourcentages)}).`,
+          `[conseils] Conseil retiré : pourcentage hors plage 0-300% (${conseil.pourcentages.length} valeur(s) contrôlée(s)).`,
         );
         return false;
       }

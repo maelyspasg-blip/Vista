@@ -830,7 +830,7 @@ function appliquerEnveloppes(
     const seuilSuspect = Math.max(2, Math.ceil(positivesAvant.length * 0.5));
     if (positivesAvant.length > 0 && remisesAZeroSuspectes.length >= seuilSuspect) {
       console.warn(
-        `[store] appliquerEnveloppes : remise à zéro en masse suspectée sur ${remisesAZeroSuspectes.length}/${positivesAvant.length} enveloppe(s) Variable (${remisesAZeroSuspectes.map((e) => e.nom).join(", ")}) — valeurs précédentes conservées.`,
+        `[store] appliquerEnveloppes : remise à zéro en masse suspectée sur ${remisesAZeroSuspectes.length}/${positivesAvant.length} enveloppe(s) Variable (ids : ${remisesAZeroSuspectes.map((e) => e.id).join(", ")}) — valeurs précédentes conservées.`,
       );
       signalerErreurSync(
         "Une anomalie a empêché la remise à zéro de plusieurs catégories — anciennes valeurs conservées.",
@@ -864,7 +864,7 @@ function appliquerEnveloppes(
 
   if (enveloppesASupprimer.length > 0) {
     console.warn(
-      `[store] appliquerEnveloppes : suppression de ${enveloppesASupprimer.length} enveloppe(s) — ${enveloppesASupprimer.map((e) => e.nom).join(", ")}.`,
+      `[store] appliquerEnveloppes : suppression de ${enveloppesASupprimer.length} enveloppe(s) — ids : ${enveloppesASupprimer.map((e) => e.id).join(", ")}.`,
     );
     sauvegarderEnveloppesSupprimees(enveloppesASupprimer);
     journaliserOperationAudit("suppression_enveloppes", {
@@ -1803,7 +1803,7 @@ async function archiverMoisActuelInterneCoeur(mois: number, annee: number) {
       const sommeArrondie = Math.round(sommeTransactions * 100) / 100;
       if (Math.abs(sommeArrondie - e.depense) <= 0.01) return e;
       console.warn(
-        `[archivage] Incohérence corrigée avant snapshot sur "${e.nom}" : depense=${e.depense}, somme réelle des transactions du mois=${sommeArrondie}.`,
+        `[archivage] Incohérence corrigée avant snapshot sur l'enveloppe ${e.id} : depense alignée sur la somme réelle des transactions du mois.`,
       );
       return { ...e, depense: sommeArrondie };
     });
@@ -2430,7 +2430,7 @@ async function verifierIntegriteDepensesInterne() {
     const sommeArrondie = Math.round(sommeTransactions * 100) / 100;
     if (Math.abs(sommeArrondie - e.depense) > 0.01) {
       console.warn(
-        `[store] Incohérence d'intégrité détectée sur "${e.nom}" : depense=${e.depense}, somme des transactions du mois=${sommeArrondie} — correction automatique appliquée.`,
+        `[store] Incohérence d'intégrité détectée sur l'enveloppe ${e.id} — correction automatique appliquée.`,
       );
       journaliserOperationAudit("correction_integrite_depense", {
         enveloppeId: e.id,
@@ -3051,7 +3051,7 @@ export function useObjectifs() {
             const age = Date.now() - new Date(cache.sauvegardeLe).getTime();
             if (age > FRAICHEUR_CACHE_DEPENSE_MS) return e;
             console.warn(
-              `[store] chargerEnveloppes : depense=0 en base pour "${e.nom}" mais cache local récent à ${cache.depense} — restauration + resynchronisation.`,
+              `[store] chargerEnveloppes : depense=0 en base pour l'enveloppe ${e.id} mais cache local récent non nul — restauration + resynchronisation.`,
             );
             const corrigee = { ...e, depense: cache.depense };
             enveloppesAResynchroniser.push(corrigee);

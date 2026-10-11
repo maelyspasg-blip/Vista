@@ -21,17 +21,18 @@ import { useTheme } from "./ThemeContext";
 //
 // RÈGLE À NE JAMAIS CASSER — TIROIRS OUVERTS PAR DÉFAUT (demande du
 // 2026-10-10) : dans TOUTE l'app, un tiroir/accordéon de CONTENU
-// (TiroirStats, sections repliables d'Aperçu, détails "Argent immobilisé",
-// historiques, catégories inchangées, historique des séries de Ton
-// bilan...) s'affiche OUVERT au premier affichage. Restent fermés par
-// défaut, volontairement : modales et popups (y compris les accordéons du
-// "Détail des calculs", dans une modale), menus (bouton "+"), pickers de
+// (TiroirStats, sections repliables d'Aperçu, catégories inchangées,
+// historique des séries de Ton bilan...) s'affiche OUVERT au premier
+// affichage. Restent fermés par défaut, volontairement : modales et
+// popups (y compris les accordéons du "Détail des calculs", dans une
+// modale), menus (bouton "+"), pickers de
 // formulaire (palettes, calendriers), modes d'édition, sélecteurs de
 // catégories, et le détail d'une catégorie au tap (un seul ouvert à la
 // fois). Exceptions explicites (demande du 2026-10-11), FERMÉES par
 // défaut : le détail "Argent immobilisé" (Aperçu et Budget) et "Voir
-// l'historique" de Budget. Une préférence déjà mémorisée par l'utilisateur (AsyncStorage,
-// SectionCollapsable d'Aperçu) reste prioritaire. Tout nouveau tiroir de
+// l'historique" de Budget. Une préférence déjà mémorisée par
+// l'utilisateur (AsyncStorage, SectionCollapsable d'Aperçu) reste
+// prioritaire. Tout nouveau tiroir de
 // contenu suit cette règle.
 export function TiroirStats({
   titre,
