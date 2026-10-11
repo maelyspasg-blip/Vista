@@ -105,7 +105,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Disponible maintenant",
         explication:
-          "Petite carte sous le chiffre principal : l'argent qu'il te reste en ce moment, à date — tes revenus déjà reçus ce mois-ci (les entrées « reçues », calculées comme sur Aperçu) moins tes dépenses réelles déjà faites. Ni le budget encore prévu, ni l'épargne, ni les entrées encore attendues ne sont pris en compte. En rouge si tu as dépensé plus que ce que tu as reçu.",
+          "Petite carte sous le chiffre principal : l'argent qu'il te reste en ce moment, à date — tes revenus déjà reçus ce mois-ci (les entrées « reçues », calculées comme sur Aperçu) moins tes dépenses réelles déjà faites. Ni le budget encore prévu, ni l'épargne, ni les entrées encore attendues ne sont pris en compte. En rouge si tu as dépensé plus que ce que tu as reçu. Sur la même ligne, à droite, ton budget mensuel (la somme de tes entrées du mois, reçues et attendues) pour comparaison.",
       },
       {
         titre: "+X € vs mois dernier (au J)",
@@ -115,7 +115,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Ordre des segments de la barre de progression et de sa légende",
         explication:
-          "Dans cet ordre, sur la barre comme dans la légende juste en dessous : \"Dépenses\", puis \"Argent immobilisé\". Le reste de la barre (entrées d'argent déjà reçues ou encore attendues ce mois-ci) n'a plus de couleur ni de nom propre — il se fond avec le fond neutre de la barre, comme de l'argent encore disponible. Ces montants restent comptés normalement dans le budget mensuel affiché ci-dessous : seul l'affichage détaillé de la barre a changé, aucune formule.",
+          "Dans cet ordre, sur la barre comme dans la légende juste en dessous : \"Dépenses\", puis \"Argent immobilisé\". Le reste de la barre (entrées d'argent déjà reçues ou encore attendues ce mois-ci) n'a plus de couleur ni de nom propre — il se fond avec le fond neutre de la barre, comme de l'argent encore disponible. Ces montants restent comptés normalement dans le budget mensuel (carte « Disponible maintenant ») : seul l'affichage détaillé de la barre a changé, aucune formule.",
       },
       {
         titre: "Légende « Argent immobilisé »",
@@ -123,9 +123,9 @@ export const CALCULS_DOC: PageCalculs[] = [
           "Sous la barre de progression, l'épargne générique et les versements aux objectifs sont regroupés sous une seule pastille \"Argent immobilisé\" (total combiné) — la barre de progression fusionne alors aussi ses deux segments en un seul, de la même couleur que la pastille. Un tap la déplie en deux pastilles, \"Épargne\" (versements hors objectif) et \"Objectifs\" (somme des versements à tes objectifs actifs) ; la barre se redécompose alors en deux segments correspondants.",
       },
       {
-        titre: "/ {X}€ budget mensuel",
+        titre: "Budget mensuel : {X} €",
         explication:
-          "Le même total combiné que BUDGET sur Aperçu : la somme des entrées de Budget comptées pour ce mois, déjà reçues et encore attendues confondues.",
+          "Affiché à droite du montant « Disponible maintenant », sur la même ligne. Le même total combiné que BUDGET sur Aperçu : la somme des entrées de Budget comptées pour ce mois, déjà reçues et encore attendues confondues.",
       },
       {
         titre: "\"X représente ta plus grosse dépense ce mois-ci\"",

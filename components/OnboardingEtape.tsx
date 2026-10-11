@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -40,6 +41,7 @@ export function OnboardingEtape({
   onBoutonSecondaire,
   erreur,
   onRetour,
+  piedDansLeDefilement = false,
 }: {
   etapeActuelle: number;
   totalEtapes: number;
@@ -53,10 +55,83 @@ export function OnboardingEtape({
   onBoutonSecondaire?: () => void;
   erreur?: string;
   onRetour?: () => void;
+  // Demande du 2026-10-10 (étape "autres dépenses") : le pied (bouton
+  // principal + secondaire) est placé DANS le défilement, après le contenu,
+  // au lieu d'être fixé en bas — et il est masqué tant que le clavier est
+  // ouvert. Fixé, le KeyboardAvoidingView le remontait juste au-dessus du
+  // clavier : l'utilisateur tapait "Continuer" par erreur en pleine saisie.
+  // Désactivé par défaut : les autres étapes gardent leur pied fixe.
+  piedDansLeDefilement?: boolean;
 }) {
   const { theme, couleurs: C } = useTheme();
   const fond = theme === "sombre" ? C.fond : C.fondPage;
   const estTablette = useEstTablette();
+  // État réel du clavier AU MONTAGE (bug trouvé en revue le 2026-10-10 :
+  // initialisé à false, il pouvait rester bloqué à "ouvert" d'une étape à
+  // l'autre et masquer Continuer clavier fermé). L'étape qui utilise
+  // piedDansLeDefilement est montée avec une `key` dédiée
+  // (app/onboarding/preferences.tsx) : instance neuve à chaque arrivée.
+  const [clavierOuvert, setClavierOuvert] = useState(() =>
+    piedDansLeDefilement ? Keyboard.isVisible() : false,
+  );
+  useEffect(() => {
+    if (!piedDansLeDefilement) return;
+    // "Will" sur iOS (avant l'animation du clavier), "Did" sur Android
+    // (seuls événements émis).
+    const evOuverture =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const evFermeture =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const abonnementOuverture = Keyboard.addListener(evOuverture, () =>
+      setClavierOuvert(true),
+    );
+    const abonnementFermeture = Keyboard.addListener(evFermeture, () =>
+      setClavierOuvert(false),
+    );
+    return () => {
+      abonnementOuverture.remove();
+      abonnementFermeture.remove();
+    };
+  }, [piedDansLeDefilement]);
+
+  const pied = (
+    <View
+    style={[
+      styles.pied,
+      { backgroundColor: fond },
+      piedDansLeDefilement && styles.piedDansLeDefilement,
+    ]}
+  >
+      {!!boutonSecondaireLabel && (
+        <TouchableOpacity
+          onPress={onBoutonSecondaire}
+          disabled={chargement}
+          style={styles.boutonSecondaire}
+          activeOpacity={0.7}
+        >
+          <Text
+            style={[styles.boutonSecondaireTexte, { color: C.texteMuted }]}
+          >
+            {boutonSecondaireLabel}
+          </Text>
+        </TouchableOpacity>
+      )}
+      <BoutonPrincipal
+        style={[
+          styles.bouton,
+          { backgroundColor: C.purple, opacity: chargement ? 0.7 : 1 },
+        ]}
+        onPress={onContinuer}
+        disabled={chargement}
+      >
+        {chargement ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <Text style={styles.boutonTexte}>{boutonLabel}</Text>
+        )}
+      </BoutonPrincipal>
+    </View>
+  );
 
   return (
     <KeyboardAvoidingView
@@ -108,38 +183,11 @@ export function OnboardingEtape({
         {!!erreur && (
           <Text style={[styles.erreur, { color: C.rougeText }]}>{erreur}</Text>
         )}
+
+        {piedDansLeDefilement && !clavierOuvert && pied}
       </ScrollView>
 
-      <View style={[styles.pied, { backgroundColor: fond }]}>
-        {!!boutonSecondaireLabel && (
-          <TouchableOpacity
-            onPress={onBoutonSecondaire}
-            disabled={chargement}
-            style={styles.boutonSecondaire}
-            activeOpacity={0.7}
-          >
-            <Text
-              style={[styles.boutonSecondaireTexte, { color: C.texteMuted }]}
-            >
-              {boutonSecondaireLabel}
-            </Text>
-          </TouchableOpacity>
-        )}
-        <BoutonPrincipal
-          style={[
-            styles.bouton,
-            { backgroundColor: C.purple, opacity: chargement ? 0.7 : 1 },
-          ]}
-          onPress={onContinuer}
-          disabled={chargement}
-        >
-          {chargement ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.boutonTexte}>{boutonLabel}</Text>
-          )}
-        </BoutonPrincipal>
-      </View>
+      {!piedDansLeDefilement && pied}
       </View>
     </KeyboardAvoidingView>
   );
@@ -160,6 +208,10 @@ const styles = StyleSheet.create({
   aide: { fontSize: 14, marginBottom: 28 },
   erreur: { fontSize: 13, marginTop: 12 },
   pied: { paddingHorizontal: 28, paddingBottom: 32, paddingTop: 12 },
+  // Dans le défilement, le contenu porte déjà les marges horizontales
+  // (scrollContent) : pas de padding latéral en double, et un écart net
+  // avec le contenu au-dessus.
+  piedDansLeDefilement: { paddingHorizontal: 0, paddingTop: 32, paddingBottom: 8 },
   boutonSecondaire: { alignItems: "center", paddingVertical: 12 },
   boutonSecondaireTexte: { fontSize: 14, fontWeight: "600" },
   bouton: { borderRadius: 16, paddingVertical: 16, alignItems: "center" },

@@ -1714,18 +1714,10 @@ export default function Budget() {
               { color: theme === "sombre" ? "#FFFFFF" : C.texte },
             ]}
           />
-          <Text
-            style={[
-              styles.heroSub,
-              { color: theme === "sombre" ? "rgba(255,255,255,0.7)" : C.texteMuted },
-            ]}
-          >
-            {"/ "}
-            <NombreAnime valeur={budgetTotal} suffixe="" />
-            {" € budget mensuel"}
-          </Text>
-          {/* Demande du 2026-10-10 : seule la carte "Disponible maintenant"
-              (une carte "Dépenses actuelles" répétait le grand chiffre). */}
+          {/* Demandes du 2026-10-10 : seule la carte "Disponible maintenant"
+              (une carte "Dépenses actuelles" répétait le grand chiffre), et
+              le budget mensuel affiché à DROITE de son montant, sur la même
+              ligne (plus de ligne "/ X € budget mensuel" séparée). */}
           <View style={styles.cartesMaintenant}>
             <View
               style={[
@@ -1739,21 +1731,35 @@ export default function Budget() {
               <Text style={[styles.carteMaintenantLabel, { color: C.texteMuted }]}>
                 Disponible maintenant
               </Text>
-              <Text
-                style={[
-                  styles.carteMaintenantMontant,
-                  {
-                    color:
-                      disponibleMaintenant < 0
-                        ? C.peachText
-                        : theme === "sombre"
-                          ? C.accent
-                          : "#1D9E75",
-                  },
-                ]}
-              >
-                {formaterMontant(disponibleMaintenant)} €
-              </Text>
+              <View style={styles.carteMaintenantLigne}>
+                <Text
+                  style={[
+                    styles.carteMaintenantMontant,
+                    {
+                      color:
+                        disponibleMaintenant < 0
+                          ? C.peachText
+                          : theme === "sombre"
+                            ? C.accent
+                            : "#1D9E75",
+                    },
+                  ]}
+                >
+                  {formaterMontant(disponibleMaintenant)} €
+                </Text>
+                <Text
+                  style={[
+                    styles.carteMaintenantBudget,
+                    {
+                      color:
+                        theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  Budget mensuel : {formaterMontant(budgetTotal)} €
+                </Text>
+              </View>
             </View>
           </View>
           {deltaDepensesTotal !== null && (
@@ -2872,16 +2878,22 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   heroAmount: { fontSize: 50, fontWeight: "700", marginBottom: 4 },
-  heroSub: { fontSize: 14, marginBottom: 16 },
-  cartesMaintenant: { flexDirection: "row", gap: 10, marginBottom: 16 },
+  cartesMaintenant: { flexDirection: "row", gap: 10, marginTop: 12, marginBottom: 16 },
   carteMaintenant: {
-    alignSelf: "flex-start",
+    flex: 1,
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 14,
   },
   carteMaintenantLabel: { fontSize: 12, marginBottom: 2 },
   carteMaintenantMontant: { fontSize: 17, fontWeight: "700" },
+  carteMaintenantLigne: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  carteMaintenantBudget: { fontSize: 13, flexShrink: 1, textAlign: "right" },
   progressBg: {
     height: 6,
     borderRadius: 3,

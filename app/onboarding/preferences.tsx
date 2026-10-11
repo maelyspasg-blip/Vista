@@ -1,13 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import {
+  Alert,
   InputAccessoryView,
   Keyboard,
   Platform,
   StyleSheet,
   Switch,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { supabase } from "../../supabaseClient";
@@ -24,6 +26,9 @@ import { OnboardingEtape } from "../../components/OnboardingEtape";
 import { couleursInterrupteur } from "../../utils/couleursInterrupteur";
 
 const ACCESSORY_ID = "onboardingNumericDone";
+// Barre iOS du champ "Montant" de la saisie des autres dépenses : son bouton
+// "OK" ajoute la dépense (decimal-pad n'a aucune touche de validation iOS).
+const ACCESSORY_ID_AUTRE = "onboardingAutreOk";
 const TOTAL_ETAPES = 6;
 
 const MOTS_CLES_FIXE = [
@@ -90,6 +95,20 @@ export default function Preferences() {
   const [loyer, setLoyer] = useState("");
   const [courses, setCourses] = useState("");
   const [autres, setAutres] = useState<LigneAutre[]>([]);
+  // RÈGLE (refonte du 2026-10-10) : saisie UNIQUE en mode liste pour l'étape
+  // "autres dépenses" — nom + montant + OK ajoute la dépense à la liste
+  // au-dessus, vide les champs et ferme le clavier. Type (suggéré d'après le
+  // nom, cf. typeSuggereParNom) et "Se répète chaque mois" s'appliquent à
+  // la dépense en cours de saisie, jamais réécrits après ajout.
+  const [saisieNomAutre, setSaisieNomAutre] = useState("");
+  const [saisieMontantAutre, setSaisieMontantAutre] = useState("");
+  const [saisieTypeAutre, setSaisieTypeAutre] = useState<"Fixe" | "Variable">(
+    "Variable",
+  );
+  const [saisieTypeAutreManuel, setSaisieTypeAutreManuel] = useState(false);
+  const [saisieRepeteAutre, setSaisieRepeteAutre] = useState(true);
+  const [erreurSaisieAutre, setErreurSaisieAutre] = useState("");
+  const champMontantAutreRef = useRef<React.ElementRef<typeof TextInput>>(null);
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState("");
 
@@ -224,84 +243,119 @@ export default function Preferences() {
     setEtapeIndex(4);
   };
 
-  const ajouterLigneAutre = () => {
-    const id = String(prochainIdLigne.current++);
-    setAutres((lignes) => [
-      ...lignes,
-      {
-        id,
-        nom: "",
-        montant: "",
-        type: "Variable",
-        typeModifieManuellement: false,
-        repeteChaqueMois: true,
-        enveloppeId: null,
-        couleur: null,
-      },
-    ]);
+  const reinitialiserSaisieAutre = () => {
+    setSaisieNomAutre("");
+    setSaisieMontantAutre("");
+    setSaisieTypeAutre("Variable");
+    setSaisieTypeAutreManuel(false);
+    setSaisieRepeteAutre(true);
+    setErreurSaisieAutre("");
   };
 
-  const modifierNomLigne = (id: string, nom: string) => {
-    setAutres((lignes) =>
-      lignes.map((l) =>
-        l.id === id
-          ? {
-              ...l,
-              nom,
-              type: l.typeModifieManuellement ? l.type : typeSuggereParNom(nom),
-            }
-          : l,
-      ),
-    );
+  const modifierSaisieNomAutre = (nom: string) => {
+    setSaisieNomAutre(nom);
+    setErreurSaisieAutre("");
+    if (!saisieTypeAutreManuel) setSaisieTypeAutre(typeSuggereParNom(nom));
   };
 
-  const modifierMontantLigne = (id: string, montant: string) => {
-    setAutres((lignes) =>
-      lignes.map((l) => (l.id === id ? { ...l, montant: sanitizeMontantInput(montant) } : l)),
-    );
-  };
-
-  const modifierTypeLigne = (id: string, type: "Fixe" | "Variable") => {
-    setAutres((lignes) =>
-      lignes.map((l) => (l.id === id ? { ...l, type, typeModifieManuellement: true } : l)),
-    );
-  };
-
-  const modifierRepeteChaqueMoisLigne = (id: string, repeteChaqueMois: boolean) => {
-    setAutres((lignes) =>
-      lignes.map((l) => (l.id === id ? { ...l, repeteChaqueMois } : l)),
-    );
-  };
-
-  const supprimerLigneAutre = async (id: string) => {
-    const ligne = autres.find((l) => l.id === id);
-    setAutres((lignes) => lignes.filter((l) => l.id !== id));
-    if (ligne?.enveloppeId) {
-      await objStore.supprimerEnveloppe(ligne.enveloppeId);
+  // Ajoute la saisie en cours à la liste. Renvoie la liste à jour (ou null
+  // si la saisie est incomplète) pour que "Continuer" puisse enregistrer
+  // une dépense tapée mais pas encore validée, sans dépendre du setState.
+  const validerSaisieAutre = (): LigneAutre[] | null => {
+    // Jamais pendant l'enregistrement (revue du 2026-10-10) : une ligne
+    // ajoutée à ce moment était écrasée par setAutres(misesAJour) et perdue.
+    if (chargement) return null;
+    const nom = saisieNomAutre.trim();
+    const montant = parseMontant(saisieMontantAutre);
+    if (!nom && !saisieMontantAutre) {
+      Keyboard.dismiss();
+      return autres;
     }
+    if (!nom || !(montant > 0)) {
+      setErreurSaisieAutre("Indique un nom et un montant.");
+      return null;
+    }
+    const nouvelleLigne: LigneAutre = {
+      id: String(prochainIdLigne.current++),
+      nom,
+      montant: saisieMontantAutre,
+      type: saisieTypeAutre,
+      typeModifieManuellement: saisieTypeAutreManuel,
+      repeteChaqueMois: saisieRepeteAutre,
+      enveloppeId: null,
+      couleur: null,
+    };
+    const lignes = [...autres, nouvelleLigne];
+    setAutres(lignes);
+    reinitialiserSaisieAutre();
+    Keyboard.dismiss();
+    return lignes;
+  };
+
+  const continuerAutresAvecSaisie = () => {
+    if (chargement) return;
+    const lignes = validerSaisieAutre();
+    if (lignes === null) return;
+    continuerAutres(lignes);
+  };
+
+  // RÈGLE (revue du 2026-10-10) : jamais pendant l'enregistrement (la ligne
+  // retirée était recréée par la boucle de continuerAutres — catégorie
+  // fantôme). Une ligne pas encore enregistrée se retire directement (simple
+  // brouillon) ; une ligne DÉJÀ enregistrée en base (retour arrière) est une
+  // vraie catégorie : confirmation explicite avant suppression (CLAUDE.md,
+  // opérations destructives — supprimerEnveloppe porte filtre user_id et log).
+  const supprimerLigneAutre = (id: string) => {
+    if (chargement) return;
+    const ligne = autres.find((l) => l.id === id);
+    if (!ligne) return;
+    if (!ligne.enveloppeId) {
+      setAutres((lignes) => lignes.filter((l) => l.id !== id));
+      return;
+    }
+    const enveloppeId = ligne.enveloppeId;
+    Alert.alert(
+      `Supprimer "${ligne.nom}" ?`,
+      "Cette catégorie a déjà été créée. Elle sera supprimée de ton budget.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer",
+          style: "destructive",
+          onPress: () => {
+            setAutres((lignes) => lignes.filter((l) => l.id !== id));
+            objStore.supprimerEnveloppe(enveloppeId);
+          },
+        },
+      ],
+    );
   };
 
   const passerAutres = () => {
     allerEtape(5);
   };
 
-  const continuerAutres = async () => {
+  const continuerAutres = async (lignesAEnregistrer: LigneAutre[] = autres) => {
     if (chargement) return;
     setErreur("");
-    const aTraiter = autres.filter(
+    const aTraiter = lignesAEnregistrer.filter(
       (l) => l.enveloppeId || (l.nom.trim() && parseMontant(l.montant) > 0),
     );
     if (aTraiter.length > 0) {
       setChargement(true);
       let echec = false;
       const misesAJour: LigneAutre[] = [];
-      for (const ligne of autres) {
-        const valide = !!ligne.nom.trim() && parseMontant(ligne.montant) > 0;
-        // Retour arrière + modification (ou ligne vidée) : on repart d'une
-        // base propre plutôt que de laisser une ancienne version en doublon.
+      for (const ligne of lignesAEnregistrer) {
+        // RÈGLE (refonte du 2026-10-10) : une ligne DÉJÀ enregistrée (retour
+        // arrière) est conservée telle quelle — en mode liste elle n'est plus
+        // modifiable, la supprimer puis la recréer ne servait plus à rien et
+        // laissait un doublon si la suppression échouait (supprimerEnveloppe
+        // ne renvoie pas de résultat).
         if (ligne.enveloppeId) {
-          await objStore.supprimerEnveloppe(ligne.enveloppeId);
+          misesAJour.push(ligne);
+          continue;
         }
+        const valide = !!ligne.nom.trim() && parseMontant(ligne.montant) > 0;
         if (!valide) {
           misesAJour.push({ ...ligne, enveloppeId: null, couleur: null });
           continue;
@@ -511,109 +565,180 @@ export default function Preferences() {
     return (
       <>
         <OnboardingEtape
+          // Instance dédiée (cf. RÈGLE sur clavierOuvert, OnboardingEtape).
+          key="etape-autres-depenses"
           etapeActuelle={5}
           totalEtapes={TOTAL_ETAPES}
           titre="As-tu d'autres dépenses régulières ?"
           aide="Ex : abonnements, électricité, transport..."
-          onContinuer={autres.length > 0 ? continuerAutres : ajouterLigneAutre}
+          onContinuer={continuerAutresAvecSaisie}
           onRetour={() => allerEtape(3)}
-          boutonLabel={autres.length > 0 ? "Continuer" : "+ Ajouter une dépense"}
           chargement={chargement}
           erreur={erreur}
-          boutonSecondaireLabel={autres.length === 0 ? "Passer cette étape" : undefined}
+          boutonSecondaireLabel={
+            autres.length === 0 && !saisieNomAutre && !saisieMontantAutre
+              ? "Passer cette étape"
+              : undefined
+          }
           onBoutonSecondaire={passerAutres}
+          // Continuer tout en bas du défilement, masqué tant que le clavier
+          // est ouvert (cf. OnboardingEtape).
+          piedDansLeDefilement
         >
-          {autres.map((ligne) => (
-            <View key={ligne.id} style={[styles.ligneAutre, { borderColor: C.carteBorder }]}>
-              <View style={styles.ligneAutreHaut}>
-                <TextInput
-                  style={[styles.inputLigne, { color: C.texte, backgroundColor: C.carte }]}
-                  placeholder="Nom de la dépense"
-                  placeholderTextColor={C.texteMuted}
-                  value={ligne.nom}
-                  onChangeText={(t) => modifierNomLigne(ligne.id, t)}
-                  inputAccessoryViewID={ACCESSORY_ID}
-                />
-                <TouchableOpacity
-                  onPress={() => supprimerLigneAutre(ligne.id)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Supprimer cette dépense"
-                  style={styles.boutonSupprimer}
+          {/* Refonte du 2026-10-10 : mode liste — dépenses ajoutées au-dessus,
+              une seule saisie nom + montant + OK en dessous. Un tap hors des
+              champs ferme le clavier. */}
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <View>
+              {autres.map((ligne) => (
+                <View
+                  key={ligne.id}
+                  style={[styles.ligneListeAutre, { borderColor: C.carteBorder }]}
                 >
-                  <Ionicons name="close-circle" size={22} color={C.texteMuted} />
-                </TouchableOpacity>
-              </View>
-              <View style={styles.ligneAutreBas}>
-                <TextInput
-                  style={[styles.inputMontantLigne, { color: C.texte, backgroundColor: C.carte }]}
-                  placeholder="Montant"
-                  placeholderTextColor={C.texteMuted}
-                  keyboardType="decimal-pad"
-                  value={ligne.montant}
-                  onChangeText={(t) => modifierMontantLigne(ligne.id, t)}
-                  inputAccessoryViewID={ACCESSORY_ID}
-                />
-                <View style={styles.selecteurType}>
-                  {(["Fixe", "Variable"] as const).map((t) => {
-                    const selectionne = ligne.type === t;
-                    return (
-                      <TouchableOpacity
-                        key={t}
-                        onPress={() => modifierTypeLigne(ligne.id, t)}
-                        style={[
-                          styles.chipType,
-                          {
-                            backgroundColor: selectionne ? C.purple : C.purpleLight,
-                          },
-                        ]}
-                        activeOpacity={0.7}
-                      >
-                        <Text
-                          style={[
-                            styles.chipTypeTexte,
-                            { color: selectionne ? "#FFFFFF" : C.purpleText },
-                          ]}
-                        >
-                          {t}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+                  <Text style={[styles.ligneListeNom, { color: C.texte }]} numberOfLines={1}>
+                    {ligne.nom}
+                  </Text>
+                  <Text style={[styles.ligneListeDetail, { color: C.texteMuted }]}>
+                    {formaterMontant(parseMontant(ligne.montant))} € · {ligne.type}
+                    {ligne.repeteChaqueMois ? "" : " · ponctuelle"}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => supprimerLigneAutre(ligne.id)}
+                    disabled={chargement}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Retirer ${ligne.nom}`}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="close-circle" size={22} color={C.texteMuted} />
+                  </TouchableOpacity>
                 </View>
-              </View>
-              <View style={styles.ligneRepeteRow}>
-                <Text style={[styles.ligneRepeteTexte, { color: C.texte }]}>
-                  Se répète chaque mois
-                </Text>
-                <Switch
-                  value={ligne.repeteChaqueMois}
-                  onValueChange={(v) => modifierRepeteChaqueMoisLigne(ligne.id, v)}
-                  {...couleursInterrupteur(C)}
-                />
+              ))}
+
+              <View style={[styles.saisieAutre, { borderColor: C.carteBorder }]}>
+                <View style={styles.saisieAutreLigne}>
+                  <TextInput
+                    style={[styles.inputLigne, { color: C.texte, backgroundColor: C.carte }]}
+                    placeholder="Nom de la dépense"
+                    placeholderTextColor={C.texteMuted}
+                    value={saisieNomAutre}
+                    onChangeText={modifierSaisieNomAutre}
+                    editable={!chargement}
+                    returnKeyType="next"
+                    blurOnSubmit={false}
+                    onSubmitEditing={() => champMontantAutreRef.current?.focus()}
+                  />
+                  <TextInput
+                    ref={champMontantAutreRef}
+                    style={[
+                      styles.inputMontantSaisie,
+                      { color: C.texte, backgroundColor: C.carte },
+                    ]}
+                    placeholder="Montant"
+                    placeholderTextColor={C.texteMuted}
+                    keyboardType="decimal-pad"
+                    value={saisieMontantAutre}
+                    editable={!chargement}
+                    accessibilityLabel="Montant de la dépense"
+                    onChangeText={(t) => {
+                      setSaisieMontantAutre(sanitizeMontantInput(t));
+                      setErreurSaisieAutre("");
+                    }}
+                    returnKeyType="done"
+                    onSubmitEditing={() => validerSaisieAutre()}
+                    inputAccessoryViewID={ACCESSORY_ID_AUTRE}
+                  />
+                  <TouchableOpacity
+                    onPress={() => validerSaisieAutre()}
+                    disabled={chargement}
+                    style={[
+                      styles.boutonOkAutre,
+                      { backgroundColor: "#1D9E75", opacity: chargement ? 0.5 : 1 },
+                    ]}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Ajouter cette dépense"
+                  >
+                    <Text style={styles.boutonOkAutreTexte}>OK</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.ligneAutreBas}>
+                  <View style={styles.selecteurType}>
+                    {(["Fixe", "Variable"] as const).map((t) => {
+                      const selectionne = saisieTypeAutre === t;
+                      return (
+                        <TouchableOpacity
+                          key={t}
+                          onPress={() => {
+                            setSaisieTypeAutre(t);
+                            setSaisieTypeAutreManuel(true);
+                          }}
+                          style={[
+                            styles.chipType,
+                            { backgroundColor: selectionne ? C.purple : C.purpleLight },
+                          ]}
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[
+                              styles.chipTypeTexte,
+                              { color: selectionne ? "#FFFFFF" : C.purpleText },
+                            ]}
+                          >
+                            {t}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  {/* Bulle d'info (demande du 2026-10-10). */}
+                  <TouchableOpacity
+                    onPress={() =>
+                      Alert.alert(
+                        "Fixe ou Variable ?",
+                        "Une dépense Fixe a toujours le même montant chaque mois — comme ton loyer (700 €) ou ton abonnement Netflix (13 €).\n\nUne dépense Variable change d'un mois à l'autre — comme tes courses ou tes sorties restaurant.",
+                        [{ text: "Compris" }],
+                      )
+                    }
+                    activeOpacity={0.6}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Fixe ou Variable ?"
+                  >
+                    <Ionicons
+                      name="information-circle-outline"
+                      size={16}
+                      color={C.texteMuted}
+                    />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.ligneRepeteRow}>
+                  <Text style={[styles.ligneRepeteTexte, { color: C.texte }]}>
+                    Se répète chaque mois
+                  </Text>
+                  <Switch
+                    value={saisieRepeteAutre}
+                    onValueChange={setSaisieRepeteAutre}
+                    {...couleursInterrupteur(C)}
+                  />
+                </View>
+                {!!erreurSaisieAutre && (
+                  <Text style={[styles.erreurSaisieAutre, { color: C.rougeText }]}>
+                    {erreurSaisieAutre}
+                  </Text>
+                )}
               </View>
             </View>
-          ))}
-
-          {/* RÈGLE (demande du 2026-10-10) : bouton PLEIN teal avec icône,
-              placé dans le contenu donc AVANT "Continuer" (pied de page) —
-              l'ancien lien texte passait inaperçu et les utilisateurs
-              continuaient sans voir qu'ils pouvaient en ajouter d'autres. */}
-          {autres.length > 0 && (
-            <TouchableOpacity
-              onPress={ajouterLigneAutre}
-              style={[styles.boutonAjouterLigne, { backgroundColor: "#1D9E75" }]}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel="Ajouter une autre dépense"
-            >
-              <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.boutonAjouterLigneTexte}>
-                Ajouter une autre dépense
-              </Text>
-            </TouchableOpacity>
-          )}
+          </TouchableWithoutFeedback>
         </OnboardingEtape>
-        {accessoryBar}
+        {Platform.OS === "ios" && (
+          <InputAccessoryView nativeID={ACCESSORY_ID_AUTRE}>
+            <View style={[styles.accessoryBar, { backgroundColor: C.fondSecondaire }]}>
+              <TouchableOpacity onPress={() => validerSaisieAutre()}>
+                <Text style={[styles.accessoryTexte, { color: C.accent }]}>OK</Text>
+              </TouchableOpacity>
+            </View>
+          </InputAccessoryView>
+        )}
       </>
     );
   }
@@ -701,16 +826,10 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "600",
   },
-  ligneAutre: {
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 12,
-  },
-  ligneAutreHaut: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
   inputLigne: { flex: 1, borderRadius: 12, padding: 12, fontSize: 15 },
-  boutonSupprimer: { padding: 2 },
-  ligneAutreBas: { flexDirection: "row", alignItems: "center", gap: 8 },
+  // marginTop (demande du 2026-10-10) : respiration entre la ligne
+  // Nom/Montant/OK et les boutons Fixe/Variable.
+  ligneAutreBas: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 },
   ligneRepeteRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -718,7 +837,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   ligneRepeteTexte: { fontSize: 13, fontWeight: "500" },
-  inputMontantLigne: { width: 100, borderRadius: 12, padding: 12, fontSize: 15 },
   selecteurType: { flexDirection: "row", gap: 6, flex: 1 },
   chipType: {
     flex: 1,
@@ -727,16 +845,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   chipTypeTexte: { fontSize: 13, fontWeight: "600" },
-  boutonAjouterLigne: {
+  ligneListeAutre: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderRadius: 14,
-    paddingVertical: 14,
-    marginTop: 8,
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 8,
   },
-  boutonAjouterLigneTexte: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
+  ligneListeNom: { flex: 1, fontSize: 15, fontWeight: "600" },
+  ligneListeDetail: { fontSize: 13 },
+  saisieAutre: { borderWidth: 1, borderRadius: 14, padding: 12, marginTop: 4 },
+  saisieAutreLigne: { flexDirection: "row", alignItems: "center", gap: 8 },
+  inputMontantSaisie: {
+    width: 96,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 15,
+  },
+  boutonOkAutre: { borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16 },
+  boutonOkAutreTexte: { color: "#FFFFFF", fontSize: 15, fontWeight: "700" },
+  erreurSaisieAutre: { fontSize: 13, marginTop: 8 },
   resumeVide: { fontSize: 14, lineHeight: 20 },
   ligneResume: {
     flexDirection: "row",
