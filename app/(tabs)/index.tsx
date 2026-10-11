@@ -1349,7 +1349,7 @@ export default function Dashboard() {
     if (bloquerSiInvite(isGuest, router)) return;
     Alert.alert(
       `Supprimer "${nom}" ?`,
-      "Cette action est définitive — l'objectif et son historique de contributions seront supprimés.",
+      "Cette action est définitive — l'objectif disparaîtra de ta liste (les mois déjà archivés le conservent).",
       [
         { text: "Annuler", style: "cancel" },
         {

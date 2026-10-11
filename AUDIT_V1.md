@@ -3380,6 +3380,29 @@ Gabarit :
 
 ---
 
+### P071 — Impossible de supprimer un objectif archivé dans un mois passé (signalé le 2026-10-11)
+
+- **Gravité** : 🟠 MAJEUR (action utilisateur impossible).
+- **Reproduction** : créer un objectif, laisser passer un archivage mensuel
+  (l'objectif entre dans `snapshot_objectifs`), puis le supprimer →
+  erreur Supabase 23503 (`snapshot_objectifs_objectif_id_fkey`, ON DELETE
+  NO ACTION), l'objectif reste affiché.
+- **Cause** : `supprimerObjectif` (`app/store.ts`) faisait un vrai DELETE,
+  incompatible avec la FK des archives.
+- **Correction** : suppression douce, même principe que les enveloppes
+  (P052). Nouvelle colonne `objectifs.supprime_le` (migration
+  `20261011090000_objectifs_soft_delete.sql`, additive, **à exécuter
+  manuellement dans le dashboard Supabase**). `supprimerObjectif` fait
+  `UPDATE supprime_le = now()` filtré `id` + `user_id` (confirmation
+  `Alert` et `journaliserOperationAudit` inchangés). `chargerObjectifs`,
+  seul point de chargement des objectifs, écarte les lignes où
+  `supprime_le` n'est pas nul (filtre côté client : le chargement ne casse
+  pas si la migration n'est pas encore passée). Les mois archivés gardent
+  l'objectif dans leurs snapshots.
+- **Limite** : tant que la migration n'est pas exécutée, la suppression
+  échoue avec un message d'erreur (colonne absente) — rien n'est perdu.
+- **Statut** : **CORRIGÉ (2026-10-11)**, SQL à exécuter.
+
 ## 3. Vision individuelle — parcours principaux
 
 ### 3.1 Aperçu (`app/(tabs)/index.tsx`)

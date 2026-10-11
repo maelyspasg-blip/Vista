@@ -57,10 +57,10 @@ import {
 //     TOUTES les catégories d'un coup n'a aucun parcours UI légitime dans
 //     l'app). Sauvegarde AsyncStorage best-effort + re-vérification
 //     user_id explicite avant chaque suppression individuelle.
-//   - supprimerObjectif() : 1 objectif par id, protégé côté base par la
-//     contrainte FK ON DELETE NO ACTION (refuse un objectif déjà archivé
-//     dans un mois passé) ET par un filtre double id + user_id explicite
-//     côté client (même niveau de protection qu'appliquerEnveloppes) ET par
+//   - supprimerObjectif() : 1 objectif par id — suppression DOUCE depuis le
+//     2026-10-11 (P071 : UPDATE supprime_le, plus jamais de DELETE, les
+//     snapshots passés restent intacts), protégé par un filtre double
+//     id + user_id explicite côté client (même niveau de protection qu'appliquerEnveloppes) ET par
 //     une sauvegarde AsyncStorage best-effort AVANT toute suppression
 //     réelle (cf. sauvegarderObjectifsSupprimes) — un objectif est de
 //     l'argent mis de côté par l'utilisateur, jamais moins protégé qu'une
@@ -951,6 +951,9 @@ type ObjectifRow = {
   dernier_versement_annee: number | null;
   contribution_mois: number | null;
   ferme: boolean | null;
+  // Suppression douce (P071, migration 20261011090000) : non nul = objectif
+  // supprimé par l'utilisateur, jamais chargé dans etat.objectifs.
+  supprime_le?: string | null;
 };
 
 function objectifDepuisLigne(l: ObjectifRow): Objectif {
@@ -3216,7 +3219,15 @@ export function useObjectifs() {
             : etat.dernierMoisArchive;
 
         setEtat({
-          objectifs: (data ?? []).map(objectifDepuisLigne),
+          // RÈGLE À NE JAMAIS CASSER (P071) : un objectif supprimé
+          // (supprime_le non nul) n'entre jamais dans etat.objectifs. C'est
+          // aujourd'hui l'unique SELECT sur `objectifs` — tout futur SELECT
+          // sur cette table doit reproduire ce filtre.
+          // Filtre côté client (et non `.is("supprime_le", null)`) : si la
+          // colonne n'existe pas encore en base, le chargement ne casse pas.
+          objectifs: ((data ?? []) as ObjectifRow[])
+            .filter((l) => !l.supprime_le)
+            .map(objectifDepuisLigne),
           epargneMois: profil?.epargne_mois ?? etat.epargneMois,
           argentDisponibleReportAuto:
             profil?.argent_disponible_report_auto ??
@@ -3532,8 +3543,9 @@ export function useObjectifs() {
           objectifs: (objectifsRows ?? [])
             .filter((o) => o.snapshot_mois_id === s.id)
             .map((o) => ({
-              // Même risque que pour enveloppe_id ci-dessus : objectif_id
-              // devient null si l'objectif source a été supprimé depuis.
+              // Repli défensif, même principe qu'enveloppe_id ci-dessus. Un
+              // objectif supprimé n'est plus jamais effacé (suppression douce,
+              // P071) : objectif_id reste renseigné.
               id: o.objectif_id ?? o.id,
               nom: o.nom,
               actuel: o.actuel,
@@ -3717,23 +3729,31 @@ export function useObjectifs() {
         sauvegarderObjectifsSupprimes([objectif]);
       }
 
-      // La suppression Supabase passe en premier : snapshot_objectifs.objectif_id
-      // est en ON DELETE NO ACTION, donc un objectif déjà archivé dans un mois
-      // passé sera rejeté (code Postgres 23503). On ne touche l'état local
-      // qu'une fois la suppression confirmée, pour ne jamais désynchroniser
-      // l'UI et la base si elle échoue.
-      const { error } = await supabase
+      // RÈGLE À NE JAMAIS CASSER — SUPPRESSION DOUCE (P071, 2026-10-11, même
+      // principe que les enveloppes / P052) : plus jamais de DELETE. Un vrai
+      // DELETE était rejeté (23503) dès que l'objectif figurait dans un
+      // snapshot passé (snapshot_objectifs.objectif_id, ON DELETE NO
+      // ACTION) — l'utilisateur ne pouvait plus le supprimer. La ligne reste
+      // en base (les archives passées restent intactes), simplement masquée
+      // au chargement (cf. filtre `supprime_le` dans chargerObjectifs).
+      // L'état local n'est touché qu'une fois l'écriture confirmée.
+      // `.select("id")` : un UPDATE qui ne touche aucune ligne (id périmé,
+      // RLS) ne renvoie pas d'erreur — sans ce contrôle, l'objectif
+      // disparaîtrait de l'écran puis réapparaîtrait au rechargement.
+      const { data: lignesMasquees, error } = await supabase
         .from("objectifs")
-        .delete()
+        .update({ supprime_le: new Date().toISOString() })
         .eq("id", id)
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .select("id");
       if (error) {
-        console.error("Supabase delete objectif a échoué :", error);
-        signalerErreurSync(
-          error.code === "23503"
-            ? "Cet objectif a été archivé dans un mois passé et ne peut plus être supprimé."
-            : `Impossible de supprimer l'objectif : ${error.message}`,
-        );
+        console.error("Supabase update supprime_le (objectif) a échoué :", error.message);
+        signalerErreurSync(`Impossible de supprimer l'objectif : ${error.message}`);
+        return;
+      }
+      if (!lignesMasquees || lignesMasquees.length === 0) {
+        console.error("Suppression d'objectif : aucune ligne mise à jour.");
+        signalerErreurSync("Impossible de supprimer l'objectif : il est introuvable en base.");
         return;
       }
       // RÈGLE : log audit_operations ajouté lors de l'audit sécurité
