@@ -45,6 +45,8 @@ export type RaisonEchecRejoindre =
   | "deja_membre"
   // P074 (2026-10-11) : un espace compte 2 membres au maximum.
   | "espace_complet"
+  // P074 (suite) : déjà dans un AUTRE espace actif — un seul à la fois.
+  | "deja_dans_un_espace"
   | "erreur_reseau";
 
 export type ResultatRejoindreEspace =
@@ -226,7 +228,12 @@ function journaliserOperationAuditEspace(
 // (espace + membre propriétaire) et la lecture finale dans la MÊME
 // transaction security definer, qui bypass RLS en interne — l'ordre des
 // opérations n'a donc plus d'importance vis-à-vis de la lecture.
-export async function creerEspacePartage(): Promise<EspacePartage | null> {
+// "deja_dans_un_espace" : refus serveur (P074, un seul espace actif par
+// utilisateur, exception levée par creer_espace_partage) — distingué d'un
+// échec réseau pour afficher le bon message.
+export async function creerEspacePartage(): Promise<
+  EspacePartage | "deja_dans_un_espace" | null
+> {
   try {
     const {
       data: { user },
@@ -235,6 +242,9 @@ export async function creerEspacePartage(): Promise<EspacePartage | null> {
 
     const { data, error } = await supabase.rpc("creer_espace_partage");
 
+    if (error?.message?.includes("deja_dans_un_espace")) {
+      return "deja_dans_un_espace";
+    }
     if (error || !data || data.length === 0) {
       console.error(
         "Supabase rpc creer_espace_partage a échoué :",
@@ -300,7 +310,8 @@ export async function rejoindreEspacePartage(
       ligne.statut === "code_invalide" ||
       ligne.statut === "code_expire" ||
       ligne.statut === "deja_membre" ||
-      ligne.statut === "espace_complet"
+      ligne.statut === "espace_complet" ||
+      ligne.statut === "deja_dans_un_espace"
     ) {
       return { succes: false, raison: ligne.statut };
     }
@@ -357,7 +368,8 @@ export async function apercuEspacePartage(code: string): Promise<ApercuEspace> {
       ligne.statut === "code_invalide" ||
       ligne.statut === "code_expire" ||
       ligne.statut === "deja_membre" ||
-      ligne.statut === "espace_complet"
+      ligne.statut === "espace_complet" ||
+      ligne.statut === "deja_dans_un_espace"
     ) {
       return { possible: false, raison: ligne.statut };
     }

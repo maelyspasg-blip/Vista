@@ -3489,8 +3489,22 @@ Gabarit :
      l'espace en attente d'une 3e personne (chaque espace reste à 2,
      mais l'utilisateur est alors dans deux espaces ; `getMembreEspace`
      en prend un au hasard, la notification peut partir au mauvais
-     partenaire). Proposition : un seul espace par utilisateur, statut
-     `deja_dans_un_espace`.
+     partenaire). **Tranché le 2026-10-11 : un seul espace ACTIF par
+     utilisateur** — statut `deja_dans_un_espace` (aperçu, adhésion) et
+     refus de `creer_espace_partage`, message « Tu fais déjà partie d'un
+     espace partagé. Quitte-le d'abord pour en rejoindre un autre. ». Un
+     espace en attente (seul dedans) ne bloque pas. Migration
+     `20261011110000_un_seul_espace_actif.sql`, **à exécuter après
+     20261011100000**.
+     Trouvé en revue et corrigé dans la même migration : (a) les membres
+     de l'espace visé sont aussi contrôlés — le code d'un espace en
+     attente dont le créateur est entre-temps entré ailleurs est traité
+     comme expiré ; (b) `quitter_espace_partage` quitte en priorité
+     l'espace actif (avant : `limit 1` au hasard). Reste ouvert (rare,
+     🔵) : deux partenaires qui rejoignent chacun l'espace de l'autre à
+     la même milliseconde obtiennent deux espaces actifs (verrous sur
+     des espaces différents) ; parade possible : verrouiller les lignes
+     `profils` concernées dans un ordre fixe.
   2. Code d'invitation : `VISTA-` + 6 caractères (30 bits), généré avec
      `random()`, sans limite de débit. Plus robuste : pgcrypto
      (`gen_random_bytes`) et 8 caractères ou plus.

@@ -177,6 +177,11 @@ function styleCarte(
       };
 }
 
+// P074 (décision du 2026-10-11) : un seul espace partagé actif par
+// utilisateur — message commun à l'adhésion et à la création.
+const MESSAGE_DEJA_DANS_UN_ESPACE =
+  "Tu fais déjà partie d'un espace partagé. Quitte-le d'abord pour en rejoindre un autre.";
+
 export default function Profil() {
   const router = useRouter();
   const estTablette = useEstTablette();
@@ -515,7 +520,9 @@ export default function Profil() {
     setErreurCreationEspace(null);
     const espace = await creerEspacePartage();
     setCreationEspaceEnCours(false);
-    if (espace) {
+    if (espace === "deja_dans_un_espace") {
+      setErreurCreationEspace(MESSAGE_DEJA_DANS_UN_ESPACE);
+    } else if (espace) {
       setCodeGenere(espace.code);
       setCodeExpireLabel(formaterExpirationCode(espace.expireAt));
       chargerEtatEspacePartage();
@@ -684,6 +691,8 @@ export default function Profil() {
         return "Tu fais déjà partie de cet espace partagé.";
       case "espace_complet":
         return "Cet espace partagé est déjà complet.";
+      case "deja_dans_un_espace":
+        return MESSAGE_DEJA_DANS_UN_ESPACE;
       case "erreur_reseau":
         return "Impossible de rejoindre l'espace pour le moment. Réessaie dans quelques instants.";
     }
@@ -697,7 +706,8 @@ export default function Profil() {
   // chose avait échoué, poussant l'utilisateur à recliquer "Rejoindre"
   // (nouvel appel, même résultat, en boucle) ou à chercher un autre moyen
   // de fermer — bug corrigé. Seules les VRAIES erreurs (code_invalide,
-  // code_expire, espace_complet, erreur_reseau) gardent la modale ouverte avec un message
+  // code_expire, espace_complet, deja_dans_un_espace, erreur_reseau)
+  // gardent la modale ouverte avec un message
   // sous le champ ; la croix en haut à droite, elle, ferme TOUJOURS la
   // modale sans rien faire d'autre (jamais de logique d'annulation dessus,
   // cf. son onPress plus bas) — que la modale soit fermée par elle ou
@@ -2560,6 +2570,8 @@ export default function Profil() {
                     >
                       {erreurCreationEspace}
                     </Text>
+                    {/* Pas de "Réessayer" sur un refus définitif (P074). */}
+                    {erreurCreationEspace !== MESSAGE_DEJA_DANS_UN_ESPACE && (
                     <TouchableOpacity
                       style={[
                         styles.btnSecondaire,
@@ -2574,6 +2586,7 @@ export default function Profil() {
                         Réessayer
                       </Text>
                     </TouchableOpacity>
+                    )}
                   </>
                 ) : codeGenere ? (
                   <>
