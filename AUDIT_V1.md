@@ -3464,6 +3464,41 @@ Gabarit :
      `push_token_partenaire`.
 - **Statut** : **CORRIGÉ (2026-10-11)**, questions 1-3 ouvertes.
 
+### P074 — Espace partagé : confirmation des deux côtés + faille « 3e membre » (2026-10-11)
+
+- **Gravité** : 🔴 CRITIQUE pour la faille (accès aux données d'un couple),
+  🟡 pour la confirmation.
+- **Faille trouvée** : une fois le partenaire entré, le code restait valide
+  jusqu'en 2099 (`desactiver_expiration_espace`) et
+  `rejoindre_espace_par_code` ne comptait pas les membres. Une 3e personne
+  connaissant le code pouvait rejoindre l'espace actif d'un couple et voir
+  ses données. **Correction** (décision de Maëlys) : 2 membres maximum,
+  nouveau statut `espace_complet`, verrou `for update` contre deux
+  adhésions simultanées. Espaces existants inchangés.
+- **Confirmation côté celui qui rejoint** : RPC en lecture seule
+  `apercu_espace_par_code` (prénom du créateur renvoyé seulement si
+  l'adhésion est possible), puis Alert « Rejoindre l'espace de
+  [Prénom] ? » / « Vous pourrez gérer votre budget ensemble. » —
+  Annuler / Rejoindre. L'adhésion ne part que sur « Rejoindre ».
+- **Côté créateur** : push « [Prénom] a rejoint ton espace partagé 🎉 »
+  (même chemin que les événements communs, `envoyerPushPartenaire`) ; app
+  ouverte → pas de bannière, Alert « [Prénom] vient de rejoindre ton espace
+  partagé ! » et rechargement immédiat de l'espace.
+- **Questions pour Maëlys (revue sécurité, non implémentées)** :
+  1. Rien n'empêche un membre d'un couple actif de rejoindre AUSSI
+     l'espace en attente d'une 3e personne (chaque espace reste à 2,
+     mais l'utilisateur est alors dans deux espaces ; `getMembreEspace`
+     en prend un au hasard, la notification peut partir au mauvais
+     partenaire). Proposition : un seul espace par utilisateur, statut
+     `deja_dans_un_espace`.
+  2. Code d'invitation : `VISTA-` + 6 caractères (30 bits), généré avec
+     `random()`, sans limite de débit. Plus robuste : pgcrypto
+     (`gen_random_bytes`) et 8 caractères ou plus.
+- **Migration** : `20261011100000_espace_partage_apercu_et_plafond.sql`,
+  **à exécuter manuellement**. Avant son exécution : l'Alert s'affiche sans
+  prénom, et le plafond n'est pas appliqué.
+- **Statut** : **CORRIGÉ (2026-10-11)**, SQL à exécuter.
+
 ## 3. Vision individuelle — parcours principaux
 
 ### 3.1 Aperçu (`app/(tabs)/index.tsx`)

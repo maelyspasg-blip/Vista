@@ -56,7 +56,11 @@ import {
 } from "../utils/documentsLegaux";
 import { ModaleDocumentLegal } from "./ModaleDocumentLegal";
 import { messageErreurAuth } from "./authErrors";
-import { demanderPermissionNotifications, effacerPushToken } from "./notifications";
+import {
+  demanderPermissionNotifications,
+  effacerPushToken,
+  envoyerNotificationJonctionEspace,
+} from "./notifications";
 import { AccordionItem } from "./AccordionItem";
 import { RapportVisuelCarte } from "./RapportVisuelCarte";
 import { BoutonPrincipal } from "./BoutonPrincipal";
@@ -74,6 +78,7 @@ import {
   premiumUIVisible,
 } from "../utils/premium";
 import {
+  apercuEspacePartage,
   creerEspacePartage,
   EtatEspacePartage,
   getMembreEspace,
@@ -677,6 +682,8 @@ export default function Profil() {
         return "Ce code a expiré. Demande un nouveau code à ton partenaire.";
       case "deja_membre":
         return "Tu fais déjà partie de cet espace partagé.";
+      case "espace_complet":
+        return "Cet espace partagé est déjà complet.";
       case "erreur_reseau":
         return "Impossible de rejoindre l'espace pour le moment. Réessaie dans quelques instants.";
     }
@@ -690,19 +697,59 @@ export default function Profil() {
   // chose avait échoué, poussant l'utilisateur à recliquer "Rejoindre"
   // (nouvel appel, même résultat, en boucle) ou à chercher un autre moyen
   // de fermer — bug corrigé. Seules les VRAIES erreurs (code_invalide,
-  // code_expire, erreur_reseau) gardent la modale ouverte avec un message
+  // code_expire, espace_complet, erreur_reseau) gardent la modale ouverte avec un message
   // sous le champ ; la croix en haut à droite, elle, ferme TOUJOURS la
   // modale sans rien faire d'autre (jamais de logique d'annulation dessus,
   // cf. son onPress plus bas) — que la modale soit fermée par elle ou
   // automatiquement ici ne change jamais ce qui a déjà été fait côté
   // serveur.
+  //
+  // RÈGLE À NE JAMAIS CASSER — CONFIRMATION AVANT D'ADHÉRER (P074,
+  // 2026-10-11) : aperçu en lecture seule (prénom du créateur), puis Alert
+  // "Rejoindre l'espace de [Prénom] ?" — l'adhésion (écriture serveur)
+  // n'est lancée QUE sur "Rejoindre". "Annuler" ne fait rien.
   const rejoindreEspacePartageDepuisModal = async () => {
     const code = codeSaisi.trim();
     if (!code || rejoindreEnCours) return;
     setRejoindreEnCours(true);
     setMessageRejoindre(null);
+    const apercu = await apercuEspacePartage(code);
+    setRejoindreEnCours(false);
+
+    if (!apercu.possible) {
+      if (apercu.raison === "deja_membre") {
+        await terminerJonctionEspace();
+        return;
+      }
+      setMessageRejoindre({
+        type: "erreur",
+        texte: messageEchecRejoindre(apercu.raison),
+      });
+      return;
+    }
+
+    Alert.alert(
+      apercu.prenomCreateur
+        ? `Rejoindre l'espace de ${apercu.prenomCreateur} ?`
+        : "Rejoindre cet espace partagé ?",
+      "Vous pourrez gérer votre budget ensemble.",
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Rejoindre", onPress: () => confirmerJonctionEspace(code) },
+      ],
+    );
+  };
+
+  // Ref et non l'état rejoindreEnCours : ce callback est capturé par l'Alert
+  // au moment de sa création, il lirait toujours l'ancienne valeur (false).
+  const jonctionEnCoursRef = useRef(false);
+  const confirmerJonctionEspace = async (code: string) => {
+    if (jonctionEnCoursRef.current) return;
+    jonctionEnCoursRef.current = true;
+    setRejoindreEnCours(true);
     const resultat = await rejoindreEspacePartage(code);
     setRejoindreEnCours(false);
+    jonctionEnCoursRef.current = false;
 
     if (!resultat.succes && resultat.raison !== "deja_membre") {
       setMessageRejoindre({
@@ -712,6 +759,18 @@ export default function Profil() {
       return;
     }
 
+    // Prévient le créateur (push, ou Alert in-app s'il a l'app ouverte).
+    // Seulement sur une VRAIE adhésion, jamais sur "déjà membre".
+    // Best-effort, jamais attendu.
+    if (resultat.succes && objStore.userId) {
+      envoyerNotificationJonctionEspace(objStore.prenom, objStore.userId).catch(
+        () => {},
+      );
+    }
+    await terminerJonctionEspace();
+  };
+
+  const terminerJonctionEspace = async () => {
     await chargerEtatEspacePartage();
     setModalEspacePartageVisible(false);
     // RÈGLE : recharge aussi le contexte global (switcher

@@ -5,13 +5,23 @@ import { getMembreEspace } from "../utils/espacePartage";
 import { parseDateFixeLocale } from "../utils/dateOnly";
 import type { Evenement } from "./store";
 
+export const TYPE_NOTIF_JONCTION_ESPACE = "jonction_espace";
+
+// RÈGLE : une notification "X a rejoint ton espace" reçue app OUVERTE
+// n'affiche pas de bannière — EspacePartageContext montre une Alert in-app
+// à la place (demande du 2026-10-11). Toutes les autres : bannière normale.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: async (notification) => {
+    const jonction =
+      (notification.request.content.data as { type?: string } | undefined)
+        ?.type === TYPE_NOTIF_JONCTION_ESPACE;
+    return {
+      shouldPlaySound: !jonction,
+      shouldSetBadge: false,
+      shouldShowBanner: !jonction,
+      shouldShowList: !jonction,
+    };
+  },
 });
 
 export async function demanderPermissionNotifications(): Promise<boolean> {
@@ -120,10 +130,12 @@ function formaterDateNotifPush(
 // 20260913120000_planning_partage_push_notifications.sql), qui revalide
 // elle-même le partage d'espace via partage_un_espace_avec(), jamais un
 // `.eq("user_id", partenaireId)` direct sur profils.
-export async function envoyerNotificationEvenementCommun(
-  evenement: Evenement,
-  prenomMoi: string,
+// Envoi d'une notification push à l'AUTRE membre de l'espace partagé actif.
+// Seul chemin d'envoi entre partenaires — cf. RÈGLE ci-dessus (token
+// toujours via la RPC push_token_partenaire). Best-effort, jamais de throw.
+async function envoyerPushPartenaire(
   monUserId: string,
+  message: { title: string; body?: string; data: Record<string, string> },
 ): Promise<void> {
   try {
     const etatEspace = await getMembreEspace();
@@ -143,20 +155,38 @@ export async function envoyerNotificationEvenementCommun(
     await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        to: token,
-        // Libellé demandé le 2026-10-11 (tutoiement, comme le reste de l'app).
-        title: `${prenomMoi.trim() || "Ton partenaire"} t'a invité à un événement`,
-        body: `${evenement.nom} · ${formaterDateNotifPush(evenement)}`,
-        data: { type: "evenement_commun", date: evenement.date },
-      }),
+      body: JSON.stringify({ to: token, ...message }),
     });
   } catch (e) {
-    console.error(
-      "[envoyerNotificationEvenementCommun] échec (best-effort, ignoré) :",
-      e,
-    );
+    console.error("[envoyerPushPartenaire] échec (best-effort, ignoré) :", e);
   }
+}
+
+export async function envoyerNotificationEvenementCommun(
+  evenement: Evenement,
+  prenomMoi: string,
+  monUserId: string,
+): Promise<void> {
+  await envoyerPushPartenaire(monUserId, {
+    // Libellé demandé le 2026-10-11 (tutoiement, comme le reste de l'app).
+    title: `${prenomMoi.trim() || "Ton partenaire"} t'a invité à un événement`,
+    body: `${evenement.nom} · ${formaterDateNotifPush(evenement)}`,
+    data: { type: "evenement_commun", date: evenement.date },
+  });
+}
+
+// RÈGLE (P074, 2026-10-11) : envoyée par celui qui VIENT de rejoindre, au
+// créateur de l'espace. `prenom` voyage dans `data` pour l'Alert in-app
+// affichée quand l'app du créateur est ouverte (EspacePartageContext).
+export async function envoyerNotificationJonctionEspace(
+  prenomMoi: string,
+  monUserId: string,
+): Promise<void> {
+  const prenom = prenomMoi.trim() || "Ton partenaire";
+  await envoyerPushPartenaire(monUserId, {
+    title: `${prenom} a rejoint ton espace partagé 🎉`,
+    data: { type: TYPE_NOTIF_JONCTION_ESPACE, prenom },
+  });
 }
 
 const MINUTES_AVANT_DEBUT = 15;

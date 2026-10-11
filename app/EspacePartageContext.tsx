@@ -8,7 +8,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { AppState } from "react-native";
+import * as Notifications from "expo-notifications";
+import { Alert, AppState, Platform } from "react-native";
 import {
   CategorieFusionnee,
   chargerDonneesPartenaire,
@@ -23,6 +24,7 @@ import {
   modifierModeBalanceEspace,
   SnapshotMoisPartenaire,
 } from "../utils/espacePartage";
+import { TYPE_NOTIF_JONCTION_ESPACE } from "./notifications";
 import { useObjectifs } from "./store";
 
 // RÈGLE À NE JAMAIS CASSER — RESTE DERRIÈRE estEspacePartageActif : ce
@@ -380,6 +382,32 @@ export function EspacePartageProvider({
       }
       etatAppRef.current = etatSuivant;
     });
+    return () => abonnement.remove();
+  }, [rafraichirEspace]);
+
+  // RÈGLE À NE JAMAIS CASSER — PARTENAIRE QUI VIENT DE REJOINDRE, APP
+  // OUVERTE (P074, 2026-10-11) : la bannière push est masquée dans ce cas
+  // (setNotificationHandler, app/notifications.ts), remplacée par cette
+  // Alert in-app. L'espace est rechargé tout de suite : "en attente" →
+  // "actif" sans relancer l'app. App fermée ou en arrière-plan : c'est la
+  // notification push qui s'affiche, et le retour au premier plan
+  // rafraîchit déjà l'espace (effet AppState ci-dessus). Pas sur web
+  // (aucune notification push).
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const abonnement = Notifications.addNotificationReceivedListener(
+      (notification) => {
+        const donnees = notification.request.content.data as
+          | { type?: string; prenom?: string }
+          | undefined;
+        if (donnees?.type !== TYPE_NOTIF_JONCTION_ESPACE) return;
+        // Tronqué : `data` vient du réseau et pourrait être falsifié par
+        // quelqu'un qui connaît le token push (texte arbitraire ou géant).
+        const prenom = donnees.prenom?.trim().slice(0, 50) || "Ton partenaire";
+        Alert.alert(`${prenom} vient de rejoindre ton espace partagé !`);
+        rafraichirEspace();
+      },
+    );
     return () => abonnement.remove();
   }, [rafraichirEspace]);
 

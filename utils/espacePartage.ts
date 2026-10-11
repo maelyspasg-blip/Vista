@@ -43,6 +43,8 @@ export type RaisonEchecRejoindre =
   | "code_invalide"
   | "code_expire"
   | "deja_membre"
+  // P074 (2026-10-11) : un espace compte 2 membres au maximum.
+  | "espace_complet"
   | "erreur_reseau";
 
 export type ResultatRejoindreEspace =
@@ -297,7 +299,8 @@ export async function rejoindreEspacePartage(
     if (
       ligne.statut === "code_invalide" ||
       ligne.statut === "code_expire" ||
-      ligne.statut === "deja_membre"
+      ligne.statut === "deja_membre" ||
+      ligne.statut === "espace_complet"
     ) {
       return { succes: false, raison: ligne.statut };
     }
@@ -321,6 +324,47 @@ export async function rejoindreEspacePartage(
   } catch (e) {
     console.error("rejoindreEspacePartage a échoué :", e);
     return { succes: false, raison: "erreur_reseau" };
+  }
+}
+
+export type ApercuEspace =
+  | { possible: true; prenomCreateur: string | null }
+  | { possible: false; raison: RaisonEchecRejoindre };
+
+// RÈGLE À NE JAMAIS CASSER — APERÇU EN LECTURE SEULE AVANT D'ADHÉRER (P074,
+// 2026-10-11) : sert UNIQUEMENT à afficher "Rejoindre l'espace de
+// [Prénom] ?" — l'adhésion réelle reste rejoindreEspacePartage(), qui
+// revérifie tout côté serveur. RPC apercu_espace_par_code (security
+// definer, aucune écriture, migration 20261011100000). Si la RPC échoue
+// (réseau, migration pas encore exécutée), on laisse quand même confirmer,
+// sans prénom : jamais bloquer l'adhésion sur un simple affichage.
+export async function apercuEspacePartage(code: string): Promise<ApercuEspace> {
+  try {
+    const { data, error } = await supabase.rpc("apercu_espace_par_code", {
+      p_code: code.trim().toUpperCase(),
+    });
+    const ligne = data?.[0];
+    if (error || !ligne) {
+      if (error) {
+        console.error("Supabase rpc apercu_espace_par_code a échoué :", error.message);
+      }
+      return { possible: true, prenomCreateur: null };
+    }
+    if (ligne.statut === "ok") {
+      return { possible: true, prenomCreateur: ligne.cree_par_prenom ?? null };
+    }
+    if (
+      ligne.statut === "code_invalide" ||
+      ligne.statut === "code_expire" ||
+      ligne.statut === "deja_membre" ||
+      ligne.statut === "espace_complet"
+    ) {
+      return { possible: false, raison: ligne.statut };
+    }
+    return { possible: false, raison: "erreur_reseau" };
+  } catch (e) {
+    console.error("apercuEspacePartage a échoué :", e);
+    return { possible: true, prenomCreateur: null };
   }
 }
 
