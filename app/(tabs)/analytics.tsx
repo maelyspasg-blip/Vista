@@ -1716,13 +1716,19 @@ export default function Analytics() {
     ANNEE_ACTUELLE,
     MOIS_ACTUEL,
   );
+  // RÈGLE (P052, aligné le 2026-10-11) : même règle que
+  // totalDepensesMoiMois juste au-dessus — les dépenses d'une catégorie du
+  // partenaire supprimée ce mois-ci restent comptées (argent réellement
+  // sorti). EnveloppePartenaire porte bien supprimeeLe (mappé dans
+  // utils/espacePartage.ts).
   const totalDepensesPartenaireMois =
     vueActive === "partage"
       ? enveloppesPartenaireStats
           .filter(
             (e) =>
               e.type !== "Entrée" &&
-              estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL),
+              (estCategorieActiveCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL) ||
+                estSupprimeeCeMois(e, ANNEE_ACTUELLE, MOIS_ACTUEL)),
           )
           .reduce((acc, e) => acc + e.depense, 0)
       : 0;
@@ -3275,8 +3281,8 @@ export default function Analytics() {
       // ARCHIVÉS (branche historiquesMoisSource ci-dessous) n'ont pas besoin
       // de cet ajout : enveloppesSnapshot (app/store.ts::archiverMoisActuelInterneCoeur)
       // capture déjà une catégorie supprimée dans le snapshot du mois de sa
-      // suppression. Sans effet sur EnveloppePartenaire (estSupprimeeCeMois
-      // retombe sur `false`, ce type ne porte pas ce champ).
+      // suppression. S'applique aussi à EnveloppePartenaire, qui porte
+      // supprimeeLe (mappé dans utils/espacePartage.ts).
       const enveloppesMois =
         mois === MOIS_ACTUEL && annee === ANNEE_ACTUELLE
           ? [
