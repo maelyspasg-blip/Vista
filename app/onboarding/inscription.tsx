@@ -24,6 +24,7 @@ import { Text } from "../Texte";
 import { TextInput } from "../TexteInput";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useTheme } from "../ThemeContext";
+import { RATIO_LOGO_AVEC_TEXTE, sourceLogoAvecTexte } from "../../utils/logoVista";
 import { styleModaleTablette, useEstTablette } from "../useTablette";
 import { remplacerSansHistorique } from "../../utils/navigationRacine";
 import { BoutonGoogle } from "../BoutonGoogle";
@@ -168,7 +169,7 @@ export default function Inscription() {
           pattern que app/onboarding/connexion.tsx. */}
       <View style={[{ flex: 1 }, styleModaleTablette(estTablette, 560)]}>
       <Image
-        source={require("../../assets/images/vista-logo-mark.png")}
+        source={sourceLogoAvecTexte(theme)}
         style={styles.logo}
         resizeMode="contain"
       />
@@ -353,7 +354,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingTop: 64,
   },
-  logo: { width: 28, height: 28, marginBottom: 24 },
+  logo: { width: 56 * RATIO_LOGO_AVEC_TEXTE, height: 56, marginBottom: 24 },
   header: {
     marginBottom: 28,
   },

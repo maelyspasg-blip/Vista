@@ -34,7 +34,10 @@ import { AjoutRapideWidget } from "../widgets/AjoutRapideWidget";
 // écriture Supabase réelle vit dans app/store.ts (cf. RÈGLE DE SÉCURITÉ en
 // tête de ce fichier).
 
-const NOM_FICHIER_LOGO = "vista-logo-mark.png";
+// Nom versionné : le logo est copié une seule fois dans widgetsDirectory
+// (`if (destination.exists)`) — changer de nom à chaque nouveau logo
+// (v2 = logo officiel du 2026-10-11), sinon le widget garde l'ancien.
+const NOM_FICHIER_LOGO = "vista-logo-mark-v2.png";
 
 // Copie une seule fois le logo vers le dossier partagé App Group exposé par
 // expo-widgets (widgetsDirectory) — les widgets tournent dans une extension

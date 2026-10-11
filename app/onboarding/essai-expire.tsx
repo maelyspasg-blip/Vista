@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "../Texte";
 import { BoutonPrincipal } from "../BoutonPrincipal";
 import { useTheme } from "../ThemeContext";
+import { RATIO_LOGO_AVEC_TEXTE, sourceLogoAvecTexte } from "../../utils/logoVista";
 
 // Écran terminal atteint uniquement via la redirection forcée de
 // app/_layout.tsx quand un essai invité a expiré (estGuestExpire) — pas de
@@ -29,7 +30,7 @@ export default function EssaiExpire() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <Image
-        source={require("../../assets/images/vista-logo-mark.png")}
+        source={sourceLogoAvecTexte(theme)}
         style={styles.logo}
         resizeMode="contain"
       />
@@ -70,7 +71,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingTop: 64,
   },
-  logo: { width: 28, height: 28, marginBottom: 24 },
+  logo: { width: 56 * RATIO_LOGO_AVEC_TEXTE, height: 56, marginBottom: 24 },
   contenu: {
     flex: 1,
     justifyContent: "center",
