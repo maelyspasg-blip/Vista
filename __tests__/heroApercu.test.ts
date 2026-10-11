@@ -197,19 +197,19 @@ describe("fusionnerCategoriesParNom — Entrées", () => {
 });
 
 describe("calculerResteHeroArchive", () => {
-  it("revenus reçus − dépensé − épargne, sans le prévu ni `disponible`", () => {
+  it("revenus reçus − dépensé − épargne − prévu non dépensé, sans `disponible`", () => {
     expect(
       calculerResteHeroArchive({
         enveloppes: [
           { id: "s", nom: "Salaire", depense: 2000, budget: 2000, type: "Entrée" },
-          // Budget 500, dépensé 300 : les 200 € prévus non dépensés ne sont
-          // PAS retirés.
+          // Budget 500, dépensé 300 : les 200 € prévus non dépensés sont
+          // retirés (règle 1, P076, 2026-10-11).
           { id: "c", nom: "Courses", depense: 300, budget: 500, type: "Variable" },
           { id: "l", nom: "Loyer", depense: 800, budget: 800, type: "Fixe" },
         ],
         epargne: 100,
       }),
-    ).toBe(800);
+    ).toBe(600);
   });
 });
 

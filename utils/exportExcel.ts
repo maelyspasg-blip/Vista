@@ -198,22 +198,34 @@ export function totalParType(envs: CategorieExport[], estEntree: boolean): numbe
     .reduce((acc, e) => acc + e.depense, 0);
 }
 
+// Budget prévu non dépensé d'un mois archivé (somme, par catégorie de
+// dépense, de budget − dépense, jamais négatif) — partagé par les deux
+// formules "reste" ci-dessous pour qu'elles ne divergent jamais.
+function prevuNonDepenseArchive(enveloppes: CategorieExport[]): number {
+  return enveloppes
+    .filter((e) => e.type !== "Entrée")
+    .reduce((acc, e) => acc + Math.max(0, e.budget - e.depense), 0);
+}
+
 // Variante pour le delta "vs mois dernier" du HERO d'Aperçu UNIQUEMENT
-// (2026-10-09) : rejoue sur le snapshot la formule du "Reste estimé en fin
-// de mois" du hero (cf. RÈGLE "HERO D'APERÇU" dans app/(tabs)/index.tsx) :
-// revenus reçus (depense des Entrées archivées) − dépensé (depense des
-// autres catégories) − épargne du mois. "À recevoir" vaut 0 sur un mois
-// clos. N'utilise volontairement PAS `snapshot.disponible`, qui contient
+// (2026-10-09, prévu ajouté le 2026-10-11, P076) : rejoue sur le snapshot
+// la formule du "Reste estimé en fin de mois" du hero (cf. RÈGLE dans
+// utils/budget.ts::calculerResteEstimeFinDeMois) : revenus reçus (depense
+// des Entrées archivées) − dépensé (depense des autres catégories) −
+// épargne du mois − prévu non dépensé (budget − dépense, par catégorie).
+// "À recevoir" vaut 0 sur un mois clos. N'utilise volontairement PAS `snapshot.disponible`, qui contient
 // aussi les entrées attendues jamais reçues (budgetDuMois = reçu + attendu,
 // app/store.ts) — le hero ne compte que l'argent effectivement reçu.
 export function calculerResteHeroArchive(snapshot: {
   enveloppes: CategorieExport[];
   epargne: number;
 }): number {
+  const totalPrevu = prevuNonDepenseArchive(snapshot.enveloppes);
   return (
     totalParType(snapshot.enveloppes, true) -
     totalParType(snapshot.enveloppes, false) -
-    snapshot.epargne
+    snapshot.epargne -
+    totalPrevu
   );
 }
 
@@ -232,9 +244,7 @@ export function calculerResteEstimeArchive(snapshot: {
   epargne: number;
   disponible: number;
 }): number {
-  const totalPrevu = snapshot.enveloppes
-    .filter((e) => e.type !== "Entrée")
-    .reduce((acc, e) => acc + Math.max(0, e.budget - e.depense), 0);
+  const totalPrevu = prevuNonDepenseArchive(snapshot.enveloppes);
   // RÈGLE À NE JAMAIS CASSER — PAS DE DOUBLE COMPTAGE DES ENTRÉES (bug
   // corrigé le 2026-10-09, P066, demande de Maëlys) : `snapshot.disponible`
   // VAUT DÉJÀ la somme des entrées du mois archivé (budgetDuMois = reçu +

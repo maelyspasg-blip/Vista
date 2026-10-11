@@ -51,7 +51,9 @@ import {
 } from "../../utils/exportExcel";
 import { trouverDepenseDominante } from "../../utils/conseils";
 import {
+  calculerDisponibleMaintenant,
   calculerResteEstimeCourant,
+  calculerTotalDepensesEtImmobilise,
   entreesAffichablesDuMois,
   estCategorieActiveCeMois,
   revenusDuMoisHero,
@@ -819,9 +821,10 @@ export default function Budget() {
       MOIS_ACTUEL,
     );
   const totalEpargne = epargneMoisAffiche;
-  // RÈGLE (demande du 2026-10-10) : carte "Disponible maintenant" = cash
-  // restant À DATE = revenus déjà REÇUS ce mois − dépenses réelles déjà
-  // faites — ni budget prévu, ni épargne, ni entrées encore attendues.
+  // RÈGLE (demande du 2026-10-10, épargne ajoutée le 2026-10-11, P076) :
+  // carte "Disponible maintenant" = cash restant À DATE = revenus déjà
+  // REÇUS ce mois − dépenses réelles déjà faites − argent immobilisé — ni
+  // budget prévu, ni entrées encore attendues.
   // Revenus reçus calculés EXACTEMENT comme le hero d'Aperçu (mêmes lignes,
   // entreesAffichablesDuMois + revenusDuMoisHero) et sur les mêmes
   // catégories que totalDepenses (enveloppesAffichees) — jamais une source
@@ -835,7 +838,18 @@ export default function Budget() {
     ),
     new Date(),
   );
-  const disponibleMaintenant = revenusRecusCeMois - totalDepenses;
+  // Règles 2 et 3 (P076, 2026-10-11) — cf. RÈGLE dans utils/budget.ts :
+  // l'argent immobilisé (épargne + objectifs) est retiré du disponible et
+  // ajouté au total de la carte "Dépenses et argent immobilisé".
+  const disponibleMaintenant = calculerDisponibleMaintenant({
+    revenusRecus: revenusRecusCeMois,
+    depensesActuelles: totalDepenses,
+    argentImmobilise: totalEpargne,
+  });
+  const totalDepensesEtImmobilise = calculerTotalDepensesEtImmobilise({
+    depensesActuelles: totalDepenses,
+    argentImmobilise: totalEpargne,
+  });
   // ⚠️ Jauge "Dépenses et argent immobilisé" : UNIQUEMENT ces deux segments
   // (pctDepenses, pctEpargne/pctEpargneGenerique/pctObjectifs). Les entrées
   // d'argent (reçues/prévues) ne doivent jamais y apparaître — elles sont
@@ -861,12 +875,17 @@ export default function Budget() {
   const snapshotMoisPrecedentTotal = objStore.historiquesMois.find(
     (s) => s.mois === moisPrecTotal && s.annee === anneePrecTotal,
   );
+  // Même définition que le grand chiffre (règle 3) : dépenses + épargne du
+  // mois archivé — jamais comparer un total avec épargne à un total sans.
   const totalDepensesPrecedent = snapshotMoisPrecedentTotal
-    ? totalParType(snapshotMoisPrecedentTotal.enveloppes, false)
+    ? calculerTotalDepensesEtImmobilise({
+        depensesActuelles: totalParType(snapshotMoisPrecedentTotal.enveloppes, false),
+        argentImmobilise: snapshotMoisPrecedentTotal.epargne,
+      })
     : null;
   const deltaDepensesTotal =
     totalDepensesPrecedent !== null
-      ? totalDepenses - totalDepensesPrecedent
+      ? totalDepensesEtImmobilise - totalDepensesPrecedent
       : null;
   // Comparaison en % en plus du delta en €, togglable au clic sur la valeur.
   const pctDeltaDepensesTotal =
@@ -882,7 +901,10 @@ export default function Budget() {
         .map((s) => ({
           mois: s.mois,
           annee: s.annee,
-          montant: totalParType(s.enveloppes, false),
+          montant: calculerTotalDepensesEtImmobilise({
+            depensesActuelles: totalParType(s.enveloppes, false),
+            argentImmobilise: s.epargne,
+          }),
         }))
         .reverse()
     : [];
@@ -1699,7 +1721,7 @@ export default function Budget() {
             />
           </View>
           <NombreAnime
-            valeur={totalDepenses}
+            valeur={totalDepensesEtImmobilise}
             style={[
               styles.heroAmount,
               { color: theme === "sombre" ? "#FFFFFF" : C.texte },
@@ -1782,7 +1804,7 @@ export default function Budget() {
                 </TouchableOpacity>
                 <InfoBulle
                   titre="Comparaison au mois dernier"
-                  texte="Comparé au total des dépenses du mois dernier entier, une fois ce mois-là clos."
+                  texte="Comparé au total des dépenses et de l'argent immobilisé du mois dernier entier, une fois ce mois-là clos."
                   couleur={theme === "sombre" ? "rgba(255,255,255,0.6)" : C.texteMuted}
                 />
               </View>

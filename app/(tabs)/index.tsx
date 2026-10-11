@@ -10,6 +10,7 @@ import {
 } from "../../utils/exportExcel";
 import {
   calculerResteEstimeCourant,
+  calculerResteEstimeFinDeMois,
   estCategorieActiveCeMois,
   nomReservePar,
   entreesAffichablesDuMois,
@@ -922,15 +923,15 @@ export default function Dashboard() {
   // des MÊMES lignes que la liste "entrées ce mois-ci" (entreesBudgetTriees,
   // utils/budget.ts::entreesAffichablesDuMois) et des mêmes dépenses que
   // calculerResteEstimeCourant, jamais d'une source parallèle :
-  //   - resteActuelHero = revenus REÇUS ce mois (statut "recue") − déjà
+  //   - resteEstimeHero = revenus REÇUS ce mois (statut "recue") − déjà
   //     dépensé (totalDepenseEnveloppes) − argent immobilisé du mois
-  //     (épargne/objectifs, décision de Maëlys : le budget prévu non
-  //     dépensé n'est PAS retiré) — calcul intermédiaire, plus affiché ;
+  //     (épargne/objectifs) − dépenses prévues (totalDepensePrevue, retirées
+  //     depuis le 2026-10-11, P076) + aRecevoirCeMoisHero (grand chiffre,
+  //     delta "vs mois dernier" et bandeau) — formule unique :
+  //     utils/budget.ts::calculerResteEstimeFinDeMois ;
   //   - aRecevoirCeMoisHero = montant attendu des entrées "à venir" dont la
   //     date de réception tombe DANS le mois civil en cours — jamais une
-  //     date d'un mois suivant, même comptée pour ce mois ;
-  //   - resteEstimeHero = resteActuelHero + aRecevoirCeMoisHero (grand
-  //     chiffre, delta "vs mois dernier" et bandeau).
+  //     date d'un mois suivant, même comptée pour ce mois.
   // Ligne de précision teal sous le chiffre, UNIQUEMENT s'il y a quelque
   // chose à recevoir : "En comptant [Nom] du [jour] (+[montant] €)" pour
   // une seule entrée, "En comptant [X] € à recevoir ce mois-ci" sinon.
@@ -944,9 +945,16 @@ export default function Dashboard() {
     aRecevoir: aRecevoirCeMoisHero,
     aRecevoirDetail: aRecevoirDetailHero,
   } = revenusDuMoisHero(entreesBudgetTriees, maintenant);
-  const resteActuelHero =
-    recuCeMoisHero - totalDepenseEnveloppes - epargneMoisAffiche;
-  const resteEstimeHero = resteActuelHero + aRecevoirCeMoisHero;
+  // Règle 1 (P076, 2026-10-11) — cf. RÈGLE dans utils/budget.ts::
+  // calculerResteEstimeFinDeMois : les dépenses prévues sont désormais
+  // RETIRÉES (remplace la décision du 2026-10-09 qui ne les retirait pas).
+  const resteEstimeHero = calculerResteEstimeFinDeMois({
+    revenusRecus: recuCeMoisHero,
+    depensesActuelles: totalDepenseEnveloppes,
+    argentImmobilise: epargneMoisAffiche,
+    depensesPrevues: totalDepensePrevue,
+    entreesAVenir: aRecevoirCeMoisHero,
+  });
   const lignePrecisionHero =
     aRecevoirDetailHero.length === 1
       ? `En comptant ${aRecevoirDetailHero[0].nom} du ${formaterDateLongue(aRecevoirDetailHero[0].dateFixe)} (+${formaterMontant(aRecevoirDetailHero[0].montant)} €)`
@@ -954,7 +962,7 @@ export default function Dashboard() {
         ? `En comptant ${formaterMontant(aRecevoirCeMoisHero)} € à recevoir ce mois-ci`
         : null;
   // Delta "vs mois dernier" du hero : comparé à la MÊME formule rejouée sur
-  // le snapshot (calculerResteHeroArchive, sans le prévu non dépensé) —
+  // le snapshot (calculerResteHeroArchive, prévu non dépensé compris) —
   // jamais à resteEstimePrecedent (formule complète, qui reste celle des
   // conseils).
   const resteHeroPrecedent = snapshotMoisPrecedent
@@ -2113,7 +2121,7 @@ export default function Dashboard() {
               onPress={() =>
                 Alert.alert(
                   "Comment est calculé ce montant ?",
-                  "Le reste estimé fin de mois correspond à ce que tu as déjà reçu ce mois-ci, moins tes dépenses et ton épargne, plus les entrées d'argent que tu attends encore ce mois-ci. C'est une projection de ce qu'il te restera en fin de mois si tes habitudes restent les mêmes.",
+                  "Le reste estimé fin de mois correspond à ce que tu as déjà reçu ce mois-ci, moins tes dépenses, ton argent immobilisé (épargne et objectifs) et les dépenses encore prévues dans tes catégories, plus les entrées d'argent que tu attends encore ce mois-ci. C'est une projection de ce qu'il te restera en fin de mois si tes habitudes restent les mêmes.",
                   [{ text: "Compris" }],
                 )
               }

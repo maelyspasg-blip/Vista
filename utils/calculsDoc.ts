@@ -25,7 +25,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "RESTE ESTIMÉ FIN DE MOIS",
         explication:
-          "Le chiffre principal, toujours sous ce titre : l'argent déjà reçu ce mois-ci (les entrées listées comme « reçu » ci-dessus), moins ce qui est déjà dépensé (Dépensé), moins l'argent immobilisé (épargne + objectifs mis de côté ce mois-ci), plus les entrées encore à recevoir dont la date de réception tombe plus tard dans le mois en cours (jamais une date d'un mois suivant). Le budget encore prévu mais pas dépensé dans tes catégories n'est pas retiré. Un dépassement estimé s'affiche en négatif, en rouge. En vue partagée, les entrées des deux comptes sont additionnées, chacune avec sa propre date.",
+          "Le chiffre principal, toujours sous ce titre : l'argent déjà reçu ce mois-ci (les entrées listées comme « reçu » ci-dessus), moins ce qui est déjà dépensé (Dépensé), moins l'argent immobilisé (épargne + objectifs mis de côté ce mois-ci), moins les dépenses encore prévues (le budget de tes catégories pas encore dépensé), plus les entrées encore à recevoir dont la date de réception tombe plus tard dans le mois en cours (jamais une date d'un mois suivant). Un dépassement estimé s'affiche en négatif, en rouge. En vue partagée, les entrées des deux comptes sont additionnées, chacune avec sa propre date.",
       },
       {
         titre: "En comptant…",
@@ -40,12 +40,12 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Nos conseils",
         explication:
-          "Sous le bandeau de projection, jusqu'à 3 phrases de coaching courtes, sans jargon, choisies parmi une dizaine de règles possibles et classées par ordre de priorité (dépassement de budget en premier, bonnes nouvelles en dernier) — seules les 2-3 plus pertinentes du moment s'affichent, jamais une liste qui s'allonge. Chaque règle regarde un signal déjà utilisé ailleurs dans l'app (une projection de fin de mois qui, elle, retire aussi le budget prévu non dépensé, le taux d'épargne et le rythme des objectifs de Stats, la plus grosse dépense de Budget) ou compare le cumul de dépenses d'une catégorie à celui du mois dernier au même jour. Une puce verte signale une bonne nouvelle, orange une vigilance, rouge une alerte (dépassement réel ou quasi certain). Recalculé à chaque rendu à partir des données du mois en cours, jamais mis en cache.",
+          "Sous le bandeau de projection, jusqu'à 3 phrases de coaching courtes, sans jargon, choisies parmi une dizaine de règles possibles et classées par ordre de priorité (dépassement de budget en premier, bonnes nouvelles en dernier) — seules les 2-3 plus pertinentes du moment s'affichent, jamais une liste qui s'allonge. Chaque règle regarde un signal déjà utilisé ailleurs dans l'app (une projection de fin de mois qui retire aussi le budget prévu non dépensé, le taux d'épargne et le rythme des objectifs de Stats, la plus grosse dépense de Budget) ou compare le cumul de dépenses d'une catégorie à celui du mois dernier au même jour. Une puce verte signale une bonne nouvelle, orange une vigilance, rouge une alerte (dépassement réel ou quasi certain). Recalculé à chaque rendu à partir des données du mois en cours, jamais mis en cache.",
       },
       {
         titre: "+X € / +X % vs mois dernier",
         explication:
-          "Écart entre le « RESTE ESTIMÉ FIN DE MOIS » de ce mois et celui du mois dernier archivé, rejoué avec la même formule (revenus − dépensé − argent immobilisé, sans le budget prévu non dépensé) sur les valeurs figées du mois précédent. Un tap sur la valeur bascule l'affichage entre euros et pourcentage (pourcentage non disponible si le reste du mois dernier était nul).",
+          "Écart entre le « RESTE ESTIMÉ FIN DE MOIS » de ce mois et celui du mois dernier archivé, rejoué avec la même formule (revenus reçus − dépensé − argent immobilisé − budget prévu non dépensé) sur les valeurs figées du mois précédent. Un tap sur la valeur bascule l'affichage entre euros et pourcentage (pourcentage non disponible si le reste du mois dernier était nul).",
       },
       {
         titre: "Ordre des segments de la barre de progression et de sa légende",
@@ -90,7 +90,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Reporter le reste non dépensé",
         explication:
-          "Ce switch, affiché directement sur la carte BUDGET, détermine ce qui alimente le Budget du mois suivant. À la clôture du mois, le reste reporté est calculé uniquement à partir de ce qui a été réellement réalisé, jamais des dépenses encore prévues : BUDGET du mois − dépenses réelles − épargne mise de côté. Si le switch est activé, ce reste réalisé devient automatiquement une nouvelle entrée « Report du mois précédent » comptée pour le mois suivant. Séparément, chaque entrée de Budget marquée \"Répéter ce montant chaque mois\" est elle aussi reconduite pour le mois suivant sous forme d'une nouvelle entrée identique — les deux mécanismes s'additionnent, ils ne s'excluent pas. Comme BUDGET compte aussi les entrées encore attendues, ce total peut différer du « RESTE ESTIMÉ FIN DE MOIS » du hero, qui ne compte que l'argent reçu et celui attendu plus tard dans le mois.",
+          "Ce switch, affiché directement sur la carte BUDGET, détermine ce qui alimente le Budget du mois suivant. À la clôture du mois, le reste reporté est calculé uniquement à partir de ce qui a été réellement réalisé, jamais des dépenses encore prévues : BUDGET du mois − dépenses réelles − épargne mise de côté. Si le switch est activé, ce reste réalisé devient automatiquement une nouvelle entrée « Report du mois précédent » comptée pour le mois suivant. Séparément, chaque entrée de Budget marquée \"Répéter ce montant chaque mois\" est elle aussi reconduite pour le mois suivant sous forme d'une nouvelle entrée identique — les deux mécanismes s'additionnent, ils ne s'excluent pas. Comme BUDGET compte aussi les entrées encore attendues, ce total peut différer du « RESTE ESTIMÉ FIN DE MOIS » du hero, qui ne compte que l'argent reçu et celui attendu plus tard dans le mois, et retire en plus les dépenses encore prévues.",
       },
     ],
   },
@@ -105,7 +105,7 @@ export const CALCULS_DOC: PageCalculs[] = [
       {
         titre: "Disponible maintenant",
         explication:
-          "Petite carte sous le chiffre principal : l'argent qu'il te reste en ce moment, à date — tes revenus déjà reçus ce mois-ci (les entrées « reçues », calculées comme sur Aperçu) moins tes dépenses réelles déjà faites. Ni le budget encore prévu, ni l'épargne, ni les entrées encore attendues ne sont pris en compte. En rouge si tu as dépensé plus que ce que tu as reçu. Sur la même ligne, à droite, ton budget mensuel (la somme de tes entrées du mois, reçues et attendues) pour comparaison.",
+          "Petite carte sous le chiffre principal : l'argent qu'il te reste en ce moment, à date — tes revenus déjà reçus ce mois-ci (les entrées « reçues », calculées comme sur Aperçu) moins tes dépenses réelles déjà faites, moins l'argent immobilisé (épargne et objectifs mis de côté ce mois-ci). Ni le budget encore prévu, ni les entrées encore attendues ne sont pris en compte. En rouge si ce montant est négatif. Sur la même ligne, à droite, ton budget mensuel (la somme de tes entrées du mois, reçues et attendues) pour comparaison.",
       },
       {
         titre: "+X € vs mois dernier (au J)",

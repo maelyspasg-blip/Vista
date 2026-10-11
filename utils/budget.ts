@@ -447,3 +447,49 @@ export function calculerResteEstimeCourant(
     disponibleEffectif - totalDepenseEnveloppes - totalDepensePrevue - epargneMois;
   return { disponibleEffectif, totalDepenseEnveloppes, totalDepensePrevue, resteEstime };
 }
+
+// RÈGLE À NE JAMAIS CASSER — LES TROIS CHIFFRES DU MOIS EN COURS (règles
+// incassables de Maëlys, 2026-10-11, P076) : SEULES formules de ces trois
+// valeurs, jamais recalculées localement dans un écran.
+//   1. Reste estimé fin de mois (hero d'Aperçu) =
+//      revenus reçus − dépenses actuelles − argent immobilisé
+//      − dépenses prévues + entrées à venir ce mois-ci
+//   2. Disponible maintenant (carte Budget) =
+//      revenus reçus − dépenses actuelles − argent immobilisé
+//      (jamais les dépenses prévues ni les entrées à venir)
+//   3. Total "Dépenses et argent immobilisé" (Budget) =
+//      dépenses actuelles + argent immobilisé (épargne + objectifs)
+// Définitions des termes : revenus reçus / entrées à venir =
+// revenusDuMoisHero (recu / aRecevoir) ; dépenses actuelles /
+// dépenses prévues = calculerResteEstimeCourant (totalDepenseEnveloppes /
+// totalDepensePrevue) ; argent immobilisé = epargneMois du mois (épargne +
+// versements aux objectifs).
+export type ChiffresDuMois = {
+  revenusRecus: number;
+  depensesActuelles: number;
+  argentImmobilise: number;
+  depensesPrevues: number;
+  entreesAVenir: number;
+};
+
+export function calculerResteEstimeFinDeMois(c: ChiffresDuMois): number {
+  return (
+    c.revenusRecus -
+    c.depensesActuelles -
+    c.argentImmobilise -
+    c.depensesPrevues +
+    c.entreesAVenir
+  );
+}
+
+export function calculerDisponibleMaintenant(
+  c: Pick<ChiffresDuMois, "revenusRecus" | "depensesActuelles" | "argentImmobilise">,
+): number {
+  return c.revenusRecus - c.depensesActuelles - c.argentImmobilise;
+}
+
+export function calculerTotalDepensesEtImmobilise(
+  c: Pick<ChiffresDuMois, "depensesActuelles" | "argentImmobilise">,
+): number {
+  return c.depensesActuelles + c.argentImmobilise;
+}

@@ -3535,6 +3535,30 @@ Gabarit :
   applique la règle.
 - **Statut** : **CORRIGÉ (2026-10-11)**.
 
+### P076 — Règles incassables des chiffres du mois (signalé le 2026-10-11)
+
+- **Gravité** : 🔴 CRITIQUE (calculs financiers affichés faux).
+- **Règles** (Maëlys) :
+  1. Reste estimé fin de mois (hero Aperçu) = revenus reçus − dépenses
+     actuelles − argent immobilisé − dépenses prévues + entrées à venir ce
+     mois-ci. Avant : dépenses prévues NON retirées (décision du
+     2026-10-09, remplacée).
+  2. Disponible maintenant (Budget) = revenus reçus − dépenses actuelles −
+     argent immobilisé. Avant : argent immobilisé non retiré.
+  3. Total « Dépenses et argent immobilisé » (Budget) = dépenses actuelles
+     + argent immobilisé. Avant : dépenses seules, malgré le titre et la
+     bulle d'info.
+- **Correction** : trois fonctions uniques dans `utils/budget.ts`
+  (`calculerResteEstimeFinDeMois`, `calculerDisponibleMaintenant`,
+  `calculerTotalDepensesEtImmobilise`), appelées par Aperçu et Budget.
+  Alignés : delta « vs mois dernier » du hero (`calculerResteHeroArchive`,
+  prévu non dépensé retiré) et de la carte Budget (+ épargne archivée),
+  historique de la carte, textes de « Détail des calculs ». Tests :
+  `__tests__/chiffresDuMois.test.ts` (exemple 2409/656/500 → 1253 et 1156).
+- **Inchangé** : `calculerResteEstimeCourant` (conseils, jauge) et les
+  entrées (`entreesBudgetDuMois`), déjà conformes.
+- **Statut** : **CORRIGÉ (2026-10-11)**.
+
 ## 3. Vision individuelle — parcours principaux
 
 ### 3.1 Aperçu (`app/(tabs)/index.tsx`)
