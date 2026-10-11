@@ -28,7 +28,9 @@ import { useTheme } from "./ThemeContext";
 // "Détail des calculs", dans une modale), menus (bouton "+"), pickers de
 // formulaire (palettes, calendriers), modes d'édition, sélecteurs de
 // catégories, et le détail d'une catégorie au tap (un seul ouvert à la
-// fois). Une préférence déjà mémorisée par l'utilisateur (AsyncStorage,
+// fois). Exceptions explicites (demande du 2026-10-11), FERMÉES par
+// défaut : le détail "Argent immobilisé" (Aperçu et Budget) et "Voir
+// l'historique" de Budget. Une préférence déjà mémorisée par l'utilisateur (AsyncStorage,
 // SectionCollapsable d'Aperçu) reste prioritaire. Tout nouveau tiroir de
 // contenu suit cette règle.
 export function TiroirStats({

@@ -690,8 +690,9 @@ export default function Dashboard() {
     ? objStore.epargneMois + (epargneMoisPartenaireActuelle ?? 0)
     : objStore.epargneMois;
   const [deltaRestePourcentage, setDeltaRestePourcentage] = useState(false);
-  // Cf. RÈGLE "TIROIRS OUVERTS PAR DÉFAUT" (app/TiroirStats.tsx).
-  const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(true);
+  // Exception RÈGLE tiroirs : fermé par défaut sur demande explicite
+  // (2026-10-11, cf. RÈGLE "TIROIRS OUVERTS PAR DÉFAUT", app/TiroirStats.tsx).
+  const [argentImmobiliseOuvert, setArgentImmobiliseOuvert] = useState(false);
   const [triCategories, setTriCategories] = useState<
     "alpha" | "montantAsc" | "montantDesc"
   >("montantDesc");
