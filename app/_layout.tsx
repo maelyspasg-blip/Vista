@@ -29,7 +29,7 @@ import {
   getPresentationVue,
   marquerPresentationVue,
 } from "./onboardingStorage";
-import { enregistrerPushToken } from "./notifications";
+import { enregistrerPushToken, synchroniserRappelsSaisie } from "./notifications";
 import { SplashScreen } from "./SplashScreen";
 import { Theme, ThemeProvider } from "./ThemeContext";
 import { getThemeCache, setThemeCache } from "./themeStorage";
@@ -458,10 +458,35 @@ function RootLayoutInterne() {
   // faire qu'une fois. Entièrement best-effort (cf. RÈGLE détaillée dans
   // app/notifications.ts::enregistrerPushToken) : permission refusée ou
   // token indisponible ne bloquent jamais l'app, jamais d'erreur visible.
+  // RÈGLE À NE JAMAIS CASSER — RAPPELS DE SAISIE (P077, 2026-10-11, cf.
+  // app/notifications.ts::synchroniserRappelsSaisie) : synchronisés à
+  // chaque session active, APRÈS la demande de permission faite par
+  // enregistrerPushToken, puis à chaque retour au premier plan — une
+  // permission accordée ou retirée dans les réglages du téléphone est
+  // ainsi prise en compte. Jamais pour un compte invité (lecture seule) ;
+  // sans session, rien n'est replanifié (déconnexion : cf. profil.tsx).
+  // Un seul effet pour les deux : l'enregistrement du token (qui demande la
+  // permission) se termine TOUJOURS avant la première synchronisation.
+  // `profilCharge` : isGuest n'est connu qu'avec le profil (posé en même
+  // temps que onboardingComplete) — sans cette attente, un invité pouvait
+  // recevoir des rappels planifiés avant que isGuest passe à vrai.
+  const userIdNotifications = session?.user?.id ?? null;
+  const profilCharge = onboardingComplete !== null;
   useEffect(() => {
-    if (!session?.user?.id) return;
-    enregistrerPushToken(session.user.id);
-  }, [session?.user?.id]);
+    if (!userIdNotifications || !profilCharge) return;
+    const autorise = !isGuest;
+    let annule = false;
+    enregistrerPushToken(userIdNotifications).finally(() => {
+      if (!annule) synchroniserRappelsSaisie(autorise);
+    });
+    const abonnement = AppState.addEventListener("change", (etatApp) => {
+      if (etatApp === "active") synchroniserRappelsSaisie(autorise);
+    });
+    return () => {
+      annule = true;
+      abonnement.remove();
+    };
+  }, [userIdNotifications, profilCharge, isGuest]);
 
   // RÈGLE À NE JAMAIS CASSER — TAP SUR UNE NOTIFICATION PUSH → PLANNING
   // (demande du 2026-09-13, corrigé le 2026-10-11) : useLastNotificationResponse

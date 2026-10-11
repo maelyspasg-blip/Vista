@@ -60,6 +60,10 @@ import {
   demanderPermissionNotifications,
   effacerPushToken,
   envoyerNotificationJonctionEspace,
+  lirePreferenceRappel,
+  modifierRappelSaisie,
+  synchroniserRappelsSaisie,
+  type TypeRappelSaisie,
 } from "./notifications";
 import { AccordionItem } from "./AccordionItem";
 import { RapportVisuelCarte } from "./RapportVisuelCarte";
@@ -1015,6 +1019,42 @@ export default function Profil() {
     fermerModalMotDePasse();
   };
 
+  // Rappels de saisie (P077) : préférence par appareil, activés par défaut —
+  // cf. RÈGLE dans app/notifications.ts. Lue au montage ; l'interrupteur
+  // revient à faux si la permission est refusée.
+  const [rappelHebdo, setRappelHebdo] = useState(true);
+  const [rappelFinDeMois, setRappelFinDeMois] = useState(true);
+  // Un choix fait avant la fin de la lecture initiale n'est jamais écrasé.
+  const rappelModifieRef = useRef(false);
+  useEffect(() => {
+    let annule = false;
+    Promise.all([
+      lirePreferenceRappel("hebdo"),
+      lirePreferenceRappel("finDeMois"),
+    ]).then(([hebdo, finDeMois]) => {
+      if (annule || rappelModifieRef.current) return;
+      setRappelHebdo(hebdo);
+      setRappelFinDeMois(finDeMois);
+    });
+    return () => {
+      annule = true;
+    };
+  }, []);
+  const toggleRappel = async (type: TypeRappelSaisie, valeur: boolean) => {
+    if (bloquerSiInvite(isGuest, router)) return;
+    rappelModifieRef.current = true;
+    const setter = type === "hebdo" ? setRappelHebdo : setRappelFinDeMois;
+    setter(valeur);
+    const ok = await modifierRappelSaisie(type, valeur);
+    if (!ok && valeur) {
+      setter(false);
+      Alert.alert(
+        "Notifications refusées",
+        "Autorise les notifications dans les réglages de ton téléphone pour activer ce rappel.",
+      );
+    }
+  };
+
   const toggleNotifications = async (valeur: boolean) => {
     // Compte invité en lecture seule (revue sécurité du 2026-10-10).
     if (bloquerSiInvite(isGuest, router)) return;
@@ -1035,6 +1075,9 @@ export default function Profil() {
   const confirmerDeconnexion = async () => {
     // Cf. RÈGLE dans app/notifications.ts::effacerPushToken — avant signOut.
     await effacerPushToken();
+    // Plus de rappels de saisie sur cet appareil sans compte connecté
+    // (replanifiés à la prochaine connexion, cf. app/_layout.tsx).
+    await synchroniserRappelsSaisie(false);
     await supabase.auth.signOut();
     // RÈGLE À NE JAMAIS CASSER — DÉFENSE EN PROFONDEUR : le listener
     // onAuthStateChange dans app/store.ts fait déjà cette réinitialisation
@@ -1104,6 +1147,8 @@ export default function Profil() {
       setSuppressionEnCours(false);
     }
 
+    // Compte supprimé : plus aucun rappel de saisie sur cet appareil.
+    await synchroniserRappelsSaisie(false);
     await supabase.auth.signOut();
     // RÈGLE : même défense en profondeur que confirmerDeconnexion ci-dessus
     // — d'autant plus importante ici, un compte supprimé ne doit à aucun
@@ -1360,6 +1405,45 @@ export default function Profil() {
               accessibilityLabel="Notifications"
             />
           </View>
+
+          {/* Rappels de saisie (P077) : notifications locales, absentes du web. */}
+          {Platform.OS !== "web" && (
+          <>
+          <View style={[styles.switchRow, { marginTop: 18 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.switchLabel, { color: C.texte }]}>
+                Rappel hebdomadaire
+              </Text>
+              <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                Le dimanche à 18h, pour saisir tes dépenses de la semaine
+              </Text>
+            </View>
+            <Switch
+              value={rappelHebdo}
+              onValueChange={(valeur) => toggleRappel("hebdo", valeur)}
+              {...couleursInterrupteur(C)}
+              accessibilityLabel="Rappel hebdomadaire"
+            />
+          </View>
+
+          <View style={[styles.switchRow, { marginTop: 18 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.switchLabel, { color: C.texte }]}>
+                Rappel fin de mois
+              </Text>
+              <Text style={[styles.switchSub, { color: C.texteMuted }]}>
+                Le dernier jour du mois à 18h, avant l&apos;archivage
+              </Text>
+            </View>
+            <Switch
+              value={rappelFinDeMois}
+              onValueChange={(valeur) => toggleRappel("finDeMois", valeur)}
+              {...couleursInterrupteur(C)}
+              accessibilityLabel="Rappel fin de mois"
+            />
+          </View>
+          </>
+          )}
 
           <View style={[styles.switchRow, { marginTop: 18 }]}>
             <View style={{ flex: 1 }}>

@@ -1,5 +1,7 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
 import { supabase } from "../supabaseClient";
 import { getMembreEspace } from "../utils/espacePartage";
 import { parseDateFixeLocale } from "../utils/dateOnly";
@@ -271,6 +273,171 @@ export async function annulerNotificationsEvenement(id: string): Promise<void> {
   );
 }
 
+// RÈGLE (2026-10-11) : le réglage "Notifications" de Profil ne concerne
+// que les rappels du Planning — il n'annule JAMAIS les rappels de saisie
+// (identifiants PREFIXE_RAPPEL), qui ont leurs propres interrupteurs.
 export async function annulerToutesNotifications(): Promise<void> {
-  await Notifications.cancelAllScheduledNotificationsAsync();
+  const planifiees = await Notifications.getAllScheduledNotificationsAsync();
+  await Promise.all(
+    planifiees
+      .filter((n) => !n.identifier.startsWith(PREFIXE_RAPPEL))
+      .map((n) =>
+        Notifications.cancelScheduledNotificationAsync(n.identifier).catch(() => {}),
+      ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RÈGLE À NE JAMAIS CASSER — RAPPELS DE SAISIE DES DÉPENSES (demande du
+// 2026-10-11, P077) : notifications LOCALES, propres à l'appareil.
+//   - hebdomadaire : chaque dimanche à 18h00 (déclencheur WEEKLY, iOS et
+//     Android — CALENDAR n'existe que sur iOS) ;
+//   - fin de mois : le DERNIER jour de chaque mois à 18h00. Aucun
+//     déclencheur ne sait dire "dernier jour" (un jour fixe 31 sauterait
+//     les mois courts) : on planifie une date précise pour chacun des
+//     NB_MOIS_RAPPEL_FIN_DE_MOIS prochains mois, et synchroniserRappelsSaisie
+//     replanifie la série à chaque ouverture de l'app — elle ne s'épuise
+//     jamais. Peu de mois d'avance : iOS limite à 64 notifications
+//     planifiées par app, partagées avec celles du Planning.
+// Activés par défaut. Préférence par appareil (AsyncStorage). Jamais
+// planifiés sans permission accordée : sans elle, tout est annulé (et
+// replanifié dès qu'elle revient, à l'ouverture suivante).
+// ---------------------------------------------------------------------------
+const PREFIXE_RAPPEL = "rappel-saisie-";
+const ID_RAPPEL_HEBDO = `${PREFIXE_RAPPEL}hebdo`;
+const PREFIXE_RAPPEL_FIN_DE_MOIS = `${PREFIXE_RAPPEL}fin-de-mois-`;
+const NB_MOIS_RAPPEL_FIN_DE_MOIS = 6;
+const HEURE_RAPPEL = 18;
+
+export type TypeRappelSaisie = "hebdo" | "finDeMois";
+
+const CLES_PREFERENCE_RAPPEL: Record<TypeRappelSaisie, string> = {
+  hebdo: "vista_rappel_saisie_hebdo",
+  finDeMois: "vista_rappel_saisie_fin_de_mois",
+};
+
+export async function lirePreferenceRappel(type: TypeRappelSaisie): Promise<boolean> {
+  try {
+    const valeur = await AsyncStorage.getItem(CLES_PREFERENCE_RAPPEL[type]);
+    return valeur !== "false"; // activé par défaut
+  } catch {
+    return true;
+  }
+}
+
+async function ecrirePreferenceRappel(
+  type: TypeRappelSaisie,
+  actif: boolean,
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(CLES_PREFERENCE_RAPPEL[type], actif ? "true" : "false");
+  } catch {
+    // Best-effort : au pire, la préférence revient à "activé".
+  }
+}
+
+async function annulerRappel(type: TypeRappelSaisie): Promise<void> {
+  if (type === "hebdo") {
+    await Notifications.cancelScheduledNotificationAsync(ID_RAPPEL_HEBDO).catch(() => {});
+    return;
+  }
+  const planifiees = await Notifications.getAllScheduledNotificationsAsync();
+  await Promise.all(
+    planifiees
+      .filter((n) => n.identifier.startsWith(PREFIXE_RAPPEL_FIN_DE_MOIS))
+      .map((n) =>
+        Notifications.cancelScheduledNotificationAsync(n.identifier).catch(() => {}),
+      ),
+  );
+}
+
+async function planifierRappel(type: TypeRappelSaisie): Promise<void> {
+  // Toujours annuler d'abord : replanifier ne crée jamais de doublon.
+  await annulerRappel(type);
+  if (type === "hebdo") {
+    await Notifications.scheduleNotificationAsync({
+      identifier: ID_RAPPEL_HEBDO,
+      content: {
+        title: "C'est dimanche 📊",
+        body: "N'oublie pas de rentrer tes dépenses de la semaine dans Vista !",
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+        weekday: 1, // dimanche (1 = dimanche, 7 = samedi)
+        hour: HEURE_RAPPEL,
+        minute: 0,
+      },
+    });
+    return;
+  }
+  const maintenant = new Date();
+  for (let i = 0; i < NB_MOIS_RAPPEL_FIN_DE_MOIS; i++) {
+    // Jour 0 du mois suivant = dernier jour du mois visé.
+    const date = new Date(
+      maintenant.getFullYear(),
+      maintenant.getMonth() + i + 1,
+      0,
+      HEURE_RAPPEL,
+      0,
+      0,
+    );
+    if (date.getTime() <= maintenant.getTime()) continue;
+    const mois = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    await Notifications.scheduleNotificationAsync({
+      identifier: `${PREFIXE_RAPPEL_FIN_DE_MOIS}${mois}`,
+      content: {
+        title: "Fin de mois 💰",
+        body: "N'oublie pas de rentrer tes dépenses du mois avant l'archivage !",
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date,
+      },
+    });
+  }
+}
+
+// À chaque session active et à chaque retour au premier plan (app/_layout.tsx) :
+// permission accordée → planifie les rappels activés, annule les autres ;
+// permission absente (ou `autorise` faux : compte invité, déconnexion) →
+// annule tout. Ne demande JAMAIS la permission elle-même. Best-effort.
+export async function synchroniserRappelsSaisie(autorise: boolean): Promise<void> {
+  if (Platform.OS === "web") return;
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    const permission = status === "granted";
+    for (const type of ["hebdo", "finDeMois"] as const) {
+      if (autorise && permission && (await lirePreferenceRappel(type))) {
+        await planifierRappel(type);
+      } else {
+        await annulerRappel(type);
+      }
+    }
+  } catch (e) {
+    console.error("[synchroniserRappelsSaisie] échec (best-effort, ignoré) :", e);
+  }
+}
+
+// Interrupteur de Profil. Renvoie false si l'activation est impossible
+// (permission refusée) — l'appelant remet alors l'interrupteur à faux.
+export async function modifierRappelSaisie(
+  type: TypeRappelSaisie,
+  actif: boolean,
+): Promise<boolean> {
+  if (Platform.OS === "web") return false;
+  try {
+    if (!actif) {
+      await ecrirePreferenceRappel(type, false);
+      await annulerRappel(type);
+      return true;
+    }
+    const autorise = await demanderPermissionNotifications();
+    if (!autorise) return false;
+    await ecrirePreferenceRappel(type, true);
+    await planifierRappel(type);
+    return true;
+  } catch (e) {
+    console.error("[modifierRappelSaisie] échec :", e);
+    return false;
+  }
 }

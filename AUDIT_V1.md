@@ -3559,6 +3559,32 @@ Gabarit :
   entrées (`entreesBudgetDuMois`), déjà conformes.
 - **Statut** : **CORRIGÉ (2026-10-11)**.
 
+### P077 — Rappels locaux de saisie des dépenses (demande du 2026-10-11)
+
+- **Ajout** : deux notifications locales, activées par défaut, réglables
+  dans Profil (« Rappel hebdomadaire », « Rappel fin de mois ») :
+  dimanche 18h « C'est dimanche 📊 » et dernier jour du mois 18h « Fin de
+  mois 💰 ».
+- **Choix techniques** : `CalendarTriggerInput` est iOS seulement → déclencheur
+  `WEEKLY` pour le dimanche (iOS + Android). Aucun déclencheur ne sait
+  dire « dernier jour du mois » → une date précise pour chacun des 6
+  prochains mois, replanifiée à chaque ouverture (la série ne s'épuise
+  jamais ; peu de mois d'avance car iOS limite à 64 notifications
+  planifiées par app).
+- **Synchronisation** (`synchroniserRappelsSaisie`, `app/_layout.tsx`) :
+  après la demande de permission de chaque session, puis à chaque retour
+  au premier plan (permission accordée ou retirée dans les réglages).
+  Jamais pour un compte invité ; annulés à la déconnexion.
+- **Séparation** : le réglage « Notifications » (rappels du Planning)
+  n'annule plus les rappels de saisie (`annulerToutesNotifications` les
+  épargne).
+- **Risque résiduel** (🔵) : iOS ne garde que 64 notifications planifiées
+  par app. Les rappels en occupent jusqu'à 7 ; le Planning, jusqu'à 2 par
+  événement, sans plafond. Au-delà d'environ 28 événements futurs, iOS
+  abandonne en silence les plus lointaines (souvent les fins de mois
+  éloignées), rétablies à l'ouverture suivante.
+- **Statut** : **FAIT (2026-10-11)**, à tester sur appareil.
+
 ## 3. Vision individuelle — parcours principaux
 
 ### 3.1 Aperçu (`app/(tabs)/index.tsx`)
