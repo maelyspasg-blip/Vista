@@ -1998,23 +1998,16 @@ export default function Profil() {
                 styleCarte(theme, "#C9A84C", contrasteRenforce),
               ]}
             >
-              {[
-                "Graphique de flux financier (onglet Vista de Ton bilan)",
-                "Analyses et conseils personnalisés illimités sans publicité",
-                "Historique complet (Budget + Stats au-delà de 2 mois)",
-                "Ton bilan complet (Santé, Trophées, Simulation)",
-                "Export de vos données (Excel et résumé visuel)",
-              ].map((avantage, i) => (
-                <View
-                  key={avantage}
-                  style={[styles.premiumAvantageRow, i > 0 && { marginTop: 8 }]}
-                >
-                  <Text style={{ color: C.texteMuted, fontSize: 14 }}>•</Text>
-                  <Text style={[styles.premiumAvantageTexte, { color: C.texte }]}>
-                    {avantage}
-                  </Text>
-                </View>
-              ))}
+              {/* P079 (2026-10-17) : les anciens avantages listés ici (sans
+                  publicité, Stats au-delà de 2 mois, Ton bilan complet,
+                  graphique de flux, export) sont TOUS gratuits depuis le
+                  drop V1 sans pub (P078) et la refonte du 2026-09-12 —
+                  aucune promesse d'avantage réservé tant qu'il n'en existe
+                  pas de réel. Liste d'origine : cf. git log. */}
+              <Text style={[styles.premiumAvantageTexte, { color: C.texte }]}>
+                Toutes les fonctionnalités de Vista sont gratuites pour le
+                moment.
+              </Text>
               <BoutonPrincipal
                 style={[
                   styles.btnPrincipal,
@@ -3022,8 +3015,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
-  premiumAvantageRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  premiumAvantageTexte: { fontSize: 13, flex: 1 },
+  premiumAvantageTexte: { fontSize: 13 },
   champValeurStatique: {
     fontSize: 15,
     fontWeight: "600",

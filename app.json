@@ -60,14 +60,6 @@
       "expo-status-bar",
       "expo-asset",
       [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-4645298475525932~3915893926",
-          "iosAppId": "ca-app-pub-4645298475525932~8046710624",
-          "userTrackingUsageDescription": "Cette information est utilisée pour vous proposer des publicités personnalisées."
-        }
-      ],
-      [
         "expo-widgets",
         {
           "groupIdentifier": "group.com.maelyspasgvista.vista",

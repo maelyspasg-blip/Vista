@@ -109,6 +109,8 @@ export function premiumUIVisible(isAdmin: boolean): boolean {
 // ce risque lui-même). Package + plugin natif + require() protégé
 // restaurés (utils/adMobModule.ts) — passé à `true` ici pour que
 // useDeblocagePub (app/InsightVerrouille.tsx) tente réellement le SDK.
+// [Historique : plugin et require() retirés le 2026-10-17, P079 — cf.
+// utils/adMobModule.ts.]
 //
 // RÈGLE — TESTFLIGHT_MODE REPASSÉ À `false` LE 2026-09-14 (build V1
 // production) : le court-circuit `TESTFLIGHT_MODE || !ADMOB_ACTIF || ...`
@@ -124,8 +126,12 @@ export function premiumUIVisible(isAdmin: boolean): boolean {
 // SDK n'est jamais sollicité (useDeblocagePub sort tout de suite) et les
 // 3 emplacements autrefois verrouillés (Ton bilan, Insights d'Aperçu,
 // période Stats au-delà de 2 mois) sont libres pour tous via
-// contenuLibreSansPub() ci-dessous. Repasser à `true` réactive les pubs
-// ET les cadenas d'un seul geste.
+// contenuLibreSansPub() ci-dessous : repasser ce flag à `true` remet les
+// pubs ET les cadenas d'un seul geste côté JS. Depuis P079 (même jour), le
+// SDK natif est AUSSI retiré du build (exclusion d'autolinking dans
+// package.json, plugin retiré d'app.json, utils/adMobModule.ts vidé) : ce
+// flag seul ne suffit donc plus — suivre la procédure de réactivation
+// complète décrite dans utils/adMobModule.ts.
 export const ADMOB_ACTIF = false;
 
 // RÈGLE À NE JAMAIS CASSER : SEUL point d'entrée pour savoir si le contenu

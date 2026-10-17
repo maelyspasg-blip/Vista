@@ -1,3 +1,7 @@
+// [Les RÈGLE ci-dessous, jusqu'au bloc P079, décrivent le module tel qu'il
+// doit être RESTAURÉ le jour où le SDK est réintégré — elles ne
+// s'appliquent pas à la version vide actuelle.]
+//
 // RÈGLE À NE JAMAIS CASSER — require() DANS UN try/catch, JAMAIS UN IMPORT
 // STATIQUE : react-native-google-mobile-ads est un module natif qui
 // nécessite un rebuild EAS (cf. RÈGLE dans InsightVerrouille.tsx) — sur le
@@ -38,31 +42,42 @@
 // la validation sur un vrai build EAS avant toute diffusion large — jamais
 // une décision prise seul par une prochaine session sans revalider ce
 // contexte.
-let RewardedAd: any = null;
-let RewardedAdEventType: any = null;
-let AdEventType: any = null;
-let TestIds: any = null;
+// RÈGLE À NE JAMAIS CASSER (à la réactivation) — CE try/catch NE SUFFIT
+// PAS À LUI SEUL : il ne protège que le require() du package lui-même.
+// `RewardedAd` étant un objet JS valide dès que le require() réussit, un
+// appel ultérieur comme `RewardedAd.createForAdRequest(...)` peut ENCORE
+// planter avec "Module XXX not found" si le module natif n'est pas linké
+// dans ce build (dev client sans rebuild EAS) — cette erreur survient à un
+// point du code hors de portée de CE try/catch. Voir la RÈGLE dans
+// InsightVerrouille.tsx : le try/catch qui entoure createForAdRequest()/
+// load() dans son useEffect est tout aussi indispensable, pas redondant.
+//
+// RÈGLE À NE JAMAIS CASSER — SDK ADMOB RETIRÉ DU BUILD (P079, 2026-10-17,
+// drop V1 sans publicité) : ce module ne charge PLUS le package. Le SDK
+// natif est exclu de l'autolinking (package.json → expo.autolinking.exclude)
+// et son plugin retiré d'app.json : un require() ici tenterait d'atteindre
+// un module natif absent du binaire. Les 4 exports restent `null` (comme
+// adMobModule.web.ts) — useDeblocagePub (InsightVerrouille.tsx) sort avant
+// tout appel au SDK tant que ADMOB_ACTIF est false ou RewardedAd null.
+//
+// PROCÉDURE DE RÉACTIVATION DES PUBS (dans cet ordre) :
+//   1. package.json : retirer "react-native-google-mobile-ads" de
+//      expo.autolinking.exclude.
+//   2. app.json : remettre le plugin tel qu'il était avant P079 —
+//      source exacte : `git show 5eab7e0:app.json` (androidAppId, iosAppId,
+//      userTrackingUsageDescription).
+//   3. Ce fichier : restaurer le bloc try/require() — source exacte :
+//      `git show 5eab7e0:utils/adMobModule.ts`.
+//   4. utils/premium.ts : ADMOB_ACTIF = true — remet aussi les cadenas
+//      (contenuLibreSansPub() redevient faux).
+//   5. Build EAS "preview" testé sur un appareil physique AVANT tout build
+//      "production" (crash natif au démarrage du 2026-09-01 jamais
+//      diagnostiqué, cf. RÈGLE plus haut et utils/premium.ts).
+//   6. Redéclarer publicité et identifiant de l'appareil dans App Store
+//      Connect (confidentialité) et dans la Data safety du Play Store.
+const RewardedAd: any = null;
+const RewardedAdEventType: any = null;
+const AdEventType: any = null;
+const TestIds: any = null;
 
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const admob = require("react-native-google-mobile-ads");
-  RewardedAd = admob.RewardedAd;
-  RewardedAdEventType = admob.RewardedAdEventType;
-  AdEventType = admob.AdEventType;
-  TestIds = admob.TestIds;
-} catch {
-  // AdMob non disponible (dev client sans rebuild natif EAS) — les 4 exports
-  // restent `null`, InsightVerrouille retombe systématiquement sur l'Alert
-  // simulé, jamais de crash.
-}
-
-// RÈGLE À NE JAMAIS CASSER — CE try/catch NE SUFFIT PAS À LUI SEUL : il ne
-// protège que le require() du package lui-même. `RewardedAd` étant un objet
-// JS valide dès que le require() réussit, un appel ultérieur comme
-// `RewardedAd.createForAdRequest(...)` peut ENCORE planter avec "Module
-// XXX not found" si le module natif n'est pas linké dans ce build (dev
-// client sans rebuild EAS) — cette erreur survient à un point du code hors
-// de portée de CE try/catch. Voir la RÈGLE dans InsightVerrouille.tsx : le
-// try/catch qui entoure createForAdRequest()/load() dans son useEffect est
-// tout aussi indispensable, pas redondant.
 export { RewardedAd, RewardedAdEventType, AdEventType, TestIds };

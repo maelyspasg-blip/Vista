@@ -71,5 +71,12 @@
     "jsonwebtoken": "^9.0.3",
     "typescript": "~6.0.3"
   },
-  "private": true
+  "private": true,
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "react-native-google-mobile-ads"
+      ]
+    }
+  }
 }

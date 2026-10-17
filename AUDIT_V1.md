@@ -3603,8 +3603,34 @@ Gabarit :
   publicitaire `userTrackingUsageDescription`, initialisation automatique
   du SDK sur Android). Pour une V1 sans pub, le retirer du build simplifie
   la déclaration de confidentialité App Store / Play Store — changement
-  natif (rebuild EAS), non fait.
+  natif (rebuild EAS) — **fait en P079**.
 - **Statut** : **FAIT (2026-10-17)**.
+
+### P079 — SDK AdMob retiré du build (demande du 2026-10-17)
+
+- **But** : simplifier les déclarations de confidentialité App Store /
+  Play Store pour la V1 sans pub, en gardant le package npm installé.
+- **Piège évité** : retirer seulement le plugin d'app.json ne suffisait
+  PAS — l'autolinking d'Expo liait toujours le SDK natif (vérifié avec
+  `npx expo-modules-autolinking react-native-config`), qui plante au
+  lancement sans l'identifiant d'application fourni par ce plugin. Un
+  `react-native.config.js` (`platforms: null`) est ignoré par Expo SDK 56.
+- **Correction** :
+  - `package.json` → `expo.autolinking.exclude:
+    ["react-native-google-mobile-ads"]` (SDK absent sur iOS et Android :
+    15 → 14 modules natifs) ;
+  - `app.json` → plugin retiré, avec les identifiants d'application et la
+    phrase de suivi publicitaire (`NSUserTrackingUsageDescription` absent
+    de la config résolue) ;
+  - `utils/adMobModule.ts` → plus de require(), 4 exports `null`,
+    procédure de réactivation décrite en RÈGLE ;
+  - Profil, section « PASSER PREMIUM » (admin en simulation seulement) :
+    les 5 avantages listés étant tous gratuits, remplacés par « Toutes les
+    fonctionnalités de Vista sont gratuites pour le moment. »
+- **À faire** : nouveau build EAS ; dans App Store Connect, retirer la
+  déclaration « publicité / identifiant de l'appareil » du questionnaire
+  de confidentialité, et l'équivalent dans la Data safety du Play Store.
+- **Statut** : **FAIT (2026-10-17)**, build à refaire.
 
 ## 3. Vision individuelle — parcours principaux
 
