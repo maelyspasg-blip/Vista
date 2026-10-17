@@ -78,7 +78,7 @@ import { InsightVerrouille, useDeblocagePub } from "../InsightVerrouille";
 import { TonBilanVerrou } from "../TonBilanVerrou";
 import { GraphiqueFlux, LienFlux, NoeudFlux } from "../GraphiqueFlux";
 import { usePremium } from "../PremiumContext";
-import { estComptePremium } from "../../utils/premium";
+import { contenuLibreSansPub, estComptePremium } from "../../utils/premium";
 import { EtapeTutoriel, TutorielOverlay } from "../TutorielOverlay";
 import { useTutoriel } from "../TutorielContext";
 import { TiroirStats } from "../TiroirStats";
@@ -1460,10 +1460,14 @@ export default function Analytics() {
     () => setStatsPeriodeDebloquePartage(true),
     statsPeriodeDebloquePartage || !estDansUnEspace,
   );
+  // `contenuLibreSansPub()` (P078) : sans pubs, la période n'est jamais
+  // bornée — supprime à la fois les cadenas des chips et le plafond de
+  // LIMITE_MOIS_GRATUIT_STATS (nbMois/verrouillePub lisent ce booléen).
   const statsPeriodeDebloque =
-    vueActive === "partage"
+    contenuLibreSansPub() ||
+    (vueActive === "partage"
       ? statsPeriodeDebloquePartage
-      : statsPeriodeDebloquePerso;
+      : statsPeriodeDebloquePerso);
   const declencherPubPeriodeStats =
     vueActive === "partage"
       ? declencherPubPeriodeStatsPartage
@@ -3192,7 +3196,9 @@ export default function Analytics() {
   // (Vista/Santé/Trophées/Simulateur, cf. leur site d'appel plus bas),
   // désormais partagée par TOUT le contenu de "Ton bilan" via une seule
   // variable, cf. RÈGLE sur tonBilanDebloque plus haut.
-  const tonBilanVisible = premium || isGuest || tonBilanDebloque;
+  // `contenuLibreSansPub()` (P078) : sans pubs, Ton bilan est libre pour tous.
+  const tonBilanVisible =
+    premium || isGuest || tonBilanDebloque || contenuLibreSansPub();
 
   // Comparaison mensuelle par catégorie : uniquement les catégories présentes
   // dans LES DEUX mois comparés (sinon la comparaison n'a pas de sens), plus

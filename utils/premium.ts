@@ -118,7 +118,25 @@ export function premiumUIVisible(isAdmin: boolean): boolean {
 // de crash natif jamais définitivement diagnostiqué depuis le 2026-09-01 —
 // à valider sur un vrai device via un build "preview" AVANT tout profil
 // "production").
-export const ADMOB_ACTIF = true;
+//
+// RÈGLE À NE JAMAIS CASSER — PASSÉ À `false` LE 2026-10-17 POUR LE DROP V1
+// (demande explicite, P078) : plus AUCUNE pub, plus AUCUN cadenas. Le
+// SDK n'est jamais sollicité (useDeblocagePub sort tout de suite) et les
+// 3 emplacements autrefois verrouillés (Ton bilan, Insights d'Aperçu,
+// période Stats au-delà de 2 mois) sont libres pour tous via
+// contenuLibreSansPub() ci-dessous. Repasser à `true` réactive les pubs
+// ET les cadenas d'un seul geste.
+export const ADMOB_ACTIF = false;
+
+// RÈGLE À NE JAMAIS CASSER : SEUL point d'entrée pour savoir si le contenu
+// autrefois débloqué par une pub est libre sans pub — à ajouter (en OU) à
+// la condition "déverrouillé" de CHAQUE emplacement de pub, jamais
+// ADMOB_ACTIF lu directement dans un écran. Vrai tant que les pubs sont
+// désactivées : sans pub, rien ne doit rester verrouillé derrière une pub
+// qui ne viendra jamais.
+export function contenuLibreSansPub(): boolean {
+  return !ADMOB_ACTIF;
+}
 
 // RÈGLE À NE JAMAIS CASSER — SEUL POINT D'ENTRÉE POUR SAVOIR SI L'ESPACE
 // PARTAGÉ DOIT ÊTRE VISIBLE, JAMAIS ESPACE_PARTAGE_ACTIF DIRECTEMENT DANS UN

@@ -75,7 +75,7 @@ import { useGuest } from "../GuestContext";
 import { useEspacePartage } from "../EspacePartageContext";
 import { SwitcherEspacePartage } from "../SwitcherEspacePartage";
 import { bloquerSiInvite } from "../guestGate";
-import { estComptePremium } from "../../utils/premium";
+import { contenuLibreSansPub, estComptePremium } from "../../utils/premium";
 import { COULEURS, useTheme } from "../ThemeContext";
 import { InfoBulle } from "../InfoBulle";
 import { Text } from "../Texte";
@@ -2448,7 +2448,8 @@ export default function Dashboard() {
               {ligneConseil(conseils[0], 0, C)}
               {conseils.length > 1 && (
                 <InsightVerrouille
-                  deverrouille={premium || insightsDebloque}
+                  // contenuLibreSansPub() (P078) : sans pubs, libres pour tous.
+                  deverrouille={premium || insightsDebloque || contenuLibreSansPub()}
                   onDeverrouille={() => setInsightsDebloque(true)}
                   texteCadenas="Regarder une pub pour voir tes insights"
                 >

@@ -3585,6 +3585,27 @@ Gabarit :
   éloignées), rétablies à l'ouverture suivante.
 - **Statut** : **FAIT (2026-10-11)**, à tester sur appareil.
 
+### P078 — Drop V1 : publicités AdMob désactivées (demande du 2026-10-17)
+
+- **Changement** : `ADMOB_ACTIF = false` (`utils/premium.ts`). Le flag seul
+  ne suffisait pas : `useDeblocagePub` ne chargeait plus de pub, mais les
+  3 emplacements restaient verrouillés (cadenas affichés, tap → « Publicité
+  indisponible »). Nouvelle fonction unique `contenuLibreSansPub()`, ajoutée
+  en OU à la condition « déverrouillé » de chaque emplacement : Ton bilan
+  (`tonBilanVisible`), Insights d'Aperçu, période Stats
+  (`statsPeriodeDebloque`, qui lève aussi le plafond de 2 mois).
+- **Vérifié** : plus aucun cadenas lié aux pubs (ceux qui restent : mot de
+  passe, trophées non gagnés) ; aucun chargement de pub (le hook sort
+  avant tout appel au SDK) ; textes « Regarder une pub » uniquement dans
+  les overlays, jamais rendus.
+- **Question pour Maëlys** : le SDK natif reste embarqué (plugin
+  `react-native-google-mobile-ads` dans app.json, phrase de suivi
+  publicitaire `userTrackingUsageDescription`, initialisation automatique
+  du SDK sur Android). Pour une V1 sans pub, le retirer du build simplifie
+  la déclaration de confidentialité App Store / Play Store — changement
+  natif (rebuild EAS), non fait.
+- **Statut** : **FAIT (2026-10-17)**.
+
 ## 3. Vision individuelle — parcours principaux
 
 ### 3.1 Aperçu (`app/(tabs)/index.tsx`)
