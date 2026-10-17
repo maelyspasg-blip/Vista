@@ -8,7 +8,7 @@
     "scheme": "vista",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.maelyspasgvista.vista",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
